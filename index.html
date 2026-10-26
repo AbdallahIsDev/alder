@@ -29,6 +29,8 @@
         "email": "{{email}}",
         "address": { "@type": "PostalAddress", "streetAddress": "{{address}}" },
         "areaServed": "{{area}}",
+        "openingHours": "{{hoursSchema}}",
+        "priceRange": "{{priceRange}}",
         "sameAs": ["{{google}}", "{{facebook}}", "{{instagram}}", "{{youtube}}"],
         "hasOfferCatalog": {
           "@type": "OfferCatalog",
@@ -1849,7 +1851,7 @@
 
     <section class="faq" id="faq" aria-label="Frequently asked questions" data-page-node-id="iluBYn4tsSNxleRvdt3v6b">
       <div class="wrap faq-in" data-page-node-id="VV0FaL5rrXBLPRh4YW0LN0">
-        <div class="sec-head list" data-page-node-id="r1uaJLvXnSFwGALzEbed6G"><p class="label" data-page-node-id="knRE5iBNhlMfTRvbhaLTNF">FAQ</p><h2 data-page-node-id="DC2U93JFVrp7GlNh87NLCv"><span class=\"hl\">Questions</span> homeowners <br data-page-node-id="QzRdVGhOsQ9zIcsRnONKlC">ask us regularly</h2><p class="sub2" data-page-node-id="XYBTRyDzBkYok6lVFGYtvy">Straight answers about pricing, timing, insurance, and what to expect.</p></div>
+        <div class="sec-head list" data-page-node-id="r1uaJLvXnSFwGALzEbed6G"><p class="label" data-page-node-id="knRE5iBNhlMfTRvbhaLTNF">FAQ</p><h2 data-page-node-id="DC2U93JFVrp7GlNh87NLCv">Questions <span class="hl">homeowners ask</span> us regularly</h2><p class="sub2" data-page-node-id="XYBTRyDzBkYok6lVFGYtvy">Straight answers about pricing, timing, insurance, and what to expect.</p></div>
         <div class="faq-list" data-page-node-id="ULcUQWl7Bzlfe5lIL9oUYd">
           <div class="fi open" data-page-node-id="GbVZz52jBiGxosq9PAmnqR"><button class="q" type="button" aria-expanded="true" data-page-node-id="HxkV9udNgqkx0A1AVKHQYx">How much does a new roof cost?</button><div class="a" data-page-node-id="oJLoQMHVBQBgv5nvz5Xc4W"><div data-page-node-id="8uxH18e1MKaIVsn29wqd1V"><p data-page-node-id="38x6GzvuuYzmXyMqOgSDSS">It depends on your roof’s size, pitch, and materials. We give you a written price after an in-person inspection, and it doesn’t change halfway through.</p></div></div></div>
           <div class="fi" data-page-node-id="NMjP27e5Ej0O6myEj5ivvr"><button class="q" type="button" aria-expanded="false" data-page-node-id="LSxtDuJ67o71BAX9kfJRbo">How long does a replacement take?</button><div class="a" data-page-node-id="FzCRzjHCNWEwtaUjlU9Gs8"><div data-page-node-id="M0TmLxd01yh6gIO1Yt0DBH"><p data-page-node-id="AnjahnCVf44b6LI1zxTHKe">Most homes take one to three days, depending on size and weather. We give you a start date and a realistic finish date before we begin.</p></div></div></div>
@@ -1998,6 +2000,8 @@ var BIZ = {
   url: 'https://alder-roofing.vercel.app/',                     /* absolute address of this page; the canonical link uses it */
   address: '123 Main Street, Des Moines, IA', hours: 'Mon to Fri, 7am to 5pm',
   area: 'Iowa & the Upper Midwest', base: 'Iowa', reply: 'one business day',
+  hoursSchema: 'Mo-Fr 07:00-17:00',                            /* same hours as `hours`, in machine format for search engines: Mo-Fr 07:00-17:00, or 'Mo-Fr 07:00-17:00, Sa 08:00-12:00'. Leave '' to omit */
+  priceRange: '',                                            /* $ to $$$$. Leave '' to omit */
   rating: '4.8', reviews: '314', roofs: '276', warranty: '20',
   facebook: '#', instagram: '#', youtube: '#', google: '#',   /* leave '' to hide an icon */                                                   /* full site address with https:// and a trailing slash, e.g. 'https://www.alderroofing.com/'. Leave '' until the site has a domain; the structured data simply leaves those fields out */
 };
@@ -2017,10 +2021,10 @@ var BIZ = {
     try {
       var bad = function (v) { return typeof v === 'string' && (v === '' || v === '#' || v.indexOf('{{') > -1 || /^assets\//.test(v)); };
       var prune = function (o) {
-        if (Array.isArray(o)) return o.map(prune).filter(function (v) { return v !== undefined; });
+        if (Array.isArray(o)) { var arr = o.map(prune).filter(function (v) { return v !== undefined; }); return arr.length ? arr : undefined; }
         if (o && typeof o === 'object') {
           var out = {}, n = 0;
-          Object.keys(o).forEach(function (k) { var v = prune(o[k]); if (v !== undefined) { out[k] = v; if (k.charAt(0) !== '@') n++; } });
+          Object.keys(o).forEach(function (k) { var v = prune(o[k]); if (v !== undefined) { out[k] = v; if (k !== '@type' && k !== '@context') n++; } });
           return n ? out : undefined;
         }
         return bad(o) ? undefined : o;
