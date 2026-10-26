@@ -11,6 +11,40 @@
     content="Roofs built by our own crew, never subcontractors. Clear written price up front. Free estimates across {{area}}." data-page-node-id="egiFHZqGftCnMd2JrbcW2o">
   <link rel="canonical" href="{{url}}">
   <link rel="icon" href="assets/images/favicon.svg" type="image/svg+xml">
+  <!-- STRUCTURED DATA (JSON-LD). Same {{tokens}} as the rest of the page. The BUSINESS CONFIG script fills them at runtime
+       (escaped for JSON) and drops anything left empty, '#' or still a token, so a client without Instagram or a domain
+       yet never ships a broken value. A static build has to fill the tokens in this block too. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "RoofingContractor",
+        "name": "{{name}}",
+        "alternateName": "{{brand}}",
+        "description": "Roof replacement, storm and hail damage repair, leak repairs and free roof inspections across {{area}}. Every roof is built by our own crew, never subcontractors, with a clear written price up front.",
+        "url": "{{url}}",
+        "image": "{{url}}assets/images/hero-1.webp",
+        "telephone": "{{tel}}",
+        "email": "{{email}}",
+        "address": { "@type": "PostalAddress", "streetAddress": "{{address}}" },
+        "areaServed": "{{area}}",
+        "sameAs": ["{{google}}", "{{facebook}}", "{{instagram}}", "{{youtube}}"],
+        "hasOfferCatalog": {
+          "@type": "OfferCatalog",
+          "name": "Roofing services",
+          "itemListElement": [
+            { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Full roof replacement" } },
+            { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Storm and hail damage" } },
+            { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Repairs and leak detection" } },
+            { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Free roof inspection" } }
+          ]
+        }
+      },
+      { "@type": "WebSite", "name": "{{name}}", "url": "{{url}}" }
+    ]
+  }
+  </script>
   <script>document.documentElement.classList.add('js','split-pending','biz-pending');setTimeout(function(){document.documentElement.classList.remove('biz-pending')},3000);setTimeout(function(){document.documentElement.classList.remove('split-pending')},3000)</script>
   <!--
   IMAGES: assets/images/{hero-1,about-crew}.{avif,webp} and
@@ -37,7 +71,7 @@
     }
 
     :root {
-    --white: #fff;
+      --white: #fff;
       --ink: #1c1f24;
       --ink2: #2a2d33;
       --cream: #f1f1f1;
@@ -182,6 +216,7 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
     :focus-visible {
       outline: 2px solid var(--accent);
       outline-offset: 3px
@@ -421,6 +456,8 @@
       opacity: 1
     }
 
+    img[data-src]:not([src]) { visibility: hidden }   /* held back by the load-order script: no alt-text flash while waiting */
+
     html:not(.js) .slide:first-child {
       opacity: 1
     }
@@ -539,7 +576,7 @@
       list-style: none;
       padding: 0;
       display: grid;
-      grid-template-columns: repeat(4, 1fr)
+      grid-template-columns: repeat(4, minmax(0, 1fr))   /* minmax(0,...): a long label can never make one column wider than the others */
     }
 
     .stats li {
@@ -548,7 +585,7 @@
       align-items: center;
       text-align: center;
       gap: 10px;
-      padding: 30px 24px
+      padding: 30px clamp(8px, 2vw, 24px)
     }
 
     .stats li+li {
@@ -743,6 +780,7 @@
 
     /* split-text */
     html.split-pending :is(.hero h1,.sub,.about-sub,.services h2,.services .intro,.card h3,.card p,.more p,.hws h2,.sec-head h2,.cta-sec h2,.cta-sub,.sec-head .sum,.sh-r p,.sub2,.hws .intro,.step h3,.step p) { visibility: hidden }
+    .hl { color: var(--accent) }   /* the one or two words a heading wants you to land on */
     .sw { display: inline }
     .w { display: inline-block; overflow: hidden; vertical-align: top; padding-block: .1em; margin-block: -.1em }
     .wi { display: inline-block; will-change: transform }
@@ -753,8 +791,7 @@
     .hws-head { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center }
     .hws .label { justify-content: center }
     .hws h2 { font-size: clamp(32px, 3.6vw, 44px); font-weight: 450; letter-spacing: -.035em; line-height: 1.05; color: var(--ink); max-width: 14em }
-    .steps { position: relative }
-    .steps-list { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--g) }
+    .steps { list-style: none; padding: 0; position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--g) }
     .line { position: absolute; z-index: 0; left: calc((100% - 2*var(--g))/6); top: 27px; width: calc(66.6667% + .6667*var(--g)); height: 2px; background: var(--cream) }
     .line i { display: block; width: 100%; height: 100%; background: var(--accent); transform: scaleX(var(--p, 1)); transform-origin: left }
     .step { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 28px }
@@ -765,13 +802,13 @@
     .step h3 { font-size: clamp(20px, 1.8vw, 26px); font-weight: 550; letter-spacing: -.02em; line-height: 1.15; color: var(--ink) }
     .step p { color: #4a4e56; max-width: 34ch }
     @media (max-width: 900px) {
-      .steps-list { grid-template-columns: 1fr; gap: 36px }
+      .steps { grid-template-columns: 1fr; gap: 36px }
       .line { left: calc(var(--sq) / 2 - 1px); top: calc(var(--sq) / 2); bottom: calc(var(--last, var(--sq) / 2) - var(--sq) / 2); width: 2px; height: auto }   /* --last = height of step 3, set by script: the line stops at the centre of its square */
       .line i { transform: scaleY(var(--p, 1)); transform-origin: top }
       .step { display: grid; grid-template-columns: var(--sq) 1fr; gap: 20px; align-items: start; text-align: left }
       .step div { width: auto; align-items: flex-start }
     }
-    @media (max-width: 560px) { .steps { --sq: 40px } .steps-list { gap: 28px } .step { gap: 16px } .step .n { font-size: 17px } .step div { gap: 6px } }
+    @media (max-width: 560px) { .steps { --sq: 40px; gap: 28px } .step { gap: 16px } .step .n { font-size: 17px } .step div { gap: 6px } }
     @media (prefers-reduced-motion: reduce) { .step .n { transition: none } }
 
     /* ===== FOOTER (final) ===== */
@@ -824,7 +861,12 @@
        never really kept 16/9 on wide screens (it capped to ~2.4:1 and cropped with object-fit: cover anyway).
        Width stays 100%. 21/9 is the natural ratio; the height cap only shortens it on short screens (the photo is
        cropped top/bottom, so keep the subject in the centre band). Generate the six images at 21:9 (2520x1080). */
-    .frame { position: relative; width: 100%; aspect-ratio: 3/2; overflow: hidden; background: #d6d0c4; touch-action: pan-y; user-select: none; cursor: ew-resize }
+    .frame { position: relative; width: 100%; aspect-ratio: 3/2; overflow: hidden; touch-action: pan-y; user-select: none; cursor: ew-resize }
+    /* Before/After never shows a placeholder: no gradient, no path label. Nothing in the frame is visible until the first
+       pair has loaded and decoded (the loader script adds .ba-ready), then it fades in. */
+    .ba .ph { background: none } .ba .ph::after { display: none } .ba img:not([src]) { visibility: hidden }
+    .ba .frame > * { transition: opacity .4s ease }
+    html.js .ba:not(.ba-ready) .frame > * { opacity: 0 }
     .pic { position: absolute; inset: 0 } .pic.after { clip-path: inset(0 0 0 var(--x, 50%)) }
     /* a real <img> starts a native drag on mousedown, which fires pointercancel and stops the slider
        dead after the first move; taking the image out of hit-testing leaves the frame in charge */
@@ -835,7 +877,6 @@
     .handle::before { content: ""; position: absolute; top: 50%; left: 50%; width: 10px; height: 40px; transform: translate(-50%, -50%); background: #fff; box-shadow: 0 0 6px rgb(0 0 0/.35) }
     .handle::after { content: ""; position: absolute; top: 50%; left: 50%; width: 56px; height: 16px; transform: translate(-50%, -50%); background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56 16' fill='none' stroke='white' stroke-width='1.8'%3E%3Cpath d='M11 4 7 8l4 4'/%3E%3Cpath d='M45 4l4 4-4 4'/%3E%3C/svg%3E") center / 100% 100% no-repeat; filter: drop-shadow(0 0 2px rgb(0 0 0/.5)) }
     .pair figcaption { font-size: var(--fs); color: var(--ink); font-weight: 500 }
-
 
 
     /* ===== REVIEWS (final): 2 feature cards over 3 cards (image / text only / image). Every review image is 3:2. Feature cards put the image on the left
@@ -852,10 +893,8 @@
     .av { display: grid; place-items: center; flex: none; width: 48px; height: 48px; border-radius: 3rem; background: var(--c); color: #fff; font-size: 20px; font-weight: 600 }
     .who2 { display: flex; flex-direction: column } .who2 strong { color: var(--ink) } .who2 span { font-size: 14px; color: #6a6e76 }
     .rv-text { min-height: 320px }   /* no photo: give the quote room so the card does not look squeezed next to the photo cards */
-    .rv-media { position: relative; flex: none; background: var(--c, #d6d0c4) }
-    .rv-media::after { content: attr(data-label); position: absolute; left: 12px; top: 12px; padding: 2px 8px; font-size: 12px; color: #fff; background: rgb(28 31 36/.45) }
+    .rv-media { position: relative; flex: none }   /* no placeholder: the box stays empty until the clip-path reveal brings the photo in */
     .rv-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover }
-    .rv-media:has(img)::after { display: none }
     .rv-feat .rv-media, .rv-hasimg .rv-media { width: 100%; aspect-ratio: 3/2 }
     @media (min-width: 1800px) { .rv-feat { flex-direction: row; align-items: stretch } .rv-feat .rv-media { width: 50%; align-self: start } }
     @media (max-width: 900px) { .rv-list { grid-template-columns: 1fr } .rv-std, .rv-feat { grid-column: auto } .rv-feat { flex-direction: column } .rv-feat .rv-media { width: 100%; align-self: auto } }
@@ -899,12 +938,12 @@
     /* footer socials */
     .ft { border-top: 1px solid rgb(255 255 255/.12) }
     .ft-social { display: flex; gap: 10px }
-    .ft-social a { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid rgb(255 255 255/.22); color: #fff; transition: background .2s, border-color .2s }
+    .ft-social a { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid rgb(255 255 255/.15); color: #fff; transition: background .2s, border-color .2s }
     .ft-social a:hover { background: var(--accent); border-color: var(--accent) }
     .ft-social svg { width: 18px; height: 18px }
 
     /* ===== MOBILE MENU ===== */
-    .menu-btn { display: none; width: 44px; height: 44px; place-items: center; background: none; border: 1px solid rgb(255 255 255/.22); color: #fff; cursor: pointer }
+    .menu-btn { display: none; width: 44px; height: 44px; place-items: center; background: none; border: 1px solid rgb(255 255 255/.15); color: #fff; cursor: pointer }
     .menu-btn svg, .menu-close svg { width: 16px; height: 9px; overflow: visible }
     /* two lines -> X. Each line rotates about its own centre, then shifts half the gap (3.5) so both cross
        on the middle of the 16x9 box. overflow:visible keeps the 45deg arms from being clipped by the viewBox. */
@@ -915,7 +954,7 @@
     .menu { position: fixed; inset: 0; z-index: 100; display: none; flex-direction: column; background: var(--ink); color: #fff; padding: 12px 12px 32px; overflow-y: auto; visibility: hidden; clip-path: inset(0 0 100% 0); transition: clip-path .6s cubic-bezier(.7, 0, .2, 1), visibility 0s .6s }
     .menu.open { visibility: visible; clip-path: inset(0); transition-delay: 0s }
     .menu-top { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px 12px 20px }
-    .menu-close { width: 44px; height: 44px; display: grid; place-items: center; background: none; border: 1px solid rgb(255 255 255/.22); color: #fff; cursor: pointer }
+    .menu-close { width: 44px; height: 44px; display: grid; place-items: center; background: none; border: 1px solid rgb(255 255 255/.15); color: #fff; cursor: pointer }
     .menu nav { display: flex; flex-direction: column; margin-top: clamp(24px, 6vh, 56px) }
     .menu nav a { padding: 18px 20px; font-size: clamp(30px, 8vw, 44px); font-weight: 500; letter-spacing: -.035em; line-height: 1.1; text-decoration: none; color: #fff;}
     .menu nav a:last-child { border-bottom: 1px solid rgb(255 255 255/.14) }
@@ -1199,7 +1238,7 @@
     .tot {
       position: fixed; z-index: 62; right: 16px; bottom: 16px;
       width: 48px; height: 48px; display: grid; place-items: center; padding: 0;
-      background: rgb(241 241 241/.25); box-shadow: inset 0 0 0 1px rgb(28 31 36/.18);
+      background: rgb(255 255 255/.25); box-shadow: inset 0 0 0 1px rgb(28 31 36/.18);
       border: 0; color: var(--ink);
       cursor: pointer; opacity: 0; visibility: hidden; pointer-events: none;
       transform: translateY(12px);
@@ -1211,11 +1250,17 @@
        cancels that delay, which is what makes the button appear the instant the class lands */
     .tot.on { opacity: 1; visibility: visible; pointer-events: auto; transform: none; transition-delay: 0s }
     .tot .ring { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none }
-    .tot .ring path { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: square; stroke-dasharray: 100px; stroke-dashoffset: calc(100px - var(--p, 0) * 100px); transition: stroke-dashoffset .12s linear }
+    .tot .ring path { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: square; stroke-dasharray: 100px; stroke-dashoffset: calc(100px - var(--p, 0) * 100px); transition: stroke-dashoffset .12s linear, stroke .25s ease }
     .tot .arrow { position: relative; z-index: 2; width: 18px; height: 18px }
     .tot:is(:hover, :focus-visible) { color: var(--accent) }
     .tot:is(:hover, :focus-visible) .ring path { stroke-dashoffset: 0; transition: stroke-dashoffset .45s cubic-bezier(.2, .7, .2, 1) }
-    html.tot-dark .tot { background: var(--ink); box-shadow: inset 0 0 0 1px rgb(255 255 255/.2); color: #f1f1f1 }
+    /* CTA section (accent background): arrow and progress ring turn white. The ground gets a light ink tint so white reads on the orange.
+       Footer (html.tot-dark): ring back to accent, arrow stays white. These come after the rule above so the footer wins if both ever apply. */
+    html.tot-cta .tot { background: rgba(255, 255, 255, 0.1); box-shadow: inset 0 0 0 1px rgb(255 255 255/.35); color: #fff }
+    html.tot-cta .tot .ring path { stroke: #fff }
+    html.tot-cta .tot:is(:hover, :focus-visible) { color: #fff }
+    html.tot-dark .tot { background: var(--ink); box-shadow: inset 0 0 0 1px rgb(255 255 255/.2); color: #fff }
+    html.tot-dark .tot .ring path { stroke: var(--accent) }
     /* (0,3,1) beats html.tot-dark .tot at (0,2,1); without it the dark ground keeps the arrow pale
        on hover, because the plain hover rule is only (0,2,0) and loses to the dark skin */
     html.tot-dark .tot:is(:hover, :focus-visible) { color: var(--accent) }
@@ -1260,7 +1305,7 @@
     }
 
     .dbg button:hover {
-      background: rgb(255 255 255/.22)
+      background: rgb(255 255 255/.15)
     }
 
     .dbg button[aria-pressed="true"] {
@@ -1284,7 +1329,7 @@
       height: 20px;
       margin: -2px -4px -2px auto;
       padding: 0;
-      background: rgb(255 255 255/.12);
+      background: rgb(255 255 255/.15);
       border: 0;
       color: #fff;
       cursor: pointer
@@ -1314,6 +1359,10 @@
     }
 
     /* slider off only stops auto-rotation; manual slide jumps still animate */
+
+    /* TABLET (up to 1024px): the header already collapses to the menu button at 1024, so the hero stacks at the same width.
+       At ~940px two columns squeezed the headline and a paragraph + two buttons into ~350px each and the buttons wrapped into a stack of unequal widths. */
+    @media (max-width: 1024px) { .hero-in { grid-template-columns: 1fr; gap: 28px; padding-top: 120px } }
 
     @media(max-width:900px) {
       .links {
@@ -1570,7 +1619,7 @@
           <div class="ph" data-src="assets/images/hero-2.png" data-page-node-id="G1wGvpVyHTrwrLR8O36w2V">
             <picture data-page-node-id="qBg4SUBALhhPo39z42dpjc">
               <!-- only a PNG exists for this slide: add avif/webp sources once the pipeline encodes it -->
-              <img src="assets/images/hero-2.png"
+              <img data-src="assets/images/hero-2.png"
                 alt="Roofer's hands setting a shingle over engineered underlayment" data-page-node-id="i0DGMRAYoLdHr1bDSkEMSB">
             </picture>
           </div>
@@ -1579,7 +1628,7 @@
           <div class="ph" data-src="assets/images/hero-3.png" data-page-node-id="Z1Vci0mtR4KHpjanZiVJ5j">
             <picture data-page-node-id="FCLbLnN0omyNKAERZAtJRP">
               <!-- only a PNG exists for this slide: add avif/webp sources once the pipeline encodes it -->
-              <img src="assets/images/hero-3.png"
+              <img data-src="assets/images/hero-3.png"
                 alt="Finished charcoal shingle roof on a stone home in morning light" data-page-node-id="7b8Z2hMWUzmW80GDrDuUF6">
             </picture>
           </div>
@@ -1604,6 +1653,77 @@
           </div>
         </div>
       </section>
+
+      <!-- IMAGE LOAD ORDER. Hero slide 1 first (a plain eager <img>, fetchpriority high). The moment it has loaded,
+           slide 2 starts, then slide 3. After those three, the Before/After images load (first pair first), because that
+           section must never show a placeholder and its Next/Previous must never wait on a download. Every other image keeps
+           its own loading="lazy". Held-back images carry data-src / data-srcset instead of src / srcset. -->
+      <script>
+      (function () {
+        function settle(img) {                       /* resolves when the image has finished (or failed) and is decoded */
+          return new Promise(function (res) {
+            if (!img || !img.isConnected) return res();
+            var t = 0, fin = function () { clearTimeout(t); img.removeEventListener('load', fin); img.removeEventListener('error', fin);
+              (img.decode ? img.decode().catch(function () {}) : Promise.resolve()).then(res); };
+            if (img.complete && img.getAttribute('src')) return fin();
+            img.addEventListener('load', fin); img.addEventListener('error', fin);
+            t = setTimeout(fin, 10000);              /* a stuck request must never freeze the sequence */
+          });
+        }
+        function activate(img) {
+          if (img && img.hasAttribute('data-src')) {
+            var pic = img.closest('picture');
+            if (pic) [].forEach.call(pic.querySelectorAll('source[data-srcset]'), function (s) { s.setAttribute('srcset', s.getAttribute('data-srcset')); s.removeAttribute('data-srcset'); });
+            img.setAttribute('src', img.getAttribute('data-src')); img.removeAttribute('data-src');
+          }
+          return settle(img);
+        }
+        var heroImgs = [].slice.call(document.querySelectorAll('.hero .slide img'));
+        var baResolve = function () {};
+        function pairReady(pair) {
+          if (pair._ready) return Promise.resolve();
+          return (pair._p = pair._p || Promise.all([].slice.call(pair.querySelectorAll('img')).map(activate)).then(function () { pair._ready = true; }));
+        }
+        var baFirst = null;
+        function baStage() {                          /* first pair, then the rest; returns a promise for the first pair */
+          if (baFirst) return baFirst;
+          baFirst = new Promise(function (res) { baResolve = res; });
+          var go = function () {
+            var ba = document.querySelector('.ba'), pairs = ba ? [].slice.call(ba.querySelectorAll('.pair')) : [];
+            if (!pairs.length) { baResolve(); return; }
+            var ready = function () { ba.classList.add('ba-ready'); };
+            setTimeout(ready, 12000);                 /* failsafe: never leave the section empty */
+            pairReady(pairs[0]).then(function () { ready(); baResolve(); return Promise.all(pairs.slice(1).map(pairReady)); });
+          };
+          if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
+          return baFirst;
+        }
+        /* heroes in order, then Before/After */
+        var seq = settle(heroImgs[0]);
+        heroImgs.slice(1).forEach(function (im) { seq = seq.then(function () { return activate(im); }); });
+        /* everything else keeps its own loading="lazy"; it is only released once the heroes and the first Before/After pair are in */
+        var released = false;
+        function releaseRest() {
+          if (released) return; released = true;
+          [].forEach.call(document.querySelectorAll('img[data-src]'), function (im) { activate(im); });
+        }
+        seq.then(function () {
+          var first = baStage();
+          return Promise.race([first, new Promise(function (r) { setTimeout(r, 3000); })]);
+        }).then(releaseRest);
+        /* a visitor who is already scrolling should not wait for the sequence */
+        addEventListener('scroll', function onScroll() { if (scrollY > innerHeight * .5) { removeEventListener('scroll', onScroll); releaseRest(); } }, { passive: true });
+        addEventListener('load', function () { setTimeout(releaseRest, 6000); });
+        /* a visitor who gets near Before/After before the heroes are done: that section goes first */
+        function watch() {
+          var ba = document.querySelector('.ba');
+          if (!ba || !window.IntersectionObserver) return;
+          new IntersectionObserver(function (es, o) { if (es.some(function (e) { return e.isIntersecting; })) { o.disconnect(); baStage(); } }, { rootMargin: '900px 0px' }).observe(ba);
+        }
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch); else watch();
+        window.__imgOrder = { pairReady: pairReady, heroAll: function () { heroImgs.forEach(activate); }, releaseRest: releaseRest };
+      })();
+      </script>
 
       <section class="stats" aria-label="{{brand}} in numbers" data-page-node-id="p5CjHxok33ZIPv7HEPYL8L">
         <div class="wrap" data-page-node-id="H7FjWQD3hhJdREpzzuohED">
@@ -1633,8 +1753,8 @@
       <figure class="photo" data-page-node-id="O0ZCzkTwwMbd2wnaYlxmh8">
         <div class="ph l" data-src="assets/images/about-crew.avif" data-page-node-id="xw5xOGXshaze4cZ5mR5sUx">
           <picture data-page-node-id="CVgAKz9ILoSKac9iWsz37e">
-            <source srcset="assets/images/about-crew.avif" type="image/avif" data-page-node-id="BWnnWYcz5sSLgkZeaQvRLB">
-            <source srcset="assets/images/about-crew.webp" type="image/webp" data-page-node-id="n0dk2dG6zGWcBa3XAKvWMh"><img src="assets/images/about-crew.webp"
+            <source data-srcset="assets/images/about-crew.avif" type="image/avif" data-page-node-id="BWnnWYcz5sSLgkZeaQvRLB">
+            <source data-srcset="assets/images/about-crew.webp" type="image/webp" data-page-node-id="n0dk2dG6zGWcBa3XAKvWMh"><img data-src="assets/images/about-crew.webp"
               alt="The {{brand}} crew in front of a finished home" loading="lazy" data-page-node-id="qCgylKKoX4zojdb4rw1OpF">
           </picture>
         </div>
@@ -1664,22 +1784,22 @@
     </section>
 
     <section class="wrap services" id="services" aria-label="Services" data-page-node-id="oAiIlsQEGNJ1rdCA4Yi30y">
-      <div class="sec-head split" data-page-node-id="6h7X6gyoQYioL6VeKL3Azi"><div class="sh-l" data-page-node-id="HC0TFEBvGvQE3ozhQLR4cS"><p class="label" data-page-node-id="wLerZL24BtWRNHPQip42sn">What we do</p><h2 data-page-node-id="XzxrmrZm043oHNRgZMUQlP">Four ways we take care of your roof</h2></div><div class="sh-r" data-page-node-id="jNzHXHM6HCX1nrWJA5ewfZ"><p class="intro" data-page-node-id="xqiParBsjYlcYBqA9P6mE9">Whether it’s a leak or a full replacement, you get the same crew and the same straight answers.</p></div></div>
+      <div class="sec-head split" data-page-node-id="6h7X6gyoQYioL6VeKL3Azi"><div class="sh-l" data-page-node-id="HC0TFEBvGvQE3ozhQLR4cS"><p class="label" data-page-node-id="wLerZL24BtWRNHPQip42sn">What we do</p><h2 data-page-node-id="XzxrmrZm043oHNRgZMUQlP">Four ways we <span class="hl">take care</span> of your roof</h2></div><div class="sh-r" data-page-node-id="jNzHXHM6HCX1nrWJA5ewfZ"><p class="intro" data-page-node-id="xqiParBsjYlcYBqA9P6mE9">Whether it’s a leak or a full replacement, you get the same crew and the same straight answers.</p></div></div>
       <div class="grid" data-page-node-id="vQXUf82djbjmJeilpPE9Lm">
         <article class="card" data-page-node-id="rb8vqw0dcXTokRZ0vsNJR2">
-          <div class="photo" data-page-node-id="LUywyJ2BeAZ4CxQx7DMcde"><div class="ph l" data-src="assets/images/services/service-replacement.avif" data-page-node-id="Gqdw1YfGZB8EVJZvHQQXAA"><picture data-page-node-id="bbyZAk5okGD8wCIHriXBR6"><source srcset="assets/images/services/service-replacement.avif" type="image/avif" data-page-node-id="AoCrMJTkhhYVjMLn5guuxQ"><source srcset="assets/images/services/service-replacement.webp" type="image/webp" data-page-node-id="TuHzvdZSiIRRjsmR4nsimI"><img src="assets/images/services/service-replacement.webp" alt="Roofers installing new charcoal shingles on a roof" loading="lazy" data-page-node-id="vLYKFYiUPebtypGDN4dWKA"></picture></div></div>
+          <div class="photo" data-page-node-id="LUywyJ2BeAZ4CxQx7DMcde"><div class="ph l" data-src="assets/images/services/service-replacement.avif" data-page-node-id="Gqdw1YfGZB8EVJZvHQQXAA"><picture data-page-node-id="bbyZAk5okGD8wCIHriXBR6"><source data-srcset="assets/images/services/service-replacement.avif" type="image/avif" data-page-node-id="AoCrMJTkhhYVjMLn5guuxQ"><source data-srcset="assets/images/services/service-replacement.webp" type="image/webp" data-page-node-id="TuHzvdZSiIRRjsmR4nsimI"><img data-src="assets/images/services/service-replacement.webp" alt="Roofers installing new charcoal shingles on a roof" loading="lazy" data-page-node-id="vLYKFYiUPebtypGDN4dWKA"></picture></div></div>
           <div class="card-text" data-page-node-id="wmvQGfInoCYlAZ16E0EkAN"><h3 data-page-node-id="rvc4W9CF3hHPgkfjaPaBDE">Full roof replacement</h3><p data-page-node-id="zU92dLLuPuyM5P2kY2rQ4N">Tear-off to final shingle by our own crew, with engineered underlayment and a written price before we start.</p></div>
         </article>
         <article class="card" data-page-node-id="yAonQAUroa5R0HE6rrJhjZ">
-          <div class="photo" data-page-node-id="bIEgiuU2sEa7y1axpF5cwA"><div class="ph l" data-src="assets/images/services/service-storm.avif" data-page-node-id="2wiJOAdvrJxbJIAIViNhVC"><picture data-page-node-id="olSNYbEvCHitn56cJPIZ5a"><source srcset="assets/images/services/service-storm.avif" type="image/avif" data-page-node-id="Z5SKihFOFExfESpGOgHZZn"><source srcset="assets/images/services/service-storm.webp" type="image/webp" data-page-node-id="CNHhdHUnhBVJFgpPRMJG2z"><img src="assets/images/services/service-storm.webp" alt="Hail damage marked on asphalt shingles" loading="lazy" data-page-node-id="NOFPhIiCCcYwDA6GkLxEdi"></picture></div></div>
+          <div class="photo" data-page-node-id="bIEgiuU2sEa7y1axpF5cwA"><div class="ph l" data-src="assets/images/services/service-storm.avif" data-page-node-id="2wiJOAdvrJxbJIAIViNhVC"><picture data-page-node-id="olSNYbEvCHitn56cJPIZ5a"><source data-srcset="assets/images/services/service-storm.avif" type="image/avif" data-page-node-id="Z5SKihFOFExfESpGOgHZZn"><source data-srcset="assets/images/services/service-storm.webp" type="image/webp" data-page-node-id="CNHhdHUnhBVJFgpPRMJG2z"><img data-src="assets/images/services/service-storm.webp" alt="Hail damage marked on asphalt shingles" loading="lazy" data-page-node-id="NOFPhIiCCcYwDA6GkLxEdi"></picture></div></div>
           <div class="card-text" data-page-node-id="i9Qdu9QyrzDqAE81mGnEZG"><h3 data-page-node-id="dzdXSYClAEnpBa1E2B5n0I">Storm and hail damage</h3><p data-page-node-id="7viWTnRUkXal9QoTWVDNDP">We inspect, photograph the damage, and help you through the insurance conversation.</p></div>
         </article>
         <article class="card" data-page-node-id="XxlFbrou4e2PkfUKHRxGMB">
-          <div class="photo" data-page-node-id="NpDoQTbzT7RE2zDFWnpVE3"><div class="ph l" data-src="assets/images/services/service-repair.avif" data-page-node-id="McADCtg5cRC5zwZ61tsRmf"><picture data-page-node-id="LoGwKuSQu2UzMFKezaGOZT"><source srcset="assets/images/services/service-repair.avif" type="image/avif" data-page-node-id="HR08MYiT13sXPsYTgk4Wdu"><source srcset="assets/images/services/service-repair.webp" type="image/webp" data-page-node-id="QBijRuYUfC4VmTfbxMWs07"><img src="assets/images/services/service-repair.webp" alt="Roofer repairing flashing around a roof vent" loading="lazy" data-page-node-id="vZ4mhS8JvgxxnPEaUsxzB5"></picture></div></div>
+          <div class="photo" data-page-node-id="NpDoQTbzT7RE2zDFWnpVE3"><div class="ph l" data-src="assets/images/services/service-repair.avif" data-page-node-id="McADCtg5cRC5zwZ61tsRmf"><picture data-page-node-id="LoGwKuSQu2UzMFKezaGOZT"><source data-srcset="assets/images/services/service-repair.avif" type="image/avif" data-page-node-id="HR08MYiT13sXPsYTgk4Wdu"><source data-srcset="assets/images/services/service-repair.webp" type="image/webp" data-page-node-id="QBijRuYUfC4VmTfbxMWs07"><img data-src="assets/images/services/service-repair.webp" alt="Roofer repairing flashing around a roof vent" loading="lazy" data-page-node-id="vZ4mhS8JvgxxnPEaUsxzB5"></picture></div></div>
           <div class="card-text" data-page-node-id="uIdH9z5SmtGBN4d6Eftc9F"><h3 data-page-node-id="REdi1FxGhsTCE6Q3t4sDzZ">Repairs and leak detection</h3><p data-page-node-id="NGgxgh8MXJxfBwzOKGOVkV">We find the real source of the leak, not just the stain on your ceiling.</p></div>
         </article>
         <article class="card" data-page-node-id="ECslb14TmlU0SiDNumtmPR">
-          <div class="photo" data-page-node-id="mREIejO5bWeAPK5Ogybij8"><div class="ph l" data-src="assets/images/services/service-inspection.avif" data-page-node-id="oGRiGGDd05OxC4wQEIgRot"><picture data-page-node-id="XcSHf9FkYR3ovWbsZe5wj4"><source srcset="assets/images/services/service-inspection.avif" type="image/avif" data-page-node-id="QSjgmJ0xRA5JbUcHxmR5Hv"><source srcset="assets/images/services/service-inspection.webp" type="image/webp" data-page-node-id="ScZvUOEBeL4uPB1L1JGOGC"><img src="assets/images/services/service-inspection.webp" alt="Roofer inspecting a roof with a tablet" loading="lazy" data-page-node-id="5D0coE9W8goLxxP3C7sALF"></picture></div></div>
+          <div class="photo" data-page-node-id="mREIejO5bWeAPK5Ogybij8"><div class="ph l" data-src="assets/images/services/service-inspection.avif" data-page-node-id="oGRiGGDd05OxC4wQEIgRot"><picture data-page-node-id="XcSHf9FkYR3ovWbsZe5wj4"><source data-srcset="assets/images/services/service-inspection.avif" type="image/avif" data-page-node-id="QSjgmJ0xRA5JbUcHxmR5Hv"><source data-srcset="assets/images/services/service-inspection.webp" type="image/webp" data-page-node-id="ScZvUOEBeL4uPB1L1JGOGC"><img data-src="assets/images/services/service-inspection.webp" alt="Roofer inspecting a roof with a tablet" loading="lazy" data-page-node-id="5D0coE9W8goLxxP3C7sALF"></picture></div></div>
           <div class="card-text" data-page-node-id="An56KnGTourfRAXyFhP8dz"><h3 data-page-node-id="dkjLTj8bx7V1OzWNNkz8JV">Free roof inspection</h3><p data-page-node-id="02WKtsxNEVghKftGxcH9DM">An honest look at your roof’s condition, with photos and no pressure to buy.</p></div>
         </article>
       </div>
@@ -1693,43 +1813,43 @@
       <div class="wrap hws-in" data-page-node-id="1i39lOjqQxbkBB6P9M61PO">
         <div class="hws-head" data-page-node-id="pLxxSIpMK0OGvsqxsDSGb1">
           <p class="label" data-page-node-id="P9GiFw73v8imCJG4Kj7DTf">How we work</p>
-          <h2 data-page-node-id="sVRaxEtalmsmjA1PzsCT3q">From first call to final shingle</h2>
+          <h2 data-page-node-id="sVRaxEtalmsmjA1PzsCT3q">From first call to <span class="hl">final shingle</span></h2>
         </div>
-        <div class="steps" data-page-node-id="hO6yw9lXVWAVdvOCpbMJhT"><span class="line" data-page-node-id="Fis054S0ryAMX9IL0ccAp2"><i data-page-node-id="boCdOCPE8w4RFlZnWkG6Xe"></i></span><ol class="steps-list">
+        <ol class="steps" data-page-node-id="hO6yw9lXVWAVdvOCpbMJhT"><span class="line" data-page-node-id="Fis054S0ryAMX9IL0ccAp2"><i data-page-node-id="boCdOCPE8w4RFlZnWkG6Xe"></i></span>
         <li class="step" data-page-node-id="Mq1nnCwreKeYfDxVaOgA27"><span class="n" data-page-node-id="dvkdB862GwIj8vYinwHIx3">1</span><div data-page-node-id="7ZL7nY8UFGVzKZ6SZUCwJF"><h3 data-page-node-id="cqPrR0YhkRtTfqnmYMlZhd">We inspect and quote</h3><p data-page-node-id="MkcTGXbVSl8VK8HdG4Sdld">We look at your roof in person, take photos, and send a written price within {{reply}}.</p></div></li>
         <li class="step" data-page-node-id="9bF8CJiW6fGlW32niSjnUu"><span class="n" data-page-node-id="gvpsuGnRp4G1A1XF5IZCtq">2</span><div data-page-node-id="OniHe4cfkrKFoAEJhRRTA0"><h3 data-page-node-id="EZTwS9TjhkiCuQnL5qC1EB">We plan the job</h3><p data-page-node-id="OgMsYj7bJAymVgbJgMVbyM">You choose the materials and the start date. We handle the permits and order everything before day one.</p></div></li>
         <li class="step" data-page-node-id="LSHtCheu6mGgaBjONFoZVe"><span class="n" data-page-node-id="pTc2GT4aGf1q0hCtB5iesy">3</span><div data-page-node-id="ZAKEBN7fUiQNzTs81ZbGMq"><h3 data-page-node-id="do45mgAPDPiQUZ6VDGEClG">We build it and walk it with you</h3><p data-page-node-id="NuXmQRxlPDe2JkNYLD6lxq">Our own crew does the work, with photos at every stage. You get a final walkthrough and a written warranty.</p></div></li>
-        </ol></div>
+        </ol>
       </div>
     </section>
 
     <section class="wrap ba" id="projects" aria-label="Before and after" data-page-node-id="fEe6SpUNBSWm5UFH1ZmzvI">
-      <div class="sec-head" data-page-node-id="fh6BwK0FD9s8g65T0El81d"><p class="label" data-page-node-id="3xduGLvIyiNy7FrUju1PLz">Our work</p><h2 data-page-node-id="ZoHt29edfFLurm4cCGLdfY">See the difference a new roof makes</h2></div>
+      <div class="sec-head" data-page-node-id="fh6BwK0FD9s8g65T0El81d"><p class="label" data-page-node-id="3xduGLvIyiNy7FrUju1PLz">Our work</p><h2 data-page-node-id="ZoHt29edfFLurm4cCGLdfY">See the <span class="hl">difference</span> a new roof makes</h2></div>
         <div class="ba-nav" data-page-node-id="YE8rnsI0EILtBe031mbS84"><button type="button" data-d="-1" aria-label="Previous project" data-page-node-id="hZhGy1dVdR1fspSQuWRV3P"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" data-page-node-id="5fVbCt5D8ktc5ykF4lCGTs"><path d="M16 10H4M9 5l-5 5 5 5" data-page-node-id="2oOMObgc42OCSBMtZhw1Le"/></svg><span class="bt" data-page-node-id="uv2DGR9LwObYUV8lUWxthS">Previous</span></button><button type="button" data-d="1" aria-label="Next project" data-page-node-id="R9o0fwcNo75hzqFqpGMdDv"><span class="bt" data-page-node-id="FvAJgzVV79cQkDdVxMZnch">Next</span><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" data-page-node-id="bmIZAbApMlT8uh6zswxwgF"><path d="M4 10h12M11 5l5 5-5 5" data-page-node-id="H045FC736P0yI4KeXMbgAJ"/></svg></button></div>
       <div class="pairs" data-page-node-id="s5AEmEBDkb6phmYd4iTCfD">
-        <figure class="pair active" data-page-node-id="WtP7q0TAZdwuBubQ1KKGQA"><div class="frame" data-page-node-id="sjLJviUSLVGTa6prADYvVj"><div class="pic before" data-page-node-id="G9HAk5D36yhQOKPw8gSSxi"><div class="ph" data-src="assets/images/before-after/ba-1-before.avif" data-page-node-id="3x7uCAsraP04jmP2uCPbGu"><picture data-page-node-id="sqkxqtdAooywKps2jJs3xH"><source srcset="assets/images/before-after/ba-1-before.avif" type="image/avif" data-page-node-id="L1sI4vWUvQ1EBtzA6A0qxJ"><source srcset="assets/images/before-after/ba-1-before.webp" type="image/webp" data-page-node-id="ol8bn3WVFxNdXRUDVRoFkq"><img src="assets/images/before-after/ba-1-before.webp" alt="Roof before the work: Asphalt shingle replacement · Ames" width="1000" height="667" loading="lazy" decoding="async" data-page-node-id="JZ629lUQaW2WMtGyGtvQ7A"></picture></div></div><div class="pic after" data-page-node-id="NSxqdb0Phf2LurtwGUEzm9"><div class="ph l" data-src="assets/images/before-after/ba-1-after.avif" data-page-node-id="SAvGsleF27Y6GySfZ6fHd2"><picture data-page-node-id="nCwsGGv4fkFHpzFXNs3Kd8"><source srcset="assets/images/before-after/ba-1-after.avif" type="image/avif" data-page-node-id="CCxOQ6EqfVfAFMlRseRVTE"><source srcset="assets/images/before-after/ba-1-after.webp" type="image/webp" data-page-node-id="uloQvwYM8tzZ6zCZDpgBZf"><img src="assets/images/before-after/ba-1-after.webp" alt="Roof after the work: Asphalt shingle replacement · Ames" width="1000" height="667" loading="lazy" decoding="async" data-page-node-id="uSyLaBPtaZ6mdUtEAxYRCU"></picture></div></div><span class="tag t-b" data-page-node-id="t5uX6RUXFww0bYwDAAYJSq">Before</span><span class="tag t-a" data-page-node-id="coOfygDKAPgVzsBLC6HIjz">After</span><span class="handle" aria-hidden="true" data-page-node-id="1KQd23MyU0YFFqZDUsuebX"></span></div><figcaption data-page-node-id="ICupoKbIX6UccZ83QB7014">Full replacement · Ames</figcaption></figure>
-        <figure class="pair" data-page-node-id="KHSnXQNg1cWa7kfLc5T0p9"><div class="frame" data-page-node-id="jHL5klohwoPDAuRfobEU0T"><div class="pic before" data-page-node-id="s7gEvbmy6j0p2VoxV7i4fS"><div class="ph" data-src="assets/images/before-after/ba-2-before.avif" data-page-node-id="BA9Z6cqDj4BlwOCqcYyqku"><picture data-page-node-id="YrOx1XusyCJUFdkCzzM349"><source srcset="assets/images/before-after/ba-2-before.avif" type="image/avif" data-page-node-id="FcrIHkWYB6cosNrEhiP0K4"><source srcset="assets/images/before-after/ba-2-before.webp" type="image/webp" data-page-node-id="tHG3cOZF9AscesnX3Vkbpm"><img src="assets/images/before-after/ba-2-before.webp" alt="Roof before the work: Standing-seam metal roof · Cedar Rapids" width="1000" height="667" loading="lazy" decoding="async" data-page-node-id="ueed2s22UkM5DBk0WuUrpP"></picture></div></div><div class="pic after" data-page-node-id="oAZC5LAe8VAfmIDCaygZMR"><div class="ph l" data-src="assets/images/before-after/ba-2-after.avif" data-page-node-id="Cxk0RSc8ABr69VMZ41sM1w"><picture data-page-node-id="wNZATmPtKFh184lj6BfAV2"><source srcset="assets/images/before-after/ba-2-after.avif" type="image/avif" data-page-node-id="t7g28a90aDBZs42ZzHk37M"><source srcset="assets/images/before-after/ba-2-after.webp" type="image/webp" data-page-node-id="3YY3WBnx0f4cogxOjfoHjA"><img src="assets/images/before-after/ba-2-after.webp" alt="Roof after the work: Standing-seam metal roof · Cedar Rapids" width="1000" height="667" loading="lazy" decoding="async" data-page-node-id="kEpAJLThP3K4oIXg3eW6QI"></picture></div></div><span class="tag t-b" data-page-node-id="sZC9z3DHlGidVXsYgnTHH8">Before</span><span class="tag t-a" data-page-node-id="NYv93izBFT0thJ6BVp9DDz">After</span><span class="handle" aria-hidden="true" data-page-node-id="PouyMKjx8ETx9vr9B4SjCZ"></span></div><figcaption data-page-node-id="crtGjLL3FJYSl5gSKo0fRd">Storm damage repair · Cedar Rapids</figcaption></figure>
-        <figure class="pair" data-page-node-id="jpA50rCCEoS2gp2NbtPyrt"><div class="frame" data-page-node-id="T4H37eouEinl79xuStCImw"><div class="pic before" data-page-node-id="4l4CM2iTRHiZMmPsAn6jv2"><div class="ph" data-src="assets/images/before-after/ba-3-before.avif" data-page-node-id="QgFvAfEbfXQghoq3SkfUQW"><picture data-page-node-id="xcvwI6PDKDXRglHK6OjUOH"><source srcset="assets/images/before-after/ba-3-before.avif" type="image/avif" data-page-node-id="b8B2NzxvqMpbIoBEmaf7ZO"><source srcset="assets/images/before-after/ba-3-before.webp" type="image/webp" data-page-node-id="MtErEyikG7nefAEGAtNFtl"><img src="assets/images/before-after/ba-3-before.webp" alt="Roof before the work: Concrete tile roof · Des Moines" width="1000" height="667" loading="lazy" decoding="async" data-page-node-id="CbOIMlWZqZz4T43MiLLPWm"></picture></div></div><div class="pic after" data-page-node-id="oZ2WUrygNyDIEh9MQYRjCC"><div class="ph l" data-src="assets/images/before-after/ba-3-after.avif" data-page-node-id="wWC5oKIXRTRleQRPTped9g"><picture data-page-node-id="EMrCCvl8tiO7amAQh3Esaf"><source srcset="assets/images/before-after/ba-3-after.avif" type="image/avif" data-page-node-id="KwHlCc0r3nn8EVRraFYrEJ"><source srcset="assets/images/before-after/ba-3-after.webp" type="image/webp" data-page-node-id="XLlGzTgam3CmwCOgoFWjk4"><img src="assets/images/before-after/ba-3-after.webp" alt="Roof after the work: Concrete tile roof · Des Moines" width="1000" height="667" loading="lazy" decoding="async" data-page-node-id="VotnuvgFSojMGiHSisIqw4"></picture></div></div><span class="tag t-b" data-page-node-id="HthmGHe6145g166LnhXtit">Before</span><span class="tag t-a" data-page-node-id="cFAAKt6Nfgj4jqwkQeLwlx">After</span><span class="handle" aria-hidden="true" data-page-node-id="xJdQCRvbHwKFBihuBaDgfA"></span></div><figcaption data-page-node-id="qMJD1cWcY680SEhNYrL8zC">Flashing and leak repair · Des Moines</figcaption></figure>
-        <figure class="pair" data-page-node-id="jpA50rCCEoS2gp2NbtPyrt"><div class="frame" data-page-node-id="T4H37eouEinl79xuStCImw"><div class="pic before" data-page-node-id="4l4CM2iTRHiZMmPsAn6jv2"><div class="ph" data-src="assets/images/before-after/ba-4-before.avif" data-page-node-id="QgFvAfEbfXQghoq3SkfUQW"><picture data-page-node-id="xcvwI6PDKDXRglHK6OjUOH"><source srcset="assets/images/before-after/ba-4-before.avif" type="image/avif" data-page-node-id="b8B2NzxvqMpbIoBEmaf7ZO"><source srcset="assets/images/before-after/ba-4-before.webp" type="image/webp" data-page-node-id="MtErEyikG7nefAEGAtNFtl"><img src="assets/images/before-after/ba-4-before.webp" alt="Roof before the work: Cedar shake restoration · Iowa City" width="1000" height="667" loading="lazy" decoding="async" data-page-node-id="CbOIMlWZqZz4T43MiLLPWm"></picture></div></div><div class="pic after" data-page-node-id="oZ2WUrygNyDIEh9MQYRjCC"><div class="ph l" data-src="assets/images/before-after/ba-4-after.avif" data-page-node-id="wWC5oKIXRTRleQRPTped9g"><picture data-page-node-id="EMrCCvl8tiO7amAQh3Esaf"><source srcset="assets/images/before-after/ba-4-after.avif" type="image/avif" data-page-node-id="KwHlCc0r3nn8EVRraFYrEJ"><source srcset="assets/images/before-after/ba-4-after.webp" type="image/webp" data-page-node-id="XLlGzTgam3CmwCOgoFWjk4"><img src="assets/images/before-after/ba-4-after.webp" alt="Roof after the work: Cedar shake restoration · Iowa City" width="1000" height="667" loading="lazy" decoding="async" data-page-node-id="VotnuvgFSojMGiHSisIqw4"></picture></div></div><span class="tag t-b" data-page-node-id="HthmGHe6145g166LnhXtit">Before</span><span class="tag t-a" data-page-node-id="cFAAKt6Nfgj4jqwkQeLwlx">After</span><span class="handle" aria-hidden="true" data-page-node-id="xJdQCRvbHwKFBihuBaDgfA"></span></div><figcaption data-page-node-id="qMJD1cWcY680SEhNYrL8zC">Flashing and leak repair · Des Moines</figcaption></figure>
+        <figure class="pair active" data-page-node-id="WtP7q0TAZdwuBubQ1KKGQA"><div class="frame" data-page-node-id="sjLJviUSLVGTa6prADYvVj"><div class="pic before" data-page-node-id="G9HAk5D36yhQOKPw8gSSxi"><div class="ph" data-src="assets/images/before-after/ba-1-before.avif" data-page-node-id="3x7uCAsraP04jmP2uCPbGu"><picture data-page-node-id="sqkxqtdAooywKps2jJs3xH"><source data-srcset="assets/images/before-after/ba-1-before.avif" type="image/avif" data-page-node-id="L1sI4vWUvQ1EBtzA6A0qxJ"><source data-srcset="assets/images/before-after/ba-1-before.webp" type="image/webp" data-page-node-id="ol8bn3WVFxNdXRUDVRoFkq"><img data-src="assets/images/before-after/ba-1-before.webp" alt="Roof before the work: Asphalt shingle replacement · Ames" width="1000" height="667" decoding="async" data-page-node-id="JZ629lUQaW2WMtGyGtvQ7A"></picture></div></div><div class="pic after" data-page-node-id="NSxqdb0Phf2LurtwGUEzm9"><div class="ph l" data-src="assets/images/before-after/ba-1-after.avif" data-page-node-id="SAvGsleF27Y6GySfZ6fHd2"><picture data-page-node-id="nCwsGGv4fkFHpzFXNs3Kd8"><source data-srcset="assets/images/before-after/ba-1-after.avif" type="image/avif" data-page-node-id="CCxOQ6EqfVfAFMlRseRVTE"><source data-srcset="assets/images/before-after/ba-1-after.webp" type="image/webp" data-page-node-id="uloQvwYM8tzZ6zCZDpgBZf"><img data-src="assets/images/before-after/ba-1-after.webp" alt="Roof after the work: Asphalt shingle replacement · Ames" width="1000" height="667" decoding="async" data-page-node-id="uSyLaBPtaZ6mdUtEAxYRCU"></picture></div></div><span class="tag t-b" data-page-node-id="t5uX6RUXFww0bYwDAAYJSq">Before</span><span class="tag t-a" data-page-node-id="coOfygDKAPgVzsBLC6HIjz">After</span><span class="handle" aria-hidden="true" data-page-node-id="1KQd23MyU0YFFqZDUsuebX"></span></div><figcaption data-page-node-id="ICupoKbIX6UccZ83QB7014">Full replacement · Ames</figcaption></figure>
+        <figure class="pair" data-page-node-id="KHSnXQNg1cWa7kfLc5T0p9"><div class="frame" data-page-node-id="jHL5klohwoPDAuRfobEU0T"><div class="pic before" data-page-node-id="s7gEvbmy6j0p2VoxV7i4fS"><div class="ph" data-src="assets/images/before-after/ba-2-before.avif" data-page-node-id="BA9Z6cqDj4BlwOCqcYyqku"><picture data-page-node-id="YrOx1XusyCJUFdkCzzM349"><source data-srcset="assets/images/before-after/ba-2-before.avif" type="image/avif" data-page-node-id="FcrIHkWYB6cosNrEhiP0K4"><source data-srcset="assets/images/before-after/ba-2-before.webp" type="image/webp" data-page-node-id="tHG3cOZF9AscesnX3Vkbpm"><img data-src="assets/images/before-after/ba-2-before.webp" alt="Roof before the work: Standing-seam metal roof · Cedar Rapids" width="1000" height="667" decoding="async" data-page-node-id="ueed2s22UkM5DBk0WuUrpP"></picture></div></div><div class="pic after" data-page-node-id="oAZC5LAe8VAfmIDCaygZMR"><div class="ph l" data-src="assets/images/before-after/ba-2-after.avif" data-page-node-id="Cxk0RSc8ABr69VMZ41sM1w"><picture data-page-node-id="wNZATmPtKFh184lj6BfAV2"><source data-srcset="assets/images/before-after/ba-2-after.avif" type="image/avif" data-page-node-id="t7g28a90aDBZs42ZzHk37M"><source data-srcset="assets/images/before-after/ba-2-after.webp" type="image/webp" data-page-node-id="3YY3WBnx0f4cogxOjfoHjA"><img data-src="assets/images/before-after/ba-2-after.webp" alt="Roof after the work: Standing-seam metal roof · Cedar Rapids" width="1000" height="667" decoding="async" data-page-node-id="kEpAJLThP3K4oIXg3eW6QI"></picture></div></div><span class="tag t-b" data-page-node-id="sZC9z3DHlGidVXsYgnTHH8">Before</span><span class="tag t-a" data-page-node-id="NYv93izBFT0thJ6BVp9DDz">After</span><span class="handle" aria-hidden="true" data-page-node-id="PouyMKjx8ETx9vr9B4SjCZ"></span></div><figcaption data-page-node-id="crtGjLL3FJYSl5gSKo0fRd">Storm damage repair · Cedar Rapids</figcaption></figure>
+        <figure class="pair" data-page-node-id="jpA50rCCEoS2gp2NbtPyrt"><div class="frame" data-page-node-id="T4H37eouEinl79xuStCImw"><div class="pic before" data-page-node-id="4l4CM2iTRHiZMmPsAn6jv2"><div class="ph" data-src="assets/images/before-after/ba-3-before.avif" data-page-node-id="QgFvAfEbfXQghoq3SkfUQW"><picture data-page-node-id="xcvwI6PDKDXRglHK6OjUOH"><source data-srcset="assets/images/before-after/ba-3-before.avif" type="image/avif" data-page-node-id="b8B2NzxvqMpbIoBEmaf7ZO"><source data-srcset="assets/images/before-after/ba-3-before.webp" type="image/webp" data-page-node-id="MtErEyikG7nefAEGAtNFtl"><img data-src="assets/images/before-after/ba-3-before.webp" alt="Roof before the work: Concrete tile roof · Des Moines" width="1000" height="667" decoding="async" data-page-node-id="CbOIMlWZqZz4T43MiLLPWm"></picture></div></div><div class="pic after" data-page-node-id="oZ2WUrygNyDIEh9MQYRjCC"><div class="ph l" data-src="assets/images/before-after/ba-3-after.avif" data-page-node-id="wWC5oKIXRTRleQRPTped9g"><picture data-page-node-id="EMrCCvl8tiO7amAQh3Esaf"><source data-srcset="assets/images/before-after/ba-3-after.avif" type="image/avif" data-page-node-id="KwHlCc0r3nn8EVRraFYrEJ"><source data-srcset="assets/images/before-after/ba-3-after.webp" type="image/webp" data-page-node-id="XLlGzTgam3CmwCOgoFWjk4"><img data-src="assets/images/before-after/ba-3-after.webp" alt="Roof after the work: Concrete tile roof · Des Moines" width="1000" height="667" decoding="async" data-page-node-id="VotnuvgFSojMGiHSisIqw4"></picture></div></div><span class="tag t-b" data-page-node-id="HthmGHe6145g166LnhXtit">Before</span><span class="tag t-a" data-page-node-id="cFAAKt6Nfgj4jqwkQeLwlx">After</span><span class="handle" aria-hidden="true" data-page-node-id="xJdQCRvbHwKFBihuBaDgfA"></span></div><figcaption data-page-node-id="qMJD1cWcY680SEhNYrL8zC">Flashing and leak repair · Des Moines</figcaption></figure>
+        <figure class="pair" data-page-node-id="jpA50rCCEoS2gp2NbtPyrt"><div class="frame" data-page-node-id="T4H37eouEinl79xuStCImw"><div class="pic before" data-page-node-id="4l4CM2iTRHiZMmPsAn6jv2"><div class="ph" data-src="assets/images/before-after/ba-4-before.avif" data-page-node-id="QgFvAfEbfXQghoq3SkfUQW"><picture data-page-node-id="xcvwI6PDKDXRglHK6OjUOH"><source data-srcset="assets/images/before-after/ba-4-before.avif" type="image/avif" data-page-node-id="b8B2NzxvqMpbIoBEmaf7ZO"><source data-srcset="assets/images/before-after/ba-4-before.webp" type="image/webp" data-page-node-id="MtErEyikG7nefAEGAtNFtl"><img data-src="assets/images/before-after/ba-4-before.webp" alt="Roof before the work: Cedar shake restoration · Iowa City" width="1000" height="667" decoding="async" data-page-node-id="CbOIMlWZqZz4T43MiLLPWm"></picture></div></div><div class="pic after" data-page-node-id="oZ2WUrygNyDIEh9MQYRjCC"><div class="ph l" data-src="assets/images/before-after/ba-4-after.avif" data-page-node-id="wWC5oKIXRTRleQRPTped9g"><picture data-page-node-id="EMrCCvl8tiO7amAQh3Esaf"><source data-srcset="assets/images/before-after/ba-4-after.avif" type="image/avif" data-page-node-id="KwHlCc0r3nn8EVRraFYrEJ"><source data-srcset="assets/images/before-after/ba-4-after.webp" type="image/webp" data-page-node-id="XLlGzTgam3CmwCOgoFWjk4"><img data-src="assets/images/before-after/ba-4-after.webp" alt="Roof after the work: Cedar shake restoration · Iowa City" width="1000" height="667" decoding="async" data-page-node-id="VotnuvgFSojMGiHSisIqw4"></picture></div></div><span class="tag t-b" data-page-node-id="HthmGHe6145g166LnhXtit">Before</span><span class="tag t-a" data-page-node-id="cFAAKt6Nfgj4jqwkQeLwlx">After</span><span class="handle" aria-hidden="true" data-page-node-id="xJdQCRvbHwKFBihuBaDgfA"></span></div><figcaption data-page-node-id="qMJD1cWcY680SEhNYrL8zC">Flashing and leak repair · Des Moines</figcaption></figure>
       </div>
     </section>
 
     <section class="rvs" id="reviews" aria-label="Customer reviews" data-page-node-id="rqYhExiCTCQ8ichblRPM2J">
       <div class="wrap" data-page-node-id="tL2CKtBXPlWh6pXtfGUpMD">
-        <div class="sec-head split" data-page-node-id="FauEPBScrxroGTviVNTLHU"><div class="sh-l" data-page-node-id="MPb0LPBvF81kCp1ZSoiVq8"><p class="label" data-page-node-id="D5t1xm7u4Afq1Dv0LfVjBz">Reviews</p><h2 data-page-node-id="ufY0aWnw8ePahUCBtoUSqH">What homeowners say about working with us</h2></div><div class="sh-r" data-page-node-id="ZYfYTmVEvF8L9UEoRhTwPX"><p class="sum" data-page-node-id="FQrzl5wgQcHnbbOsXLnb0I">{{rating}} stars on Google from {{reviews}} reviews. Here’s what a few of our customers told us.</p></div></div>
+        <div class="sec-head split" data-page-node-id="FauEPBScrxroGTviVNTLHU"><div class="sh-l" data-page-node-id="MPb0LPBvF81kCp1ZSoiVq8"><p class="label" data-page-node-id="D5t1xm7u4Afq1Dv0LfVjBz">Reviews</p><h2 data-page-node-id="ufY0aWnw8ePahUCBtoUSqH">What <span class="hl">homeowners</span> say about working with us</h2></div><div class="sh-r" data-page-node-id="ZYfYTmVEvF8L9UEoRhTwPX"><p class="sum" data-page-node-id="FQrzl5wgQcHnbbOsXLnb0I">{{rating}} stars on Google from {{reviews}} reviews. Here’s what a few of our customers told us.</p></div></div>
         <div class="rv-view" data-page-node-id="MxHGTX1MnLFsXeQ1MQIQfC"><div class="rv-list">
-        <article class="rv rv-feat"><div class="rv-media" style="--c:#d6d0c4"><picture><source srcset="assets/images/reviews/review-1.avif" type="image/avif"><source srcset="assets/images/reviews/review-1.webp" type="image/webp"><img src="assets/images/reviews/review-1.webp" alt="Finished roof: Full replacement · Ames" width="930" height="620" loading="lazy" decoding="async"></picture></div><div class="rv-body"><div class="rv-top"><p class="stars" aria-label="5 out of 5 stars">★★★★★</p><blockquote><p>They showed me photos of the decking before covering it. I’ve never had a contractor do that.</p></blockquote></div><div class="rv-foot"><div class="rv-meta"><span class="av" style="--c:#b8541f" aria-hidden="true">D</span><div class="who2"><strong>Dana R.</strong><span>Full replacement · Ames</span></div></div></div></div></article>
-        <article class="rv rv-feat"><div class="rv-media" style="--c:#c9c3b8"><picture><source srcset="assets/images/reviews/review-2.avif" type="image/avif"><source srcset="assets/images/reviews/review-2.webp" type="image/webp"><img src="assets/images/reviews/review-2.webp" alt="Finished roof: Storm damage · Des Moines" width="930" height="620" loading="lazy" decoding="async"></picture></div><div class="rv-body"><div class="rv-top"><p class="stars" aria-label="5 out of 5 stars">★★★★★</p><blockquote><p>Hail got our roof on a Tuesday. By Friday they had documented everything and talked me through the claim.</p></blockquote></div><div class="rv-foot"><div class="rv-meta"><span class="av" style="--c:#2f5d8a" aria-hidden="true">P</span><div class="who2"><strong>Priya S.</strong><span>Storm damage · Des Moines</span></div></div></div></div></article>
-        <article class="rv rv-std rv-hasimg"><div class="rv-media" style="--c:#d6d0c4"><picture><source srcset="assets/images/reviews/review-3.avif" type="image/avif"><source srcset="assets/images/reviews/review-3.webp" type="image/webp"><img src="assets/images/reviews/review-3.webp" alt="Finished roof: Full replacement · Cedar Rapids" width="930" height="620" loading="lazy" decoding="async"></picture></div><div class="rv-body"><div class="rv-top"><p class="stars" aria-label="5 out of 5 stars">★★★★★</p><blockquote><p>The price they wrote down is the price I paid. No surprises, and the crew left the yard cleaner than they found it.</p></blockquote></div><div class="rv-foot"><div class="rv-meta"><span class="av" style="--c:#4b6b52" aria-hidden="true">M</span><div class="who2"><strong>Mark T.</strong><span>Full replacement · Cedar Rapids</span></div></div></div></div></article>
+        <article class="rv rv-feat"><div class="rv-media" data-reveal-img><picture><source data-srcset="assets/images/reviews/review-1.avif" type="image/avif"><source data-srcset="assets/images/reviews/review-1.webp" type="image/webp"><img data-src="assets/images/reviews/review-1.webp" alt="Finished roof: Full replacement · Ames" width="930" height="620" loading="lazy" decoding="async"></picture></div><div class="rv-body"><div class="rv-top"><p class="stars" aria-label="5 out of 5 stars">★★★★★</p><blockquote><p>They showed me photos of the decking before covering it. I’ve never had a contractor do that.</p></blockquote></div><div class="rv-foot"><div class="rv-meta"><span class="av" style="--c:#b8541f" aria-hidden="true">D</span><div class="who2"><strong>Dana R.</strong><span>Full replacement · Ames</span></div></div></div></div></article>
+        <article class="rv rv-feat"><div class="rv-media" data-reveal-img><picture><source data-srcset="assets/images/reviews/review-2.avif" type="image/avif"><source data-srcset="assets/images/reviews/review-2.webp" type="image/webp"><img data-src="assets/images/reviews/review-2.webp" alt="Finished roof: Storm damage · Des Moines" width="930" height="620" loading="lazy" decoding="async"></picture></div><div class="rv-body"><div class="rv-top"><p class="stars" aria-label="5 out of 5 stars">★★★★★</p><blockquote><p>Hail got our roof on a Tuesday. By Friday they had documented everything and talked me through the claim.</p></blockquote></div><div class="rv-foot"><div class="rv-meta"><span class="av" style="--c:#2f5d8a" aria-hidden="true">P</span><div class="who2"><strong>Priya S.</strong><span>Storm damage · Des Moines</span></div></div></div></div></article>
+        <article class="rv rv-std rv-hasimg"><div class="rv-media" data-reveal-img><picture><source data-srcset="assets/images/reviews/review-3.avif" type="image/avif"><source data-srcset="assets/images/reviews/review-3.webp" type="image/webp"><img data-src="assets/images/reviews/review-3.webp" alt="Finished roof: Full replacement · Cedar Rapids" width="930" height="620" loading="lazy" decoding="async"></picture></div><div class="rv-body"><div class="rv-top"><p class="stars" aria-label="5 out of 5 stars">★★★★★</p><blockquote><p>The price they wrote down is the price I paid. No surprises, and the crew left the yard cleaner than they found it.</p></blockquote></div><div class="rv-foot"><div class="rv-meta"><span class="av" style="--c:#4b6b52" aria-hidden="true">M</span><div class="who2"><strong>Mark T.</strong><span>Full replacement · Cedar Rapids</span></div></div></div></div></article>
         <article class="rv rv-std rv-text"><div class="rv-body"><div class="rv-top"><p class="stars" aria-label="5 out of 5 stars">★★★★★</p><blockquote><p>Same crew from the first day to the last walkthrough. It felt like they actually cared about the house.</p></blockquote></div><div class="rv-foot"><div class="rv-meta"><span class="av" style="--c:#7a5c8e" aria-hidden="true">T</span><div class="who2"><strong>Tom and Lisa B.</strong><span>Full replacement · Iowa City</span></div></div></div></div></article>
-        <article class="rv rv-std rv-hasimg"><div class="rv-media" style="--c:#c9c3b8"><picture><source srcset="assets/images/reviews/review-4.avif" type="image/avif"><source srcset="assets/images/reviews/review-4.webp" type="image/webp"><img src="assets/images/reviews/review-4.webp" alt="Repaired roof: Leak repair · Davenport" width="930" height="620" loading="lazy" decoding="async"></picture></div><div class="rv-body"><div class="rv-top"><p class="stars" aria-label="5 out of 5 stars">★★★★★</p><blockquote><p>Found a leak two other roofers missed. Fixed in one visit.</p></blockquote></div><div class="rv-foot"><div class="rv-meta"><span class="av" style="--c:#8a6d2f" aria-hidden="true">C</span><div class="who2"><strong>Carlos M.</strong><span>Leak repair · Davenport</span></div></div></div></div></article>
+        <article class="rv rv-std rv-hasimg"><div class="rv-media" data-reveal-img><picture><source data-srcset="assets/images/reviews/review-4.avif" type="image/avif"><source data-srcset="assets/images/reviews/review-4.webp" type="image/webp"><img data-src="assets/images/reviews/review-4.webp" alt="Repaired roof: Leak repair · Davenport" width="930" height="620" loading="lazy" decoding="async"></picture></div><div class="rv-body"><div class="rv-top"><p class="stars" aria-label="5 out of 5 stars">★★★★★</p><blockquote><p>Found a leak two other roofers missed. Fixed in one visit.</p></blockquote></div><div class="rv-foot"><div class="rv-meta"><span class="av" style="--c:#8a6d2f" aria-hidden="true">C</span><div class="who2"><strong>Carlos M.</strong><span>Leak repair · Davenport</span></div></div></div></div></article>
         </div></div>
       </div>
     </section>
 
     <section class="faq" id="faq" aria-label="Frequently asked questions" data-page-node-id="iluBYn4tsSNxleRvdt3v6b">
       <div class="wrap faq-in" data-page-node-id="VV0FaL5rrXBLPRh4YW0LN0">
-        <div class="sec-head list" data-page-node-id="r1uaJLvXnSFwGALzEbed6G"><p class="label" data-page-node-id="knRE5iBNhlMfTRvbhaLTNF">FAQ</p><h2 data-page-node-id="DC2U93JFVrp7GlNh87NLCv">Questions homeowners <br data-page-node-id="QzRdVGhOsQ9zIcsRnONKlC">ask us regularly</h2><p class="sub2" data-page-node-id="XYBTRyDzBkYok6lVFGYtvy">Straight answers about pricing, timing, insurance, and what to expect.</p></div>
+        <div class="sec-head list" data-page-node-id="r1uaJLvXnSFwGALzEbed6G"><p class="label" data-page-node-id="knRE5iBNhlMfTRvbhaLTNF">FAQ</p><h2 data-page-node-id="DC2U93JFVrp7GlNh87NLCv"><span class=\"hl\">Questions</span> homeowners <br data-page-node-id="QzRdVGhOsQ9zIcsRnONKlC">ask us regularly</h2><p class="sub2" data-page-node-id="XYBTRyDzBkYok6lVFGYtvy">Straight answers about pricing, timing, insurance, and what to expect.</p></div>
         <div class="faq-list" data-page-node-id="ULcUQWl7Bzlfe5lIL9oUYd">
           <div class="fi open" data-page-node-id="GbVZz52jBiGxosq9PAmnqR"><button class="q" type="button" aria-expanded="true" data-page-node-id="HxkV9udNgqkx0A1AVKHQYx">How much does a new roof cost?</button><div class="a" data-page-node-id="oJLoQMHVBQBgv5nvz5Xc4W"><div data-page-node-id="8uxH18e1MKaIVsn29wqd1V"><p data-page-node-id="38x6GzvuuYzmXyMqOgSDSS">It depends on your roof’s size, pitch, and materials. We give you a written price after an in-person inspection, and it doesn’t change halfway through.</p></div></div></div>
           <div class="fi" data-page-node-id="NMjP27e5Ej0O6myEj5ivvr"><button class="q" type="button" aria-expanded="false" data-page-node-id="LSxtDuJ67o71BAX9kfJRbo">How long does a replacement take?</button><div class="a" data-page-node-id="FzCRzjHCNWEwtaUjlU9Gs8"><div data-page-node-id="M0TmLxd01yh6gIO1Yt0DBH"><p data-page-node-id="AnjahnCVf44b6LI1zxTHKe">Most homes take one to three days, depending on size and weather. We give you a start date and a realistic finish date before we begin.</p></div></div></div>
@@ -1746,7 +1866,7 @@
         <div class="cta-l" data-page-node-id="Ca3cQ4B5f3ocW42YOkEQGa"><h2 data-page-node-id="jGNzGAHMCME1Z7x174HZoI">Ready for a roof you won’t think about again?</h2></div>
         <div class="cta-r" data-page-node-id="jl8YWMiVEZQA5bjdRZkII9"><p class="cta-sub" data-page-node-id="2hCUeRj0pZ4ubmufyJWgxw">Tell us a little about your roof. We’ll reply within {{reply}} with a clear written price. No obligation.</p>
           <div class="cta-actions" data-page-node-id="GFmPMy6WiSFSAwB28U9nqL"><a class="btn" href="#estimate-form" data-open-estimate data-page-node-id="4xAslIdEQmOnEtFDXWV8AF">Get a free estimate <i data-page-node-id="Bg3gDy4FY5LfWA2HaCxSav"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" data-page-node-id="67pmxvWz2tt3POmCTaBaEW"><path d="M3 8h10M9 4l4 4-4 4" data-page-node-id="pjYPw9eqy0UpGFRNFi4RwT"/></svg></i></a><a class="cta-phone" href="tel:{{tel}}" data-page-node-id="D7dyvcOM4DTBUPxSMZZ4lP">{{phone}}</a></div></div>
-        <div class="cta-img" data-page-node-id="iH9U08WivrFlQA3aub0Ayj"><div class="ph l" data-src="assets/images/cta-roof.avif" data-page-node-id="9NxXY0oplfK3lOpibrZlZd"><picture data-page-node-id="KvFDmZGAOfrtKndTLiPAfi"><source srcset="assets/images/cta-roof.avif" type="image/avif" data-page-node-id="SJf53QX41LnVBOU2YaLfPR"><source srcset="assets/images/cta-roof.webp" type="image/webp" data-page-node-id="EqS1QDwKxD6fEN9yRNtAfR"><img src="assets/images/cta-roof.webp" alt="{{brand}} crew finishing a roof" width="940" height="564" loading="lazy" decoding="async" data-page-node-id="fFmeHkaItdFAIhuhsBo9pC"></picture></div></div>
+        <div class="cta-img" data-page-node-id="iH9U08WivrFlQA3aub0Ayj"><div class="ph l" data-src="assets/images/cta-roof.avif" data-page-node-id="9NxXY0oplfK3lOpibrZlZd"><picture data-page-node-id="KvFDmZGAOfrtKndTLiPAfi"><source data-srcset="assets/images/cta-roof.avif" type="image/avif" data-page-node-id="SJf53QX41LnVBOU2YaLfPR"><source data-srcset="assets/images/cta-roof.webp" type="image/webp" data-page-node-id="EqS1QDwKxD6fEN9yRNtAfR"><img data-src="assets/images/cta-roof.webp" alt="{{brand}} crew finishing a roof" width="940" height="564" loading="lazy" decoding="async" data-page-node-id="fFmeHkaItdFAIhuhsBo9pC"></picture></div></div>
       </div>
     </section>
 
@@ -1874,12 +1994,12 @@
 var BIZ = {
   name: 'Alder Roofing', brand: 'Alder', founder: '[Founder name]',
   phone: '(555) 018-4400', countryCode: '+1',                 /* the tel: link is derived from these two */
-  email: 'hello@alder-roofing.example',
-  url: 'https://alder-roofing.example/',                     /* absolute address of this page; the canonical link uses it */
+  email: 'hello@alder-roofing.vercel.app',
+  url: 'https://alder-roofing.vercel.app/',                     /* absolute address of this page; the canonical link uses it */
   address: '123 Main Street, Des Moines, IA', hours: 'Mon to Fri, 7am to 5pm',
   area: 'Iowa & the Upper Midwest', base: 'Iowa', reply: 'one business day',
   rating: '4.8', reviews: '314', roofs: '276', warranty: '20',
-  facebook: '#', instagram: '#', youtube: '#', google: '#'    /* leave '' to hide an icon */
+  facebook: '#', instagram: '#', youtube: '#', google: '#',   /* leave '' to hide an icon */                                                   /* full site address with https:// and a trailing slash, e.g. 'https://www.alderroofing.com/'. Leave '' until the site has a domain; the structured data simply leaves those fields out */
 };
 (function () {
   var d = BIZ.phone.replace(/\D/g, ''), cc = BIZ.countryCode.replace(/\D/g, '');
@@ -1892,6 +2012,24 @@ var BIZ = {
   ns.forEach(function (n) { n.nodeValue = rep(n.nodeValue); });
   document.querySelectorAll('*').forEach(function (el) { Array.prototype.forEach.call(el.attributes, function (a) { if (a.value.indexOf('{{') > -1) a.value = rep(a.value); }); });
   document.title = rep(document.title);
+  /* structured data: fill the tokens (escaped for JSON), then drop empty / '#' / unfilled / relative values */
+  document.querySelectorAll('script[type="application/ld+json"]').forEach(function (s) {
+    try {
+      var bad = function (v) { return typeof v === 'string' && (v === '' || v === '#' || v.indexOf('{{') > -1 || /^assets\//.test(v)); };
+      var prune = function (o) {
+        if (Array.isArray(o)) return o.map(prune).filter(function (v) { return v !== undefined; });
+        if (o && typeof o === 'object') {
+          var out = {}, n = 0;
+          Object.keys(o).forEach(function (k) { var v = prune(o[k]); if (v !== undefined) { out[k] = v; if (k.charAt(0) !== '@') n++; } });
+          return n ? out : undefined;
+        }
+        return bad(o) ? undefined : o;
+      };
+      var txt = s.textContent.replace(re, function (m, k) { return k in BIZ ? JSON.stringify(String(BIZ[k])).slice(1, -1) : m; });
+      var data = prune(JSON.parse(txt));
+      if (data) s.textContent = JSON.stringify(data); else s.remove();
+    } catch (e) { }
+  });
   document.querySelectorAll('.ft-social a').forEach(function (a) { if (!a.getAttribute('href')) a.remove(); });
   document.documentElement.classList.remove('biz-pending');
 })();
@@ -1952,6 +2090,8 @@ var BIZ = {
     const S = [...document.querySelectorAll('.slide')], D = [9000, 7000, 7000]; let i = 0;
     let heroTimer = 0, heroOn = false; /* debug default: rotation off */
     const heroNext = () => {
+      const nx = S[(i + 1) % S.length].querySelector('img');
+      if (nx && (nx.hasAttribute('data-src') || !nx.complete)) { heroTimer = setTimeout(heroNext, 400); return }   /* next slide still loading: wait, never crossfade to a half-loaded image */
       S[i].classList.remove('on'); i = (i + 1) % S.length; S[i].classList.add('on');
       if (heroOn) heroTimer = setTimeout(heroNext, D[i])
     };
@@ -1999,7 +2139,7 @@ var BIZ = {
       const setFormat = fmt => {
         document.querySelectorAll('.slide .ph').forEach(ph => {
           const pic = ph.querySelector('picture'), img = ph.querySelector('img');
-          if (!pic || !img) return;
+          if (!pic || !img || img.hasAttribute('data-src')) return;   /* slide not loaded yet: the load-order script owns it */
           /* <source> always wins over <img src>, so drop them to force one format */
           pic.querySelectorAll('source').forEach(s => s.remove());
           const base = (ph.dataset.src || img.getAttribute('src')).replace(/\.(png|jpe?g|webp|avif)$/i, '');
@@ -2053,6 +2193,7 @@ var BIZ = {
       };
 
       panel.querySelectorAll('[data-format]').forEach(b => b.addEventListener('click', () => {
+        if (window.__imgOrder) window.__imgOrder.heroAll();
         setFormat(b.dataset.format);
         panel.querySelectorAll('[data-format]').forEach(x => x.setAttribute('aria-pressed', x === b))
       }));
@@ -2061,6 +2202,7 @@ var BIZ = {
         panel.querySelectorAll('[data-slider]').forEach(x => x.setAttribute('aria-pressed', x === b))
       }));
       panel.querySelectorAll('[data-slide]').forEach(b => b.addEventListener('click', () => {
+        if (window.__imgOrder) window.__imgOrder.heroAll();
         jumpTo(+b.dataset.slide);
         panel.querySelectorAll('[data-slide]').forEach(x => x.setAttribute('aria-pressed', x === b))
       }));
@@ -2094,11 +2236,11 @@ var BIZ = {
   }
   function bind(el) { if (!el || seen.has(el) || el.closest(SKIP)) return; seen.add(el); reveal(el); }
   function scan(root) {
-    if (root.matches && root.matches('img')) bind(root.closest('.photo, .cta-img') || root.closest('.ph') || root);
+    if (root.matches && root.matches('img')) bind(root.closest('.photo, .cta-img, [data-reveal-img]') || root.closest('.ph') || root);
     if (root.matches && root.matches('.photo, .cta-img, [data-reveal-img]')) bind(root);
     if (!root.querySelectorAll) return;
     [].forEach.call(root.querySelectorAll('.photo, .cta-img, [data-reveal-img]'), bind);
-    [].forEach.call(root.querySelectorAll('img'), function (i) { bind(i.closest('.photo, .cta-img') || i.closest('.ph') || i); });
+    [].forEach.call(root.querySelectorAll('img'), function (i) { bind(i.closest('.photo, .cta-img, [data-reveal-img]') || i.closest('.ph') || i); });
   }
   scan(document.body);
   new MutationObserver(function (ms) { ms.forEach(function (m) { [].forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1) scan(n); }); }); }).observe(document.body, { childList: true, subtree: true });
@@ -2332,10 +2474,18 @@ var BIZ = {
     f.addEventListener('pointerup', function () { f.onpointermove = null; });
     f.addEventListener('keydown', function (e) { if (e.key === 'ArrowLeft') { go(t - 8); e.preventDefault(); } if (e.key === 'ArrowRight') { go(t + 8); e.preventDefault(); } });
   });
+  /* The only thing a click does is switch pairs. The target pair is normally loaded and decoded long before this
+     (see IMAGE LOAD ORDER); if it somehow is not yet, the switch waits for it instead of showing an empty frame. */
+  var navTicket = 0;
   ba.querySelectorAll('.ba-nav button').forEach(function (b) { b.addEventListener('click', function () {
-    cur = (cur + +b.dataset.d + pairs.length) % pairs.length;
-    pairs.forEach(function (p, k) { p.classList.toggle('active', k === cur); });
-    pairs[cur].querySelector('.frame')._reset(); }); });
+    var to = (cur + +b.dataset.d + pairs.length) % pairs.length, ticket = ++navTicket;
+    var show = function () {
+      if (ticket !== navTicket) return;
+      cur = to;
+      pairs.forEach(function (p, k) { p.classList.toggle('active', k === cur); });
+      pairs[cur].querySelector('.frame')._reset();
+    };
+    if (window.__imgOrder) window.__imgOrder.pairReady(pairs[to]).then(show); else show(); }); });
   /* FAQ: only one question open at a time */
   var items = document.querySelectorAll('.faq .fi');
   function setOpen(it, o) { it.classList.toggle('open', o); it.querySelector('.q').setAttribute('aria-expanded', o); }
@@ -2627,7 +2777,8 @@ var BIZ = {
   var html = document.documentElement;
   var page = document.querySelector('.page'), ft = document.querySelector('.ft'), legal = document.querySelector('.ft-legal');
   var guard = legal ? [].slice.call(legal.querySelectorAll('a, .ft-trust > span')) : [];
-  var raf = 0, base = 24, size = 48, dark = false, shiftNow = -1, pNow = '';
+  var cta = document.querySelector('.cta-sec');
+  var raf = 0, base = 24, size = 48, dark = false, ctaOn = false, shiftNow = -1, pNow = '';
 
   var sync = function () {
     var d = document.documentElement;
@@ -2637,6 +2788,13 @@ var BIZ = {
     var ps = p.toFixed(4);
     if (ps !== pNow) { pNow = ps; b.style.setProperty('--p', ps); }
     b.classList.toggle('on', y > innerHeight * .55);
+
+    /* CTA section: on while the button's centre sits inside it. The CTA ends where the page ends, so once the
+       footer is uncovered the button has left the CTA and only the footer state applies. */
+    if (cta) {
+      var cr = cta.getBoundingClientRect(), cy = innerHeight - base - size / 2, inCta = cr.top <= cy && cr.bottom > cy;
+      if (inCta !== ctaOn) { ctaOn = inCta; html.classList.toggle('tot-cta', inCta); }
+    }
 
     if (!page || !ft || !legal) return;
     var tall = html.classList.contains('ft-tall');
