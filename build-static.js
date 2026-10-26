@@ -126,6 +126,7 @@ if (fs.existsSync(assets) && path.resolve(outDir) !== path.dirname(path.resolve(
 /* ---- 7. heads-up about placeholder values that should not ship ---- */
 const looksPlaceholder = {
   phone: v => /555/.test(v), email: v => /example|\.test\b/i.test(v),
+  url: v => /example|\.test\b|localhost|127\.0\.0\.1/i.test(v),
   founder: v => /^\[.*\]$/.test(v), address: v => /123 Main/i.test(v),
   facebook: v => v === '#', instagram: v => v === '#', youtube: v => v === '#', google: v => v === '#'
 };
