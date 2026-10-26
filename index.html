@@ -457,12 +457,19 @@
       min-height: 100dvh;
       display: flex;
       align-items: flex-end;
-      overflow: hidden
+      overflow: hidden;
+      /* clip-path (not just overflow) is what clips the position:fixed slides to the hero box:
+         the photos stay put while the hero scrolls away and the next section slides up over them */
+      clip-path: inset(0)
     }
 
     .slide {
-      position: absolute;
-      inset: 0;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100vh;
+      height: max(100lvh, var(--hero-h, 0px));   /* --hero-h is set by script so a hero taller than the window is still fully covered */
       opacity: 0;
       transition: opacity 1.5s ease
     }
@@ -1484,6 +1491,10 @@
 
     @media (max-width: 300px) { .stats li { padding-inline: 4px } .stats p { font-size: 10px; letter-spacing: .02em } }
 
+    /* PARALLAX: the script moves the <img> with the independent translate / scale properties, so the clip-path reveal on
+       the box, the card hover zoom (transform) and the before/after clip are all untouched. The frame clips the overscan. */
+    .px-img { will-change: translate; scale: 1.11 }
+
     @media(prefers-reduced-motion:reduce) {
       html {
         scroll-behavior: auto
@@ -1663,11 +1674,11 @@
             <p class="sub" data-page-node-id="KgRuWQmUfn5QvqYRvH6Le8">Every {{brand}} roof is built by our own crew, never subcontractors, with materials chosen to
               last. You get a clear written price up front, and it doesn’t change halfway through.</p>
             <div class="cta" data-page-node-id="SFTsv6gsy43tOo3xOd2JWa">
-              <a class="btn" href="#estimate-form" data-open-estimate data-page-node-id="4UC61iBU5TWCuFaJFSeBlR">Get a free estimate <i data-page-node-id="qcBlXgjYk418Wf8ZPiKFpG"><svg viewBox="0 0 16 16" fill="none"
+              <a class="btn" href="#estimate-form" data-open-estimate data-page-node-id="4UC61iBU5TWCuFaJFSeBlR">Get a Free Estimate <i data-page-node-id="qcBlXgjYk418Wf8ZPiKFpG"><svg viewBox="0 0 16 16" fill="none"
                     stroke="currentColor" stroke-width="1.6" data-page-node-id="3MWhCDINMn1IAT4SX4KV8A">
                     <path d="M3 8h10M9 4l4 4-4 4" data-page-node-id="rFZPjxqENJmC1DUrFDPjAr" />
                   </svg></i></a>
-              <a class="btn ghost" href="#projects" data-page-node-id="YOQkwVw3DHEjYral0TpzUR">See our recent roofs</a>
+              <a class="btn ghost" href="#projects" data-page-node-id="YOQkwVw3DHEjYral0TpzUR">See Our Recent Roofs</a>
             </div>
             <p class="micro" data-page-node-id="y1gZarsHCuckAHXN6t8izK">Free, no obligation. We’ll reply within {{reply}}.</p>
           </div>
@@ -1795,7 +1806,7 @@
             <p data-page-node-id="BmnDUkV3MAlAwGZKNZG05g">Nathan {{brand}}</p>
             <p class="role" data-page-node-id="J54ynYHMVBorss8lPxC4df">Founder, {{name}}</p>
           </div>
-          <a class="btn dark" href="#estimate-form" data-open-estimate data-page-node-id="Ms8bYRtAESeRQE6YJ31Hn2">Get a free estimate <i data-page-node-id="1EsEuvRSchnIVu0FzFkCJS"><svg viewBox="0 0 16 16" fill="none"
+          <a class="btn dark" href="#estimate-form" data-open-estimate data-page-node-id="Ms8bYRtAESeRQE6YJ31Hn2">Get a Free Estimate <i data-page-node-id="1EsEuvRSchnIVu0FzFkCJS"><svg viewBox="0 0 16 16" fill="none"
                 stroke="currentColor" stroke-width="1.6" data-page-node-id="qAdkRtDX63PBjr9pJZML2e">
                 <path d="M3 8h10M9 4l4 4-4 4" data-page-node-id="K4e4Qjui5KsMntmSkttr1X" />
               </svg></i></a>
@@ -1825,7 +1836,7 @@
       </div>
       <div class="more" data-page-node-id="Ul7xao84HgrgKx51nQFgEk">
         <p data-page-node-id="KGhzjIoSyhKe1yzE0gz201">Not sure what you need?</p>
-        <a class="btn dark" href="#estimate-form" data-open-estimate data-page-node-id="BDkKsBREB2dTPW2WCoQnnp">Get a free inspection <i data-page-node-id="9GdxaG3hHSNc1BEY7AHqTA"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" data-page-node-id="Im42Cc70OLpjQr2ZUh2k09"><path d="M3 8h10M9 4l4 4-4 4" data-page-node-id="JeCKDcZnEoNv5pZVPhC1Bu"/></svg></i></a>
+        <a class="btn dark" href="#estimate-form" data-open-estimate data-page-node-id="BDkKsBREB2dTPW2WCoQnnp">Get a Free Inspection <i data-page-node-id="9GdxaG3hHSNc1BEY7AHqTA"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" data-page-node-id="Im42Cc70OLpjQr2ZUh2k09"><path d="M3 8h10M9 4l4 4-4 4" data-page-node-id="JeCKDcZnEoNv5pZVPhC1Bu"/></svg></i></a>
       </div>
     </section>
 
@@ -1885,7 +1896,7 @@
       <div class="wrap cta-in" data-page-node-id="GZ9CXs4ABMRgaYQqN0JwW9">
         <div class="cta-body" data-page-node-id="Ca3cQ4B5f3ocW42YOkEQGa"><h2 data-page-node-id="jGNzGAHMCME1Z7x174HZoI">Ready for a roof you won’t think about again?</h2>
           <p class="cta-sub" data-page-node-id="2hCUeRj0pZ4ubmufyJWgxw">Tell us a little about your roof. We’ll reply within {{reply}} with a clear written price. No obligation.</p>
-          <div class="cta-actions" data-page-node-id="GFmPMy6WiSFSAwB28U9nqL"><a class="btn" href="#estimate-form" data-open-estimate data-page-node-id="4xAslIdEQmOnEtFDXWV8AF">Get a free estimate <i data-page-node-id="Bg3gDy4FY5LfWA2HaCxSav"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" data-page-node-id="67pmxvWz2tt3POmCTaBaEW"><path d="M3 8h10M9 4l4 4-4 4" data-page-node-id="pjYPw9eqy0UpGFRNFi4RwT"/></svg></i></a><a class="btn phone" href="tel:{{tel}}" aria-label="Call {{phone}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-phone"/></svg><span>{{phone}}</span></a></div></div>
+          <div class="cta-actions" data-page-node-id="GFmPMy6WiSFSAwB28U9nqL"><a class="btn" href="#estimate-form" data-open-estimate data-page-node-id="4xAslIdEQmOnEtFDXWV8AF">Get a Free Estimate <i data-page-node-id="Bg3gDy4FY5LfWA2HaCxSav"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" data-page-node-id="67pmxvWz2tt3POmCTaBaEW"><path d="M3 8h10M9 4l4 4-4 4" data-page-node-id="pjYPw9eqy0UpGFRNFi4RwT"/></svg></i></a><a class="btn phone" href="tel:{{tel}}" aria-label="Call {{phone}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-phone"/></svg><span>{{phone}}</span></a></div></div>
         <div class="cta-img" data-page-node-id="iH9U08WivrFlQA3aub0Ayj"><div class="ph l" data-src="assets/images/cta-roof.avif" data-page-node-id="9NxXY0oplfK3lOpibrZlZd"><picture data-page-node-id="KvFDmZGAOfrtKndTLiPAfi"><source data-srcset="assets/images/cta-roof.avif" type="image/avif" data-page-node-id="SJf53QX41LnVBOU2YaLfPR"><source data-srcset="assets/images/cta-roof.webp" type="image/webp" data-page-node-id="EqS1QDwKxD6fEN9yRNtAfR"><img data-src="assets/images/cta-roof.webp" alt="{{brand}} crew finishing a roof" width="940" height="564" loading="lazy" decoding="async" data-page-node-id="fFmeHkaItdFAIhuhsBo9pC"></picture></div></div>
       </div>
     </section>
@@ -2257,6 +2268,68 @@ var BIZ = {
   new MutationObserver(function (ms) { ms.forEach(function (m) { [].forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1) scan(n); }); }); }).observe(document.body, { childList: true, subtree: true });
   if (window.__lenis) window.__lenis.on('scroll', ScrollTrigger.update);
   addEventListener('load', function () { ScrollTrigger.refresh(); });
+})();
+</script>
+<!-- HERO HEIGHT + IMAGE PARALLAX (separate script so an error elsewhere can never block it) -->
+<script>
+/* HERO: the slides are position:fixed (see .slide). --hero-h keeps them tall enough when the hero is taller than the window. */
+(function () {
+  var h = document.querySelector('.hero'); if (!h) return;
+  var s = function () { h.style.setProperty('--hero-h', h.offsetHeight + 'px'); };
+  s(); addEventListener('resize', s); addEventListener('load', s);
+  if (window.ResizeObserver) new ResizeObserver(s).observe(h);
+})();
+
+/* PARALLAX: every image except the hero slides drifts against the scroll inside its own frame. Runs on the <img> only, so the
+   clip-path reveal on the frame is never touched. SCALE is the overscan (keep it in step with .px-img { scale } in the CSS);
+   the travel is exactly half of it each way, so the frame never shows an edge. Opt out with data-no-parallax. */
+(function () {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var SCALE = 1.11, EASE = .14, SKIP = '.hero, .ba, .rvs, header, .menu, .est, .dbg, [data-no-parallax]';
+  var live = new Set(), raf = 0, last = 0;
+
+  var io = new IntersectionObserver(function (es) {
+    es.forEach(function (e) {
+      var it = e.target.__px; if (!it) return;
+      if (e.isIntersecting) { it.ready = false; live.add(it); } else live.delete(it);
+    });
+    kick();
+  }, { rootMargin: '150px 0px' });
+
+  function aim(it) {                                  /* where the image wants to be: -travel..+travel across the screen */
+    var r = it.host.getBoundingClientRect(); if (!r.height) return null;
+    var p = ((r.top + r.height / 2) - innerHeight / 2) / ((innerHeight + r.height) / 2);
+    p = Math.max(-1, Math.min(1, p));
+    return -p * (SCALE - 1) / 2 * r.height;
+  }
+  function frame(now) {
+    raf = 0; var busy = false, k = 1 - Math.pow(1 - EASE, Math.min(64, now - last || 16.7) / 16.7); last = now;
+    live.forEach(function (it) {
+      var t = aim(it); if (t === null) return;
+      if (!it.ready) { it.cur = t; it.ready = true; }
+      else { it.cur += (t - it.cur) * k; if (Math.abs(t - it.cur) < .05) it.cur = t; else busy = true; }
+      it.img.style.translate = '0 ' + it.cur.toFixed(2) + 'px';
+    });
+    if (busy) raf = requestAnimationFrame(frame);
+  }
+  function kick() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
+
+  function add(img) {
+    if (img.__pxDone || img.closest(SKIP)) return;
+    var host = img.closest('.ph, .rv-media') || img.parentElement; if (!host) return;
+    img.__pxDone = true; img.classList.add('px-img');
+    host.__px = { img: img, host: host, cur: 0, ready: false };
+    io.observe(host);
+  }
+  function scan(root) {
+    if (root.matches && root.matches('img')) add(root);
+    if (root.querySelectorAll) [].forEach.call(root.querySelectorAll('img'), add);
+  }
+  scan(document.body);
+  new MutationObserver(function (ms) { ms.forEach(function (m) { [].forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1) scan(n); }); }); }).observe(document.body, { childList: true, subtree: true });
+  addEventListener('scroll', kick, { passive: true });
+  addEventListener('resize', kick);
+  addEventListener('load', kick);
 })();
 </script>
 <!-- IMAGE FALLBACK (separate script so an error elsewhere can never block it) -->
