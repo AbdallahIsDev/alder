@@ -794,7 +794,7 @@
 
 
     /* split-text */
-    html.split-pending :is(.hero h1,.sub,.about-sub,.services h2,.services .intro,.card h3,.card p,.more p,.hws h2,.sec-head h2,.cta-sec h2,.cta-sub,.sec-head .sum,.sh-r p,.sub2,.hws .intro,.step h3,.step p) { visibility: hidden }
+    html.split-pending :is(.hero h1,.sub,.about-text .reveal,.about-sub,.sign p,.services h2,.services .intro,.card h3,.card p,.more p,.hws h2,.sec-head h2,.cta-sec h2,.cta-sub,.sec-head .sum,.sh-r p,.sub2,.hws .intro,.step h3,.step p) { visibility: hidden }
     .hl { color: var(--accent) }   /* the one or two words a heading wants you to land on */
     .sw { display: inline }
     .w { display: inline-block; overflow: hidden; vertical-align: top; padding-block: .1em; margin-block: -.1em }
@@ -2130,19 +2130,6 @@ var BIZ = {
     }), { threshold: .6 });
     if (!rm) document.querySelectorAll('[data-to]').forEach(el => { el.textContent = nf(0, +(el.dataset.dec || 0)); co.observe(el) });
 
-    /* about: words fill from faded to full as you scroll */
-    const p = document.querySelector('.reveal');
-    if (!rm && p) {
-      const w = p.textContent.trim().split(/\s+/); p.innerHTML = w.map(x => '<span>' + x + '</span>').join(' ');
-      const sp = [...p.children];
-      const upd = () => {
-        const r = p.getBoundingClientRect(), h = innerHeight,
-          pr = Math.min(1, Math.max(0, (h * .85 - r.top) / (h * .45 + r.height * .5)));
-        sp.forEach((s, k) => { s.style.opacity = .2 + .8 * Math.min(1, Math.max(0, pr * sp.length * 1.1 - k)) })
-      };
-      addEventListener('scroll', upd, { passive: true }); addEventListener('resize', upd); upd()
-    }
-
 
     /* DEBUG PANEL (prototype only) - force a hero image format and/or freeze the slider */
     (() => {
@@ -2330,7 +2317,7 @@ var BIZ = {
     done(); return;
   }
   gsap.registerPlugin(ScrollTrigger);
-  var SEL = '.hero h1,.sub,.about-sub,.services h2,.services .intro,.card h3,.card p,.more p,.hws h2,.sec-head h2,.cta-sec h2,.cta-sub,.sec-head .sum,.sh-r p,.sub2,.hws .intro,.step h3,.step p';
+  var SEL = '.hero h1,.sub,.about-text .reveal,.about-sub,.sign p,.services h2,.services .intro,.card h3,.card p,.more p,.hws h2,.sec-head h2,.cta-sec h2,.cta-sub,.sec-head .sum,.sh-r p,.sub2,.hws .intro,.step h3,.step p';
   function split(el) {
     var sr = document.createElement('span'); sr.className = 'sr'; sr.textContent = el.textContent.trim();
     var nodes = [], words = [], tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -2350,7 +2337,7 @@ var BIZ = {
   }
   window.__splitText = split;   /* the footer reuses the same word split */
   document.querySelectorAll(SEL).forEach(function (el) {
-    if (el.closest('.reveal') || !el.textContent.trim()) return;
+    if (!el.textContent.trim()) return;
     var words = split(el); if (!words.length) return;
     gsap.set(words, { yPercent: 115 });
     var vars = { yPercent: 0, duration: .9, ease: 'power3.out', stagger: Math.min(.035, .45 / words.length) };
@@ -2402,7 +2389,7 @@ var BIZ = {
   pick('main .btn, .ba-nav button', 'btn', 'header, .menu, .est, .dbg');             /* the header has its own slide */
   /* flags: every accent square and its label, in every section. An element inside a card or a
      before/after pair is left to that container, so nothing animates twice. */
-  pick('.label, .badge, .trust > span, .micro, .cta-micro, .stats p, .tag, .pair figcaption, .sign .role, .who2 span, .stars', 'flag', '.est, .menu, .dbg');
+  pick('.label, .badge, .trust > span, .micro, .cta-micro, .stats p, .tag, .pair figcaption, .who2 span, .stars', 'flag', '.est, .menu, .dbg');
 
   /* ---------- footer: sticky, revealed as the page uncovers it ---------- */
   var ft = document.querySelector('footer.ft'), main = document.querySelector('main.page');
