@@ -1,0 +1,31 @@
+# --- dependencies -----------------------------------------------------------
+node_modules/
+
+# --- build output -----------------------------------------------------------
+dist/
+
+# --- local only, never published --------------------------------------------
+# Full-resolution originals the image pipeline reads. ~51 MB, and they are the
+# only copy, so they stay on disk — just not in the repo.
+_source-images/
+# Agent scratch and project memory.
+.workbuddy-ai/
+# Verification screenshots and crops. Regenerated on demand, never shipped.
+_shots/
+
+# --- local secrets ----------------------------------------------------------
+# client.json carries a real phone number and business details; only the
+# .example template belongs in the repo.
+client.json
+.env
+.env.*
+
+# --- OS / editor ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+
+# --- logs -------------------------------------------------------------------
+*.log
+npm-debug.log*

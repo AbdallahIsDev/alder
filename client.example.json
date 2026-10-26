@@ -1,0 +1,20 @@
+{
+  "name": "Example Roofing Co.",
+  "brand": "Example",
+  "phone": "(515) 555-0100",
+  "countryCode": "+1",
+  "email": "office@example-roofing.com",
+  "address": "100 Main Street, Ames, IA",
+  "hours": "Mon to Fri, 7am to 5pm",
+  "area": "Central Iowa",
+  "base": "Ames",
+  "reply": "one business day",
+  "rating": "4.9",
+  "reviews": "128",
+  "roofs": "512",
+  "warranty": "25",
+  "facebook": "https://facebook.com/example",
+  "instagram": "",
+  "youtube": "",
+  "google": "https://g.page/example"
+}

@@ -1,0 +1,15 @@
+# Normalise line endings to LF in both the repo and the working tree.
+# core.autocrlf is true on this machine, and this project is edited by exact
+# byte replacement (a CRLF rewrite breaks every patch string), so the working
+# copy must stay LF on checkout as well.
+* text=auto eol=lf
+
+# Binaries - never diff or convert these.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.avif  binary
+*.ico   binary
+*.woff2 binary
+*.woff  binary

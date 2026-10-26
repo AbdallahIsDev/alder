@@ -1,0 +1,86 @@
+{
+  "defaults": {
+    "ssimFloor": 0.985,
+    "qualityStep": 5,
+    "maxQuality": 100,
+    "fit": "cover",
+    "position": "centre",
+    "kernel": "lanczos3",
+    "formats": {
+      "webp": {
+        "quality": 90,
+        "effort": 6,
+        "smartSubsample": true
+      },
+      "avif": {
+        "quality": 75,
+        "effort": 6,
+        "chromaSubsampling": "4:4:4"
+      }
+    }
+  },
+  "targets": [
+    {
+      "name": "services",
+      "input": "_source-images/services",
+      "output": "assets/images/services",
+      "width": 960,
+      "height": 640
+    },
+    {
+      "name": "before-after",
+      "input": "_source-images/before-after",
+      "output": "assets/images/before-after",
+      "width": 1000,
+      "height": 667,
+      "pin": {
+        "ba-1-after": { "webp": 92, "avif": 80 },
+        "ba-1-before": { "webp": 80, "avif": 55 },
+        "ba-2-after": { "webp": 95, "avif": 82 },
+        "ba-2-before": { "webp": 90, "avif": 70 },
+        "ba-3-after": { "webp": 92, "avif": 75 },
+        "ba-3-before": { "webp": 85, "avif": 67 },
+        "ba-4-after": { "webp": 85, "avif": 65 },
+        "ba-4-before": { "webp": 80, "avif": 60 }
+      }
+    },
+    {
+      "name": "reviews",
+      "input": "_source-images/reviews",
+      "output": "assets/images/reviews",
+      "width": 930,
+      "height": 620,
+      "rename": {
+        "Modern Roofline and Gutter Detail": "review-1",
+        "Textured Gray Roof with Stone Chimney and Gutter": "review-2",
+        "Rooftop Vent on Charcoal Shingles": "review-3",
+        "Stone Chimney Flashing Detail": "review-4"
+      },
+      "pin": {
+        "Modern Roofline and Gutter Detail": { "webp": 90, "avif": 70 },
+        "Textured Gray Roof with Stone Chimney and Gutter": { "webp": 88, "avif": 65 },
+        "Rooftop Vent on Charcoal Shingles": { "webp": 90, "avif": 66 },
+        "Stone Chimney Flashing Detail": { "webp": 88, "avif": 62 }
+      }
+    },
+    {
+      "name": "cta",
+      "input": "_source-images/cta",
+      "output": "assets/images",
+      "width": 940,
+      "fit": "inside",
+      "formats": {
+        "webp": {
+          "quality": 80,
+          "effort": 6,
+          "smartSubsample": true
+        },
+        "avif": {
+          "quality": 55,
+          "effort": 6,
+          "chromaSubsampling": "4:4:4"
+        }
+      }
+    }
+  ]
+}

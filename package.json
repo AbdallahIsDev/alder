@@ -1,0 +1,15 @@
+{
+  "name": "alder-landing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Single-file landing page prototype plus the image pipeline that feeds it.",
+  "type": "module",
+  "scripts": {
+    "images": "node scripts/optimize-images.mjs",
+    "images:force": "node scripts/optimize-images.mjs --force"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.2",
+    "ssim.js": "^3.5.0"
+  }
+}
