@@ -1141,6 +1141,10 @@
     .sel-list { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 5; margin: 0; padding: 6px; list-style: none; max-height: 260px; overflow-y: auto; background: rgb(32 35 41/.96); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); border: 1px solid var(--line); box-shadow: 0 18px 40px rgb(0 0 0/.45); transform-origin: top; animation: estMenu .18s cubic-bezier(.2, .7, .2, 1) both }
     .sel-list[hidden] { display: none } .sel.up .sel-list { top: auto; bottom: calc(100% + 6px); transform-origin: bottom; animation-name: estMenuUp }
     @keyframes estMenu { from { opacity: 0; transform: translateY(-6px) scale(.98) } } @keyframes estMenuUp { from { opacity: 0; transform: translateY(6px) scale(.98) } }
+    /* closing: the same move played backwards, a little quicker; the script hides the list when it ends */
+    .sel.closing .sel-list { animation: estMenuOut .14s cubic-bezier(.4, 0, 1, 1) both; pointer-events: none }
+    .sel.up.closing .sel-list { animation-name: estMenuOutUp }
+    @keyframes estMenuOut { to { opacity: 0; transform: translateY(-6px) scale(.98) } } @keyframes estMenuOutUp { to { opacity: 0; transform: translateY(6px) scale(.98) } }
     .sel-list li { position: relative; padding: 12px 42px 12px 14px; font-size: var(--fs); color: var(--fg); cursor: pointer; transition: background .15s }
     .sel-list li.on { background: var(--card-h) }
     .sel-list li[aria-selected="true"] { font-weight: 600; box-shadow: inset 3px 0 0 var(--accent) }
@@ -1507,7 +1511,7 @@
 
     /* PARALLAX: the script moves the <img> with the independent translate / scale properties, so the clip-path reveal on
        the box, the card hover zoom (transform) and the before/after clip are all untouched. The frame clips the overscan. */
-    .px-img { will-change: translate; scale: 1.11 }
+    .px-img { will-change: translate; scale: var(--px-s, 1.11) }
 
     /* ===== BUTTON HOVER: fill + roll (locked) =====
        The <html> tag carries a static class "bx"; it is only there to raise these selectors above .btn.dark and friends,
@@ -2064,7 +2068,7 @@
             <label class="opt" data-page-node-id="gxVo4ipOs3yfdn1JQgHfbc"><input type="radio" name="home" value="commercial" data-page-node-id="5LigOLTCB1KoCJrXmErEm8"><b data-page-node-id="kDDe1oUSfauSGC4dhGVRBH">Commercial building</b></label>
             <label class="opt" data-page-node-id="2ST8iqfB7jl0uVRvApbslh"><input type="radio" name="home" value="other" data-page-node-id="LAzrxSMEuPQMV1rVZ27ED8"><b data-page-node-id="EWSCcQpSwkAs59VI8ogiZR">Something else</b></label>
           </div><p class="err" role="alert" data-page-node-id="eJ4fgHlUPffdDDdkgHkFpf"></p></div>
-          <div class="f" data-f="age" data-page-node-id="6D5vKhWvBBPrs5pmOCQjY3"><label for="e-age" id="e-age-lab" data-page-node-id="NiRDz1WGhJuOASYxrmb2Rv">How old is the roof?</label><select id="e-age" name="age" data-page-node-id="DhegmzErPJp2AwIR6sfrIT"><option value="" data-page-node-id="Kb5nuAUS1nkz5incEkk13M">Choose one</option><option data-page-node-id="CxYnFtv6EKATTw9YlO7Uv5">Under 10 years</option><option data-page-node-id="xRDmkMrDDu4sQq5i6866GZ">10 to 20 years</option><option data-page-node-id="vV5djTI8tF2TTP0KcMZDr1">Over 20 years</option><option data-page-node-id="6caNCRMEK8Kn4WzU4p7kGI">Not sure</option></select><p class="err" role="alert" data-page-node-id="v2nyGlF1u5NryTDFNt6Zcn"></p></div>
+          <div class="f" data-f="age" data-page-node-id="6D5vKhWvBBPrs5pmOCQjY3"><label for="e-age" id="e-age-lab" data-page-node-id="NiRDz1WGhJuOASYxrmb2Rv">How old is the roof?</label><select id="e-age" name="age" data-page-node-id="DhegmzErPJp2AwIR6sfrIT"><option value="" data-page-node-id="Kb5nuAUS1nkz5incEkk13M">Choose one</option><option data-page-node-id="CxYnFtv6EKATTw9YlO7Uv5">Under 10 years</option><option data-page-node-id="xRDmkMrDDu4sQq5i6866GZ">10 to 20 years</option><option data-page-node-id="vV5djTI8tF2TTP0KcMZDr1">Over 20 years</option><option selected data-page-node-id="6caNCRMEK8Kn4WzU4p7kGI">Not sure</option></select><p class="err" role="alert" data-page-node-id="v2nyGlF1u5NryTDFNt6Zcn"></p></div>
         </section>
 
         <section class="est-pane" data-step="3" hidden data-page-node-id="ff47aa6QQQ2dXFuNzQrqk3">
@@ -2403,6 +2407,10 @@ var BIZ = {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   var SCALE = 1.11, EASE = .14, SKIP = '.hero, .ba, .rvs, header, .menu, .est, .dbg, [data-no-parallax]';
   var live = new Set(), raf = 0, last = 0;
+  /* SCALE is the overscan and so the travel (half of it each way). Desktop stays as it was; tablets and phones, where frames are
+     small and the scroll is short, get a clearly stronger drift. The CSS scale follows through --px-s. */
+  function strength() { var w = innerWidth; SCALE = w <= 640 ? 1.24 : w <= 1024 ? 1.18 : 1.11; document.documentElement.style.setProperty('--px-s', SCALE); }
+  strength();
 
   var io = new IntersectionObserver(function (es) {
     es.forEach(function (e) {
@@ -2444,7 +2452,7 @@ var BIZ = {
   scan(document.body);
   new MutationObserver(function (ms) { ms.forEach(function (m) { [].forEach.call(m.addedNodes, function (n) { if (n.nodeType === 1) scan(n); }); }); }).observe(document.body, { childList: true, subtree: true });
   addEventListener('scroll', kick, { passive: true });
-  addEventListener('resize', kick);
+  addEventListener('resize', function () { strength(); kick(); });
   addEventListener('load', kick);
 })();
 </script>
@@ -2553,13 +2561,15 @@ var BIZ = {
 (function () {
   var html = document.documentElement;
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  var G = { flag: [], btn: [], card: [], ba: [] };
+  var G = { flag: [], btn: [], card: [], ba: [] }, HERO = [];
   html.classList.add('rv-ready');
 
   /* ---------- engine: a marked element is hidden until it scrolls in, then its reveal runs and the mark is removed ---------- */
   function mark(el, g, manual) {
     el._g = g; el.setAttribute('data-rv', g);
-    if (!manual) { G[g].push(el); io.observe(el); }
+    if (manual) return;
+    G[g].push(el);
+    if (el.closest('.hero')) HERO.push(el); else io.observe(el);   /* the hero never waits for a scroll: see below */
   }
   function run(el, delay) {
     clearTimeout(el._rt); el.style.setProperty('--d', delay + 'ms'); el.classList.add('rv-run');
@@ -2580,12 +2590,25 @@ var BIZ = {
      before/after pair is left to that container, so nothing animates twice. */
   pick('.label, .badge, .trust > span, .micro, .cta-micro, .stats p, .tag, .pair figcaption, .who2 span, .stars', 'flag', '.est, .menu, .dbg');
   html.classList.remove('rv-pre');   /* the marks now hide everything the first-paint rule was hiding */
+  /* Every element of the hero reveals on load, in reading order, behind the headline. They are not handed to the observer: its
+     bottom margin (and a hero taller than the window on phones) kept the badges under the headline and the note under the
+     buttons waiting for a scroll. The forced style flush makes sure the hidden state has been drawn first, so they transition. */
+  if (HERO.length) {
+    void html.offsetWidth;
+    HERO.sort(function (a, b) { var A = a.getBoundingClientRect(), B = b.getBoundingClientRect(); return (A.top - B.top) || (A.left - B.left); });
+    HERO.forEach(function (el, k) { run(el, 300 + k * 90); });
+  }
 
   /* ---------- footer: sticky, revealed as the page uncovers it ---------- */
   var ft = document.querySelector('footer.ft'), main = document.querySelector('main.page');
   if (ft && main && window.gsap && window.ScrollTrigger && window.__splitText) {
-    var split = window.__splitText, words = [], ftDone = false, tick = 0;
-    [].forEach.call(ft.querySelectorAll('.ft-brand p, .ft-col h3, .ft-col li > a, .ft-col li:not(:has(> a)), .ft-legal p, .ft-legal a'), function (el) { words = words.concat(split(el)); });
+    var split = window.__splitText, words = [], allDone = false, tick = 0, items = [];
+    /* One entry per element. Each plays when enough of THAT element is actually on screen (see check), not when the footer as a
+       whole has started to show: the footer sits fixed behind the page, so the old single trigger fired while the links were
+       still hidden behind the CTA, and only the wordmark at the bottom was seen animating. */
+    [].forEach.call(ft.querySelectorAll('.ft-brand p, .ft-col h3, .ft-col li > a, .ft-col li:not(:has(> a)), .ft-legal p, .ft-legal a'), function (el) {
+      var w = split(el); words = words.concat(w); if (w.length) items.push({ el: el, kind: 'words', words: w, done: false });
+    });
     var fword = ft.querySelector('.ft-word'), fw = document.createElement('span'), letters = [];
     fw.className = 'fw';
     [].slice.call(fword.childNodes).forEach(function (n) {                    /* the wordmark becomes one box of letters (the accent dot keeps its colour) */
@@ -2594,24 +2617,32 @@ var BIZ = {
       if (n.nodeType !== 3) fw.appendChild(host);
     });
     fword.textContent = ''; fword.appendChild(fw);
+    items.push({ el: fword, kind: 'letters', done: false });
     var manual = [];                                                          /* logo and socials act like buttons, the two trust points like flags */
     [].forEach.call(ft.querySelectorAll('.ft-brand .logo, .ft-social a'), function (el) { manual.push([el, 'btn']); });
     [].forEach.call(ft.querySelectorAll('.ft-trust > span'), function (el) { manual.push([el, 'flag']); });
+    manual.forEach(function (m) { items.push({ el: m[0], kind: 'mark', done: false }); });
 
     var sticky = function () { return !html.classList.contains('ft-tall'); };
-    /* 0 when the page has just started uncovering the footer, 1 when it has cleared it entirely.
-       Both branches measure the same thing: the edge of whatever the footer is hiding behind. */
-    var frac = function () { var h = ft.offsetHeight || 1, edge = sticky() ? main.getBoundingClientRect().bottom : ft.getBoundingClientRect().top; return (innerHeight - edge) / h; };
-    var footerIn = function () {
-      ftDone = true;
-      gsap.to(words, { yPercent: 0, duration: .9, ease: 'power3.out', stagger: .014, delay: .05 });
-      manual.forEach(function (m, k) { run(m[0], 150 + k * 70); });
-      gsap.to(letters, { yPercent: 0, duration: 1.1, ease: 'power4.out', stagger: .07, delay: .15 });
+    /* How much of an element can be seen. Sticky footer: only the strip below the page's bottom edge is uncovered (the footer is
+       revealed from its bottom up). Footer in normal flow: the window. */
+    var seen = function (el) {
+      var r = el.getBoundingClientRect(), top = sticky() ? Math.max(0, main.getBoundingClientRect().bottom) : 0;
+      return r.height ? (Math.min(r.bottom, innerHeight) - Math.max(r.top, top)) / r.height : 0;
     };
-    var check = function () { if (!ftDone && frac() >= (sticky() ? .35 : .22)) footerIn(); };
+    var fire = function (it, k) {
+      if (it.kind === 'words') gsap.to(it.words, { yPercent: 0, duration: .9, ease: 'power3.out', stagger: .014, delay: .04 + k * .05 });
+      else if (it.kind === 'letters') gsap.to(letters, { yPercent: 0, duration: 1.1, ease: 'power4.out', stagger: .07, delay: .1 });
+      else run(it.el, 60 + k * 70);
+    };
+    var check = function () {
+      var k = 0, left = 0;                                                     /* k staggers whatever becomes visible in the same pass */
+      items.forEach(function (it) { if (it.done) return; if (seen(it.el) >= .35) { it.done = true; fire(it, k++); } else left++; });
+      allDone = !left;
+    };
     function applyFooter() {
       gsap.killTweensOf([fw].concat(letters));
-      ftDone = false;
+      allDone = false; items.forEach(function (it) { it.done = false; });
       gsap.set(words, { yPercent: 115 }); gsap.set(letters, { yPercent: 115 });
       manual.forEach(function (m) { clearTimeout(m[0]._rt); m[0].classList.remove('rv-run'); m[0].style.removeProperty('--d'); mark(m[0], m[1], true); });
       void ft.offsetWidth; ScrollTrigger.refresh(); check();
@@ -2623,7 +2654,7 @@ var BIZ = {
       html.classList.toggle('ft-tall', h > innerHeight + 2); check();
     };
     new ResizeObserver(function () { cancelAnimationFrame(raf); raf = requestAnimationFrame(sync); }).observe(ft);   /* a frame later, so layout is never changed inside the observer callback (that is what raises "ResizeObserver loop" errors) */
-    addEventListener('scroll', function () { if (ftDone || tick) return; tick = requestAnimationFrame(function () { tick = 0; check(); }); }, { passive: true });
+    addEventListener('scroll', function () { if (allDone || tick) return; tick = requestAnimationFrame(function () { tick = 0; check(); }); }, { passive: true });
     addEventListener('resize', function () { html.classList.toggle('ft-tall', ft.offsetHeight > innerHeight + 2); check(); });
     applyFooter();
   }
@@ -2776,19 +2807,28 @@ var BIZ = {
       var o = opts[active]; if (o.offsetTop < list.scrollTop) list.scrollTop = o.offsetTop; else if (o.offsetTop + o.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = o.offsetTop + o.offsetHeight - list.clientHeight;
     }
     function openList() {
+      if (wrap.classList.contains('closing')) finishClose();                   /* reopened while it was still closing */
       if (!list.hidden) return;
       list.hidden = false; wrap.classList.remove('up');
       var r = btn.getBoundingClientRect(), b = body.getBoundingClientRect(), room = b.bottom - r.bottom - 8;     /* open upward when it would not fit below inside the modal */
       if (list.offsetHeight + 6 > room && r.top - b.top > room) wrap.classList.add('up');
       wrap.classList.add('open'); btn.setAttribute('aria-expanded', 'true'); setActive(selected() >= 0 ? selected() : 0);
     }
-    function closeList() { if (list.hidden) return; list.hidden = true; wrap.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); btn.removeAttribute('aria-activedescendant'); }
+    var closeT = 0;
+    function onEnd(e) { if (e.target === list) finishClose(); }
+    function finishClose() { clearTimeout(closeT); list.removeEventListener('animationend', onEnd); wrap.classList.remove('closing'); list.hidden = true; }
+    function closeList(now) {                                                  /* now === true: no animation (step change, modal reset) */
+      if (list.hidden || wrap.classList.contains('closing')) return;
+      wrap.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); btn.removeAttribute('aria-activedescendant');
+      if (now === true || !canAnimate()) { finishClose(); return; }
+      wrap.classList.add('closing'); list.addEventListener('animationend', onEnd); closeT = setTimeout(finishClose, 240);
+    }
     function choose(i) { sel.value = opts[i].dataset.value; sel.dispatchEvent(new Event('input', { bubbles: true })); render(); closeList(); btn.focus(); }
     btn.addEventListener('click', function (e) {                       /* e.detail === 0: Enter or Space on the keyboard */
-      if (list.hidden) openList(); else if (e.detail === 0 && active >= 0) choose(active); else closeList();
+      if (list.hidden || wrap.classList.contains('closing')) openList(); else if (e.detail === 0 && active >= 0) choose(active); else closeList();
     });
     btn.addEventListener('keydown', function (e) {
-      var k = e.key, isOpen = !list.hidden;
+      var k = e.key, isOpen = !list.hidden && !wrap.classList.contains('closing');
       if (k === 'ArrowDown' || k === 'ArrowUp') { e.preventDefault(); if (!isOpen) openList(); else setActive(active + (k === 'ArrowDown' ? 1 : -1)); }
       else if ((k === 'Home' || k === 'End') && isOpen) { e.preventDefault(); setActive(k === 'Home' ? 0 : opts.length - 1); }
       else if (k === 'Escape' && isOpen) { e.preventDefault(); e.stopPropagation(); closeList(); }   /* closes the list only, not the modal */
@@ -2802,7 +2842,7 @@ var BIZ = {
     list.addEventListener('mousedown', function (e) { e.preventDefault(); });                            /* keep focus on the button while clicking an option */
     list.addEventListener('click', function (e) { var li = e.target.closest('li'); if (li) choose(opts.indexOf(li)); });
     list.addEventListener('mousemove', function (e) { var li = e.target.closest('li'); if (li && opts.indexOf(li) !== active) setActive(opts.indexOf(li)); });
-    selects.push({ render: render, close: closeList }); render();
+    selects.push({ render: render, close: function () { closeList(true); } }); render();
   }
   [].forEach.call(form.querySelectorAll('select'), enhanceSelect);
 
