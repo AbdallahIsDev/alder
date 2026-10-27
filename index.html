@@ -47,7 +47,7 @@
     ]
   }
   </script>
-  <script>document.documentElement.classList.add('js','split-pending','biz-pending');setTimeout(function(){document.documentElement.classList.remove('biz-pending')},3000);setTimeout(function(){document.documentElement.classList.remove('split-pending')},3000)</script>
+  <script>document.documentElement.classList.add('js','split-pending','biz-pending');setTimeout(function(){document.documentElement.classList.remove('biz-pending')},3000);setTimeout(function(){document.documentElement.classList.remove('split-pending')},3000);if(!matchMedia('(prefers-reduced-motion: reduce)').matches){document.documentElement.classList.add('rv-pre');setTimeout(function(){document.documentElement.classList.remove('rv-pre')},3000)}</script>
   <!--
   IMAGES: assets/images/{hero-1,about-crew}.{avif,webp} and
   assets/images/services/{service-replacement,service-storm,service-repair,service-inspection}.{avif,webp}
@@ -334,7 +334,7 @@
     }
 
     /* header + menu buttons never go below 16px (the shared --fs token bottoms out at 14px) */
-    .bar .btn, .menu-foot .btn, .btn.phone { font-size: max(16px, var(--fs)); white-space: nowrap }
+    .bar .btn, .menu-foot .btn, .menu-acts .btn, .btn.phone { font-size: max(16px, var(--fs)); white-space: nowrap }
 
     .btn.ghost {
       background: transparent;
@@ -972,6 +972,12 @@
     /* same side padding as the header bar at this size (16 left, 12 right), so the close button sits exactly where the open button was */
     .menu-top { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 12px 16px }
     @media (min-width: 521px) { .menu-top { min-height: 72px } }   /* the header bar is 72px tall while it holds a 48px button, so the logo and close button line up with it */
+    /* The overlay covers the header, so a button that is visible in the header is drawn again here, in the same place and with the
+       same breakpoints as the header (phone leaves at 760, estimate at 520). It is a copy, so it is only ever on screen while the
+       header's own is hidden underneath. */
+    .menu-acts { display: flex; align-items: center; gap: 8px }
+    @media (max-width: 760px) { .menu-acts .btn.phone { display: none } }
+    @media (max-width: 520px) { .menu-acts .btn:not(.phone) { display: none } }
     .menu-close { width: 44px; height: 44px; display: grid; place-items: center; background: none; border: 1px solid rgb(255 255 255/.15); color: #fff; cursor: pointer }
     .menu nav { display: flex; flex-direction: column; margin-top: clamp(24px, 5vh, 56px) }
     .menu nav a { padding: 16px 20px; font-size: clamp(30px, 8vw, 44px); font-weight: 500; letter-spacing: -.035em; line-height: 1.1; text-decoration: none; color: #fff;}
@@ -1228,6 +1234,14 @@
     /* testimonial and FAQ cards: blur and rise (locked). The card arrives out of focus and a
        little low, then resolves. */
     html.rv-ready [data-rv="card"]:not(.rv-run) { opacity: 0; filter: blur(10px); transform: translateY(20px) }
+
+    /* FIRST PAINT. The marks above only exist once the reveal script (end of <body>) has run, so anything on screen before then
+       was visible, got hidden, and was then revealed: a flash. The <head> script sets html.rv-pre (like split-pending does for
+       the titles) and this hides the same elements the script is going to mark, from the first frame. The reveal script drops
+       rv-pre in the same task in which it adds the marks, so there is no frame where an element is neither. Not set for
+       reduced motion; a 3s timer in the <head> script removes it if the reveal script never runs. */
+    html.rv-pre :is(.rv, .fi, main .btn, .ba-nav button, .label, .badge, .trust > span, .micro, .cta-micro, .stats p, .tag, .pair figcaption, .who2 span, .stars):not(:is(.est, .menu, .dbg, header) *) { opacity: 0 }
+    html.rv-pre .ba .pairs { clip-path: inset(0 0 100% 0) }
 
     /* before and after: clip down, same as the Services images (locked) */
     html.rv-ready [data-rv="ba"]:not(.rv-run) { clip-path: inset(0 0 100% 0) }
@@ -1556,7 +1570,11 @@
       background-size: 34px 34px; background-position: calc(100% - 7px) 50%;
       transition: background-size var(--bx-d) var(--bx-ease), background-position var(--bx-d) var(--bx-ease)
     }
-    html.bx .bx-p:is(:hover, :focus-visible) { --bx-c: #fff; background-size: calc(100% + 2px) calc(100% + 2px); background-position: 50% 50% }   /* 1px of overscan each side so a fractional button width never leaves a hairline */
+    /* The position keeps 100% on the horizontal axis and only the px offset changes (7px short of the edge -> 1px past it), so the
+       square's RIGHT edge is anchored to the button's right edge and never moves left: it grows leftward from the arrow's own
+       edge (and 1px of overscan on every side so a fractional button width never leaves a hairline). Interpolating 100% -> 50%
+       instead would drag the right edge across the arrow halfway through, which is what cut the white arrow in half. */
+    html.bx .bx-p:is(:hover, :focus-visible) { --bx-c: #fff; background-size: calc(100% + 2px) calc(100% + 2px); background-position: calc(100% + 1px) 50% }
 
     @media (prefers-reduced-motion: reduce) {
       html.bx :is(.bx-p, .bx-s, .bx-ph), html.bx :is(.bx-p, .bx-s, .bx-ph) *, html.bx :is(.bx-p, .bx-s)::before, html.bx :is(.bx-p, .bx-s)::after,
@@ -1697,7 +1715,7 @@
         </div>
       </header>
   <div class="menu" id="menu" data-lenis-prevent role="dialog" aria-modal="true" aria-label="Menu" aria-hidden="true" data-page-node-id="sB46rxndrciOPQwWaLiXC1">
-    <div class="menu-top" data-page-node-id="Skx6QwpILD1ciokf1XBI14"><a class="logo" href="#top" tabindex="-1" aria-label="{{brand}} home" data-page-node-id="hGeUq17lHi9WeG4jLFm5wD"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round" data-page-node-id="9KUNVLWuHF6msQGvsJuYE2"><path d="M5 19 20 6l15 13" data-page-node-id="gTOE5ojuLwz2wGHREYbx5d"/><path d="M9 17v17h22V17" data-page-node-id="LJAs4cT04ZjGEBiahnPZjC"/><path d="M16 34V24h8v10" data-page-node-id="a2NwpKt7WbpIBPVLCpoVps"/></svg><span class="word" data-page-node-id="6pqtUiBCVF69GKsriYyqNU">{{brand}}<b data-page-node-id="6ulW3CunaZVlCUPreBgH4X">.</b></span></a><button class="menu-close" type="button" aria-label="Close menu" data-page-node-id="FDs6U4uRIJyfyPNubXGzNo"><svg viewBox="0 0 16 9" width="16" height="9" fill="none" aria-hidden="true"><path d="M0 .75H16" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M0 7.75H16" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button></div>
+    <div class="menu-top" data-page-node-id="Skx6QwpILD1ciokf1XBI14"><a class="logo" href="#top" tabindex="-1" aria-label="{{brand}} home" data-page-node-id="hGeUq17lHi9WeG4jLFm5wD"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round" data-page-node-id="9KUNVLWuHF6msQGvsJuYE2"><path d="M5 19 20 6l15 13" data-page-node-id="gTOE5ojuLwz2wGHREYbx5d"/><path d="M9 17v17h22V17" data-page-node-id="LJAs4cT04ZjGEBiahnPZjC"/><path d="M16 34V24h8v10" data-page-node-id="a2NwpKt7WbpIBPVLCpoVps"/></svg><span class="word" data-page-node-id="6pqtUiBCVF69GKsriYyqNU">{{brand}}<b data-page-node-id="6ulW3CunaZVlCUPreBgH4X">.</b></span></a><div class="menu-acts"><a class="btn phone" href="tel:{{tel}}" aria-label="Call {{phone}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-phone"/></svg><span>{{phone}}</span></a><a class="btn" href="#estimate-form" data-open-estimate>Get a Free Estimate <i><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8h10M9 4l4 4-4 4"/></svg></i></a><button class="menu-close" type="button" aria-label="Close menu" data-page-node-id="FDs6U4uRIJyfyPNubXGzNo"><svg viewBox="0 0 16 9" width="16" height="9" fill="none" aria-hidden="true"><path d="M0 .75H16" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M0 7.75H16" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button></div></div>
     <nav aria-label="Mobile" data-page-node-id="Zowwis6UGUC5Gd657OKmCn"><a href="#services" data-page-node-id="pay1iSzTu6NQuvvlDithKZ"><span class="mk" style="--i:0" data-page-node-id="Ha9ANGeZCvONROlmRyF71C"><span class="mi" data-page-node-id="sb1I7AITT8o4v3f83INPqy">Services</span></span></a><a href="#how-we-work" data-page-node-id="xoV7rk42ctnIb2M0mFgimv"><span class="mk" style="--i:1" data-page-node-id="iMr5LQIzPIVDdp7lQaDATM"><span class="mi" data-page-node-id="rxPkcD4MSaPpvskAlMML7N">How We Work</span></span></a><a href="#projects" data-page-node-id="fRjV2IpSIVkZLng7hZrHcU"><span class="mk" style="--i:2" data-page-node-id="8omYvYnOvoDlQeirU7FQKg"><span class="mi" data-page-node-id="yLSyZ5jPibhcxdhy9joqAH">Projects</span></span></a><a href="#reviews" data-page-node-id="xUSRWaUSvHvuLE5oKFW6Pr"><span class="mk" style="--i:3" data-page-node-id="cuJxaSeKACjKre70N9v09f"><span class="mi" data-page-node-id="iLHO3raGZTm7UcGEjYqATi">Reviews</span></span></a><a href="#faq" data-page-node-id="p1smZOqa2dvpLwSyKgecmF"><span class="mk" style="--i:4" data-page-node-id="eIkF71hY7p0UQdt8mVUS55"><span class="mi" data-page-node-id="x43uRi3SD8jBLkruig6cph">FAQ</span></span></a></nav>
     <div class="menu-foot" data-page-node-id="UHUmXu9S8OhiEEvKwndHBy"><div class="mk menu-est" style="--i:5" data-page-node-id="uoR8CB7Q03mgdPTN3Aqyfg"><div class="mi" data-page-node-id="N8ReJZidcxvydWoG5SXMi7"><a class="btn" href="#estimate-form" data-open-estimate data-page-node-id="4TUsBbmY9FnfsBxM1ZRJEw">Get a Free Estimate <i data-page-node-id="SFDOzzKbtnnPQnUur9vBPM"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" data-page-node-id="lXkYECLrcAPnEtBMqYPcec"><path d="M3 8h10M9 4l4 4-4 4" data-page-node-id="eyRJXq7EKodhSV8Zsy9thl"/></svg></i></a></div></div><div class="mk menu-tel" style="--i:6"><div class="mi"><a class="btn phone" href="tel:{{tel}}" aria-label="Call {{phone}}"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-phone"/></svg><span>{{phone}}</span></a></div></div></div>
   </div>
@@ -2561,6 +2579,7 @@ var BIZ = {
   /* flags: every accent square and its label, in every section. An element inside a card or a
      before/after pair is left to that container, so nothing animates twice. */
   pick('.label, .badge, .trust > span, .micro, .cta-micro, .stats p, .tag, .pair figcaption, .who2 span, .stars', 'flag', '.est, .menu, .dbg');
+  html.classList.remove('rv-pre');   /* the marks now hide everything the first-paint rule was hiding */
 
   /* ---------- footer: sticky, revealed as the page uncovers it ---------- */
   var ft = document.querySelector('footer.ft'), main = document.querySelector('main.page');
