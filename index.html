@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-page-node-id="lomSK6Lrp5COiedjjPfIZf">
+<html lang="en" class="bx" data-page-node-id="lomSK6Lrp5COiedjjPfIZf">
 
 <head data-page-node-id="qA66i1soIRBJHtNRlA6SzR">
   <meta charset="utf-8" data-page-node-id="W2m4P2JcBHb8fUCfnpcshs">
@@ -1495,6 +1495,74 @@
        the box, the card hover zoom (transform) and the before/after clip are all untouched. The frame clips the overscan. */
     .px-img { will-change: translate; scale: 1.11 }
 
+    /* ===== BUTTON HOVER: fill + roll (locked) =====
+       The <html> tag carries a static class "bx"; it is only there to raise these selectors above .btn.dark and friends,
+       so nothing here needs a JS switch any more.
+       No wrapper elements anywhere: the label stays a bare text node inside the <a>. That text is transparent and the
+       label is drawn by the button's own ::before (the visible copy) and ::after (the copy waiting below), both taken
+       from the data-label attribute and both exactly 34px tall: the same band as the arrow square. The copies are
+       absolutely positioned with no offsets, so they sit where the text node sits. Each copy moves AND clips itself
+       (transform + clip-path on one shared timing), which makes the 34px band the clip box, the same as the arrow's
+       square, so label and arrow leave at the same line. Phone buttons do the same with their number and icon.
+       On hover the arrow square's fill grows until it floods the whole button, the label turns white, and the label and
+       the arrow roll up, each replaced by a copy entering from below.
+       Primary = arrow square (.bx-p). Secondary = ghost, no icon (.bx-s). Phone = icon + number (.bx-ph).
+       Secondary and phone buttons keep the header phone button's hover as it is (a background fades in); only the roll
+       is added on top. */
+    svg.bx-2 { display: none }
+
+    html.bx { --bx-ease: cubic-bezier(.65, 0, .35, 1); --bx-d: .4s }
+    html.bx .bx-p { --bx-c: var(--ink); --bx-fill: var(--accent); color: transparent }
+    html.bx .bx-p.dark { --bx-c: #fff }
+    html.bx .cta-sec .bx-p { --bx-fill: var(--ink) }
+    html.bx :is(.bx-s, .bx-ph) { --bx-c: #fff }
+    html.bx .bx-s { color: transparent }
+    html.bx .bx-ph > span { position: relative; color: transparent }
+
+    /* the label, drawn by pseudo-elements. ::before = the visible copy, ::after = the copy waiting below */
+    html.bx .bx-p::before, html.bx .bx-s::before, html.bx .bx-p::after, html.bx .bx-s::after,
+    html.bx .bx-ph > span::before, html.bx .bx-ph > span::after {
+      content: attr(data-label); content: attr(data-label) / "";
+      position: absolute; height: 34px; line-height: 34px; white-space: nowrap; pointer-events: none;
+      color: var(--bx-c); clip-path: inset(0 0 0 0);
+      transition: transform var(--bx-d) var(--bx-ease), clip-path var(--bx-d) var(--bx-ease), color var(--bx-d) var(--bx-ease)
+    }
+    html.bx .bx-ph > span::before, html.bx .bx-ph > span::after { left: 0; top: calc(50% - 17px) }
+    html.bx .bx-p::after, html.bx .bx-s::after, html.bx .bx-ph > span::after { transform: translateY(34px); clip-path: inset(0 0 34px 0) }
+    html.bx :is(.bx-p, .bx-s):is(:hover, :focus-visible)::before,
+    html.bx .bx-ph:is(:hover, :focus-visible) > span::before { transform: translateY(-34px); clip-path: inset(34px 0 0 0) }
+    html.bx :is(.bx-p, .bx-s):is(:hover, :focus-visible)::after,
+    html.bx .bx-ph:is(:hover, :focus-visible) > span::after { transform: none; clip-path: inset(0 0 0 0) }
+
+    /* phone icon: same 34px band, the original stays in flow, the copy is absolutely placed on top of it */
+    html.bx .bx-ph > svg { width: 22px; height: 34px; clip-path: inset(0 0 0 0); transition: transform var(--bx-d) var(--bx-ease), clip-path var(--bx-d) var(--bx-ease) }
+    html.bx .bx-ph > svg.bx-2 { display: block; position: absolute; transform: translateY(34px); clip-path: inset(0 0 34px 0) }
+    html.bx .bx-ph:is(:hover, :focus-visible) > svg:not(.bx-2) { transform: translateY(-34px); clip-path: inset(34px 0 0 0) }
+    html.bx .bx-ph:is(:hover, :focus-visible) > svg.bx-2 { transform: none; clip-path: inset(0 0 0 0) }
+
+    /* arrow: the square (<i>) clips, both arrows are placed inside it */
+    html.bx .bx-p i { position: relative; overflow: hidden }
+    html.bx .bx-p i > svg { position: absolute; inset: 0; margin: auto; transition: transform var(--bx-d) var(--bx-ease) }
+    html.bx .bx-p i > svg.bx-2 { display: block; transform: translateY(34px) }
+    html.bx .bx-p:is(:hover, :focus-visible) i > svg:not(.bx-2) { transform: translateY(-34px) }
+    html.bx .bx-p:is(:hover, :focus-visible) i > svg.bx-2 { transform: none }
+
+    /* the square's colour moves from <i> into the button's own background, a 34px square pinned where the square is,
+       which grows to the full box on hover */
+    html.bx .bx-p i { background: transparent }
+    html.bx .bx-p {
+      background-image: linear-gradient(var(--bx-fill), var(--bx-fill)); background-repeat: no-repeat;
+      background-origin: border-box; background-clip: border-box;
+      background-size: 34px 34px; background-position: calc(100% - 7px) 50%;
+      transition: background-size var(--bx-d) var(--bx-ease), background-position var(--bx-d) var(--bx-ease)
+    }
+    html.bx .bx-p:is(:hover, :focus-visible) { --bx-c: #fff; background-size: calc(100% + 2px) calc(100% + 2px); background-position: 50% 50% }   /* 1px of overscan each side so a fractional button width never leaves a hairline */
+
+    @media (prefers-reduced-motion: reduce) {
+      html.bx :is(.bx-p, .bx-s, .bx-ph), html.bx :is(.bx-p, .bx-s, .bx-ph) *, html.bx :is(.bx-p, .bx-s)::before, html.bx :is(.bx-p, .bx-s)::after,
+      html.bx .bx-ph > span::before, html.bx .bx-ph > span::after { transition: none !important }
+    }
+
     @media(prefers-reduced-motion:reduce) {
       html {
         scroll-behavior: auto
@@ -2270,6 +2338,36 @@ var BIZ = {
   addEventListener('load', function () { ScrollTrigger.refresh(); });
 })();
 </script>
+<!-- BUTTON HOVER: tags the buttons and adds the data-label / second arrow the .bx-* CSS needs -->
+<script>
+(function () {
+  /* No wrapper elements are created. A button gets a class, a data-label copy of its own text (the CSS draws the label from
+     it) and, where there is an arrow or icon, a second copy of that <svg> (hidden until the roll runs).
+     Primary = has the arrow square (<i>). Phone = icon + number. Secondary = ghost without an icon. */
+  function firstText(el) { for (var n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 3 && n.nodeValue.trim()) return n; return null; }
+  function twin(svg) { var c = svg.cloneNode(true); c.classList.add('bx-2'); c.setAttribute('aria-hidden', 'true'); return c; }
+  function build(btn) {
+    if (btn.__bx) return;
+    var ic = btn.querySelector(':scope > i'), tn, sv, sp;
+    if (ic) {
+      sv = ic.querySelector('svg'); tn = firstText(btn); if (!sv || !tn) return;
+      btn.setAttribute('data-label', tn.nodeValue.trim()); ic.appendChild(twin(sv)); btn.classList.add('bx-p');
+    } else if (btn.classList.contains('phone')) {
+      sv = btn.querySelector(':scope > svg'); sp = btn.querySelector(':scope > span'); if (!sv || !sp) return;
+      sp.setAttribute('data-label', sp.textContent.trim()); sv.insertAdjacentElement('afterend', twin(sv)); btn.classList.add('bx-ph');
+    } else if (btn.classList.contains('ghost') && !btn.querySelector('svg')) {
+      tn = firstText(btn); if (!tn) return;
+      btn.setAttribute('data-label', tn.nodeValue.trim()); btn.classList.add('bx-s');
+    } else return;
+    btn.__bx = true;
+  }
+  function scan(root) {
+    if (root.matches && root.matches('.btn')) build(root);
+    if (root.querySelectorAll) [].forEach.call(root.querySelectorAll('.btn'), build);
+  }
+  scan(document.body);
+})();
+</script>
 <!-- HERO HEIGHT + IMAGE PARALLAX (separate script so an error elsewhere can never block it) -->
 <script>
 /* HERO: the slides are position:fixed (see .slide). --hero-h keeps them tall enough when the hero is taller than the window. */
@@ -2948,3 +3046,4 @@ var BIZ = {
 </body>
 
 </html>
+ 
