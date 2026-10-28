@@ -280,17 +280,28 @@
       object-fit: cover
     }
 
+    /* BUTTON SIZE: every button gets its height from ONE token, --btn-h (48px; the header buttons drop to 44px, see below).
+       Height is fixed and the content is centred, so primary and secondary buttons are sized the same way.
+       --btn-pad is the gap between the 34px band (arrow square / label / icon) and the button's edge: (height - 2px border - 34px) / 2,
+       so 6px at 48px and 4px at 44px. The primary button uses it on the right (the square keeps the same space on top, right
+       and bottom); its left padding is --btn-pad + 8px (14px at 48px). */
     .btn {
+      --btn-h: 48px;
+      --btn-pad: calc((var(--btn-h) - 36px) / 2);
       display: inline-flex;
       align-items: center;
       gap: 12px;
-      padding: 6px 6px 6px 14px;
+      height: var(--btn-h);
+      padding: 0 var(--btn-pad) 0 calc(var(--btn-pad) + 8px);
       font: 550 var(--fs) var(--f2);
       text-decoration: none;
       border: 1px solid transparent;
       background: var(--cream);
       color: var(--ink)
     }
+
+    /* primary (has the arrow square): the square sits at the right edge, the label takes the left */
+    .btn:not(.ghost):not(.phone):not(.est-next) { justify-content: space-between }
 
     .btn i {
       display: grid;
@@ -317,7 +328,7 @@
       background: transparent;
       color: #fff;
       border-color: rgb(255 255 255/.15);
-      height: 48px;
+      height: var(--btn-h);
       padding: 0 16px;
       gap: 8px;
       font-weight: 450;
@@ -341,7 +352,7 @@
       color: #fff;
       border-color: rgb(255 255 255/.15);
       padding: 0 16px;
-      height: 48px;
+      height: var(--btn-h);
       transition: background .2s;
       font-weight: 450;
     }
@@ -971,7 +982,7 @@
     .menu.open { visibility: visible; clip-path: inset(0); transition-delay: 0s }
     /* same side padding as the header bar at this size (16 left, 12 right), so the close button sits exactly where the open button was */
     .menu-top { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 12px 16px }
-    @media (min-width: 521px) { .menu-top { min-height: 72px } }   /* the header bar is 72px tall while it holds a 48px button, so the logo and close button line up with it */
+    @media (min-width: 521px) { .menu-top { min-height: 68px } }   /* the header bar is 68px tall while it holds the 44px header buttons (12px padding each side), so the logo, the buttons and the close button line up with it */
     /* The overlay covers the header, so a button that is visible in the header is drawn again here, in the same place and with the
        same breakpoints as the header (phone leaves at 760, estimate at 520). It is a copy, so it is only ever on screen while the
        header's own is hidden underneath. */
@@ -1002,6 +1013,7 @@
       .menu { display: flex }
       .bar { padding-left: 16px }
     }
+    @media (max-width: 1140px) { .bar .btn, .menu-acts .btn { --btn-h: 44px } }   /* header CTAs, and their copies in the open menu's top row beside the 44px close button; the buttons lower in the menu (.menu-foot) and in the page stay 48px */
     @media (max-width: 760px) { .bar .btn.phone { display: none } }
     @media (max-width: 520px) { .bar .btn:not(.phone) { display: none } }
     @media (min-width: 761px) { .menu-foot { display: none } .menu nav a:last-child::after { display: none } }   /* both buttons in the header: none in the menu */
@@ -1514,49 +1526,49 @@
     .px-img { will-change: translate; scale: var(--px-s, 1.11) }
 
     /* ===== BUTTON HOVER: fill + roll (locked) =====
-       The <html> tag carries a static class "bx"; it is only there to raise these selectors above .btn.dark and friends,
-       so nothing here needs a JS switch any more.
-       No wrapper elements anywhere: the label stays a bare text node inside the <a>. That text is transparent and the
-       label is drawn by the button's own ::before (the visible copy) and ::after (the copy waiting below), both taken
-       from the data-label attribute and both exactly 34px tall: the same band as the arrow square. The copies are
-       absolutely positioned with no offsets, so they sit where the text node sits. Each copy moves AND clips itself
-       (transform + clip-path on one shared timing), which makes the 34px band the clip box, the same as the arrow's
-       square, so label and arrow leave at the same line. Phone buttons do the same with their number and icon.
-       On hover the arrow square's fill grows until it floods the whole button, the label turns white, and the label and
-       the arrow roll up, each replaced by a copy entering from below.
+       The <html> tag carries a static class "bx"; it is only there to raise these selectors above .btn.dark and friends.
+       The script wraps the label text in <span class="bx-l"> and, for the phone button, the icon in <span class="bx-ic">.
+       Both are exactly 34px tall, the band between the button's vertical padding (6px, or 4px in the 44px header buttons), with
+       overflow clipped, so they are the clip box. Inside, the real text is transparent (it only sizes the box) and the label is drawn
+       by the span's ::before (the visible copy) and ::after (the copy waiting below), from its data-label. Because the clip box does
+       not move and the copies only translate, the copies start to disappear as soon as they reach the padding area and nothing
+       can drift out of step. The arrow square (<i>) is its own 34px clip box. All of them leave at the same line.
+       On hover the arrow square's fill grows until it floods the whole button and the label and arrow roll up, each replaced by
+       a copy entering from below. The leaving copy keeps its colour and the entering copy is already white: no colour, opacity or
+       blur transition anywhere.
        Primary = arrow square (.bx-p). Secondary = ghost, no icon (.bx-s). Phone = icon + number (.bx-ph).
        Secondary and phone buttons keep the header phone button's hover as it is (a background fades in); only the roll
        is added on top. */
     svg.bx-2 { display: none }
 
     html.bx { --bx-ease: cubic-bezier(.65, 0, .35, 1); --bx-d: .4s }
-    html.bx .bx-p { --bx-c: var(--ink); --bx-fill: var(--accent); color: transparent }
+    html.bx .bx-p { --bx-c: var(--ink); --bx-fill: var(--accent) }
     html.bx .bx-p.dark { --bx-c: #fff }
     html.bx .cta-sec .bx-p { --bx-fill: var(--ink) }
     html.bx :is(.bx-s, .bx-ph) { --bx-c: #fff }
-    html.bx .bx-s { color: transparent }
-    html.bx .bx-ph > span { position: relative; color: transparent }
 
-    /* the label, drawn by pseudo-elements. ::before = the visible copy, ::after = the copy waiting below */
-    html.bx .bx-p::before, html.bx .bx-s::before, html.bx .bx-p::after, html.bx .bx-s::after,
-    html.bx .bx-ph > span::before, html.bx .bx-ph > span::after {
+    /* the label clip box: 34px band; 3px of side room (padding + equal negative margin) so overflow clipping never trims a glyph */
+    html.bx .bx-l {
+      position: relative; display: block; flex: none; height: 34px; line-height: 34px; white-space: nowrap;
+      padding-inline: 3px; margin-inline: -3px; color: transparent; overflow: hidden; overflow: clip
+    }
+    /* ::before = the visible copy, ::after = the copy waiting below. Both pinned to the band's top-left (3px = the side room) */
+    html.bx .bx-l::before, html.bx .bx-l::after {
       content: attr(data-label); content: attr(data-label) / "";
-      position: absolute; height: 34px; line-height: 34px; white-space: nowrap; pointer-events: none;
-      color: var(--bx-c);
+      position: absolute; left: 3px; top: 0; height: 34px; line-height: 34px; white-space: nowrap; pointer-events: none;
       transition: transform var(--bx-d) var(--bx-ease)
     }
-    html.bx .bx-ph > span::before, html.bx .bx-ph > span::after { left: 0; top: calc(50% - 17px) }
-    html.bx .bx-p::after, html.bx .bx-s::after, html.bx .bx-ph > span::after { transform: translateY(34px) }
-    html.bx :is(.bx-p, .bx-s):is(:hover, :focus-visible)::before,
-    html.bx .bx-ph:is(:hover, :focus-visible) > span::before { transform: translateY(-34px) }
-    html.bx :is(.bx-p, .bx-s):is(:hover, :focus-visible)::after,
-    html.bx .bx-ph:is(:hover, :focus-visible) > span::after { transform: none }
+    html.bx .bx-l::before { color: var(--bx-c) }
+    html.bx .bx-l::after { color: var(--bx-hc, #fff); transform: translateY(34px) }
+    html.bx :is(.bx-p, .bx-s, .bx-ph):is(:hover, :focus-visible) .bx-l::before { transform: translateY(-34px) }
+    html.bx :is(.bx-p, .bx-s, .bx-ph):is(:hover, :focus-visible) .bx-l::after { transform: none }
 
-    /* phone icon: same 34px band, the original stays in flow, the copy is absolutely placed on top of it */
-    html.bx .bx-ph > svg { width: 22px; height: 34px; transition: transform var(--bx-d) var(--bx-ease) }
-    html.bx .bx-ph > svg.bx-2 { display: block; position: absolute; transform: translateY(34px) }
-    html.bx .bx-ph:is(:hover, :focus-visible) > svg:not(.bx-2) { transform: translateY(-34px) }
-    html.bx .bx-ph:is(:hover, :focus-visible) > svg.bx-2 { transform: none }
+    /* phone icon: same 34px band */
+    html.bx .bx-ic { position: relative; display: block; flex: none; width: 22px; height: 34px; overflow: hidden; overflow: clip }
+    html.bx .bx-ic > svg { display: block; width: 22px; height: 34px; transition: transform var(--bx-d) var(--bx-ease) }
+    html.bx .bx-ic > svg.bx-2 { position: absolute; inset: 0; transform: translateY(34px) }
+    html.bx .bx-ph:is(:hover, :focus-visible) .bx-ic > svg:not(.bx-2) { transform: translateY(-34px) }
+    html.bx .bx-ph:is(:hover, :focus-visible) .bx-ic > svg.bx-2 { transform: none }
 
     /* arrow: the square (<i>) clips, both arrows are placed inside it */
     html.bx .bx-p i { position: relative; overflow: hidden }
@@ -1565,16 +1577,16 @@
     html.bx .bx-p:is(:hover, :focus-visible) i > svg:not(.bx-2) { transform: translateY(-34px) }
     html.bx .bx-p:is(:hover, :focus-visible) i > svg.bx-2 { transform: none }
 
-    /* the square's colour moves from <i> into the button's own background, a 34px square pinned where the square is,
-       which grows to the full box on hover */
+    /* the square's colour moves from <i> into the button's own background, a 34px square pinned where the square is
+       (1px border + --btn-pad from the right edge, centred vertically), which grows to the full box on hover */
     html.bx .bx-p i { background: transparent }
     html.bx .bx-p {
       background-image: linear-gradient(var(--bx-fill), var(--bx-fill)); background-repeat: no-repeat;
       background-origin: border-box; background-clip: border-box;
-      background-size: 34px 34px; background-position: calc(100% - 7px) 50%;
+      background-size: 34px 34px; background-position: calc(100% - 1px - var(--btn-pad)) 50%;
       transition: background-size var(--bx-d) var(--bx-ease), background-position var(--bx-d) var(--bx-ease)
     }
-    /* The position keeps 100% on the horizontal axis and only the px offset changes (7px short of the edge -> 1px past it), so the
+    /* The position keeps 100% on the horizontal axis and only the px offset changes (the square's inset -> 1px past the edge), so the
        square's RIGHT edge is anchored to the button's right edge and never moves left: it grows leftward from the arrow's own
        edge (and 1px of overscan on every side so a fractional button width never leaves a hairline). Interpolating 100% -> 50%
        instead would drag the right edge across the arrow halfway through, which is what cut the white arrow in half. */
@@ -1586,20 +1598,10 @@
        because it has no fade-in to hide it. */
     html.bx:not(.bx-on) :is(.bx-p, .bx-s, .bx-ph),
     html.bx:not(.bx-on) :is(.bx-p, .bx-s, .bx-ph) *,
-    html.bx:not(.bx-on) :is(.bx-p, .bx-s)::before, html.bx:not(.bx-on) :is(.bx-p, .bx-s)::after,
-    html.bx:not(.bx-on) .bx-ph > span::before, html.bx:not(.bx-on) .bx-ph > span::after { transition: none !important }
-
-    /* The outgoing copy (::before) keeps its resting colour for the whole roll; the incoming copy (::after) is already white
-       (--bx-hc) while it waits below, so no copy ever changes colour mid-move and there is no opacity or colour transition at all. */
-    html.bx :is(.bx-p, .bx-s)::after, html.bx .bx-ph > span::after { color: var(--bx-hc, #fff) }
-    /* The button's own box is the clip: copies stay fully visible while they travel and vanish exactly at the button's edge.
-       contain: paint clips to the padding box and makes the button the containing block for the absolutely placed copies,
-       and unlike a clip-path on each copy it cannot drift out of step with the transform when a hover is interrupted. */
-    html.bx :is(.bx-p, .bx-s, .bx-ph) { contain: paint }
+    html.bx:not(.bx-on) .bx-l::before, html.bx:not(.bx-on) .bx-l::after { transition: none !important }
 
     @media (prefers-reduced-motion: reduce) {
-      html.bx :is(.bx-p, .bx-s, .bx-ph), html.bx :is(.bx-p, .bx-s, .bx-ph) *, html.bx :is(.bx-p, .bx-s)::before, html.bx :is(.bx-p, .bx-s)::after,
-      html.bx .bx-ph > span::before, html.bx .bx-ph > span::after { transition: none !important }
+      html.bx :is(.bx-p, .bx-s, .bx-ph), html.bx :is(.bx-p, .bx-s, .bx-ph) *, html.bx .bx-l::before, html.bx .bx-l::after { transition: none !important }
     }
 
     @media(prefers-reduced-motion:reduce) {
@@ -2427,23 +2429,30 @@ var BIZ = {
 <!-- BUTTON HOVER: tags the buttons and adds the data-label / second arrow the .bx-* CSS needs -->
 <script>
 (function () {
-  /* No wrapper elements are created. A button gets a class, a data-label copy of its own text (the CSS draws the label from
-     it) and, where there is an arrow or icon, a second copy of that <svg> (hidden until the roll runs).
+  /* A button gets a class and a data-label copy of its own text (the CSS draws the label from it). The label text is wrapped in
+     <span class="bx-l"> and the phone icon in <span class="bx-ic">: fixed 34px boxes that clip the rolling copies. Where there is an
+     arrow or icon, a second copy of that <svg> is added (hidden until the roll runs).
      Primary = has the arrow square (<i>). Phone = icon + number. Secondary = ghost without an icon. */
   function firstText(el) { for (var n = el.firstChild; n; n = n.nextSibling) if (n.nodeType === 3 && n.nodeValue.trim()) return n; return null; }
   function twin(svg) { var c = svg.cloneNode(true); c.classList.add('bx-2'); c.setAttribute('aria-hidden', 'true'); return c; }
+  function label(tn) {
+    var w = document.createElement('span'); w.className = 'bx-l'; w.setAttribute('data-label', tn.nodeValue.trim());
+    tn.parentNode.replaceChild(w, tn); w.appendChild(tn);
+  }
   function build(btn) {
     if (btn.__bx) return;
-    var ic = btn.querySelector(':scope > i'), tn, sv, sp;
+    var ic = btn.querySelector(':scope > i'), tn, sv, sp, w;
     if (ic) {
       sv = ic.querySelector('svg'); tn = firstText(btn); if (!sv || !tn) return;
-      btn.setAttribute('data-label', tn.nodeValue.trim()); ic.appendChild(twin(sv)); btn.classList.add('bx-p');
+      label(tn); ic.appendChild(twin(sv)); btn.classList.add('bx-p');
     } else if (btn.classList.contains('phone')) {
       sv = btn.querySelector(':scope > svg'); sp = btn.querySelector(':scope > span'); if (!sv || !sp) return;
-      sp.setAttribute('data-label', sp.textContent.trim()); sv.insertAdjacentElement('afterend', twin(sv)); btn.classList.add('bx-ph');
+      sp.classList.add('bx-l'); sp.setAttribute('data-label', sp.textContent.trim());
+      w = document.createElement('span'); w.className = 'bx-ic'; sv.parentNode.replaceChild(w, sv); w.appendChild(sv); w.appendChild(twin(sv));
+      btn.classList.add('bx-ph');
     } else if (btn.classList.contains('ghost') && !btn.querySelector('svg')) {
       tn = firstText(btn); if (!tn) return;
-      btn.setAttribute('data-label', tn.nodeValue.trim()); btn.classList.add('bx-s');
+      label(tn); btn.classList.add('bx-s');
     } else return;
     btn.__bx = true;
   }
