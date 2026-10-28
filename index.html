@@ -1542,21 +1542,21 @@
     html.bx .bx-ph > span::before, html.bx .bx-ph > span::after {
       content: attr(data-label); content: attr(data-label) / "";
       position: absolute; height: 34px; line-height: 34px; white-space: nowrap; pointer-events: none;
-      color: var(--bx-c); clip-path: inset(0 0 0 0);
-      transition: transform var(--bx-d) var(--bx-ease), clip-path var(--bx-d) var(--bx-ease), color var(--bx-d) var(--bx-ease)
+      color: var(--bx-c);
+      transition: transform var(--bx-d) var(--bx-ease)
     }
     html.bx .bx-ph > span::before, html.bx .bx-ph > span::after { left: 0; top: calc(50% - 17px) }
-    html.bx .bx-p::after, html.bx .bx-s::after, html.bx .bx-ph > span::after { transform: translateY(34px); clip-path: inset(0 0 34px 0) }
+    html.bx .bx-p::after, html.bx .bx-s::after, html.bx .bx-ph > span::after { transform: translateY(34px) }
     html.bx :is(.bx-p, .bx-s):is(:hover, :focus-visible)::before,
-    html.bx .bx-ph:is(:hover, :focus-visible) > span::before { transform: translateY(-34px); clip-path: inset(34px 0 0 0) }
+    html.bx .bx-ph:is(:hover, :focus-visible) > span::before { transform: translateY(-34px) }
     html.bx :is(.bx-p, .bx-s):is(:hover, :focus-visible)::after,
-    html.bx .bx-ph:is(:hover, :focus-visible) > span::after { transform: none; clip-path: inset(0 0 0 0) }
+    html.bx .bx-ph:is(:hover, :focus-visible) > span::after { transform: none }
 
     /* phone icon: same 34px band, the original stays in flow, the copy is absolutely placed on top of it */
-    html.bx .bx-ph > svg { width: 22px; height: 34px; clip-path: inset(0 0 0 0); transition: transform var(--bx-d) var(--bx-ease), clip-path var(--bx-d) var(--bx-ease) }
-    html.bx .bx-ph > svg.bx-2 { display: block; position: absolute; transform: translateY(34px); clip-path: inset(0 0 34px 0) }
-    html.bx .bx-ph:is(:hover, :focus-visible) > svg:not(.bx-2) { transform: translateY(-34px); clip-path: inset(34px 0 0 0) }
-    html.bx .bx-ph:is(:hover, :focus-visible) > svg.bx-2 { transform: none; clip-path: inset(0 0 0 0) }
+    html.bx .bx-ph > svg { width: 22px; height: 34px; transition: transform var(--bx-d) var(--bx-ease) }
+    html.bx .bx-ph > svg.bx-2 { display: block; position: absolute; transform: translateY(34px) }
+    html.bx .bx-ph:is(:hover, :focus-visible) > svg:not(.bx-2) { transform: translateY(-34px) }
+    html.bx .bx-ph:is(:hover, :focus-visible) > svg.bx-2 { transform: none }
 
     /* arrow: the square (<i>) clips, both arrows are placed inside it */
     html.bx .bx-p i { position: relative; overflow: hidden }
@@ -1578,7 +1578,24 @@
        square's RIGHT edge is anchored to the button's right edge and never moves left: it grows leftward from the arrow's own
        edge (and 1px of overscan on every side so a fractional button width never leaves a hairline). Interpolating 100% -> 50%
        instead would drag the right edge across the arrow halfway through, which is what cut the white arrow in half. */
-    html.bx .bx-p:is(:hover, :focus-visible) { --bx-c: #fff; background-size: calc(100% + 2px) calc(100% + 2px); background-position: calc(100% + 1px) 50% }
+    html.bx .bx-p:is(:hover, :focus-visible) { background-size: calc(100% + 2px) calc(100% + 2px); background-position: calc(100% + 1px) 50% }
+
+    /* No transitions until the script has tagged the buttons AND a frame has painted in their final state (html.bx-on).
+       Tagging swaps the arrow square from the <i>'s own background to the button's 34px gradient; without this gate the browser
+       animates that gradient from its default spot (left edge) to the right, which is visible on the header button
+       because it has no fade-in to hide it. */
+    html.bx:not(.bx-on) :is(.bx-p, .bx-s, .bx-ph),
+    html.bx:not(.bx-on) :is(.bx-p, .bx-s, .bx-ph) *,
+    html.bx:not(.bx-on) :is(.bx-p, .bx-s)::before, html.bx:not(.bx-on) :is(.bx-p, .bx-s)::after,
+    html.bx:not(.bx-on) .bx-ph > span::before, html.bx:not(.bx-on) .bx-ph > span::after { transition: none !important }
+
+    /* The outgoing copy (::before) keeps its resting colour for the whole roll; the incoming copy (::after) is already white
+       (--bx-hc) while it waits below, so no copy ever changes colour mid-move and there is no opacity or colour transition at all. */
+    html.bx :is(.bx-p, .bx-s)::after, html.bx .bx-ph > span::after { color: var(--bx-hc, #fff) }
+    /* The button's own box is the clip: copies stay fully visible while they travel and vanish exactly at the button's edge.
+       contain: paint clips to the padding box and makes the button the containing block for the absolutely placed copies,
+       and unlike a clip-path on each copy it cannot drift out of step with the transform when a hover is interrupted. */
+    html.bx :is(.bx-p, .bx-s, .bx-ph) { contain: paint }
 
     @media (prefers-reduced-motion: reduce) {
       html.bx :is(.bx-p, .bx-s, .bx-ph), html.bx :is(.bx-p, .bx-s, .bx-ph) *, html.bx :is(.bx-p, .bx-s)::before, html.bx :is(.bx-p, .bx-s)::after,
@@ -1635,6 +1652,53 @@
         .cta-micro, .ft-brand p, .ft-col li, .ft-legal) {
       font-weight: 450
     }
+
+    /* ===== TEXT SELECTION + KEYBOARD (TAB) FOCUS, in the site colours =====
+       Selection: accent block with white text on the white/cream/ink surfaces, ink block on the accent
+       call-to-action band (accent on accent would vanish). Same colours inside the estimate modal.
+       Tab focus on smaller screens (<= 900px, where the layout is the stacked one): :focus-visible only fires for keyboard
+       / switch / assistive navigation, never for a tap or mouse click, so touch users see no ring.
+       --tab is the ring colour for the surface the element sits on: accent on light, white on ink and on the
+       accent band. The tint behind plain links is the same colour at low alpha. */
+    :root { --sel-bg: var(--accent); --sel-fg: #fff; --tab: var(--accent); --tab-bg: rgb(217 57 23/.12) }
+    :is(header, .hero, .masthead, .ft, .menu, .tot) { --tab: #fff; --tab-bg: rgb(255 255 255/.16) }
+    .est { --tab: var(--accent); --tab-bg: rgb(217 57 23/.22) }
+    .cta-sec { --sel-bg: var(--ink); --sel-fg: #fff; --tab: #fff; --tab-bg: rgb(255 255 255/.2) }
+
+    /* tap / tab highlight: the browser's default light-blue flash is replaced by the surface's tint (accent on light, white on ink,
+       white on the accent band). The FAQ question rows also hold the tint while keyboard-focused. */
+    * { -webkit-tap-highlight-color: var(--tab-bg) }
+    .q:focus-visible { background: var(--tab-bg); outline-offset: -3px }
+    /* the call-to-action buttons have their own hover/press animation, so they get no tap tint */
+    .btn, .btn * { -webkit-tap-highlight-color: transparent }
+
+    ::selection { background: var(--sel-bg); color: var(--sel-fg); text-shadow: none }
+    ::-moz-selection { background: var(--sel-bg); color: var(--sel-fg); text-shadow: none }
+    /* the accent-coloured words (.hl, stars, footer dot) keep a readable colour while selected */
+    :is(.hl, .stars, .ft-word b)::selection { color: var(--sel-fg) }
+    /* images never show the selection tint (Chrome/Safari paint it over a selected <img>), and they can't be picked up by a drag-select */
+    :is(img, picture, video, canvas, svg)::selection, :is(img, picture, video, canvas, svg) ::selection { background: transparent }
+    :is(img, picture, video, canvas)::-moz-selection { background: transparent }
+    img, picture, video, canvas { -webkit-user-select: none; user-select: none; -webkit-user-drag: none }
+    .cta-sec ::selection { background: var(--ink); color: #fff }
+    .cta-sec ::-moz-selection { background: var(--ink); color: #fff }
+
+    @media (max-width: 900px) {
+      :root :focus-visible { outline: 3px solid var(--tab); outline-offset: 3px }
+      /* plain text links (footer, FAQ, body copy) get a soft tint so the focused link reads as a block, not just a line */
+      :root :where(p, li, dd, .ft-legal, .ft-top) a:not([class]):focus-visible {
+        background: var(--tab-bg); box-shadow: 0 0 0 3px var(--tab-bg); outline-offset: 3px
+      }
+      /* mobile menu: the accent plane that wipes in on hover also marks the tab position; the ring goes inside the row, in white */
+      .menu nav a:focus-visible { outline: 3px solid #fff; outline-offset: -6px }
+      .menu nav a:focus-visible::before { clip-path: inset(0) }
+      /* form controls in the modal: keep the field border in the accent and add a thicker ring */
+      .est :is(input, textarea, button, [tabindex]):focus-visible { outline-width: 3px; outline-offset: 2px }
+      .f input:focus-visible, .f textarea:focus-visible { background: var(--tab-bg) }
+      /* before/after slider handle */
+      [role="slider"]:focus-visible { outline-offset: 4px }
+    }
+    @media (max-width: 900px) and (prefers-reduced-motion: reduce) { .menu nav a:focus-visible::before { transition: none !important } }
 
   </style>
 </head>
@@ -2388,6 +2452,10 @@ var BIZ = {
     if (root.querySelectorAll) [].forEach.call(root.querySelectorAll('.btn'), build);
   }
   scan(document.body);
+  /* let one frame paint with the buttons in their final state before the roll-over transitions are switched on */
+  var root = document.documentElement;
+  requestAnimationFrame(function () { requestAnimationFrame(function () { root.classList.add('bx-on'); }); });
+  setTimeout(function () { root.classList.add('bx-on'); }, 1000);   /* backgrounded tab: rAF is paused, never leave hover dead */
 })();
 </script>
 <!-- HERO HEIGHT + IMAGE PARALLAX (separate script so an error elsewhere can never block it) -->
