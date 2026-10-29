@@ -518,7 +518,7 @@
       inset: 0;
       z-index: 1;
       pointer-events: none;
-      background: linear-gradient(to bottom, rgb(28 31 36/.55) 0, transparent 18%), linear-gradient(to top, var(--ink) 0, var(--ink) 16%, rgb(28 31 36/.85) 34%, transparent 62%)
+      background: linear-gradient(to top, var(--ink) 0, var(--ink) 16%, rgb(28 31 36/.85) 34%, transparent 62%)
     }
 
     .hero-in {
@@ -828,7 +828,7 @@
     .line i { display: block; width: 100%; height: 100%; background: var(--accent); transform: scaleX(var(--p, 1)); transform-origin: left }
     .step { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 28px }
     .steps { --sq: 56px }   /* size of the numbered square; the stacked layout reads it for the column and the line */
-    .step .n { display: grid; place-items: center; width: var(--sq); height: var(--sq); background: var(--cream); color: var(--ink); font-size: 22px; font-weight: 500; transition: background .45s ease, color .45s ease }
+    .step .n { display: grid; place-items: center; width: var(--sq); height: var(--sq); background: var(--cream); color: var(--ink); font-size: 22px; font-weight: 500; border: 1px solid #00000026; transition: background .45s ease, color .45s ease }
     .step.on .n, html:not(.js) .step .n { background: var(--accent); color: #fff }
     .step div { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100% }
     .step h3 { font-size: clamp(20px, 1.8vw, 26px); font-weight: 550; letter-spacing: -.02em; line-height: 1.15; color: var(--ink) }
@@ -1507,7 +1507,7 @@
       .cta { flex-direction: column }
       .cta .btn { width: 100%; justify-content: space-between; padding-left: 18px }
       .micro { font-size: 13px; line-height: 1.4 }
-      .hero::after { background: linear-gradient(to bottom, rgb(28 31 36/.6) 0, transparent 20%), linear-gradient(to top, var(--ink) 0, rgb(28 31 36/.92) 30%, rgb(28 31 36/.6) 52%, transparent 78%) }
+      .hero::after { background: linear-gradient(to top, var(--ink) 0, rgb(28 31 36/.92) 30%, rgb(28 31 36/.6) 52%, transparent 78%) }
     }
 
     /* VERY NARROW SCREENS (about 400px and below, down to ~260px): nothing may be wider than the window.
@@ -2619,6 +2619,7 @@ var BIZ = {
     var words = split(el); if (!words.length) return;
     gsap.set(words, { yPercent: 115 });
     var vars = { yPercent: 0, duration: .9, ease: 'power3.out', stagger: Math.min(.035, .45 / words.length) };
+    if (el.matches('.services .intro')) vars.delay = .25;   /* services: the subtitle starts a beat after the title instead of together with it */
     if (el.closest('.hero')) { vars.delay = el.matches('h1') ? .15 : .4; gsap.to(words, vars); }
     else ScrollTrigger.create({ trigger: el, start: 'top 90%', once: true, onEnter: function () { gsap.to(words, vars); } });
   });
