@@ -1706,6 +1706,20 @@
     }
     @media (max-width: 900px) and (prefers-reduced-motion: reduce) { .menu nav a:focus-visible::before { transition: none !important } }
 
+    /* ===== HERO LAYOUT: "stacked" (prototype, switched from the debug panel; html.hero-stack) =====
+       Tablet and phone only (<= 900px). Desktop is never touched. Instead of a full-bleed photo that is cropped to a tall, narrow
+       window (and then covered by the text and a heavy overlay), the photo gets its own box at the top, --hm tall, and the
+       text block sits underneath it on the ink background. The slides become ordinary absolutely placed boxes inside the hero (no longer
+       fixed behind it), so they scroll away with the page. A short fade at the bottom of the photo blends it into the text area; there
+       is no overlay over the picture itself. --hm is roughly a 4:5 box (128vw) but never more than 66% of the screen height, so the
+       text block always starts in the first screen. */
+    @media (max-width: 900px) {
+      html.hero-stack { --hm: max(360px, min(128vw, 66svh)) }
+      html.hero-stack .hero { min-height: 0; background: var(--ink) }
+      html.hero-stack .slide { position: absolute; inset: 0 0 auto 0; width: 100%; height: var(--hm); overflow: hidden }
+      html.hero-stack .hero::after { inset: 0 0 auto 0; height: var(--hm); background: linear-gradient(to top, var(--ink) 0, rgb(28 31 36/0) 30%) }
+      html.hero-stack .hero-in { padding-top: calc(var(--hm) + 20px) }
+    }
   </style>
 </head>
 
@@ -1797,7 +1811,7 @@
 
       <section class="hero" id="top" aria-label="{{name}}" data-page-node-id="NQN4M1WKq2ocAH2QwpUeTd">
         <div class="slide on" data-page-node-id="UPYO5n5I2fkABf7xvgbSeS">
-          <div class="ph" data-src="assets/images/hero-1.avif" data-page-node-id="fmMfs7RU1i7FF9BNIE8ETz">
+          <div class="ph" data-src="assets/images/hero-1.avif" data-m="assets/images/hero-1-m" data-page-node-id="fmMfs7RU1i7FF9BNIE8ETz">
             <picture data-page-node-id="cAcZj7KJJs4slMOtbT9I1B">
               <source srcset="assets/images/hero-1.avif" type="image/avif" data-page-node-id="pJ44lAO0QQtlCFqgMbZERm">
               <source srcset="assets/images/hero-1.webp" type="image/webp" data-page-node-id="TmpOhuC7qKyArBrjR2zbyp"><img src="assets/images/hero-1.webp"
@@ -1807,7 +1821,7 @@
           </div>
         </div>
         <div class="slide" data-page-node-id="Z7CPePbpeeiYNENA6E54KU">
-          <div class="ph" data-src="assets/images/hero-2.png" data-page-node-id="G1wGvpVyHTrwrLR8O36w2V">
+          <div class="ph" data-src="assets/images/hero-2.png" data-m="assets/images/hero-2-m" data-page-node-id="G1wGvpVyHTrwrLR8O36w2V">
             <picture data-page-node-id="qBg4SUBALhhPo39z42dpjc">
               <!-- only a PNG exists for this slide: add avif/webp sources once the pipeline encodes it -->
               <img data-src="assets/images/hero-2.png"
@@ -1816,7 +1830,7 @@
           </div>
         </div>
         <div class="slide" data-page-node-id="vXRr8HFBK6B4cMQIhfyMBx">
-          <div class="ph" data-src="assets/images/hero-3.png" data-page-node-id="Z1Vci0mtR4KHpjanZiVJ5j">
+          <div class="ph" data-src="assets/images/hero-3.png" data-m="assets/images/hero-3-m" data-page-node-id="Z1Vci0mtR4KHpjanZiVJ5j">
             <picture data-page-node-id="FCLbLnN0omyNKAERZAtJRP">
               <!-- only a PNG exists for this slide: add avif/webp sources once the pipeline encodes it -->
               <img data-src="assets/images/hero-3.png"
@@ -2084,12 +2098,17 @@
         <button type="button" data-format="png" aria-pressed="false" data-page-node-id="elV1OSgPvLAWAXwa9bDwyw">PNG</button>
         <button type="button" data-format="webp" aria-pressed="false" data-page-node-id="mzXG6G5pk86BOydNYpoef1">WebP</button>
       </div>
+      <div class="dbg-row"><span>Hero layout</span>
+        <button type="button" data-hero-layout="current" aria-pressed="true">Current</button>
+        <button type="button" data-hero-layout="stacked" aria-pressed="false">Stacked</button>
+      </div>
       <div class="dbg-row" data-page-node-id="uvey6oTFE9udjPf8Vi1yi6"><span data-page-node-id="xZ0a1eZaAIHHUvcCFUZZOr">Slide</span>
         <button type="button" data-slide="0" aria-pressed="true" data-page-node-id="FPm0O6EJODEk6YJFKcnQA7">1</button>
         <button type="button" data-slide="1" aria-pressed="false" data-page-node-id="ChQPrdtyN9iAyRiVKTX6Uw">2</button>
         <button type="button" data-slide="2" aria-pressed="false" data-page-node-id="0tRBW3sxyDqTEzZBRKAYqu">3</button>
       </div>
       <div class="dbg-read" data-page-node-id="Rv8XEv3djLOBrKbidiCcXh"></div>
+      <div class="dbg-read" data-hero-layout-read></div>
       </div>
       <div class="dbg-row dbg-head"><span>Debug</span><button type="button" class="dbg-toggle" aria-expanded="false" aria-controls="dbg-body" aria-label="Expand debug panel"><svg viewBox="0 0 12 8" width="12" height="8" fill="none" aria-hidden="true"><path d="M1 6.5 6 1.5l5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
     </div>
@@ -2391,6 +2410,57 @@ var BIZ = {
       addEventListener('load', readout);
       setFormat('avif'); /* start on AVIF so the panel's state matches the DOM */
     })();
+</script>
+<!-- HERO LAYOUT SWITCH (prototype): current full-bleed hero vs. "stacked" (photo above the text) on tablet/phone, plus the mobile image files.
+     Mobile photos are optional: put assets/images/hero-1-m.{avif,webp,png} (and -2-m, -3-m, tall ~4:5) next to the desktop ones and the
+     stacked layout uses them below 900px; until a file exists the desktop photo is used (the script probes first, so nothing breaks or 404s
+     in the page itself). Delete this block, the "Hero layout" debug row and the html.hero-stack CSS to remove the prototype. -->
+<script>
+(function () {
+  var html = document.documentElement, panel = document.querySelector('.dbg'); if (!panel) return;
+  var MQ = '(max-width: 900px)', EXT = [['avif', 'image/avif'], ['webp', 'image/webp'], ['png', 'image/png']];
+  var phs = [].slice.call(document.querySelectorAll('.hero .slide .ph[data-m]')), stacked = false;
+  var note = panel.querySelector('[data-hero-layout-read]');
+
+  function probe(ph) {                                   /* which mobile files exist (tried once, only when Stacked is switched on) */
+    return ph._probe || (ph._probe = Promise.all(EXT.map(function (e) {
+      return new Promise(function (res) { var im = new Image(); im.onload = function () { res(e); }; im.onerror = function () { res(null); }; im.src = ph.getAttribute('data-m') + '.' + e[0]; });
+    })).then(function (r) { ph._found = r.filter(Boolean); return ph._found; }));
+  }
+  function apply(ph) {
+    var img = ph.querySelector('img'), pic = ph.querySelector('picture'); if (!img || !pic) return Promise.resolve();
+    var drop = function () { [].forEach.call(pic.querySelectorAll('source[data-m-src]'), function (x) { x.remove(); }); };
+    if (!stacked) { drop(); return Promise.resolve(); }
+    if (img.hasAttribute('data-src')) return Promise.resolve();   /* the load-order script has not released this slide yet; the observer below retries */
+    return probe(ph).then(function (found) {
+      if (!stacked) return;
+      drop();
+      var forced = img.dataset.fmt, use = forced && found.some(function (f) { return f[0] === forced; }) ? found.filter(function (f) { return f[0] === forced; }) : found;
+      use.slice().reverse().forEach(function (f) {      /* media-qualified sources go first, so they win over the desktop ones only below 900px */
+        var so = document.createElement('source'); so.setAttribute('data-m-src', ''); so.media = MQ; so.type = f[1]; so.srcset = ph.getAttribute('data-m') + '.' + f[0];
+        pic.insertBefore(so, pic.firstChild);
+      });
+    });
+  }
+  function report() {
+    if (!note) return;
+    if (!stacked) { note.textContent = 'layout: current'; return; }
+    note.textContent = 'stacked \u00b7 mobile photo: ' + phs.map(function (ph, k) { return (k + 1) + (ph._found && ph._found.length ? ' \u2713' : ' \u2013 (desktop photo)'); }).join('  ');
+  }
+  function setLayout(on) {
+    stacked = on; html.classList.toggle('hero-stack', on);
+    panel.querySelectorAll('[data-hero-layout]').forEach(function (b) { b.setAttribute('aria-pressed', (b.dataset.heroLayout === 'stacked') === on); });
+    Promise.all(phs.map(apply)).then(report);
+    report();
+    requestAnimationFrame(function () {                 /* the hero changed height: let the footer, scroll triggers and --hero-h catch up */
+      dispatchEvent(new Event('resize')); if (window.ScrollTrigger) ScrollTrigger.refresh();
+    });
+  }
+  panel.querySelectorAll('[data-hero-layout]').forEach(function (b) { b.addEventListener('click', function () { setLayout(b.dataset.heroLayout === 'stacked'); }); });
+  var mo = new MutationObserver(function (list) { var seen = []; list.forEach(function (m) { var ph = m.target.closest('.ph'); if (ph && seen.indexOf(ph) < 0) { seen.push(ph); apply(ph).then(report); } }); });
+  phs.forEach(function (ph) { var im = ph.querySelector('img'); if (im) mo.observe(im, { attributes: true, attributeFilter: ['src', 'data-src', 'data-fmt'] }); });
+  if (/[?&]hero=stacked\b/.test(location.search)) setLayout(true); else report();
+})();
 </script>
 <!-- IMAGE REVEAL (separate script so an error elsewhere can never block it) -->
 <script>
