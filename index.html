@@ -970,7 +970,11 @@
     .ft-social svg { width: 18px; height: 18px }
 
     /* ===== MOBILE MENU ===== */
-    .menu-btn { display: none; width: 44px; height: 44px; place-items: center; background: none; border: 1px solid rgb(255 255 255/.15); color: #fff; cursor: pointer }
+    /* ONE size for the open button and the close button (they swap in the same spot): 44px, or 36px once the header holds only the
+       logo and the menu button (<= 520px, where the estimate button has left the header). Both read the same token, so they can't differ. */
+    :root { --mb: 44px }
+    @media (max-width: 520px) { :root { --mb: 36px } }
+    .menu-btn { display: none; width: var(--mb); height: var(--mb); place-items: center; background: none; border: 1px solid rgb(255 255 255/.15); color: #fff; cursor: pointer }
     .menu-btn svg, .menu-close svg { width: 16px; height: 9px; overflow: visible }
     /* two lines -> X. Each line rotates about its own centre, then shifts half the gap (3.5) so both cross
        on the middle of the 16x9 box. overflow:visible keeps the 45deg arms from being clipped by the viewBox. */
@@ -989,7 +993,7 @@
     .menu-acts { display: flex; align-items: center; gap: 8px }
     @media (max-width: 760px) { .menu-acts .btn.phone { display: none } }
     @media (max-width: 520px) { .menu-acts .btn:not(.phone) { display: none } }
-    .menu-close { width: 44px; height: 44px; display: grid; place-items: center; background: none; border: 1px solid rgb(255 255 255/.15); color: #fff; cursor: pointer }
+    .menu-close { width: var(--mb); height: var(--mb); display: grid; place-items: center; background: none; border: 1px solid rgb(255 255 255/.15); color: #fff; cursor: pointer }
     .menu nav { display: flex; flex-direction: column; margin-top: clamp(24px, 5vh, 56px) }
     .menu nav a { padding: 16px 20px; font-size: clamp(30px, 8vw, 44px); font-weight: 500; letter-spacing: -.035em; line-height: 1.1; text-decoration: none; color: #fff;}
     /* the rule under the last link is drawn left to right when the menu opens, after the links have slid in */
