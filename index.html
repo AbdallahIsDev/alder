@@ -5,6 +5,7 @@
   <meta charset="utf-8" data-page-node-id="W2m4P2JcBHb8fUCfnpcshs">
   <meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="wfAreaTX00JEc5rBkrOu4O">
   <!-- colours the phone browser bar to match the ink the page sits on (--white) -->
+  <meta name="robots" content="noindex,nofollow">   <!-- concept page: remove this line when the site goes live -->
   <meta name="theme-color" content="#fff">
   <title>{{name}} | Roof replacement across {{area}}</title>
   <meta name="description"
@@ -518,7 +519,7 @@
       inset: 0;
       z-index: 1;
       pointer-events: none;
-      background: linear-gradient(to top, var(--ink) 0, var(--ink) 16%, rgb(28 31 36/.85) 34%, transparent 62%)
+      background: linear-gradient(to top, var(--ink) 0, var(--ink) 10%, rgb(28 31 36 / .85) 25%, transparent 40%)
     }
 
     .hero-in {
@@ -534,7 +535,7 @@
     .hero-in>div {
       display: flex;
       flex-direction: column;
-      gap: 20px
+      gap: 12px
     }
 
     .badge {
@@ -553,10 +554,10 @@
     }
 
     h1 {
-      font-weight: 450;
-      font-size: clamp(36px, 3.4vw, 56px);
+      font-weight: 400;
+      font-size: clamp(36px, 3.5vw, 56px);
       line-height: 1.2;
-      letter-spacing: -.04em;
+      letter-spacing: -.03em;
       color: #fff
     }
 
@@ -1175,6 +1176,7 @@
     @keyframes estFade { from { opacity: 0; transform: translateY(-4px) } }
     .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px }
     .fine { font-size: var(--fs); color: var(--mut) }
+    .hp { position: absolute !important; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden }   /* honeypot: off-screen, not display:none (some bots skip hidden fields) */
     .chk { display: flex; gap: 12px; align-items: center; padding: 14px 16px; background: var(--card); border: 1px solid var(--line); cursor: pointer; font-size: var(--fs); transition: background .2s, border-color .2s, transform .15s }
     .chk:hover { background: var(--card-h) } .chk:active { transform: scale(.992) } .chk:has(input:checked) { border-color: var(--sel) }
     .chk input { appearance: none; -webkit-appearance: none; flex: none; width: 22px; height: 22px; margin: 0; border: 1.5px solid rgb(255 255 255/.4); background: transparent center / 100% no-repeat; cursor: pointer; border-radius: 0 }
@@ -1845,7 +1847,7 @@
             <div class="trust" data-page-node-id="Ey9kFV7e4m3FBdbt9w6cOV"><span data-page-node-id="M60cdpljbVNKfBrzlce7fN">Licensed and insured</span><span data-page-node-id="JuSd3thzMso5RtpWtPWtIg">Locally owned</span></div>
           </div>
           <div data-page-node-id="CwfysI2C5MzsaHug3MmapE">
-            <p class="sub" data-page-node-id="KgRuWQmUfn5QvqYRvH6Le8">Every {{brand}} roof is built by our own crew, never subcontractors, with materials chosen to
+            <p class="sub" data-page-node-id="KgRuWQmUfn5QvqYRvH6Le8" style="margin-bottom: 16px">Every {{brand}} roof is built by our own crew, never subcontractors, with materials chosen to
               last. You get a clear written price up front, and it doesn’t change halfway through.</p>
             <div class="cta" data-page-node-id="SFTsv6gsy43tOo3xOd2JWa">
               <a class="btn" href="#estimate-form" data-open-estimate data-page-node-id="4UC61iBU5TWCuFaJFSeBlR">Get a Free Estimate <i data-page-node-id="qcBlXgjYk418Wf8ZPiKFpG"><svg viewBox="0 0 16 16" fill="none"
@@ -2135,7 +2137,7 @@
       <div class="est-prog" data-page-node-id="bo8i2FnXCvCYDf6LdRZEgE"><p class="est-step" aria-live="polite" data-page-node-id="AEXWNUGu9EdNk1rE2nJKRJ">Step 1 of 4</p><ol class="est-dots" aria-hidden="true" data-page-node-id="ydjcs232CoglgDyh4Jh5oD"><li data-page-node-id="pRgecOP5Er694jLVrwG9yb"></li><li data-page-node-id="ALJXjJaKDRLVKQQPPYDN7H"></li><li data-page-node-id="ARD6HWIY3EGyVMFAPNDHkn"></li><li data-page-node-id="UsJS2z1g3Fivvy0Cg85bYL"></li></ol></div>
       <button type="button" class="est-x" data-close aria-label="Close" data-page-node-id="nXbxbHNBKO4VeAngBD2g0A"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" data-page-node-id="eiOMNav1A9Es5wFrHWfrFg"><path d="M5 5l14 14M19 5 5 19" data-page-node-id="0X8x3ZDd5QM7KPTR6qAxP8"/></svg></button>
     </div>
-    <form class="est-form" novalidate onsubmit="return false" data-page-node-id="CnDFVpvtloZHceyJlRLUHh">
+    <form class="est-form" novalidate data-page-node-id="CnDFVpvtloZHceyJlRLUHh">
       <div class="est-body" data-lenis-prevent data-page-node-id="moreZQYve00QkT986DV0dy">
 
         <section class="est-pane" data-step="1" data-page-node-id="KnfagniFSsdKFX7yzk9PAp">
@@ -2173,13 +2175,15 @@
 
         <section class="est-pane" data-step="4" hidden data-page-node-id="rCrYD8H8fotOBsWhIBCQMe">
           <div class="est-head" data-page-node-id="4Q4U141jvUywAjhfKeVOaF"><h3 data-page-node-id="eosuZSVyEpqsGfIkYeJT1S">Where should we send your estimate?</h3></div>
-          <div class="f" data-f="name" data-page-node-id="Gn4ErDIjJSOP6w2YlYkb8y"><label for="e-name" data-page-node-id="H3eVR3yTjKClXslTjF2NPU">Your name</label><input id="e-name" name="name" type="text" autocomplete="name" enterkeyhint="next" data-page-node-id="ELXVmZKUs9uljJuMtgXDzU"><p class="err" role="alert" data-page-node-id="UdCEaxWcBUjQXjTsAvCbGH"></p></div>
+          <div class="f" data-f="name" data-page-node-id="Gn4ErDIjJSOP6w2YlYkb8y"><label for="e-name" data-page-node-id="H3eVR3yTjKClXslTjF2NPU">Your name</label><input id="e-name" name="name" type="text" autocomplete="name" enterkeyhint="next" maxlength="80" data-page-node-id="ELXVmZKUs9uljJuMtgXDzU"><p class="err" role="alert" data-page-node-id="UdCEaxWcBUjQXjTsAvCbGH"></p></div>
           <div class="row2" data-page-node-id="A7XuJNFptI6EFCgAXevfjo">
             <div class="f" data-f="phone" data-page-node-id="NtWgZLB4FosSGjd7YJ4Jk9"><label for="e-phone" data-page-node-id="JSG77Qb247YiSpVlXMaJLX">Phone</label><input id="e-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" enterkeyhint="next" maxlength="32" data-page-node-id="CWg0Pqsjqi71zUbxgnrNK4"><p class="err" role="alert" data-page-node-id="eA9LBPWnJBheDe07dfkn4x"></p></div>
-            <div class="f" data-f="email" data-page-node-id="6AmpmIrMm9TiMQk0n4sBDK"><label for="e-mail" data-page-node-id="051o6UMyk4OXNMuUsxf2GV">Email (optional)</label><input id="e-mail" name="email" type="email" inputmode="email" autocomplete="email" enterkeyhint="done" data-page-node-id="ESnq4TUvsqhCx3oEnm1gTU"><p class="err" role="alert" data-page-node-id="wkSVFFGqQBZ9DdD8uhjcdR"></p></div>
+            <div class="f" data-f="email" data-page-node-id="6AmpmIrMm9TiMQk0n4sBDK"><label for="e-mail" data-page-node-id="051o6UMyk4OXNMuUsxf2GV">Email (optional)</label><input id="e-mail" name="email" type="email" inputmode="email" autocomplete="email" enterkeyhint="done" maxlength="254" data-page-node-id="ESnq4TUvsqhCx3oEnm1gTU"><p class="err" role="alert" data-page-node-id="wkSVFFGqQBZ9DdD8uhjcdR"></p></div>
           </div>
-          <div class="f" data-page-node-id="zSSixugw6ixwuOPfzKG8it"><label for="e-notes" data-page-node-id="tShePoY9XeOGZkulbhPsub">Anything we should know? (optional)</label><textarea id="e-notes" name="notes"></textarea></div>
-          <p class="fine" data-page-node-id="4pVebfApdTCCJJIw75qS4H">By sending this, you agree to be contacted about your estimate. We reply within {{reply}}.</p>
+          <div class="f" data-page-node-id="zSSixugw6ixwuOPfzKG8it"><label for="e-notes" data-page-node-id="tShePoY9XeOGZkulbhPsub">Anything we should know? (optional)</label><textarea id="e-notes" name="notes" maxlength="2000"></textarea></div>
+          <!-- honeypot: invisible to people (off-screen, skipped by Tab and screen readers); bots fill it. Must stay empty. -->
+          <div class="hp" aria-hidden="true"><label>Leave this field empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+          <p class="fine" data-page-node-id="4pVebfApdTCCJJIw75qS4H">By sending this, you agree to be contacted about your estimate. We only use these details to contact you about your estimate. We reply within {{reply}}.</p>
         </section>
 
         <div class="est-alert" role="alert" tabindex="-1" hidden data-page-node-id="4nNkbTIXVLUPlb0DtUCHLE"><b data-page-node-id="Ow5PXozA2Onybgp27WUkMW">We couldn’t send your request.</b><span data-page-node-id="4ZpjlDJACLDG3SjTp7xLj8">Check your connection and try again. If it keeps failing, call us on <a href="tel:{{tel}}" data-page-node-id="DvEQdFrBB81SAESswHmpGH">{{phone}}</a>.</span></div>
@@ -3093,9 +3097,15 @@ var BIZ = {
     if (typeof window.estimateDeliver === 'function') return Promise.resolve(window.estimateDeliver(data));
     return new Promise(function (ok) { setTimeout(ok, 1000); });
   }
+  /* Anti-spam (client side; the server must repeat these checks, see api/lead.js): a filled honeypot or a form finished in under 2 s after the page loaded is a bot, so it gets a
+     silent fake "sent" and nothing is delivered. A second send within 30 s of the last one is refused. `elapsed` travels with the data so the server can check it too. */
+  var openedAt = Date.now(), lastSent = 0;
   function send() {
-    var data = collect(); reflow(function () { alertBox.hidden = true; }, 260); setBusy(true);
-    deliver(data).then(function () { showSent(data); }, showError);
+    var data = collect(); data.elapsed = Date.now() - openedAt;
+    reflow(function () { alertBox.hidden = true; }, 260); setBusy(true);
+    if (data.website || data.elapsed < 2000) { setTimeout(function () { showSent(data); }, 1000); return; }
+    if (Date.now() - lastSent < 30000) { setTimeout(showError, 400); return; }
+    deliver(data).then(function () { lastSent = Date.now(); openedAt = lastSent; showSent(data); }, showError);
   }
   function labelOf(n) { var r = form.querySelector('input[name="' + n + '"]:checked'); return r ? r.closest('.opt').querySelector('b').textContent : ''; }
   function recap(data) {
