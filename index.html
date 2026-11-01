@@ -1067,7 +1067,7 @@
     .menu { position: fixed; inset: 0; z-index: 100; display: none; flex-direction: column; background: var(--ink); color: #fff; padding: 12px 12px 32px; overflow-y: auto; visibility: hidden; clip-path: inset(0 0 100% 0); transition: clip-path .6s cubic-bezier(.7, 0, .2, 1), visibility 0s .6s }
     .menu.open { visibility: visible; clip-path: inset(0); transition-delay: 0s }
     /* same side padding as the header bar at this size (16 left, 12 right), so the close button sits exactly where the open button was */
-    .menu-top { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 12px 16px }
+    .menu-top { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 12px 12px }
     @media (min-width: 521px) { .menu-top { min-height: 68px } }   /* the header bar is 68px tall while it holds the 44px header buttons (12px padding each side), so the logo, the buttons and the close button line up with it */
     /* The overlay covers the header, so a button that is visible in the header is drawn again here, in the same place and with the
        same breakpoints as the header (phone leaves at 760, estimate at 520). It is a copy, so it is only ever on screen while the
