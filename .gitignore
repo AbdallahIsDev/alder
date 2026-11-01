@@ -7,7 +7,7 @@ dist/
 # --- local only, never published --------------------------------------------
 # Full-resolution originals the image pipeline reads. ~51 MB, and they are the
 # only copy, so they stay on disk — just not in the repo.
-_source-images/
+_source-assets/
 # Agent scratch and project memory.
 .workbuddy-ai/
 # Verification screenshots and crops. Regenerated on demand, never shipped.
@@ -29,3 +29,8 @@ desktop.ini
 # --- logs -------------------------------------------------------------------
 *.log
 npm-debug.log*
+
+# --- DEBUG (temporary) ------------------------------------------------------
+# Any _debug/ folder and any experiment folder, wherever they sit. Never published, never committed.
+_debug/
+*experiments*/

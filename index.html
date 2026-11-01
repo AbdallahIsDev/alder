@@ -25,7 +25,7 @@
         "alternateName": "{{brand}}",
         "description": "Roof replacement, storm and hail damage repair, leak repairs and free roof inspections across {{area}}. Every roof is built by our own crew, never subcontractors, with a clear written price up front.",
         "url": "{{url}}",
-        "image": "{{url}}assets/images/hero-1.webp",
+        "image": "{{url}}assets/images/hero/hero-poster.webp",
         "telephone": "{{tel}}",
         "email": "{{email}}",
         "address": { "@type": "PostalAddress", "streetAddress": "{{address}}" },
@@ -48,11 +48,57 @@
     ]
   }
   </script>
+  <!-- HERO MODE - the one switch for the hero media.
+       'video'  : the hero plays one of three tiers, picked once at load - 4K AV1 on a desktop, 1080p 16:9 on a
+                  tablet, 4:5 864x1080 portrait on a phone - with the matching still underneath as the fallback.
+       'slider' : the original three-photo slider, cloned out of <template id="hero-slider-template">.
+       Every hero script reads this and does nothing when the mode it belongs to is off. -->
+  <script>
+  /* DEBUG GATE (temporary). The panel and the hero switches are code in every build but only run on a
+     development origin, so the published site never renders them and never offers the old slider:
+       localhost / 127.0.0.1 / ::1 / *.local / file://   - always
+       any other host with ?dev=1 or ?debug=1            - sticky, so a phone preview keeps it across the
+                                                           reload the Hero type buttons cause
+     Everything below reads DEV. Deleting the panel means deleting this script, the .dbg markup, the DEBUG
+     CSS block and the DEBUG PANEL script; nothing else depends on it. */
+  var DEV = (function () {
+    try {
+      if (location.protocol === 'file:') return true;
+      var h = location.hostname;
+      if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]' || /\.local$/.test(h)) return true;
+      if (/[?&](dev|debug)=1(?:&|#|$)/.test(location.search)) {
+        try { sessionStorage.setItem('dbgDev', '1') } catch (e2) { }
+        return true;
+      }
+      return sessionStorage.getItem('dbgDev') === '1';
+    } catch (e) { return false; }
+  })();
+  if (!DEV) document.documentElement.classList.add('no-dev');
+
+  /* DEBUG (temporary): the mode can be set from the panel, which stores it and reloads. The URL wins, so
+     ?hero=slider / ?hero=video also works and a stale sessionStorage value can always be overridden.
+     Anything other than 'slider' means 'video'. Storage keys: dbgHeroMode, dbgPanelOpen, dbgDev.
+     Outside development this is locked to 'video' - the published hero is the only one reachable. */
+  var HERO_MODE = (function () {
+    try {
+      if (!DEV) return 'video';
+      var q = /[?&]hero=(slider|video)(?:&|#|$)/.exec(location.search);
+      if (q) return q[1];
+      return sessionStorage.getItem('dbgHeroMode') === 'slider' ? 'slider' : 'video';
+    } catch (e) { return 'video'; }
+  })();
+  </script>
   <script>document.documentElement.classList.add('js','split-pending','biz-pending');setTimeout(function(){document.documentElement.classList.remove('biz-pending')},3000);setTimeout(function(){document.documentElement.classList.remove('split-pending')},3000);if(!matchMedia('(prefers-reduced-motion: reduce)').matches){document.documentElement.classList.add('rv-pre');setTimeout(function(){document.documentElement.classList.remove('rv-pre')},3000)}</script>
   <!--
-  IMAGES: assets/images/{hero-1,about-crew}.{avif,webp} and
+  IMAGES: assets/images/about-crew.{avif,webp} and
   assets/images/services/{service-replacement,service-storm,service-repair,service-inspection}.{avif,webp}
-  (AVIF first, WebP fallback). hero-2 / hero-3 are PNG only.
+  (AVIF first, WebP fallback).
+  HERO MEDIA: one <video> with NO <source> children. The behaviour script picks a tier once, before anything is
+  requested, and appends that tier's sources - desktop: 4K AV1 then 4K HEVC then 1080p AV1 then 1080p H.264;
+  tablet: 1080p AV1 then 1080p H.264; phone: 4:5 864x1080 HEVC then H.264. The browser plays the first it can
+  decode and skips the rest without requesting them. The still behind it is hero-poster.avif, or the 4:5 crop at
+  600px and below. The three-photo slider it replaced is kept inert in <template id="hero-slider-template">:
+  a template is not parsed into the live DOM, so none of its images is requested. HERO_MODE = 'slider' restores it.
   Missing files show a labeled placeholder, the label disappears as soon as a photo loads.
   PLACEHOLDER TEXT to replace: phone, stats numbers, services, reply time.
   -->
@@ -495,6 +541,62 @@
       opacity: 1
     }
 
+    /* HERO VIDEO (HERO_MODE = 'video'). Same box and same stacking order as .slide: position:fixed inside the
+       clipped .hero, so the footage stays put while the next section slides up over it. The still is the video's
+       own poster, which is what stays on screen when autoplay is blocked or playback is suppressed. */
+    .hero-video {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100vh;
+      height: max(100lvh, var(--hero-h, 0px));
+      z-index: 0;
+      pointer-events: none
+    }
+
+    .hero-video video,
+    .hero-video picture {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center
+    }
+
+    /* the still is behind the footage and is never hidden; the footage is invisible until it has a frame to show,
+       so the gap between poster and first frame is the poster, not a black box */
+    .hero-video picture {
+      z-index: 0
+    }
+
+    /* object-fit on the <picture> itself does nothing (it is not a replaced element), and the global img rule only
+       caps the width, so the still used to paint at its own aspect and anchor top-left: 1426x802 of a 1426x900
+       box at 1440px, 376x470 of a 376x599 box on a phone. The still has to fill the box exactly like the footage
+       does, or the handover is a visible zoom. */
+    .hero-video picture img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center
+    }
+
+    .hero-video video {
+      z-index: 1;
+      opacity: 0;
+      transition: opacity .45s ease
+    }
+
+    .hero-video.is-playing video {
+      opacity: 1
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hero-video video { transition: none }
+    }
+
     .slide .ph {
       transform: scale(1);
       transition: transform 0s 1.6s
@@ -519,7 +621,7 @@
       inset: 0;
       z-index: 1;
       pointer-events: none;
-      background: linear-gradient(to top, var(--ink) 0, var(--ink) 10%, rgb(28 31 36 / .85) 25%, transparent 40%)
+      background: linear-gradient(to top, var(--ink) 0, var(--ink) 10%, rgb(28 31 36 / .75) 25%, transparent 40%)
     }
 
     .hero-in {
@@ -559,27 +661,6 @@
       line-height: 1.2;
       letter-spacing: -.03em;
       color: #fff
-    }
-
-    .trust {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 26px;
-      font-size: 14px;
-      color: #c9ccd1
-    }
-
-    .trust > span {
-      display: flex;
-      align-items: center;
-      gap: 8px
-    }
-
-    .trust > span::before {
-      content: "";
-      width: 8px;
-      height: 8px;
-      background: var(--cream)
     }
 
     .sub {
@@ -1016,7 +1097,7 @@
       .links { display: none }
       .menu-btn { display: grid }
       .menu { display: flex }
-      .bar { padding-left: 16px }
+      .bar { padding-left: 12px }
     }
     @media (max-width: 1140px) { .bar .btn, .menu-acts .btn { --btn-h: 44px } }   /* header CTAs, and their copies in the open menu's top row beside the 44px close button; the buttons lower in the menu (.menu-foot) and in the page stay 48px */
     @media (max-width: 760px) { .bar .btn.phone { display: none } }
@@ -1024,6 +1105,14 @@
     @media (min-width: 761px) { .menu-foot { display: none } .menu nav a:last-child::after { display: none } }   /* both buttons in the header: none in the menu */
     @media (min-width: 521px) and (max-width: 760px) { .menu-foot .menu-est { display: none } }                           /* only estimate in the header: just the phone in the menu */
     @media (prefers-reduced-motion: reduce) { .menu { transition: none !important } }
+
+    /* PHONES: the header sits 8px from the top, left and right instead of 12. The open menu takes the same
+       inset, so the logo and the button do not move by a single pixel when it opens: header 8 + .bar's own
+       16/12 padding, menu 8 + .menu-top's own 16/12 padding - the same numbers on both sides. */
+    @media (max-width: 767px) {
+      header { top: 8px; left: 8px; right: 8px }
+      .menu { padding: 8px 8px 32px }
+    }
 
     /* ===== MOBILE MENU LINK HOVER: accent slider, locked =====
        The accent wipes in from the left behind the label. It hangs off a pseudo element on the
@@ -1429,7 +1518,21 @@
       padding-left: 52px
     }
 
-    /* slider off only stops auto-rotation; manual slide jumps still animate */
+    /* ===== DEBUG (temporary) - hero type / video source / slider audit =====
+       Remove this block together with the .dbg markup and the DEBUG PANEL script. */
+    /* The panel is markup in every build but only renders on a development origin (see the DEBUG GATE script
+       in <head>). Hiding it here as well as removing the node keeps it out of the first paint on a slow
+       connection, where the end-of-body script can run after the browser has already drawn. */
+    html.no-dev .dbg { display: none !important }
+    .dbg-row[hidden] { display: none }
+    .dbg-read {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%
+    }
+    /* "Slider: Off" really freezes the frame: no crossfade and no Ken Burns drift while it is off */
+    html.dbg-noslide .slide, html.dbg-noslide .slide .ph { transition: none !important; transform: none !important }
 
     /* TABLET (up to 1024px): the hero stacks here (the header collapses to the menu button earlier, at 1140).
        At ~940px two columns squeezed the headline and a paragraph + two buttons into ~350px each and the buttons wrapped into a stack of unequal widths. */
@@ -1500,15 +1603,14 @@
        Hidden: the eyebrow (the headline already says it), the paragraph (the trust row and the sections below carry it),
        and the second button (the menu already links to Projects). Stronger bottom fade so the text stays readable. */
     @media (max-width: 640px) {
-      .hero-in { gap: 0; padding-top: 110px; padding-bottom: 28px }
-      .hero-in > div { gap: 16px }
-      .hero-in > div + div { margin-top: 24px }
+      .hero-in { gap: 0; padding-top: 110px; padding-bottom: 20px }
+      .hero-in > div { gap: 12px }
+      .hero-in > div + div { margin-top: 16px }
       .hero .badge, .hero .sub, .hero .cta .btn.ghost, .hero h1 br { display: none }
       .hero h1 { font-size: clamp(32px, 8.8vw, 40px); line-height: 1.12; text-wrap: balance }
-      .trust { gap: 6px 18px; font-size: 13px }
       .cta { flex-direction: column }
       .cta .btn { width: 100%; justify-content: space-between; padding-left: 18px }
-      .micro { font-size: 13px; line-height: 1.4 }
+      .micro { font-size: 12px; line-height: 1.35 }
       .hero::after { background: linear-gradient(to top, var(--ink) 0, rgb(28 31 36/.92) 30%, rgb(28 31 36/.6) 52%, transparent 78%) }
     }
 
@@ -1708,19 +1810,43 @@
     }
     @media (max-width: 900px) and (prefers-reduced-motion: reduce) { .menu nav a:focus-visible::before { transition: none !important } }
 
-    /* ===== HERO LAYOUT: "stacked" (prototype, switched from the debug panel; html.hero-stack) =====
-       Tablet and phone only (<= 900px). Desktop is never touched. Instead of a full-bleed photo that is cropped to a tall, narrow
-       window (and then covered by the text and a heavy overlay), the photo gets its own box at the top, --hm tall, and the
-       text block sits underneath it on the ink background. The slides become ordinary absolutely placed boxes inside the hero (no longer
-       fixed behind it), so they scroll away with the page. A short fade at the bottom of the photo blends it into the text area; there
-       is no overlay over the picture itself. --hm is roughly a 4:5 box (128vw) but never more than 66% of the screen height, so the
-       text block always starts in the first screen. */
+    /* ===== HERO LAYOUT: STACKED (tablet and phone, <= 900px, always on) =====
+       Desktop is never touched. Instead of a full-bleed photo that is cropped to a tall, narrow window (and then covered by
+       the text and a heavy overlay), the photo gets its own box at the top, --hm tall, and the text block sits underneath it
+       on the ink background. The media becomes an ordinary absolutely placed box inside the hero (no longer fixed behind it),
+       so it scrolls away with the page. A short fade at the bottom of the photo blends it into the text area; there is no
+       overlay over the picture itself. --hm is roughly a 4:5 box (128vw) but never more than 66% of the screen height, so the
+       text block always starts in the first screen. The video and the slider share the box: below 900px .hero-video stops
+       being a full-viewport fixed layer and becomes the same --hm-tall frame, with the footage cropped to it. */
     @media (max-width: 900px) {
-      html.hero-stack { --hm: max(360px, min(128vw, 66svh)) }
-      html.hero-stack .hero { min-height: 0; background: var(--ink) }
-      html.hero-stack .slide { position: absolute; inset: 0 0 auto 0; width: 100%; height: var(--hm); overflow: hidden }
-      html.hero-stack .hero::after { inset: 0 0 auto 0; height: var(--hm); background: linear-gradient(to top, var(--ink) 0, rgb(28 31 36/0) 30%) }
-      html.hero-stack .hero-in { padding-top: calc(var(--hm) + 20px) }
+      /* FALLBACK ONLY. The band is measured by the script at the bottom of the page ("one screen minus the
+         text block") and written over this as an inline --hm on .hero; these terms only decide what the page
+         looks like if that script never runs. They keep the old reserve so the block still fits the window:
+         128vw is the 4:5 crop, 66svh stops the picture eating a tall screen, and the last term leaves room
+         for a headline and a button. The video's file, object-fit and playback are untouched at every width -
+         only the height of the frame it is cropped into moves. */
+      :root { --hm: max(240px, min(128vw, 66svh, calc(100svh - 290px))) }
+      .hero { min-height: 100svh; align-items: flex-end; background: var(--ink) }
+      .slide { position: absolute; inset: 0 0 auto 0; width: 100%; height: var(--hm); overflow: hidden }
+      .hero-video { position: absolute; inset: 0 0 auto 0; width: 100%; height: var(--hm); overflow: hidden }
+      .hero-video video { object-fit: cover }
+      .hero::after { inset: 0 0 auto 0; height: var(--hm); background: linear-gradient(to top, var(--ink) 0, rgb(28 31 36/0) 30%) }
+      /* The text block is pinned to the bottom of the hero, the same way the desktop one is, and the band above
+         it is then stretched down to meet it - the script at the bottom of the page writes --hm as "hero height
+         minus the text block", so there is no dead ink between the picture and the headline at any window height.
+         Everything that draws the band reads the same variable (.slide, .hero-video, .hero::after), which is why
+         the video and the photo slider stay in step. The value below is only the pre-JS fallback. */
+      .hero-in { padding-top: 0; padding-bottom: 20px }
+    }
+
+    /* The stacked order is fixed: band on top, copy underneath, fade at the band's bottom edge. */
+
+    /* A window wider than 640 brings the paragraph back (it is hidden on phones) but can still be short -
+       a tablet in landscape, a split screen. The text block is then ~140px taller, so the reserve has to
+       grow with it or the last line lands under the fold. Portrait tablets are untouched: 768x1024 never
+       matches this. */
+    @media (min-width: 641px) and (max-width: 900px) and (max-height: 820px) {
+      :root { --hm: max(240px, min(128vw, 66svh, calc(100svh - 440px))) }
     }
   </style>
 </head>
@@ -1812,39 +1938,54 @@
 
 
       <section class="hero" id="top" aria-label="{{name}}" data-page-node-id="NQN4M1WKq2ocAH2QwpUeTd">
-        <div class="slide on" data-page-node-id="UPYO5n5I2fkABf7xvgbSeS">
-          <div class="ph" data-src="assets/images/hero-1.avif" data-m="assets/images/hero-1-m" data-page-node-id="fmMfs7RU1i7FF9BNIE8ETz">
-            <picture data-page-node-id="cAcZj7KJJs4slMOtbT9I1B">
-              <source srcset="assets/images/hero-1.avif" type="image/avif" data-page-node-id="pJ44lAO0QQtlCFqgMbZERm">
-              <source srcset="assets/images/hero-1.webp" type="image/webp" data-page-node-id="TmpOhuC7qKyArBrjR2zbyp"><img src="assets/images/hero-1.webp"
-                alt="{{brand}} crew replacing a roof, half finished, on a stone home" fetchpriority="high"
-                data-page-node-id="MTfkTpAsHOAFSFIGcjZWRP">
-            </picture>
-          </div>
+        <!-- HERO VIDEO (HERO_MODE = 'video'). Sources are tried in order, first match wins: the portrait 720x900
+             H.264 file below 600px, then HEVC for Safari/Edge hardware decoders, then AV1 for Chrome, then the H.264
+             file as the universal fallback. The mobile file has to come first: a media-qualified <source> placed
+             after an unqualified one never wins, because the earlier source already matches. 601px to 900px uses the
+             desktop chain on purpose - the stacked media box is almost square there, so a portrait crop would be
+             cropped back to a letterbox anyway. preload="metadata" keeps the first paint to the poster; loop + muted
+             + playsinline is what makes autoplay legal. No controls, out of the tab order, hidden from assistive
+             tech. -->
+        <!-- HERO VIDEO, INERT UNTIL CLONED. A <template> is not parsed into the live DOM, so in slider mode
+             neither the poster nor any video file is requested - the old markup sat directly in the hero, which
+             made the browser start fetching a video before the behaviour script could take it away. In video mode
+             the box below is cloned in immediately (the script right after this template). The poster <img>
+             carries loading="lazy" for the same reason slide 1 does: Firefox resolves <picture> inside a template
+             and would fetch the winning candidate; with no box it defers, and once cloned into the hero it is in
+             the viewport and loads at once. (DEBUG (temporary): this wrapper is part of the test feature.) -->
+        <template id="hero-video-template">
+        <div class="hero-video" data-hero-video>
+          <!-- POSTER. A <picture>, not the video's poster attribute: the attribute would download the same
+               still a second time and can only carry one format. It sits behind the <video> in the same box, so
+               it is what stays on screen while the first frame decodes, when autoplay is blocked, and when
+               reduced motion or Save-Data drops the sources. The video is transparent until it actually plays
+               (.is-playing on the box), which is what removes the black flash between poster and first frame.
+               The media query is the same 600px breakpoint as the phone tier, and the phone still is the
+               4:5 crop of the same frame the phone video starts on, so the swap never jumps. -->
+          <picture class="hero-poster">
+            <source media="(max-width: 600px)" srcset="assets/images/hero/hero-poster-mobile.avif" type="image/avif">
+            <source media="(max-width: 600px)" srcset="assets/images/hero/hero-poster-mobile.webp" type="image/webp">
+            <source srcset="assets/images/hero/hero-poster.avif" type="image/avif">
+            <source srcset="assets/images/hero/hero-poster.webp" type="image/webp"><img src="assets/images/hero/hero-poster.webp"
+              alt="" fetchpriority="high" loading="lazy" decoding="async" aria-hidden="true">
+          </picture>
+          <video autoplay muted loop playsinline preload="metadata"
+            disablepictureinpicture aria-hidden="true" tabindex="-1"></video>
         </div>
-        <div class="slide" data-page-node-id="Z7CPePbpeeiYNENA6E54KU">
-          <div class="ph" data-src="assets/images/hero-2.png" data-m="assets/images/hero-2-m" data-page-node-id="G1wGvpVyHTrwrLR8O36w2V">
-            <picture data-page-node-id="qBg4SUBALhhPo39z42dpjc">
-              <!-- only a PNG exists for this slide: add avif/webp sources once the pipeline encodes it -->
-              <img data-src="assets/images/hero-2.png"
-                alt="Roofer's hands setting a shingle over engineered underlayment" data-page-node-id="i0DGMRAYoLdHr1bDSkEMSB">
-            </picture>
-          </div>
-        </div>
-        <div class="slide" data-page-node-id="vXRr8HFBK6B4cMQIhfyMBx">
-          <div class="ph" data-src="assets/images/hero-3.png" data-m="assets/images/hero-3-m" data-page-node-id="Z1Vci0mtR4KHpjanZiVJ5j">
-            <picture data-page-node-id="FCLbLnN0omyNKAERZAtJRP">
-              <!-- only a PNG exists for this slide: add avif/webp sources once the pipeline encodes it -->
-              <img data-src="assets/images/hero-3.png"
-                alt="Finished charcoal shingle roof on a stone home in morning light" data-page-node-id="7b8Z2hMWUzmW80GDrDuUF6">
-            </picture>
-          </div>
-        </div>
+        </template>
+        <script>
+        /* DEBUG (temporary): video mode puts the box back where it used to be, before the behaviour script runs. */
+        (function () {
+          if (HERO_MODE !== 'video') return;
+          var t = document.getElementById('hero-video-template'), hero = document.querySelector('.hero');
+          if (!t || !hero) return;
+          hero.insertBefore(t.content.cloneNode(true), hero.querySelector('.hero-in'));
+        })();
+        </script>
         <div class="wrap hero-in" data-page-node-id="4PxwRDAI7z4v6219tO30z6">
           <div data-page-node-id="zxOHGCfdD9XWgBJg5lD8g7">
             <p class="badge" data-page-node-id="invbJUDIvB8gYqDXmJ7hKH">Roof replacement across {{area}}</p>
             <h1 data-page-node-id="nSbSFBhdZ8spqmNx8nH2VX">Your roof protects everything <br  data-page-node-id="ihQPwF38ooHnJWaXeomEiE"/>under it. We build it that way.</h1>
-            <div class="trust" data-page-node-id="Ey9kFV7e4m3FBdbt9w6cOV"><span data-page-node-id="M60cdpljbVNKfBrzlce7fN">Licensed and insured</span><span data-page-node-id="JuSd3thzMso5RtpWtPWtIg">Locally owned</span></div>
           </div>
           <div data-page-node-id="CwfysI2C5MzsaHug3MmapE">
             <p class="sub" data-page-node-id="KgRuWQmUfn5QvqYRvH6Le8" style="margin-bottom: 16px">Every {{brand}} roof is built by our own crew, never subcontractors, with materials chosen to
@@ -1861,11 +2002,153 @@
         </div>
       </section>
 
+      <!-- HERO SLIDER, KEPT BUT INERT. A <template> is not parsed into the live DOM, so nothing inside it is
+           rendered or decoded - which is why the slider can be restored without its three photos costing anything
+           while HERO_MODE = 'video'. HERO_MODE = 'slider' clones this into the hero before the image-load-order
+           script runs. Do not replace the template with display:none: a hidden <img> is still fetched.
+           Slide 1 carries loading="lazy" for one reason: Firefox resolves <picture> selection inside a template
+           and fetches the winning candidate even though nothing is rendered, so a plain src there costs a real
+           request in video mode. Lazy defers it while the node has no box, and once the template is cloned into
+           the hero the image is in the viewport, so it loads at once - still the first slide, still
+           fetchpriority="high". Verified in Chromium, Firefox and WebKit: zero hero-1/2/3 requests in video mode. -->
+      <template id="hero-slider-template">
+        <div class="slide on" data-page-node-id="UPYO5n5I2fkABf7xvgbSeS">
+          <div class="ph" data-src="assets/images/hero/hero-1.avif" data-page-node-id="fmMfs7RU1i7FF9BNIE8ETz">
+            <picture data-page-node-id="cAcZj7KJJs4slMOtbT9I1B">
+              <source media="(max-width: 900px)" srcset="assets/images/hero/hero-1-m.avif" type="image/avif" data-page-node-id="pJ44lAO0QQtlCFqgMbZERm">
+              <source media="(max-width: 900px)" srcset="assets/images/hero/hero-1-m.webp" type="image/webp">
+              <source srcset="assets/images/hero/hero-1.avif" type="image/avif">
+              <source srcset="assets/images/hero/hero-1.webp" type="image/webp"><img src="assets/images/hero/hero-1.webp"
+                alt="{{brand}} crew replacing a roof, half finished, on a stone home" fetchpriority="high" loading="lazy"
+                data-page-node-id="MTfkTpAsHOAFSFIGcjZWRP">
+            </picture>
+          </div>
+        </div>
+        <div class="slide" data-page-node-id="Z7CPePbpeeiYNENA6E54KU">
+          <div class="ph" data-src="assets/images/hero/hero-2.avif" data-page-node-id="G1wGvpVyHTrwrLR8O36w2V">
+            <picture data-page-node-id="qBg4SUBALhhPo39z42dpjc">
+              <source media="(max-width: 900px)" data-srcset="assets/images/hero/hero-2-m.avif" type="image/avif">
+              <source media="(max-width: 900px)" data-srcset="assets/images/hero/hero-2-m.webp" type="image/webp">
+              <source data-srcset="assets/images/hero/hero-2.avif" type="image/avif">
+              <source data-srcset="assets/images/hero/hero-2.webp" type="image/webp"><img data-src="assets/images/hero/hero-2.webp"
+                alt="Roofer's hands setting a shingle over engineered underlayment" data-page-node-id="i0DGMRAYoLdHr1bDSkEMSB">
+            </picture>
+          </div>
+        </div>
+        <div class="slide" data-page-node-id="vXRr8HFBK6B4cMQIhfyMBx">
+          <div class="ph" data-src="assets/images/hero/hero-3.avif" data-page-node-id="Z1Vci0mtR4KHpjanZiVJ5j">
+            <picture data-page-node-id="FCLbLnN0omyNKAERZAtJRP">
+              <source media="(max-width: 900px)" data-srcset="assets/images/hero/hero-3-m.avif" type="image/avif">
+              <source media="(max-width: 900px)" data-srcset="assets/images/hero/hero-3-m.webp" type="image/webp">
+              <source data-srcset="assets/images/hero/hero-3.avif" type="image/avif">
+              <source data-srcset="assets/images/hero/hero-3.webp" type="image/webp"><img data-src="assets/images/hero/hero-3.webp"
+                alt="Finished charcoal shingle roof on a stone home in morning light" data-page-node-id="7b8Z2hMWUzmW80GDrDuUF6">
+            </picture>
+          </div>
+        </div>
+      </template>
+
+      <!-- HERO VIDEO BEHAVIOUR. Runs immediately after the video markup, so the tier is chosen before a single
+           byte of video is requested and a suppressed hero never starts downloading at all.
+
+           THREE TIERS. The <video> ships with no <source> children: the media attribute on a <source> inside a
+           <video> is not dependable across browsers, so the decision is made here instead, once, at load.
+             phone   600px or less ....................... 4:5 864x1080, HEVC then H.264 (no AV1 on phones)
+             desktop above 900px with a mouse or trackpad . 4K AV1, 4K HEVC, then the 1080p pair
+             tablet  everything else, every touch screen . 1080p 16:9, AV1 then H.264
+           The browser plays the first source in the chosen list that it can decode, and it skips a source whose
+           type it does not support without requesting it, so one visit fetches exactly one file. The type
+           strings carry the real profile and level of each file (from ffprobe), not a guess.
+
+           Reduced motion or Save-Data: no sources are added at all, so the poster is all that is ever shown and
+           all that is ever fetched. Otherwise the clip pauses when the hero leaves the viewport and resumes when
+           it comes back. A blocked autoplay leaves the poster up, because the poster is the video's own still -
+           never a black box. -->
+      <script>
+      (function () {
+        var box = document.querySelector('[data-hero-video]'); if (!box) return;
+        if (HERO_MODE !== 'video') { box.remove(); return; }   /* slider mode: the template was never cloned */
+        var v = box.querySelector('video'); if (!v) return;
+
+        /* one list per tier: [file, type]. Phone first, because that is the narrowest case. */
+        var TIERS = {
+          phone: [
+            ['assets/images/hero/hero-m.hevc.mp4', 'video/mp4; codecs="hvc1.1.6.L93.B0"'],
+            ['assets/images/hero/hero-m.h264.mp4', 'video/mp4; codecs="avc1.640028"']
+          ],
+          desktop: [
+            ['assets/images/hero/hero-4k.av1.mp4', 'video/mp4; codecs="av01.0.12M.08"'],
+            ['assets/images/hero/hero-4k.hevc.mp4', 'video/mp4; codecs="hvc1.1.6.L150.B0"'],
+            ['assets/images/hero/hero-1080.av1.mp4', 'video/mp4; codecs="av01.0.08M.08"'],
+            ['assets/images/hero/hero-1080.h264.mp4', 'video/mp4; codecs="avc1.640028"']
+          ],
+          tablet: [
+            ['assets/images/hero/hero-1080.av1.mp4', 'video/mp4; codecs="av01.0.08M.08"'],
+            ['assets/images/hero/hero-1080.h264.mp4', 'video/mp4; codecs="avc1.640028"']
+          ]
+        };
+        var tier = matchMedia('(max-width: 600px)').matches ? 'phone'
+          : matchMedia('(min-width: 901px) and (hover: hover) and (pointer: fine)').matches ? 'desktop'
+            : 'tablet';
+        /* read by the debug panel, which shows the tier and the file the browser actually settled on */
+        window.__heroTier = { tier: tier, list: TIERS[tier].map(function (s) { return s[0].split('/').pop() }) };
+
+        var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches || (conn && conn.saveData)) {
+          v.removeAttribute('autoplay');
+          v.pause();
+          v.load();                                            /* no sources to fetch: the poster stands in */
+          box.classList.add('poster-only');
+          window.__heroTier.tier = 'poster-only';
+          return;
+        }
+
+        /* Drop the sources this browser says it cannot decode. Firefox starts fetching the HEVC file and only
+           then rejects it, which is a second request for nothing; asking canPlayType first keeps a visit to
+           exactly one file. If every type is rejected (a browser with none of them) the full list goes in and
+           the element does the fallback itself. */
+        var list = TIERS[tier].filter(function (s) { return v.canPlayType(s[1]) !== '' });
+        if (!list.length) list = TIERS[tier];
+        window.__heroTier.picked = list.map(function (s) { return s[0].split('/').pop() });
+        list.forEach(function (s) {
+          var n = document.createElement('source');
+          n.src = s[0];
+          n.type = s[1];
+          v.appendChild(n);
+        });
+        v.load();                                              /* sources added after parse need this to start */
+
+        var play = function () {
+          var p = v.play();
+          if (p && p.catch) p.catch(function () { box.classList.add('play-blocked') });   /* poster stays */
+        };
+        v.addEventListener('playing', function () {
+          box.classList.remove('play-blocked');
+          box.classList.add('is-playing');
+        });
+        /* observe the hero, not the video: the video is position:fixed, so its own rect never leaves the viewport */
+        var hero = document.querySelector('.hero');
+        if (window.IntersectionObserver && hero) {
+          new IntersectionObserver(function (es) {
+            es.forEach(function (e) { if (!e.isIntersecting) v.pause(); else play() });
+          }, { threshold: 0 }).observe(hero);
+        } else play();
+      })();
+      </script>
+
       <!-- IMAGE LOAD ORDER. Hero slide 1 first (a plain eager <img>, fetchpriority high). The moment it has loaded,
            slide 2 starts, then slide 3. After those three, the Before/After images load (first pair first), because that
            section must never show a placeholder and its Next/Previous must never wait on a download. Every other image keeps
            its own loading="lazy". Held-back images carry data-src / data-srcset instead of src / srcset. -->
       <script>
+      /* slider mode: put the original three slides back into the hero before anything below looks for them.
+         The template is inert, so this is the only moment its <img> elements enter the document. */
+      (function () {
+        if (HERO_MODE !== 'slider') return;
+        var t = document.getElementById('hero-slider-template'), hero = document.querySelector('.hero');
+        if (!t || !hero) return;
+        hero.insertBefore(t.content.cloneNode(true), hero.querySelector('.hero-in'));
+      })();
       (function () {
         function settle(img) {                       /* resolves when the image has finished (or failed) and is decoded */
           return new Promise(function (res) {
@@ -1885,7 +2168,8 @@
           }
           return settle(img);
         }
-        var heroImgs = [].slice.call(document.querySelectorAll('.hero .slide img'));
+        /* slider mode only: in video mode there is no .slide in the DOM and the list is empty */
+        var heroImgs = HERO_MODE === 'slider' ? [].slice.call(document.querySelectorAll('.hero .slide img')) : [];
         var baResolve = function () {};
         function pairReady(pair) {
           if (pair._ready) return Promise.resolve();
@@ -2086,31 +2370,32 @@
       <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 16.5V4M4.6 9.4 10 4l5.4 5.4"/></svg>
     </button>
 
-    <!-- DEBUG PANEL - prototype only. Hero image format, hero slider, hero slide. The collapse
-         toggle is the LAST row, so the panel opens upward and the button never jumps as rows are
-         added; it starts collapsed. Delete this block and the "DEBUG PANEL" script block to remove it. -->
+    <!-- DEBUG PANEL - prototype only. Hero type (video | slider), then the slider's own rows, then one
+         read-only line saying which video file and tier is playing. The collapse toggle is the LAST row, so
+         the panel opens upward and the button never jumps as rows are added; it starts collapsed. -->
+
     <div class="dbg collapsed" role="group" aria-label="Prototype debugging" data-page-node-id="kVca7BBVhkPvwnFF0xOOBi">
       <div class="dbg-body" id="dbg-body">
-      <div class="dbg-row" data-page-node-id="che6tVoND9Utn8WV8mMHec"><span data-page-node-id="EYTca8BYcMmfwRSiltRD15">Slider</span>
-        <button type="button" data-slider="on" aria-pressed="false" data-page-node-id="5C7HNQSIvqx8aFYlzMXVgz">On</button>
-        <button type="button" data-slider="off" aria-pressed="true" data-page-node-id="OeDS1kYkG0tUuPIcjn2pjO">Off</button>
+      <!-- DEBUG (temporary). "Hero type" is always visible; the rows under it belong to the active mode. -->
+      <div class="dbg-row" data-row="type" data-page-node-id="che6tVoND9Utn8WV8mMHec"><span data-page-node-id="EYTca8BYcMmfwRSiltRD15">Hero type</span>
+        <button type="button" data-type="video" aria-pressed="true" data-page-node-id="5C7HNQSIvqx8aFYlzMXVgz">Video</button>
+        <button type="button" data-type="slider" aria-pressed="false" data-page-node-id="OeDS1kYkG0tUuPIcjn2pjO">Slider</button>
       </div>
-      <div class="dbg-row" data-page-node-id="CGmLd0htF5NRS3zPO77uCT"><span data-page-node-id="D5NGDAeUNtxoRoPKbO8Xhj">Format</span>
-        <button type="button" data-format="avif" aria-pressed="true" data-page-node-id="iR2ICMBTiuZTNIouaP3Sw5">AVIF</button>
-        <button type="button" data-format="png" aria-pressed="false" data-page-node-id="elV1OSgPvLAWAXwa9bDwyw">PNG</button>
+      <div class="dbg-row" data-row="slider" data-page-node-id="che6tVoND9Utn8WV8mMHec2"><span>Slider</span>
+        <button type="button" data-slider="on" aria-pressed="false" data-page-node-id="5C7HNQSIvqx8aFYlzMXVgz2">On</button>
+        <button type="button" data-slider="off" aria-pressed="true" data-page-node-id="OeDS1kYkG0tUuPIcjn2pjO2">Off</button>
+      </div>
+      <div class="dbg-row" data-row="slider" data-page-node-id="CGmLd0htF5NRS3zPO77uCT"><span data-page-node-id="D5NGDAeUNtxoRoPKbO8Xhj">Format</span>
+        <button type="button" data-format="auto" aria-pressed="true">Auto</button>
+        <button type="button" data-format="avif" aria-pressed="false" data-page-node-id="iR2ICMBTiuZTNIouaP3Sw5">AVIF</button>
         <button type="button" data-format="webp" aria-pressed="false" data-page-node-id="mzXG6G5pk86BOydNYpoef1">WebP</button>
       </div>
-      <div class="dbg-row"><span>Hero layout</span>
-        <button type="button" data-hero-layout="current" aria-pressed="true">Current</button>
-        <button type="button" data-hero-layout="stacked" aria-pressed="false">Stacked</button>
-      </div>
-      <div class="dbg-row" data-page-node-id="uvey6oTFE9udjPf8Vi1yi6"><span data-page-node-id="xZ0a1eZaAIHHUvcCFUZZOr">Slide</span>
+      <div class="dbg-row" data-row="slider" data-page-node-id="uvey6oTFE9udjPf8Vi1yi6"><span data-page-node-id="xZ0a1eZaAIHHUvcCFUZZOr">Slide</span>
         <button type="button" data-slide="0" aria-pressed="true" data-page-node-id="FPm0O6EJODEk6YJFKcnQA7">1</button>
         <button type="button" data-slide="1" aria-pressed="false" data-page-node-id="ChQPrdtyN9iAyRiVKTX6Uw">2</button>
         <button type="button" data-slide="2" aria-pressed="false" data-page-node-id="0tRBW3sxyDqTEzZBRKAYqu">3</button>
       </div>
       <div class="dbg-read" data-page-node-id="Rv8XEv3djLOBrKbidiCcXh"></div>
-      <div class="dbg-read" data-hero-layout-read></div>
       </div>
       <div class="dbg-row dbg-head"><span>Debug</span><button type="button" class="dbg-toggle" aria-expanded="false" aria-controls="dbg-body" aria-label="Expand debug panel"><svg viewBox="0 0 12 8" width="12" height="8" fill="none" aria-hidden="true"><path d="M1 6.5 6 1.5l5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
     </div>
@@ -2304,12 +2589,13 @@ var BIZ = {
     }
 
     /* hero slider: crossfade, slow zoom handled in CSS */
-    const S = [...document.querySelectorAll('.slide')], D = [9000, 7000, 7000]; let i = 0;
+    const S = HERO_MODE === 'slider' ? [...document.querySelectorAll('.slide')] : [], D = [9000, 7000, 7000]; let i = 0;
     let heroTimer = 0, heroOn = false; /* debug default: rotation off */
     const heroNext = () => {
       const nx = S[(i + 1) % S.length].querySelector('img');
       if (nx && (nx.hasAttribute('data-src') || !nx.complete)) { heroTimer = setTimeout(heroNext, 400); return }   /* next slide still loading: wait, never crossfade to a half-loaded image */
       S[i].classList.remove('on'); i = (i + 1) % S.length; S[i].classList.add('on');
+      if (window.__dbgSyncUI) window.__dbgSyncUI();   /* DEBUG (temporary): keep the panel in step with the rotation */
       if (heroOn) heroTimer = setTimeout(heroNext, D[i])
     };
     if (heroOn && S.length > 1) heroTimer = setTimeout(heroNext, D[0])
@@ -2325,146 +2611,187 @@ var BIZ = {
     if (!rm) document.querySelectorAll('[data-to]').forEach(el => { el.textContent = nf(0, +(el.dataset.dec || 0)); co.observe(el) });
 
 
-    /* DEBUG PANEL (prototype only) - force a hero image format and/or freeze the slider */
+    /* ================= DEBUG PANEL (TEMPORARY TESTING FEATURE) =================
+       Everything this panel does lives in this block plus the .dbg markup, the "DEBUG (temporary)" CSS
+       block, the one-line hook in heroNext, and the window.__heroTier object the video behaviour script
+       leaves behind. Delete them all to remove the feature.
+       ========================================================================== */
     (() => {
       const panel = document.querySelector('.dbg');
       if (!panel) return;
+      if (!DEV) { panel.remove(); return; }   /* production: not in the DOM at all, not merely hidden */
       const read = panel.querySelector('.dbg-read');
+      const html = document.documentElement;
 
-      /* collapse / expand the panel */
+      /* ---- collapse / expand, remembered across the reload the Hero type buttons cause ---- */
       const toggle = panel.querySelector('.dbg-toggle');
       const setOpen = open => {
         panel.classList.toggle('collapsed', !open);
         toggle.setAttribute('aria-expanded', open);
         toggle.setAttribute('aria-label', open ? 'Collapse debug panel' : 'Expand debug panel');
+        try { sessionStorage.setItem('dbgPanelOpen', open ? '1' : '0') } catch (_) { }
       };
       toggle.addEventListener('click', () => setOpen(panel.classList.contains('collapsed')));
-      setOpen(false);   /* starts collapsed; the markup carries the same state so nothing flashes */
+      let wasOpen = false;
+      try { wasOpen = sessionStorage.getItem('dbgPanelOpen') === '1' } catch (_) { }
+      setOpen(wasOpen);
 
-      const setFormat = fmt => {
-        document.querySelectorAll('.slide .ph').forEach(ph => {
-          const pic = ph.querySelector('picture'), img = ph.querySelector('img');
-          if (!pic || !img || img.hasAttribute('data-src')) return;   /* slide not loaded yet: the load-order script owns it */
-          /* <source> always wins over <img src>, so drop them to force one format */
-          pic.querySelectorAll('source').forEach(s => s.remove());
-          const base = (ph.dataset.src || img.getAttribute('src')).replace(/\.(png|jpe?g|webp|avif)$/i, '');
-          img.src = base + '.' + fmt;
-          img.dataset.fmt = fmt;
+      /* ---- Hero type: video | slider. Stored, then reloaded: the hero scripts read HERO_MODE once. ---- */
+      panel.querySelectorAll('[data-type]').forEach(b => {
+        b.setAttribute('aria-pressed', b.dataset.type === HERO_MODE);
+        b.addEventListener('click', () => {
+          try {
+            sessionStorage.setItem('dbgHeroMode', b.dataset.type);
+            sessionStorage.setItem('dbgPanelOpen', '1');
+          } catch (_) { }
+          const u = new URL(location.href);
+          u.searchParams.delete('hero');   /* the URL outranks storage, so drop it or the click would do nothing */
+          location.replace(u.toString());
         });
-        readout();
+      });
+
+      /* ---- only the rows that belong to the active mode ---- */
+      panel.querySelectorAll('[data-row]').forEach(r => {
+        if (r.dataset.row !== 'type') r.hidden = r.dataset.row !== HERO_MODE;
+      });
+
+      /* ================= VIDEO MODE =================
+         Read-only. The tier is chosen in the hero behaviour script before anything loads, and the browser then
+         settles on one file; this line reports which one, so the choice can be checked on a phone. */
+      if (HERO_MODE === 'video') {
+        const box = document.querySelector('[data-hero-video]');
+        const paint = () => {
+          if (!read) return;
+          const t = window.__heroTier || {};
+          const v = box && box.querySelector('video');
+          if (t.tier === 'poster-only') { read.textContent = 'poster only · no sources (reduced motion or Save-Data)'; return }
+          const file = v && v.currentSrc ? v.currentSrc.split('/').pop() : '\u2014';
+          const dim = v && v.videoWidth ? v.videoWidth + '\u00d7' + v.videoHeight : '\u2014';
+          read.textContent = (t.tier || '\u2014') + ' · ' + file + ' · ' + dim;
+        };
+        const v = box && box.querySelector('video');
+        if (v) ['loadedmetadata', 'loadeddata', 'playing', 'emptied'].forEach(e => v.addEventListener(e, paint));
+        paint(); setTimeout(paint, 1200); setTimeout(paint, 3000);
+        return;
+      }
+
+      /* ================= SLIDER MODE ================= */
+      const slides = [...document.querySelectorAll('.hero .slide')];
+      if (!slides.length) return;
+
+      /* Captured before anything is touched: the real markup of every <picture>, so "Auto" can put the
+         browser's own negotiation back instead of leaving a forced format in place. */
+      const META = slides.map(sl => {
+        const pic = sl.querySelector('picture'), img = pic && pic.querySelector('img');
+        return {
+          pic, img,
+          imgSrc: img && img.getAttribute('src'),
+          imgData: img && img.getAttribute('data-src'),
+          descs: pic ? [...pic.querySelectorAll('source')].map(s => ({
+            html: s.outerHTML,
+            media: s.getAttribute('media') || '',
+            type: (s.getAttribute('type') || '').toLowerCase(),
+            srcset: s.getAttribute('srcset') || s.getAttribute('data-srcset') || ''
+          })) : []
+        };
+      });
+
+      let forced = 'auto';
+
+      /* Keeps the mobile and the desktop source of the chosen format and drops only the other format.
+         Paths always come from the markup; nothing is built by swapping an extension. */
+      const applyFormat = fmt => {
+        forced = fmt;
+        META.forEach(m => {
+          if (!m.pic || !m.img) return;
+          const loaded = !m.img.hasAttribute('data-src');
+          [...m.pic.querySelectorAll('source')].forEach(s => s.remove());
+          m.descs.filter(d => fmt === 'auto' || d.type.indexOf(fmt) > -1).forEach(d => {
+            const t = document.createElement('template');
+            t.innerHTML = d.html;
+            const s = t.content.firstElementChild;
+            if (loaded && s.hasAttribute('data-srcset')) { s.setAttribute('srcset', s.getAttribute('data-srcset')); s.removeAttribute('data-srcset') }
+            if (!loaded && s.hasAttribute('srcset')) { s.setAttribute('data-srcset', s.getAttribute('srcset')); s.removeAttribute('srcset') }
+            m.pic.insertBefore(s, m.img);
+          });
+          const want = fmt === 'auto'
+            ? (loaded ? m.imgSrc : m.imgData)
+            : (m.descs.find(d => !d.media && d.type.indexOf(fmt) > -1) || {}).srcset;
+          if (!want) return;
+          if (loaded) m.img.setAttribute('src', want); else m.img.setAttribute('data-src', want);
+        });
+        syncUI();
       };
 
       const setSlider = on => {
         heroOn = on;
         clearTimeout(heroTimer);
-        document.documentElement.classList.toggle('dbg-noslide', !on);
-        if (on) { heroTimer = setTimeout(heroNext, D[i]); return }
-        /* park on slide 1 so the frame is stable */
-        S.forEach((s, k) => s.classList.toggle('on', k === 0));
-        i = 0;
-        readout();
+        html.classList.toggle('dbg-noslide', !on);
+        if (on) heroTimer = setTimeout(heroNext, D[i]);
+        else { i = 0; slides.forEach((s, k) => s.classList.toggle('on', k === 0)) }
+        syncUI();
       };
 
-      /* jump to a slide and replay the crossfade + Ken Burns zoom */
-      const jumpTo = idx => {
+      /* a held-back slide is loaded first: no crossfade onto a blank frame */
+      const jumpTo = async idx => {
         clearTimeout(heroTimer);
+        const sl = slides[idx], img = sl && sl.querySelector('img');
+        if (img && img.hasAttribute('data-src')) {
+          if (window.__imgOrder) window.__imgOrder.heroAll();
+          await new Promise(res => {
+            let done = false; const fin = () => { if (done) return; done = true; res() };
+            img.addEventListener('load', fin); img.addEventListener('error', fin);
+            setTimeout(fin, 6000);
+          });
+        }
         i = idx;
-        S.forEach((s, k) => s.classList.toggle('on', k === idx));
-
-        /* restart the zoom from scale(1): pin it inline, force a reflow, release */
-        S.forEach(s => {
-          const ph = s.querySelector('.ph');
-          if (ph) { ph.style.transition = 'none'; ph.style.transform = 'scale(1)' }
-        });
+        slides.forEach((s, k) => s.classList.toggle('on', k === idx));
+        slides.forEach(s => { const ph = s.querySelector('.ph'); if (ph) { ph.style.transition = 'none'; ph.style.transform = 'scale(1)' } });
         void document.body.offsetWidth;
-        S.forEach(s => {
-          const ph = s.querySelector('.ph');
-          if (ph) { ph.style.transition = ''; ph.style.transform = '' }
-        });
-
+        slides.forEach(s => { const ph = s.querySelector('.ph'); if (ph) { ph.style.transition = ''; ph.style.transform = '' } });
         if (heroOn) heroTimer = setTimeout(heroNext, D[idx]);
+        syncUI();
+      };
+
+      /* the real file the browser picked (currentSrc), not the format that was asked for */
+      const readout = () => {
+        if (!read) return;
+        const sl = document.querySelector('.hero .slide.on') || slides[0];
+        const img = sl && sl.querySelector('img');
+        if (!img) { read.textContent = ''; return }
+        const show = () => {
+          const f = (img.currentSrc || img.getAttribute('src') || '').split('/').pop();
+          read.textContent = (f || '—') + ' · ' + (img.naturalWidth || 0) + '×' + (img.naturalHeight || 0) +
+            (forced === 'auto' ? '' : ' · forced ' + forced);
+        };
+        show();
+        if (!(img.complete && img.naturalWidth)) img.addEventListener('load', show, { once: true });
+      };
+
+      const syncUI = () => {
+        panel.querySelectorAll('[data-slider]').forEach(b => b.setAttribute('aria-pressed', (b.dataset.slider === 'on') === heroOn));
+        panel.querySelectorAll('[data-slide]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.slide === i));
+        panel.querySelectorAll('[data-format]').forEach(b => b.setAttribute('aria-pressed', b.dataset.format === forced));
         readout();
       };
-
-      const readout = () => {
-        const img = document.querySelector('.slide.on img');
-        if (!img || !read) return;
-        const show = () => {
-          read.textContent = (img.dataset.fmt || 'png') + ' \u00b7 ' + img.naturalWidth + '\u00d7' + img.naturalHeight;
-        };
-        /* naturalWidth is still the old value until the new src decodes */
-        if (img.complete && img.naturalWidth) show();
-        else img.addEventListener('load', show, { once: true });
-      };
+      window.__dbgSyncUI = syncUI;
 
       panel.querySelectorAll('[data-format]').forEach(b => b.addEventListener('click', () => {
         if (window.__imgOrder) window.__imgOrder.heroAll();
-        setFormat(b.dataset.format);
-        panel.querySelectorAll('[data-format]').forEach(x => x.setAttribute('aria-pressed', x === b))
+        applyFormat(b.dataset.format);
       }));
-      panel.querySelectorAll('[data-slider]').forEach(b => b.addEventListener('click', () => {
-        setSlider(b.dataset.slider === 'on');
-        panel.querySelectorAll('[data-slider]').forEach(x => x.setAttribute('aria-pressed', x === b))
-      }));
-      panel.querySelectorAll('[data-slide]').forEach(b => b.addEventListener('click', () => {
-        if (window.__imgOrder) window.__imgOrder.heroAll();
-        jumpTo(+b.dataset.slide);
-        panel.querySelectorAll('[data-slide]').forEach(x => x.setAttribute('aria-pressed', x === b))
-      }));
-      addEventListener('load', readout);
-      setFormat('avif'); /* start on AVIF so the panel's state matches the DOM */
-    })();
-</script>
-<!-- HERO LAYOUT SWITCH (prototype): current full-bleed hero vs. "stacked" (photo above the text) on tablet/phone, plus the mobile image files.
-     Mobile photos are optional: put assets/images/hero-1-m.{avif,webp,png} (and -2-m, -3-m, tall ~4:5) next to the desktop ones and the
-     stacked layout uses them below 900px; until a file exists the desktop photo is used (the script probes first, so nothing breaks or 404s
-     in the page itself). Delete this block, the "Hero layout" debug row and the html.hero-stack CSS to remove the prototype. -->
-<script>
-(function () {
-  var html = document.documentElement, panel = document.querySelector('.dbg'); if (!panel) return;
-  var MQ = '(max-width: 900px)', EXT = [['avif', 'image/avif'], ['webp', 'image/webp'], ['png', 'image/png']];
-  var phs = [].slice.call(document.querySelectorAll('.hero .slide .ph[data-m]')), stacked = false;
-  var note = panel.querySelector('[data-hero-layout-read]');
+      panel.querySelectorAll('[data-slider]').forEach(b => b.addEventListener('click', () => setSlider(b.dataset.slider === 'on')));
+      panel.querySelectorAll('[data-slide]').forEach(b => b.addEventListener('click', () => jumpTo(+b.dataset.slide)));
 
-  function probe(ph) {                                   /* which mobile files exist (tried once, only when Stacked is switched on) */
-    return ph._probe || (ph._probe = Promise.all(EXT.map(function (e) {
-      return new Promise(function (res) { var im = new Image(); im.onload = function () { res(e); }; im.onerror = function () { res(null); }; im.src = ph.getAttribute('data-m') + '.' + e[0]; });
-    })).then(function (r) { ph._found = r.filter(Boolean); return ph._found; }));
-  }
-  function apply(ph) {
-    var img = ph.querySelector('img'), pic = ph.querySelector('picture'); if (!img || !pic) return Promise.resolve();
-    var drop = function () { [].forEach.call(pic.querySelectorAll('source[data-m-src]'), function (x) { x.remove(); }); };
-    if (!stacked) { drop(); return Promise.resolve(); }
-    if (img.hasAttribute('data-src')) return Promise.resolve();   /* the load-order script has not released this slide yet; the observer below retries */
-    return probe(ph).then(function (found) {
-      if (!stacked) return;
-      drop();
-      var forced = img.dataset.fmt, use = forced && found.some(function (f) { return f[0] === forced; }) ? found.filter(function (f) { return f[0] === forced; }) : found;
-      use.slice().reverse().forEach(function (f) {      /* media-qualified sources go first, so they win over the desktop ones only below 900px */
-        var so = document.createElement('source'); so.setAttribute('data-m-src', ''); so.media = MQ; so.type = f[1]; so.srcset = ph.getAttribute('data-m') + '.' + f[0];
-        pic.insertBefore(so, pic.firstChild);
-      });
-    });
-  }
-  function report() {
-    if (!note) return;
-    if (!stacked) { note.textContent = 'layout: current'; return; }
-    note.textContent = 'stacked \u00b7 mobile photo: ' + phs.map(function (ph, k) { return (k + 1) + (ph._found && ph._found.length ? ' \u2713' : ' \u2013 (desktop photo)'); }).join('  ');
-  }
-  function setLayout(on) {
-    stacked = on; html.classList.toggle('hero-stack', on);
-    panel.querySelectorAll('[data-hero-layout]').forEach(function (b) { b.setAttribute('aria-pressed', (b.dataset.heroLayout === 'stacked') === on); });
-    Promise.all(phs.map(apply)).then(report);
-    report();
-    requestAnimationFrame(function () {                 /* the hero changed height: let the footer, scroll triggers and --hero-h catch up */
-      dispatchEvent(new Event('resize')); if (window.ScrollTrigger) ScrollTrigger.refresh();
-    });
-  }
-  panel.querySelectorAll('[data-hero-layout]').forEach(function (b) { b.addEventListener('click', function () { setLayout(b.dataset.heroLayout === 'stacked'); }); });
-  var mo = new MutationObserver(function (list) { var seen = []; list.forEach(function (m) { var ph = m.target.closest('.ph'); if (ph && seen.indexOf(ph) < 0) { seen.push(ph); apply(ph).then(report); } }); });
-  phs.forEach(function (ph) { var im = ph.querySelector('img'); if (im) mo.observe(im, { attributes: true, attributeFilter: ['src', 'data-src', 'data-fmt'] }); });
-  if (/[?&]hero=stacked\b/.test(location.search)) setLayout(true); else report();
-})();
+      addEventListener('resize', syncUI);       /* currentSrc can change with the viewport */
+      addEventListener('load', syncUI);
+      syncUI();
+      /* The page has always shipped with heroOn = false while the panel's "Off" button was pressed and
+         never applied - so the button lied and the slide-1 zoom kept running. Applying it here makes the
+         panel tell the truth, which also freezes that zoom until "On" is pressed. Slider mode is only
+         reachable from this panel (the hero is video by default), so no visitor sees this. */
+      setSlider(heroOn);
+    })();
 </script>
 <!-- IMAGE REVEAL (separate script so an error elsewhere can never block it) -->
 <script>
@@ -2555,6 +2882,32 @@ var BIZ = {
   if (window.ResizeObserver) new ResizeObserver(s).observe(h);
 })();
 
+/* MOBILE BAND (<=900px): the hero is a stacked column there - the media band on top, the text block pinned to the
+   bottom. The band has to end just above that block whatever the window height is, so it is measured here rather
+   than guessed in CSS; the media-query --hm is only the pre-JS fallback. Only --hm is written, and .slide,
+   .hero-video and .hero::after all read it, so the video, the photo slider and the bottom fade stretch together.
+   The block is measured as it stands, so it has to stay independent of --hm: padding-top is 0 there, which also
+   means a page without the script degrades to a shorter band and a gap rather than text over the picture. */
+(function () {
+  var h = document.querySelector('.hero'), i = h && h.querySelector('.hero-in'); if (!i) return;
+  var mq = matchMedia('(max-width: 900px)'), last = -1;
+  var fit = function () {
+    if (!mq.matches) { h.style.removeProperty('--hm'); last = -1; return }
+    /* One screen, not "the hero as it is now": if the block ever overflows, the hero grows and reading its own
+       height would feed that growth back in, shrinking the band a pixel per frame. min-height is the svh value.
+       The block itself must not depend on --hm (hence padding-top: 0 up there) - otherwise every correction
+       resizes it, and Chrome books that as a layout shift even though the text never moves. */
+    var svh = parseFloat(getComputedStyle(h).minHeight) || innerHeight;
+    var block = i.getBoundingClientRect().height;
+    var band = Math.floor(svh - block - 16 - 1);
+    if (band < 240) band = 240;
+    if (Math.abs(band - last) <= 2) return;   /* without this a 1px rounding chase makes the band crawl */
+    last = band; h.style.setProperty('--hm', band + 'px');
+  };
+  fit(); addEventListener('resize', fit); addEventListener('load', fit);
+  if (window.ResizeObserver) { new ResizeObserver(fit).observe(h); new ResizeObserver(fit).observe(i) }
+})();
+
 /* PARALLAX: every image except the hero slides drifts against the scroll inside its own frame. Runs on the <img> only, so the
    clip-path reveal on the frame is never touched. SCALE is the overscan (keep it in step with .px-img { scale } in the CSS);
    the travel is exactly half of it each way, so the frame never shows an edge. Opt out with data-no-parallax. */
@@ -2626,6 +2979,11 @@ var BIZ = {
   function chain(img) {
     var out = [], pic = img.closest('picture');
     if (pic) [].forEach.call(pic.querySelectorAll('source'), function (s) {
+      /* A media-qualified <source> is only a candidate when its query currently matches. Without this
+         a desktop visitor whose AVIF 404s would fall back to the 900px-wide mobile file, and a phone
+         would fall back to the desktop one: the chain has to describe what this viewport could use. */
+      var mq = s.getAttribute('media');
+      if (mq) { try { if (!matchMedia(mq).matches) return; } catch (e) { return; } }
       var u = (s.getAttribute('srcset') || '').trim().split(/\s+/)[0];
       if (u) out.push(new URL(u, document.baseURI).href);
     });

@@ -1,0 +1,8 @@
+# Never deployed.
+# Source material the pipeline reads: the 4K master and the experiments.
+_source-assets/
+# Any debug or experiment folder, wherever it sits.
+_debug/
+*experiments*/
+# Verification screenshots and crops.
+_shots/
