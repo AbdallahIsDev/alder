@@ -40,17 +40,13 @@
   <meta name="twitter:site" content="{{twitter}}">
   <link rel="icon" href="assets/images/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="assets/images/favicon-32x32.png" sizes="32x32" type="image/png">
-  <link rel="apple-touch-icon" href="assets/images/apple-touch-icon.png" sizes="180x180">
-  <!-- A manifest can only be fetched over http(s). Opening this file straight from disk (file://) makes Chrome
-       refuse it with a CORS error, so the link is added at runtime and only when there is a real origin. -->
-  <script>
-    if (location.protocol === 'http:' || location.protocol === 'https:') {
-      var mf = document.createElement('link');
-      mf.rel = 'manifest';
-      mf.href = 'site.webmanifest';
-      document.head.appendChild(mf);
-    }
-  </script>
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon-v1.png" sizes="180x180">
+  <meta name="apple-mobile-web-app-title" content="{{brand}}">
+  <!-- Installable web app. site.webmanifest is generated from BIZ by build-static.js and sits at a fixed url,
+       so it is served with max-age=0 (vercel.json): an installed Android app re-reads it and updates its own
+       name and icon. The icons are versioned, so a new logo becomes -v2, never an overwrite of a cached file.
+       iOS never updates a home-screen icon once the shortcut exists. -->
+  <link rel="manifest" href="site.webmanifest">
   <!-- STRUCTURED DATA (JSON-LD). Same placeholder tokens as the rest of the page. In development the BUSINESS
        CONFIG script fills them at runtime (escaped for JSON) and drops anything left empty, '#' or unfilled, so a
        client without Instagram or a domain yet never ships a broken value; build-static.js does the same at build

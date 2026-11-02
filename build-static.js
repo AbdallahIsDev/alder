@@ -24,8 +24,9 @@
    template can produce many clients without editing the HTML:  { "name": "Acme Roofing", "phone": "(515) 555-0100" }
 
    If an assets/ folder sits next to the input file it is copied next to the output (the page
-   references assets/images/*), along with robots.txt, sitemap.xml and site.webmanifest. Needs
-   Node 16.7+. No dependencies. ES module, because package.json sets "type": "module".
+   references assets/images/*), along with robots.txt and sitemap.xml. site.webmanifest is not
+   copied: it is generated from BIZ here, and the build fails if any token is left in it.
+   Needs Node 16.7+. No dependencies. ES module, because package.json sets "type": "module".
    ============================================================================================ */
 'use strict';
 import fs from 'node:fs';
@@ -192,11 +193,10 @@ scan(stripComments(headHtml), 'head');
 html.split(/(<script\b[\s\S]*?<\/script>|<style\b[\s\S]*?<\/style>|<!--[\s\S]*?-->)/i).forEach((seg, i) => { if (i % 2 === 0) scan(seg, 'body'); });
 if (survivors.length) fail('placeholder tokens survived the build:\n' + survivors.join('\n') + '\nAdd the missing key to BIZ, or remove the token.');
 
-/* ---- 9. header comment, then write ---- */
+/* ---- 9. header comment, and the output directory ---- */
 html = html.replace(/<head\b[^>]*>/i, tag => tag + '\n  <!-- Static build: business details are baked in from the BIZ config by build-static.js. Rebuild after changing them. The footer year below is the year this build ran; the page corrects it to the current year on load, so it stays right without a rebuild. -->');
 const outDir = path.dirname(path.resolve(opt.out));
 fs.mkdirSync(outDir, { recursive: true });
-fs.writeFileSync(opt.out, html, 'utf8');
 
 const assets = path.join(path.dirname(path.resolve(opt.input)), 'assets');
 let copied = '';
@@ -204,12 +204,54 @@ if (fs.existsSync(assets) && path.resolve(outDir) !== path.dirname(path.resolve(
   fs.cpSync(assets, path.join(outDir, 'assets'), { recursive: true }); copied = ' (assets/ copied)';
 }
 /* root files the deployment serves next to index.html */
-['robots.txt', 'sitemap.xml', 'site.webmanifest'].forEach(f => {
+['robots.txt', 'sitemap.xml'].forEach(f => {
   const src = path.join(path.dirname(path.resolve(opt.input)), f);
   if (fs.existsSync(src) && path.resolve(outDir) !== path.dirname(path.resolve(opt.input))) fs.copyFileSync(src, path.join(outDir, f));
 });
 
-/* ---- 10. heads-up about placeholder values that should not ship ---- */
+/* ---- 10. the web app manifest, generated from BIZ ----
+   site.webmanifest is a template: name, short_name and description are BIZ values, so the same
+   template serves every client. It is NOT copied verbatim - an unfilled token would ship.
+
+   To change the icon: create -v2 files, update the manifest icon URLs, the apple-touch-icon and the
+   favicon; never change the manifest id; keep manifest max-age 0. */
+const srcDir = path.dirname(path.resolve(opt.input));
+const mfSrc = path.join(srcDir, 'site.webmanifest');
+let manifestKB = '';
+if (fs.existsSync(mfSrc)) {
+  const raw = fs.readFileSync(mfSrc, 'utf8');
+  const filled = raw.replace(/\{\{(\w+)\}\}/g, (m, k) => (k in biz ? jsonEsc(biz[k]) : m));
+  const stray = filled.match(/\{\{[^}\n]{0,60}\}\}/g);
+  if (stray) fail('site.webmanifest has unfilled token(s): ' + [...new Set(stray)].join(', ') + '. Add the key to BIZ.');
+  let mf;
+  try { mf = JSON.parse(filled); } catch (e) { fail('site.webmanifest is not valid JSON after the tokens were filled: ' + e.message); }
+
+  /* the installability contract, checked here rather than in a browser: a name, a short name that
+     fits under the launcher icon, a start_url, a standalone display, and 192 + 512 any icons. */
+  ['name', 'short_name', 'start_url', 'display', 'icons'].forEach(k => { if (!mf[k]) fail('site.webmanifest is missing "' + k + '".'); });
+  if (mf.display !== 'standalone') warnings.push('Manifest display is "' + mf.display + '", not "standalone".');
+  if (String(mf.short_name).length > 12) warnings.push('Manifest short_name is ' + String(mf.short_name).length + ' characters; launchers clip around 12.');
+  const purposes = new Set();
+  mf.icons.forEach(ic => {
+    const p = String(ic.purpose || 'any');
+    if (p.indexOf('any') > -1 && p.indexOf('maskable') > -1) fail('Icon "' + ic.src + '" is purpose "any maskable". Split it into two entries: a combined value makes Android crop the "any" icon too.');
+    purposes.add(p);
+    if (!/^\d+x\d+$/.test(String(ic.sizes))) fail('Icon "' + ic.src + '" needs an exact "WxH" size, not "' + ic.sizes + '".');
+    if (!fs.existsSync(path.join(srcDir, ic.src))) fail('Manifest icon does not exist on disk: ' + ic.src);
+  });
+  ['any', 'maskable'].forEach(p => { if (!purposes.has(p)) warnings.push('Manifest has no "' + p + '" icon.'); });
+  if (!mf.icons.some(ic => ic.sizes === '192x192') || !mf.icons.some(ic => ic.sizes === '512x512')) warnings.push('Manifest needs a 192x192 and a 512x512 icon to be installable.');
+
+  if (path.resolve(outDir) !== srcDir) {
+    fs.writeFileSync(path.join(outDir, 'site.webmanifest'), JSON.stringify(mf, null, 2) + '\n', 'utf8');
+    manifestKB = ' (site.webmanifest generated, ' + ((fs.statSync(path.join(outDir, 'site.webmanifest')).size) / 1024).toFixed(1) + ' KB)';
+  }
+} else warnings.push('No site.webmanifest next to the input file: the page is not installable.');
+
+/* the page is written last: a build that fails on the manifest leaves no new HTML pointing at an old one */
+fs.writeFileSync(opt.out, html, 'utf8');
+
+/* ---- 11. heads-up about placeholder values that should not ship ---- */
 const looksPlaceholder = {
   phone: v => /555/.test(v), email: v => /example|\.test\b/i.test(v),
   url: v => /example|\.test\b|localhost|127\.0\.0\.1/i.test(v),
@@ -227,7 +269,7 @@ if (biz.ogImage && !fs.existsSync(path.join(path.dirname(path.resolve(opt.input)
 if (!biz.ogImage) warnings.push('BIZ.ogImage is empty: link previews will have no picture.');
 
 const kb = (fs.statSync(opt.out).size / 1024).toFixed(0);
-console.log('Built ' + opt.out + ' (' + kb + ' KB)' + copied);
+console.log('Built ' + opt.out + ' (' + kb + ' KB)' + copied + manifestKB);
 console.log('  tokens filled: ' + [...used].sort().join(', '));
 console.log('  phone shown as "' + biz.phone + '", dials ' + biz.tel);
 console.log('  title ' + biz.seoTitle.length + ' chars, description ' + biz.desc.length + ' chars, ' + ldCount + ' JSON-LD block(s)');
