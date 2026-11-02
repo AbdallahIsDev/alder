@@ -6,6 +6,10 @@
    so the file has to be 1200x630, under 300 KB, and named for its version (og-image-v1.jpg,
    -v2, ...). Overwriting a name is how you end up with an old picture in a new post.
 
+   The card this site ships is client art (assets/images/og-image.jpg), so this is the fallback
+   generator: it writes a new versioned name, never over that file. Point BIZ.ogImage at whatever
+   you generate.
+
    Usage
      node scripts/make-og-image.mjs                              hero poster -> assets/images/og-image-v1.jpg
      node scripts/make-og-image.mjs --src art.png --out assets/images/og-image-v2.jpg
