@@ -1,4 +1,6 @@
 {
+  "buildCommand": "node build-static.js index.html --out dist/index.html",
+  "outputDirectory": "dist",
   "headers": [
     {
       "source": "/assets/images/hero/(.*)",

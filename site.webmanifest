@@ -1,15 +1,17 @@
 {
-  "name": "Alder Roof Systems",
-  "short_name": "Alder Roof",
+  "name": "Alder Roofing",
+  "short_name": "Alder",
   "description": "Full roof replacement, engineered to specification, installed by employees we pay a living wage.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#F5F4F0",
-  "theme_color": "#F5F4F0",
+  "background_color": "#ffffff",
+  "theme_color": "#1c1f24",
   "lang": "en-US",
   "categories": ["business", "home"],
   "icons": [
-    { "src": "/assets/img/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    { "src": "/assets/images/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/assets/images/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/images/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }

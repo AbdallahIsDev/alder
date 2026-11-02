@@ -4,17 +4,48 @@
 <head data-page-node-id="qA66i1soIRBJHtNRlA6SzR">
   <meta charset="utf-8" data-page-node-id="W2m4P2JcBHb8fUCfnpcshs">
   <meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="wfAreaTX00JEc5rBkrOu4O">
-  <!-- colours the phone browser bar to match the ink the page sits on (--white) -->
-  <meta name="robots" content="noindex,nofollow">   <!-- concept page: remove this line when the site goes live -->
-  <meta name="theme-color" content="#fff">
-  <title>{{name}} | Roof replacement across {{area}}</title>
-  <meta name="description"
-    content="Roofs built by our own crew, never subcontractors. Clear written price up front. Free estimates across {{area}}." data-page-node-id="egiFHZqGftCnMd2JrbcW2o">
+  <!-- CONCEPT SITE. Search engines are held off in TWO places: this tag and the X-Robots-Tag header in
+       vercel.json. Delete both when the real domain goes live. Link previews still render with noindex. -->
+  <meta name="robots" content="noindex,nofollow">
+  <!-- The phone bar sits over the hero media, which is dark, so it takes the page ink (--ink) and not the
+       white body below it. One colour only: the page has no dark scheme. -->
+  <meta name="theme-color" content="#1c1f24">
+  <title>{{seoTitle}}</title>
+  <meta name="description" content="{{desc}}" data-page-node-id="egiFHZqGftCnMd2JrbcW2o">
   <link rel="canonical" href="{{url}}">
+  <meta name="author" content="{{name}}">
+  <meta name="application-name" content="{{name}}">
+  <!-- Search engines ignore keywords. Kept for the directories and intranet crawlers that still read it. -->
+  <meta name="keywords" content="{{keywords}}">
+  <!-- Link previews. A crawler fetches the raw HTML and runs no JavaScript, so build-static.js bakes every
+       value here from BIZ; a placeholder left in this block is a broken preview. The picture is 1200x630 at
+       a versioned filename, because every network caches it by URL: a new picture becomes -v2, never an edit. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{name}}">
+  <meta property="og:title" content="{{seoTitle}}">
+  <meta property="og:description" content="{{desc}}">
+  <meta property="og:url" content="{{url}}">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:image" content="{{url}}{{ogImage}}">
+  <meta property="og:image:secure_url" content="{{url}}{{ogImage}}">
+  <meta property="og:image:type" content="image/jpeg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Aerial view of a house being reroofed: new shingles on the finished slope, the crew working on the open deck beside them.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{seoTitle}}">
+  <meta name="twitter:description" content="{{desc}}">
+  <meta name="twitter:image" content="{{url}}{{ogImage}}">
+  <meta name="twitter:image:alt" content="Aerial view of a house being reroofed: new shingles on the finished slope, the crew working on the open deck beside them.">
+  <meta name="twitter:site" content="{{twitter}}">
   <link rel="icon" href="assets/images/favicon.svg" type="image/svg+xml">
-  <!-- STRUCTURED DATA (JSON-LD). Same {{tokens}} as the rest of the page. The BUSINESS CONFIG script fills them at runtime
-       (escaped for JSON) and drops anything left empty, '#' or still a token, so a client without Instagram or a domain
-       yet never ships a broken value. A static build has to fill the tokens in this block too. -->
+  <link rel="icon" href="assets/images/favicon-32x32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="assets/images/apple-touch-icon.png" sizes="180x180">
+  <link rel="manifest" href="site.webmanifest">
+  <!-- STRUCTURED DATA (JSON-LD). Same placeholder tokens as the rest of the page. In development the BUSINESS
+       CONFIG script fills them at runtime (escaped for JSON) and drops anything left empty, '#' or unfilled, so a
+       client without Instagram or a domain yet never ships a broken value; build-static.js does the same at build
+       time, so a crawler sees the real business even though it runs no JavaScript. -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -23,9 +54,9 @@
         "@type": "RoofingContractor",
         "name": "{{name}}",
         "alternateName": "{{brand}}",
-        "description": "Roof replacement, storm and hail damage repair, leak repairs and free roof inspections across {{area}}. Every roof is built by our own crew, never subcontractors, with a clear written price up front.",
+        "description": "{{desc}}",
         "url": "{{url}}",
-        "image": "{{url}}assets/images/hero/hero-poster.webp",
+        "image": "{{url}}{{ogImage}}",
         "telephone": "{{tel}}",
         "email": "{{email}}",
         "address": { "@type": "PostalAddress", "streetAddress": "{{address}}" },
@@ -2498,6 +2529,11 @@ var BIZ = {
   url: 'https://alder-roofing.vercel.app/',                     /* absolute address of this page; the canonical link uses it */
   address: '123 Main Street, Des Moines, IA', hours: 'Mon to Fri, 7am to 5pm',
   area: 'Iowa & the Upper Midwest', base: 'Iowa', reply: 'one business day',
+  seoTitle: 'Alder Roofing | Roof replacement in Iowa',        /* <= 60 chars. The build falls back to name + base when empty */
+  desc: 'Roof replacement, storm and hail damage repair and free inspections across {{area}}. Every roof is built by our own crew, never subcontractors.',
+  keywords: ['roof replacement Iowa', 'roofing contractor Des Moines', 'storm and hail damage repair', 'roof leak repair', 'free roof inspection', 'shingle roof replacement', 'residential roofing Des Moines', 'roof replacement estimate', 'roof repair Upper Midwest', 'roofing company Iowa'],
+  ogImage: 'assets/images/og-image-v1.jpg',                    /* 1200x630. A new picture gets a new filename (-v2), never an overwrite */
+  twitter: '',                                                 /* @handle for twitter:site. Leave '' and the tag is dropped */
   hoursSchema: 'Mo-Fr 07:00-17:00',                            /* same hours as `hours`, in machine format for search engines: Mo-Fr 07:00-17:00, or 'Mo-Fr 07:00-17:00, Sa 08:00-12:00'. Leave '' to omit */
   priceRange: '',                                              /* $ to $$$$. Leave '' to omit */
   rating: '4.8', reviews: '314', roofs: '276', warranty: '20',
@@ -2508,6 +2544,18 @@ var BIZ = {
   if (d.length > 10 && d.indexOf(cc) === 0) d = d.slice(cc.length);
   BIZ.tel = BIZ.countryCode + d; BIZ.year = new Date().getFullYear();
   var re = /\{\{(\w+)\}\}/g, rep = function (s) { return s.replace(re, function (m, k) { return k in BIZ ? BIZ[k] : m; }); };
+  /* a value may reference another one (desc mentions the area) and keywords is a list: normalise first,
+     exactly as build-static.js does, so the unbuilt page and the built page show the same strings */
+  Object.keys(BIZ).forEach(function (k) { if (Array.isArray(BIZ[k])) BIZ[k] = BIZ[k].join(', '); });
+  for (var pass = 0; pass < 3; pass++) {
+    var moved = false;
+    Object.keys(BIZ).forEach(function (k) {
+      if (typeof BIZ[k] !== 'string' || BIZ[k].indexOf('{{') < 0) return;
+      var next = BIZ[k].replace(re, function (m, kk) { return kk in BIZ ? BIZ[kk] : m; });
+      if (next !== BIZ[k]) { BIZ[k] = next; moved = true; }
+    });
+    if (!moved) break;
+  }
   var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, { acceptNode: function (n) {
     return n.nodeValue.indexOf('{{') < 0 || n.parentNode.closest('script,style') ? 3 : 1; } }), ns = [];
   while (w.nextNode()) ns.push(w.currentNode);
@@ -2539,7 +2587,7 @@ var BIZ = {
 <script>
 /* THE COPYRIGHT YEAR IS ALWAYS THE CURRENT ONE.
    This has to live outside the BUSINESS CONFIG block: build-static.js deletes that whole block from
-   the static page, so anything written there never reaches the build. The build stamps {{year}} with
+   the static page, so anything written there never reaches the build. The build stamps the year token with
    the year it ran in, which is right for a no-JS visitor but goes stale the moment the calendar turns
    over, and a static page can sit in place for years. So the baked year is only the fallback and this
    corrects it on every load. Runs before the word-split in the footer, so the paragraph is still one

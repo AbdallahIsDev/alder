@@ -5,6 +5,8 @@
   "description": "Single-file landing page prototype plus the image pipeline that feeds it.",
   "type": "module",
   "scripts": {
+    "build": "node build-static.js index.html --out dist/index.html",
+    "og": "node scripts/make-og-image.mjs",
     "images": "node scripts/optimize-images.mjs",
     "images:force": "node scripts/optimize-images.mjs --force"
   },
