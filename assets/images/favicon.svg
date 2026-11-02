@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <rect width="32" height="32" fill="#14140F"/>
-  <g fill="none" stroke="#F5F4F0" stroke-linecap="square">
-    <path d="M3 16 16 5.5 29 16" stroke-width="2.2"/>
-    <path d="M7 15.5v12.5h18V15.5" stroke-width="2.2"/>
-    <path d="M12.5 28V20h7v8" stroke-width="1.6"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img"><title>Alder Roofing logo</title><rect width="512" height="512" rx="112" fill="#1C1F24"/><path fill="#D93917" d="M64 240L256 80L448 240V296L256 136L64 296Z"/><rect x="336" y="96" width="56" height="104" fill="#D93917"/><path fill="#FFFFFF" d="M256 172L400 292V432H288V344H224V432H112V292Z"/></svg>
