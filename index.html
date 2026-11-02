@@ -47,6 +47,12 @@
        name and icon. The icons are versioned, so a new logo becomes -v2, never an overwrite of a cached file.
        iOS never updates a home-screen icon once the shortcut exists. -->
   <link rel="manifest" href="site.webmanifest">
+  <!-- Chrome on Android shows its own install mini-infobar as soon as the manifest makes the site
+       installable. Cancelling beforeinstallprompt suppresses that banner only; the "Install app" item in
+       Chrome's three-dot menu is untouched and still installs. The event is deliberately not stored and
+       no custom install UI is built from it. Placed before every other script so the listener exists
+       before Chrome can fire it. -->
+  <script>window.addEventListener('beforeinstallprompt',function(e){e.preventDefault()});</script>
   <!-- STRUCTURED DATA (JSON-LD). Same placeholder tokens as the rest of the page. In development the BUSINESS
        CONFIG script fills them at runtime (escaped for JSON) and drops anything left empty, '#' or unfilled, so a
        client without Instagram or a domain yet never ships a broken value; build-static.js does the same at build
@@ -946,8 +952,8 @@
     .line i { display: block; width: 100%; height: 100%; background: var(--accent); transform: scaleX(var(--p, 1)); transform-origin: left }
     .step { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 28px }
     .steps { --sq: 56px }   /* size of the numbered square; the stacked layout reads it for the column and the line */
-    .step .n { display: grid; place-items: center; width: var(--sq); height: var(--sq); background: var(--cream); color: var(--ink); font-size: 22px; font-weight: 500; border: 1px solid #00000026; transition: background .45s ease, color .45s ease }
-    .step.on .n, html:not(.js) .step .n { background: var(--accent); color: #fff }
+    .step .n { display: grid; place-items: center; width: var(--sq); height: var(--sq); background: var(--cream); color: var(--ink); font-size: 22px; font-weight: 500; border: 1px solid #0000001a; transition: background .45s ease, color .45s ease, border-color .45s ease }
+    .step.on .n, html:not(.js) .step .n { background: var(--accent); color: #fff; border-color: rgb(0 0 0 / 0) }
     .step div { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100% }
     .step h3 { font-size: clamp(20px, 1.8vw, 26px); font-weight: 550; letter-spacing: -.02em; line-height: 1.15; color: var(--ink) }
     .step p { color: #4a4e56; max-width: 34ch }
@@ -1180,11 +1186,11 @@
     @media (max-width: 900px) { .sec-head.split { grid-template-columns: 1fr; align-items: start } .sec-head.split { gap: 16px } }
     /* before/after arrows: cream pair, next one in ink, both accent on hover */
     .ba-nav { display: flex; align-items: center; gap: 8px }
-    .ba-nav button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-width: 52px; height: 52px; border: 0; cursor: pointer; font: 500 var(--fs) var(--f); background: var(--cream); color: var(--ink); transition: background .25s, color .25s }
+    .ba-nav button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-width: 52px; height: 52px; border: 1px solid #0000001a; cursor: pointer; font: 500 var(--fs) var(--f); background: var(--cream); color: var(--ink); transition: background .25s, color .25s, border-color .25s }
     .ba-nav svg { width: 20px; height: 20px; transition: transform .25s } .ba-nav .bt { display: none }
     @media (max-width: 900px) { .ba-nav button { min-width: 40px; height: 40px } .ba-nav svg { width: 16px; height: 16px } }
     .ba-nav button[data-d="1"] { background: var(--ink); color: #fff }
-    .ba-nav button:hover { background: var(--accent); color: #fff }
+    .ba-nav button:hover { background: var(--accent); color: #fff; border-color: rgb(0 0 0 / 0) }
     /* ===== BEFORE & AFTER (v3): the frame is 3:2 on every screen and only scales, so the image is never cropped differently ===== */
     .ba { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: clamp(20px, 2.5vw, 32px) 16px }
     .ba > .sec-head { grid-column: 1; grid-row: 1 } .ba > .ba-nav { grid-column: 2; grid-row: 1 } .ba > .pairs { grid-column: 1 / -1; grid-row: 2; width: 100% }
