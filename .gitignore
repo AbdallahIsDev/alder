@@ -19,6 +19,8 @@ _shots/
 client.json
 .env
 .env.*
+# .env.* would also swallow the template; the template carries names only and must ship.
+!.env.example
 
 # --- OS / editor ------------------------------------------------------------
 .DS_Store

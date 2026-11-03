@@ -2485,7 +2485,7 @@
       <div class="est-prog" data-page-node-id="bo8i2FnXCvCYDf6LdRZEgE"><p class="est-step" aria-live="polite" data-page-node-id="AEXWNUGu9EdNk1rE2nJKRJ">Step 1 of 4</p><ol class="est-dots" aria-hidden="true" data-page-node-id="ydjcs232CoglgDyh4Jh5oD"><li data-page-node-id="pRgecOP5Er694jLVrwG9yb"></li><li data-page-node-id="ALJXjJaKDRLVKQQPPYDN7H"></li><li data-page-node-id="ARD6HWIY3EGyVMFAPNDHkn"></li><li data-page-node-id="UsJS2z1g3Fivvy0Cg85bYL"></li></ol></div>
       <button type="button" class="est-x" data-close aria-label="Close" data-page-node-id="nXbxbHNBKO4VeAngBD2g0A"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" data-page-node-id="eiOMNav1A9Es5wFrHWfrFg"><path d="M5 5l14 14M19 5 5 19" data-page-node-id="0X8x3ZDd5QM7KPTR6qAxP8"/></svg></button>
     </div>
-    <form class="est-form" novalidate data-page-node-id="CnDFVpvtloZHceyJlRLUHh">
+    <form class="est-form" novalidate data-slug="{{slug}}" data-page-node-id="CnDFVpvtloZHceyJlRLUHh">
       <div class="est-body" data-lenis-prevent data-page-node-id="moreZQYve00QkT986DV0dy">
 
         <section class="est-pane" data-step="1" data-page-node-id="KnfagniFSsdKFX7yzk9PAp">
@@ -2555,6 +2555,7 @@
    Everything that changes per client lives here. In the HTML, values appear as {{tokens}}
    (e.g. {{phone}}, {{tel}}, {{email}}) and are filled in below. The tel: link is built from `phone`. */
 var BIZ = {
+  slug: 'alder-demo',                                          /* which row in public.businesses this page belongs to */
   name: 'Alder Roofing', brand: 'Alder', founder: '[Founder name]',
   phone: '(555) 018-4400', countryCode: '+1',                 /* the tel: link is derived from these two */
   email: 'hello@alder-roofing.vercel.app',
@@ -3343,6 +3344,44 @@ var BIZ = {
   matchMedia('(min-width: 1141px)').addEventListener('change', function (m) { if (m.matches && menu.classList.contains('open')) setOpen(false); });
 })();
 </script>
+<!-- ESTIMATE DELIVERY: posts the collected answers to /api/lead. Kept out of the modal script
+     so the UI stays a UI; the modal calls window.estimateDeliver(data) if it exists. -->
+<script>
+(function () {
+  var form = document.querySelector('.est-form');
+  var slug = (form && form.getAttribute('data-slug')) || '';
+  var key = '';
+
+  function newKey() {
+    try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+    var b = new Uint8Array(16);
+    try { crypto.getRandomValues(b); } catch (e) { for (var i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256); }
+    var out = 'k'; for (var j = 0; j < 16; j++) out += ('0' + b[j].toString(16)).slice(-2);
+    return out;
+  }
+
+  /* One key per form-open. A retry after a failed send reuses it, so the server drops the
+     duplicate instead of storing the same lead twice. */
+  window.estimateReset = function () { key = newKey(); };
+
+  window.estimateDeliver = function (data) {
+    if (!key) key = newKey();
+    var body = {};
+    for (var k in data) if (Object.prototype.hasOwnProperty.call(data, k)) body[k] = data[k];
+    body.slug = slug;
+    body.idempotencyKey = key;
+    return fetch('/api/lead', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      if (!r.ok) throw new Error('send failed: ' + r.status);   /* the modal shows its error state */
+      key = '';                                                  /* next open is a new submission */
+      return r.json().catch(function () { return {}; });
+    });
+  };
+})();
+</script>
 <!-- ESTIMATE MODAL behavior: UI-only 4-step flow, animated steps and height, sending / sent / failed states -->
 <script>
 /* Estimate modal: a self-contained, UI-only preview. Nothing is submitted, stored or sent anywhere.
@@ -3566,6 +3605,8 @@ var BIZ = {
   /* ---------- open / close: no layout shift (scrollbar-gutter), page scroll locked and inert, modal body scrolls, position restored ---------- */
   function open(t) {
     if (root.classList.contains('open')) return;
+    if (window.estimateReset) window.estimateReset();          /* one idempotency key per form-open */
+    openedAt = Date.now();                                     /* elapsed is measured from here, not from page load */
     trigger = t || document.activeElement; savedY = window.scrollY;
     if (!CSS.supports('scrollbar-gutter', 'stable')) { var sw = innerWidth - html.clientWidth; if (sw > 0) { html.style.paddingRight = sw + 'px'; if (header) header.style.right = 12 + sw + 'px'; } }
     html.classList.add('est-open'); if (window.__lenis) window.__lenis.stop();
