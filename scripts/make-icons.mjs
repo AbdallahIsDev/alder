@@ -1,4 +1,4 @@
-// Renders the app icon set from the master logo vector, assets/images/favicon.svg.
+// Renders the app icon set from the master logo vector, assets/icons/favicon.svg.
 //
 // Every size is rasterised from the vector at 2048px and downsampled with lanczos3, so the small
 // sizes are true supersamples rather than an upscaled raster.
@@ -20,9 +20,8 @@
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import sharp from 'sharp';
 
-const SRC = 'assets/images/favicon.svg'; /* the master: 512x512, plate + roof + chimney + house */
-const OUT = 'assets/icons';              /* versioned app icons, served immutable */
-const TAB = 'assets/images';             /* the 32px tab icon stays with the other page images */
+const SRC = 'assets/icons/favicon.svg'; /* the master: 512x512, plate + roof + chimney + house */
+const OUT = 'assets/icons';             /* every icon, including the tab favicon, lives here */
 const INK = '#1C1F24';
 const SAFE = 512 * 0.4;                  /* radius of the central 80% circle */
 const RENDER = 2048;                     /* rasterise the 512 vector at 4x, then downsample */
@@ -86,7 +85,7 @@ const maskableSvg = wrap(`<rect width="512" height="512" fill="${INK}"/>` +
 /* --- write ---------------------------------------------------------------------------------- */
 await mkdir(OUT, { recursive: true });
 const jobs = [
-  [`${TAB}/favicon-32x32.png`, wrap(body), 32, { opaque: false }],
+  [`${OUT}/favicon-32x32.png`, wrap(body), 32, { opaque: false }],
   [`${OUT}/apple-touch-icon-v1.png`, wrap(body), 180, { opaque: true }],
   [`${OUT}/icon-192-v1.png`, wrap(body), 192, { opaque: true }],
   [`${OUT}/icon-512-v1.png`, wrap(body), 512, { opaque: true }],

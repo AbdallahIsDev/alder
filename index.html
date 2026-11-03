@@ -38,19 +38,29 @@
   <meta name="twitter:image" content="{{url}}{{ogImage}}">
   <meta name="twitter:image:alt" content="A roofer in a hard hat kneeling on a new shingle roof with a nail gun, beside the Alder Roofing logo and the line Your roof protects everything under it.">
   <meta name="twitter:site" content="{{twitter}}">
-  <link rel="icon" href="assets/images/favicon.svg" type="image/svg+xml">
-  <link rel="icon" href="assets/images/favicon-32x32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="assets/icons/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="assets/icons/favicon-32x32.png" sizes="32x32" type="image/png">
   <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon-v1.png" sizes="180x180">
   <meta name="apple-mobile-web-app-title" content="{{brand}}">
   <!-- Installable web app. site.webmanifest is generated from BIZ by build-static.js and sits at a fixed url,
        so it is served with max-age=0 (vercel.json): an installed Android app re-reads it and updates its own
        name and icon. The icons are versioned, so a new logo becomes -v2, never an overwrite of a cached file.
-       iOS never updates a home-screen icon once the shortcut exists. -->
-  <link rel="manifest" href="site.webmanifest">
+       iOS never updates a home-screen icon once the shortcut exists.
+       The link is added at runtime and only on a real origin: opening this file straight from disk (file://)
+       gives the document the origin "null", and Chrome refuses the manifest with a CORS error for a file it
+       cannot read. A script-added link installs exactly the same on a server, so nothing is lost there. -->
+  <script>
+    if (location.protocol === 'http:' || location.protocol === 'https:') {
+      var mf = document.createElement('link');
+      mf.rel = 'manifest';
+      mf.href = 'site.webmanifest';
+      document.head.appendChild(mf);
+    }
+  </script>
   <!-- Chrome on Android shows its own install mini-infobar as soon as the manifest makes the site
        installable. Cancelling beforeinstallprompt suppresses that banner only; the "Install app" item in
        Chrome's three-dot menu is untouched and still installs. The event is deliberately not stored and
-       no custom install UI is built from it. Placed before every other script so the listener exists
+       no custom install UI is built from it. Placed above the page's own scripts so the listener exists
        before Chrome can fire it. -->
   <script>window.addEventListener('beforeinstallprompt',function(e){e.preventDefault()});</script>
   <!-- STRUCTURED DATA (JSON-LD). Same placeholder tokens as the rest of the page. In development the BUSINESS
@@ -1695,6 +1705,22 @@
     html.bx .bx-p { --bx-c: var(--ink); --bx-fill: var(--accent) }
     html.bx .bx-p.dark { --bx-c: #fff }
     html.bx .cta-sec .bx-p { --bx-fill: var(--ink) }
+    /* ===== CTA INVERSION =====
+       The accent leaves the arrow square and becomes the button's own ground; the square turns white and takes the
+       arrow with it. Hover is the same mechanism as before - the square still floods the button - but the flood is
+       white now, so the label and the arrow roll into ink instead of into white.
+       Scoped to .bar / .menu / .hero and .cta-sec: the two .btn.dark buttons mid-page keep ink ground + accent chip.
+       The `html.bx` prefix is what lifts these above html.bx .bx-p (0,2,1) and html.bx .cta-sec .bx-p (0,3,1). */
+    html.bx :is(.bar, .menu, .hero) .bx-p {
+      background-color: var(--accent); --bx-c: #fff; --bx-fill: #fff; --bx-hc: var(--ink)
+    }
+    html.bx :is(.bar, .menu, .hero) .bx-p i { color: var(--accent) }
+    html.bx :is(.bar, .menu, .hero) .bx-p i > svg.bx-2 { color: var(--ink) }
+
+    html.bx .cta-sec .bx-p {
+      background-color: var(--ink); --bx-c: #fff; --bx-fill: #fff; --bx-hc: var(--ink)
+    }
+    html.bx .cta-sec .bx-p i { color: var(--ink) }
     html.bx :is(.bx-s, .bx-ph) { --bx-c: #fff }
 
     /* the label clip box: 34px band; 3px of side room (padding + equal negative margin) so overflow clipping never trims a glyph */
