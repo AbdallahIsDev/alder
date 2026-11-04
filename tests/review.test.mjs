@@ -254,6 +254,22 @@ try {
   line((await foreignBefore.data).length === 0 && (await foreignAfter.data).length === 0,
     'I7', 'landing GET for another business token writes nothing', `fb=${(await foreignAfter.data).length}`);
 
+  /* I8: the landing card is vertically AND horizontally centred in every state */
+  const i8Pages = [];
+  i8Pages.push(await (await fetch(`${ORIGIN}/r/${tI}?s=3`)).text());
+  i8Pages.push(await (await fetch(`${ORIGIN}/r/${tI}?go=1`)).text());
+  const tU = token(); await seed(tU);
+  // unavailable state: a business with a disallowed Google host cannot be seeded
+  // through the API; render it via a unit-level call instead.
+  const { reviewLandingPage: rlp } = await import('../lib/content.js');
+  i8Pages.push(rlp({ business: { name: biz.name, id: biz.id }, token: tU, googleUrl: 'http://evil.example', stars: 3 }));
+  const i8ok = i8Pages.every((h) =>
+    h.includes('display:flex') && h.includes('align-items:center') && h.includes('justify-content:center')
+    && h.includes('min-height:100vh') && h.includes('min-height:100dvh')
+    && h.indexOf('min-height:100vh') < h.indexOf('min-height:100dvh')
+    && !/margin-top/.test(h));
+  line(i8ok, 'I8', 'landing card centred on both axes in every state', `pages=${i8Pages.length}`);
+
   /* no studio branding, no AI, no auto-posting claim */
   const haystack = [html0, html1, ...pages.map((p) => p.html), ...(await resendCalls()).map((x) => (x.body?.html || '') + (x.body?.text || ''))].join('\n');
   const banned = /\bAlder Studio\b|\bAI\b|automatic(ally)? post|missed-call text-back|Google auto-post/i.test(haystack);
