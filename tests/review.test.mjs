@@ -83,6 +83,18 @@ try {
   const identical = buttons.every((b) => b && b === buttons[0]);
   line(allHaveButton && identical, 'D3', 'Google button identical for ratings 1..5', `pages=${pages.length} identical=${identical}`);
 
+  /* D3b: stronger than D3. The only rating-dependent HTML in the page is the
+     "Thank you for your feedback." paragraph, which reviewPage() emits only when a
+     stored rating exists (the `thanks` const in lib/content.js). With the token and
+     that single line normalised, the page for NO rating and for ratings 1..5 must be
+     byte-identical. The numeric rating is never printed anywhere on the page. */
+  const RATING_LINE = '<p style="font:15px Arial,Helvetica,sans-serif;color:#333">Thank you for your feedback.</p>';
+  const strip = (html, tk) => html.split(tk).join('TOKEN').split(RATING_LINE).join('');
+  const variants = [strip(html0, t0), ...pages.map((p) => strip(p.html, p.token))];
+  const same = variants.every((v) => v === variants[0]);
+  line(variants.length === 6 && same, 'D3b', 'whole page identical: no rating and ratings 1..5',
+    `variants=${variants.length} identical=${same}`);
+
   /* Unknown token */
   const missing = await fetch(`${ORIGIN}/r/${token()}`);
   const missingBody = await missing.text();
