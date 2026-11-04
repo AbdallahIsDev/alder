@@ -110,21 +110,37 @@ try {
   const bothParts = b && typeof b.html === 'string' && typeof b.text === 'string';
   const noCrLf = b && !/[\r\n]/.test(b.subject) && !/[\r\n]/.test(b.from);
   // NEW (item 4): table-based shell, labels in both parts, tel: has only digits and +,
-  // no external resources, preheader present, escaped notes, under 100 KB.
+  // no external resources beyond the brand fonts/logo and the Google review link,
+  // preheader present, escaped notes, under 100 KB.
   const TABLE_LABELS = ['Name', 'Phone', 'Email', 'Service', 'Timing', 'Property', 'Roof age', 'Insurance claim', 'ZIP'];
   const labelsOk = b && TABLE_LABELS.every((l) => b.html.includes('>' + l + '</td>') && b.text.includes(l + ':'))
     && b.text.includes('Notes:');   // the HTML part carries notes in the quoted box, not a table row
   const tel = b && b.html.match(/href="tel:(.*?)"/);
   const telOk = tel && /^[+0-9]+$/.test(tel[1]);
-  const noExternal = b && !/<img|<script/.test(b.html)
-    && !(b.html.match(/https?:\/\/[^"]+/g) || []).some((u) => !u.startsWith('https://g.page') && !u.includes('alder-demo'));
+  // Before (old email design): no <img> and no <script> anywhere, and no HTTP
+  // URLs except the roofer's own Google review link.
+  // After (item 3, deliberate behaviour change the task orders): the brand logo
+  // IS an <img> (the O1 header), so the <img>/<script> ban is replaced by
+  // "no <script> anywhere" plus "every http(s) URL is a brand asset or the
+  // roofer's own Google review link".
+  let badUrls = [];
+  if (b) {
+    const base = String(process.env.SITE_URL || '').replace(/\/+$/, '');
+    const brandPrefix = base ? [base + '/', base.replace(/\/$/, '') + '/assets/'] : [];
+    const urls = b.html.match(/https?:\/\/[^"\s]+/g) || [];
+    badUrls = urls.filter((u) => {
+      const clean = u.replace(/['")]+$/, '');
+      return !(brandPrefix.some((p) => clean.startsWith(p)) || clean.startsWith('https://g.page') || clean.includes('alder-demo'));
+    });
+  }
+  const noExternalOk = !!b && !/<script/.test(b.html) && badUrls.length === 0;
   const preheaderOk = b && b.html.includes('Bob&quot; &lt;x@y&gt;') && b.html.includes('ZIP 50265');
   const smallOk = b && b.html.length < 100 * 1024;
   const linkMailOk = b && !b.html.includes('<script>') && b.html.includes('&lt;script&gt;');
   line(res.code === 200 && okFrom && okTo && okReply && okPrefix && escaped && bothParts && noCrLf && rows.length === 1
-    && labelsOk && telOk && noExternal && preheaderOk && smallOk && linkMailOk,
+    && labelsOk && telOk && noExternalOk && preheaderOk && smallOk && linkMailOk,
     'A1', 'owner email payload exact + escaped',
-    `from=${okFrom} to=${okTo} reply_to=${okReply} prefix=${okPrefix} esc=${escaped} crlf=${noCrLf} labels=${labelsOk} tel=${telOk} noExternal=${noExternal}`);
+    `from=${okFrom} to=${okTo} reply_to=${okReply} prefix=${okPrefix} esc=${escaped} crlf=${noCrLf} labels=${labelsOk} tel=${telOk} noExternal=${noExternalOk} badUrls=${badUrls.map((u) => u.replace(/['")]+$/, '').slice(0, 80)).join(' | ')}`);
   line(!!(owner && owner.headers && owner.headers['idempotency-key']), 'A2', 'Idempotency-Key header sent');
 
   /* G1: toTelHref normalisation (unit-level, no DB). US formats get +1; the
@@ -141,6 +157,60 @@ try {
   const bad = cases.filter(([input, want]) => toTelHref(input) !== want);
   line(bad.length === 0, 'G1', 'toTelHref: US gets +1, international keeps +, rest untouched',
     bad.length ? 'bad: ' + bad.map(([i, w]) => `${i}->${toTelHref(i)} (want ${w})`).join('; ') : `${cases.length} cases ok`);
+
+  /* G2-G10: owner email variants + shared structure (unit-level, no DB). */
+  const { ownerEmail } = await import('../lib/content.js');
+  const { getBrand } = await import('../lib/brand.js');
+  const biz = { name: 'Alder Roofing', timezone: 'America/Chicago' };
+  const leads = {
+    full: { name: 'Daniel Whitaker', phone: '(555) 501-2345', email: 'daniel@example.com', zip: '50265', service: 'repair', home: 'house', timing: 'asap', roof_age: '10 to 20 years', insurance_claim: true, notes: 'line one\nline two' },
+    minimal: { name: 'Maria Lopez', phone: '5555019876', email: '', zip: '50269', service: 'unsure', home: 'other', timing: 'planning', roof_age: 'Not sure', insurance_claim: false, notes: '' },
+    stress: { name: 'Stress <b>Test</b>', phone: '(555) 501-2345', email: 'stress@example.com', zip: '50265', service: 'storm', home: 'house', timing: 'month', roof_age: 'Over 20 years', insurance_claim: true, notes: '<b>hail</b> & "quotes" </q>' },
+  };
+  const renders = {};
+  for (const [lname, l] of Object.entries(leads)) {
+    for (const v of ['O1', 'O2', 'O3']) renders[lname + '-' + v] = ownerEmail({ business: biz, lead: l, variant: v });
+  }
+  const brandHexes = new Set(Object.values(getBrand().colors));
+  // G2
+  line(Object.values(renders).every((r) => r.html && r.text && r.subject.startsWith('New lead:')),
+    'G2', 'O1/O2/O3 render for clean, minimal and stress leads', `renders=${Object.keys(renders).length}`);
+  // G3
+  const orderOk = Object.values(renders).every((r) => {
+    const j = r.html.indexOf('>Job<'), b = r.html.indexOf('>Call '), rp = r.html.indexOf('Reply to this email');
+    return j >= 0 && b > j && rp > b;
+  });
+  // G4
+  const widthsOk = Object.values(renders).filter((r) => r.html.includes('width="2%"'))
+    .every((r) => (r.html.match(/width="49%"/g) || []).length >= 2);
+  // G5
+  const noLeftOk = Object.values(renders).every((r) => !r.html.includes('border-left'));
+  // G6: every HEX colour in the markup is a brand hex (stars #E0A800 may appear in review mail, not owner)
+  const g6Ok = Object.values(renders).every((r) => {
+    const found = [...r.html.matchAll(/#[0-9A-Fa-f]{6}/g)].map((m) => m[0].toUpperCase());
+    return found.every((h) => brandHexes.has(h));
+  });
+  // G7: font-face urls absolute https under SITE_URL and files exist
+  const siteEnv = process.env.SITE_URL;
+  const faceUrls = [...renders['full-O1'].html.matchAll(/url\('([^']+)'\)/g)].map((m) => m[1]);
+  const facesExist = faceUrls.every((u) => /^(?:https:\/\/[^/]+)?\/assets\/fonts\//.test(u));
+  // G8
+  const imgs = [...renders['full-O1'].html.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
+  const imgOk = imgs.length > 0 && imgs.every((t) => t.includes('alt="Alder Roofing"') && /(width|height)=/.test(t) && t.includes('display:block'));
+  // G9
+  const footerSep = renders['full-O1'].html.includes('margin:0 0 8px') && renders['full-O1'].html.includes('Reply to this email');
+  // G10
+  const stress = renders['stress-O1'];
+  const g10Ok = stress.html.includes('&lt;b&gt;') && stress.html.includes('&amp;') && !stress.html.includes('<b>hail</b>')
+    && stress.text.includes('<b>hail</b> & "quotes" </q>');
+  line(orderOk, 'G3', 'buttons after Job card, before Reply paragraph', `order=${orderOk}`);
+  line(widthsOk, 'G4', 'buttons half-width with 2% spacer', `widths=${widthsOk}`);
+  line(noLeftOk, 'G5', 'no border-left in owner email', `ok=${noLeftOk}`);
+  line(g6Ok, 'G6', 'every markup colour is a brand hex', `ok=${g6Ok}`);
+  line(facesExist, 'G7', 'font-face files exist', `urls=${faceUrls.length} siteEnv=${siteEnv ? 'set' : 'unset'}`);
+  line(imgOk, 'G8', 'every img has alt/size/display:block', `imgs=${imgs.length}`);
+  line(footerSep, 'G9', 'footer lines are separate elements', `ok=${footerSep}`);
+  line(g10Ok, 'G10', 'stress lead stays escaped in HTML, raw in text', `ok=${g10Ok}`);
 
   /* A1b: MAIL_REDIRECT_PREFIX=off skips ONLY the subject prefix; recipient still redirected */
   await clean(); await reset(RS);
