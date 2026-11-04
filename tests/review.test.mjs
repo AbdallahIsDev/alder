@@ -135,6 +135,35 @@ try {
   line(rows.length === 1 && rows[0].rating === 2 && rows[0].comment === 'Updated',
     'D7', 'second POST updates the same row', `rows=${rows.length} rating=${rows[0] && rows[0].rating}`);
 
+  /* D10: low-rating alert dedupe. The owner is alerted only when the stored rating
+     MOVES into the 1-2 range (no previous rating, or previous >= 3). A repeat low
+     rating must not alert again; a low rating after a 3 must. */
+  const t10 = token(); const lid10 = await seed(t10);
+  await reset(TG);
+  await fetch(`${ORIGIN}/r/${t10}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'stars=2&comment=First+complaint', redirect: 'manual',
+  });
+  const d10First = (await tgCalls()).length;
+  await fetch(`${ORIGIN}/r/${t10}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'stars=2&comment=Repeat', redirect: 'manual',
+  });
+  const d10Repeat = (await tgCalls()).length;
+  await fetch(`${ORIGIN}/r/${t10}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'stars=3&comment=Better', redirect: 'manual',
+  });
+  const d10Mid = (await tgCalls()).length;
+  await fetch(`${ORIGIN}/r/${t10}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'stars=1&comment=Worse+again', redirect: 'manual',
+  });
+  const d10Back = (await tgCalls()).length;
+  const fb10 = await svc.from('review_feedback').select('rating').eq('lead_id', lid10).maybeSingle();
+  line(d10First === 1 && d10Repeat === 1 && d10Mid === 1 && d10Back === 2 && fb10.data.rating === 1,
+    'D10', 'low-rating alert fires once per move into 1-2', `alerts=${d10First}/${d10Repeat}/${d10Mid}/${d10Back} final=${fb10.data.rating}`);
+
   /* /go redirect, including a forced DB write failure */
   const t2 = token(); await seed(t2);
   const go = await fetch(`${ORIGIN}/r/${t2}/go`, { redirect: 'manual' });

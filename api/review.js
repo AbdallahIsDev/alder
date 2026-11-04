@@ -106,13 +106,21 @@ export default async function handler(req, res) {
     } catch (e) {
       console.error('review_rate_limit_failed', (e && e.code) || 'no_code');
     }
+    // Read the stored rating BEFORE the upsert. The owner is alerted only when the
+    // rating MOVES into the 1-2 range: no previous rating, or a previous rating of 3
+    // or more. A repeat low rating never alerts twice. If this read fails, previous
+    // counts as "no previous rating" and the alert may fire again.
+    let previous = null;
+    try { const f = await getFeedback(lead.id); previous = f && f.rating ? f.rating : null; } catch (e) {
+      console.error('review_prev_rating_failed', (e && e.code) || 'no_code');
+    }
     try { await upsertFeedback(lead.id, stars, comment); } catch (e) {
       console.error('review_feedback_write_failed', (e && e.code) || 'no_code');
     }
     try { await addEvent(lead.id, 'rating', { stars }); } catch (e) {
       console.error('review_rating_event_failed', (e && e.code) || 'no_code');
     }
-    if (stars <= 2) {
+    if (stars <= 2 && (previous === null || previous >= 3)) {
       await sendLowRatingAlert({ business, lead: { name: lead.name, phone: lead.phone }, stars, comment });
     }
     res.setHeader('Location', '/r/' + encodeURIComponent(token));
