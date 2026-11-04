@@ -4,7 +4,7 @@
 import http from 'node:http';
 
 function start(name) {
-  const state = { mode: 'ok', status: 200, hangMs: 6000, requests: [] };
+  const state = { mode: 'ok', status: 200, hangMs: 6000, hangUsed: false, requests: [] };
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -17,7 +17,7 @@ function start(name) {
     if (req.url === '/__control' && req.method === 'POST') {
       try {
         const c = JSON.parse(raw || '{}');
-        if (c.mode !== undefined) state.mode = String(c.mode);
+        if (c.mode !== undefined) { state.mode = String(c.mode); state.hangUsed = false; }
         if (c.status !== undefined) state.status = Number(c.status);
         if (c.hangMs !== undefined) state.hangMs = Number(c.hangMs);
       } catch {}
@@ -27,17 +27,22 @@ function start(name) {
       return send(200, { count: state.requests.length, requests: state.requests });
     }
     if (req.url === '/__reset' && req.method === 'POST') {
-      state.requests = []; state.mode = 'ok'; state.status = 200;
+      // Clear the request log only. Mode is owned by /__control so tests can set a
+      // failure mode and then reset the log without losing it.
+      state.requests = [];
+      state.hangUsed = false;
       return send(200, { ok: true });
     }
 
     let parsed = null;
     try { parsed = JSON.parse(raw || '{}'); } catch {}
-    const entry = { method: req.method, path: req.url, body: parsed, raw, at: Date.now() };
+    const entry = { method: req.method, path: req.url, headers: req.headers, body: parsed, raw, at: Date.now() };
     state.requests.push(entry);
 
     let mode = state.mode;
     if (mode === '400_if_keyboard') mode = parsed && parsed.reply_markup ? '400' : 'ok';
+    if (mode === 'hang_once') mode = state.hangUsed ? 'ok' : 'hang';
+    if (mode === 'hang' && state.mode === 'hang_once') state.hangUsed = true;
 
     if (mode === 'hang') {
       setTimeout(() => { try { send(200, { ok: true }); } catch {} }, state.hangMs);
