@@ -126,6 +126,18 @@ try {
     'A1', 'owner email payload exact + escaped',
     `from=${okFrom} to=${okTo} reply_to=${okReply} prefix=${okPrefix} esc=${escaped} crlf=${noCrLf} labels=${labelsOk} tel=${telOk} ext=${!noExternal}`);
   line(!!(owner && owner.headers && owner.headers['idempotency-key']), 'A2', 'Idempotency-Key header sent');
+
+  /* A1b: MAIL_REDIRECT_PREFIX=off skips ONLY the subject prefix; recipient still redirected */
+  await clean(); await reset(RS);
+  const savedPrefix = process.env.MAIL_REDIRECT_PREFIX;
+  process.env.MAIL_REDIRECT_PREFIX = 'off';
+  const { key: keyB } = await post({});
+  process.env.MAIL_REDIRECT_PREFIX = savedPrefix;
+  const reqsB = (await requests(RS)).filter((x) => x.method === 'POST' && x.path === '/emails');
+  const ownerB = reqsB.find((x) => x.body && x.body.subject && x.body.subject.startsWith('New lead:')) && reqsB.find((x) => x.body && x.body.subject && x.body.subject.startsWith('New lead:')).body;
+  line(!!ownerB && !ownerB.subject.startsWith('[TEST for ') && ownerB.to[0] === process.env.MAIL_REDIRECT_TO
+    && ownerB.subject.startsWith('New lead:'),
+    'A1b', 'prefix off: no [TEST] prefix, still redirected', `to=${ownerB && ownerB.to} subj=${ownerB && ownerB.subject.slice(0, 30)}`);
 } catch (e) { line(false, 'A1', 'owner email payload', e.message); }
 
 /* Resend 500 */
