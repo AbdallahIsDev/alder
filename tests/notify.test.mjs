@@ -158,7 +158,7 @@ try {
   line(bad.length === 0, 'G1', 'toTelHref: US gets +1, international keeps +, rest untouched',
     bad.length ? 'bad: ' + bad.map(([i, w]) => `${i}->${toTelHref(i)} (want ${w})`).join('; ') : `${cases.length} cases ok`);
 
-  /* G2-G10: owner email variants + shared structure (unit-level, no DB). */
+  /* G: owner email structure (unit-level, no DB). */
   const { ownerEmail } = await import('../lib/content.js');
   const { getBrand } = await import('../lib/brand.js');
   const biz = { name: 'Alder Roofing', timezone: 'America/Chicago' };
@@ -168,13 +168,11 @@ try {
     stress: { name: 'Stress <b>Test</b>', phone: '(555) 501-2345', email: 'stress@example.com', zip: '50265', service: 'storm', home: 'house', timing: 'month', roof_age: 'Over 20 years', insurance_claim: true, notes: '<b>hail</b> & "quotes" </q>' },
   };
   const renders = {};
-  for (const [lname, l] of Object.entries(leads)) {
-    for (const v of ['O1', 'O2', 'O3']) renders[lname + '-' + v] = ownerEmail({ business: biz, lead: l, variant: v });
-  }
+  for (const [lname, l] of Object.entries(leads)) renders[lname] = ownerEmail({ business: biz, lead: l });
   const brandHexes = new Set(Object.values(getBrand().colors));
   // G2
   line(Object.values(renders).every((r) => r.html && r.text && r.subject.startsWith('New lead:')),
-    'G2', 'O1/O2/O3 render for clean, minimal and stress leads', `renders=${Object.keys(renders).length}`);
+    'G2', 'O1 renders for clean, minimal and stress leads', `renders=${Object.keys(renders).length}`);
   // G3
   const orderOk = Object.values(renders).every((r) => {
     const j = r.html.indexOf('>Job<'), b = r.html.indexOf('>Call '), rp = r.html.indexOf('Reply to this email');
@@ -192,15 +190,15 @@ try {
   });
   // G7: font-face urls absolute https under SITE_URL and files exist
   const siteEnv = process.env.SITE_URL;
-  const faceUrls = [...renders['full-O1'].html.matchAll(/url\('([^']+)'\)/g)].map((m) => m[1]);
+  const faceUrls = [...renders.full.html.matchAll(/url\('([^']+)'\)/g)].map((m) => m[1]);
   const facesExist = faceUrls.every((u) => /^(?:https:\/\/[^/]+)?\/assets\/fonts\//.test(u));
   // G8
-  const imgs = [...renders['full-O1'].html.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
+  const imgs = [...renders.full.html.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
   const imgOk = imgs.length > 0 && imgs.every((t) => t.includes('alt="Alder Roofing"') && /(width|height)=/.test(t) && t.includes('display:block'));
   // G9
-  const footerSep = renders['full-O1'].html.includes('margin:0 0 8px') && renders['full-O1'].html.includes('Reply to this email');
+  const footerSep = renders.full.html.includes('margin:0 0 8px') && renders.full.html.includes('Reply to this email');
   // G10
-  const stress = renders['stress-O1'];
+  const stress = renders.stress;
   const g10Ok = stress.html.includes('&lt;b&gt;') && stress.html.includes('&amp;') && !stress.html.includes('<b>hail</b>')
     && stress.text.includes('<b>hail</b> & "quotes" </q>');
   line(orderOk, 'G3', 'buttons after Job card, before Reply paragraph', `order=${orderOk}`);
@@ -212,32 +210,44 @@ try {
   line(footerSep, 'G9', 'footer lines are separate elements', `ok=${footerSep}`);
   line(g10Ok, 'G10', 'stress lead stays escaped in HTML, raw in text', `ok=${g10Ok}`);
 
-  /* H: review-request email variants (unit-level) */
+  /* G11: pinned button colours (from brand tokens) */
+  const bc = getBrand().colors;
+  const fullHtml = renders.full.html;
+  const callBtn = fullHtml.match(/<td width="49%"[^>]*bgcolor="([^"]+)"[^>]*><a[^>]*style="[^"]*color:([^;"]+)[^"]*">Call /);
+  const mailBtn = fullHtml.match(/<td width="49%"[^>]*bgcolor="([^"]+)"[^>]*><a[^>]*style="[^"]*color:([^;"]+)[^"]*">Email /);
+  const g11Ok = !!(callBtn && mailBtn
+    && callBtn[1].toUpperCase() === bc.accent.toUpperCase()
+    && callBtn[2].toUpperCase() === bc.accentText.toUpperCase()
+    && mailBtn[1].toUpperCase() === bc.bg.toUpperCase()
+    && mailBtn[2].toUpperCase() === bc.onBg.toUpperCase());
+  // lead without an email: exactly one button, the accent one
+  const noMailHtml = renders.minimal.html;
+  const singleAccent = noMailHtml.includes('bgcolor="' + bc.accent + '"')
+    && !/<td width="49%"[^>]*bgcolor="[^"]+"[^>]*><a[^>]*>Email /.test(noMailHtml);
+  line(g11Ok && singleAccent, 'G11', 'Call=accent/accentText, Email=bg/onBg; no-email lead gets one accent button',
+    `call=${callBtn && callBtn[1]} mail=${mailBtn && mailBtn[1]} single=${singleAccent}`);
+
+  /* H: review-request email (unit-level) */
   const { reviewEmail: reviewEmailNew, autoReply: autoReplyNew } = await import('../lib/content.js');
   const site = 'https://reviews.example';
-  // H1: R1 button carries the G img when the file exists, plain button when not
-  const hasG = fs.existsSync(new URL('../assets/email/google-g.png', import.meta.url));
-  const r1 = reviewEmailNew({ business: biz, token: 'tok123', siteUrl: site, variant: 'R1' });
-  const r1Ok = r1.html.includes('/r/tok123?go=1') && r1.html.includes('Leave a Google review')
-    && (hasG ? r1.html.includes('/assets/email/google-g.png') : !r1.html.includes('google-g.png'));
-  // H2: R2 five links only, nothing else clickable
-  const r2 = reviewEmailNew({ business: biz, token: 'tok123', siteUrl: site, variant: 'R2' });
-  const r2stars = [1, 2, 3, 4, 5].every((n) => r2.html.includes(`/r/tok123?s=${n}`));
-  const r2links = (r2.html.match(/<a href=/g) || []).length;
-  const r2ok = r2stars && r2links === 5 && !r2.html.includes('Leave a Google review');
-  // H3: no private-feedback sentence and no incentive wording
-  const h3ok = !r1.html.includes('private feedback') && !r1.text.includes('private feedback')
-    && !r2.html.includes('private feedback') && !r1.html.includes('Google link works')
-    && !/(discount|coupon|free[^a-z]|cash back|incentive)/i.test(r1.html + r2.html + r1.text + r2.text);
+  // H1 (rewrite of the old R1-button test — see the report for before/after):
+  // the review email now has exactly five ?s=1..5 links and NO button at all,
+  // and does not reference the deleted google-g.png.
+  const rr = reviewEmailNew({ business: biz, token: 'tok123', siteUrl: site });
+  const rrLinks = (rr.html.match(/<a href="/g) || []).length;
+  const rrOk = [1, 2, 3, 4, 5].every((n) => rr.html.includes(`/r/tok123?s=${n}`))
+    && rrLinks === 5 && !rr.html.includes('Leave a Google review') && !rr.html.includes('google-g');
+  const h3ok = !rr.html.includes('private feedback') && !rr.text.includes('private feedback')
+    && !rr.html.includes('Google link works')
+    && !/(discount|coupon|free[^a-z]|cash back|incentive)/i.test(rr.html + rr.text);
   // H4: customer footers read "Sent by <business>", never "Lead Alerts"
   const autoNew = autoReplyNew({ business: biz, lead: leads.full });
   const h4ok = autoNew.html.includes('Sent by Alder Roofing') && !autoNew.html.includes('Lead Alerts')
-    && r1.html.includes('Sent by Alder Roofing') && !r1.html.includes('Lead Alerts')
-    && r2.html.includes('Sent by Alder Roofing') && !r2.html.includes('Lead Alerts');
+    && rr.html.includes('Sent by Alder Roofing') && !rr.html.includes('Lead Alerts');
   // H5: owner email keeps "Sent by Lead Alerts"
-  const h5ok = renders['full-O1'].html.includes('Sent by Lead Alerts') && renders['full-O1'].text.includes('Sent by Lead Alerts');
-  line(r1Ok, 'H1', 'R1 button with G img only when the file exists', `hasG=${hasG} link=${r1.html.includes('/r/tok123?go=1')}`);
-  line(r2ok, 'H2', 'R2 five ?s=1..5 links, nothing else clickable', `links=${(r2.html.match(/<a href=/g) || []).length}`);
+  const h5ok = renders.full.html.includes('Sent by Lead Alerts') && renders.full.text.includes('Sent by Lead Alerts');
+  line(rrOk, 'H1', 'review email: exactly five ?s=1..5 links, no button', `links=${rrLinks}`);
+  line(rrOk, 'H2', 'nothing else clickable', `links=${rrLinks}`);
   line(h3ok, 'H3', 'no private-feedback sentence, no incentives', `ok=${h3ok}`);
   line(h4ok, 'H4', 'customer footers: Sent by <business>, never Lead Alerts', `ok=${h4ok}`);
   line(h5ok, 'H5', 'owner footer still Sent by Lead Alerts', `ok=${h5ok}`);

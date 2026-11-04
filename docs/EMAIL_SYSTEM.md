@@ -4,7 +4,7 @@ How the lead-capture emails and Telegram alerts work, and how to change them.
 No secrets, no pricing, no strategy — just the mechanics.
 
 - **Brand tokens** — where they come from, and how to restyle every client.
-- **Owner email** — the three variants and how to switch.
+- **Owner email** — the single design and its two buttons.
 - **Customer emails** — auto-reply and review request.
 - **Review landing page** — how the Google redirect works now.
 - **Telegram** — the three-step button flow.
@@ -71,27 +71,19 @@ right in both worlds.
 
 ## Owner email
 
-`ownerEmail({ business, lead, variant })` in `lib/content.js`. The variant is a
-compile-time constant:
+`ownerEmail({ business, lead })` in `lib/content.js`. There is one design only
+(the former O1 "brand dark") — no variant parameter exists any more.
 
-```js
-export const OWNER_VARIANT = 'O1';  // change this one line to repaint every owner email
-```
-
-| Variant | Look |
-|---|---|
-| `O1` (default) | dark brand band with logo, title "New estimate request", subtitle, then a 4 px accent bar |
-| `O2` | light: accent bar on TOP of the card, logo/title/subtitle in `text`/`muted`, 1 px bottom border |
-| `O3` | accent flood: the whole header is the accent colour; the logo uses `onDark` when `accentText` is white, else `onLight` |
-
-Layout (same in all three): two cards ("Customer": Name/Phone/Email; "Job":
-Service/Timing/Property/Roof age/Insurance claim/ZIP) separated by a 16 px
-spacer, with the notes box inside the Job card. **Buttons come after the Job
-card** (a change from previous versions): two half-width buttons — "Call \<first
-name\>" (accent, `tel:` link) and "Email \<first name\>" (mail link) — with a
-2% spacer between them; with no email on the lead, one full-width Call button.
-The plain-text part carries the same sections and labels, with the buttons as two
-"Call:"/"Email:" lines after the Job section.
+Layout: a dark brand band with the logo, title "New estimate request",
+subtitle, then a 4 px accent bar; two cards ("Customer": Name/Phone/Email;
+"Job": Service/Timing/Property/Roof age/Insurance claim/ZIP) separated by a
+16 px spacer, with the notes box inside the Job card. **Buttons come after the
+Job card, before the footer**: two half-width buttons, 2% spacer between them
+— "Call \<first name\>" (td = accent, link text = accentText, `tel:` link) and
+"Email \<first name\>" (td = bg, link text = onBg, mail link); with no email on
+the lead, one full-width Call button in the accent colour. Colours are brand
+tokens only. The plain-text part carries the same sections and labels, with the
+buttons as two "Call:"/"Email:" lines after the Job section.
 
 **Phone links** use `toTelHref()` in `lib/content.js`: 10 digits → `+1`, 11
 digits starting with 1 → `+`, a leading `+` stays, anything else is the bare
@@ -99,7 +91,7 @@ digits. Display text is never altered.
 
 ## Customer emails
 
-Both customer mails share the owner variant's header **band** but logo-only (no
+Both customer mails share the owner email's dark band but logo-only (no
 title/subtitle), and their footers read "Sent by \<business name\>" (escaped) —
 never "Lead Alerts". The owner email keeps "Sent by Lead Alerts".
 
@@ -107,17 +99,13 @@ never "Lead Alerts". The owner email keeps "Sent by Lead Alerts".
   are unchanged: only the roofer's business name, no studio name, no time
   promise ("we'll be in touch about it", never "within 24 hours"), no AI claims.
 
-- **Review request** (`reviewEmail`): `REVIEW_VARIANT` in `lib/content.js`
-  selects the design.
-  - `R1` (button): the line "If you have a minute, we would really appreciate a
-    Google review." then a centred "Leave a Google review" button linking to
-    `/r/<token>?go=1`, with the Google "G" letter from
-    `assets/email/google-g.png` when that file exists.
-  - `R2` (stars): "How did we do? Tap a star to rate your experience." then five
-    hollow-star TEXT links to `/r/<token>?s=1`…`?s=5` (the star is the text
-    character ☆ with a variation selector so iOS shows the outline, not an emoji).
-  - Neither variant carries the old "private feedback" sentences, and neither
-    offers incentives, discounts, or promises anything.
+- **Review request** (`reviewEmail`): five hollow-star TEXT links to
+  `/r/<token>?s=1`…`?s=5` under the line "How did we do? Tap a star to rate
+  your experience." The star is the text character ☆ with a variation selector
+  so iOS shows the outline, not an emoji. No button, no "private feedback"
+  sentences, and no incentives, discounts, or promises of any kind. The
+  `?go=1` landing-page entry point (used by legacy `/r/<token>/go` links) is
+  unchanged and serves the same landing page.
 
 ## Review landing page
 
@@ -197,10 +185,9 @@ node scripts/preview.mjs --serve   # also serve them at http://127.0.0.1:4173/
 ```
 
 No env, no network (except the loopback server), no DB. The gallery shows the
-owner email in O1/O2/O3 side by side for CLEAN/MINIMAL/STRESS leads at 640 px
-and 375 px widths, the auto-reply, R1 and R2 review emails, the three landing
-pages, and the four Telegram states, each with a caption. The landing pages use
-a stubbed Google URL on the loopback origin so the redirect can be seen without
-leaving the machine. A "Simulate dark mode" checkbox applies
-`invert(1) hue-rotate(180deg)` to the iframes — a rough approximation of
-mail-app dark-mode inversion, not a real dark mode.
+owner email for the CLEAN, MINIMAL and STRESS leads at 640 px and 375 px widths,
+the auto-reply, the five-star review email, the three landing pages (with the
+unavailable state), and the four Telegram states, each with a caption. A
+"Simulate dark mode" checkbox applies `invert(1) hue-rotate(180deg)` to the
+iframes — a rough approximation of mail-app dark-mode inversion, not a real
+dark mode.
