@@ -29,6 +29,7 @@ const DEFAULT_SUITES = [
   'tests/webhook.test.mjs',
   'tests/review.test.mjs',
   'tests/fallback.test.mjs',
+  'tests/brand.test.mjs',
   'tests/outbound.test.mjs',
 ];
 const SUITES = process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_SUITES;
