@@ -40,6 +40,5 @@ _debug/
 # --- tooling state ----------------------------------------------------------
 # `vercel link` writes projectId and orgId here. Machine-specific, never shared.
 .vercel/
-
-.vercel
-.env*
+# Written by tests/run.mjs so lib/tg.js and lib/mail.js refuse real outbound calls.
+.test-mode
