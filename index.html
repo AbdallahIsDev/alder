@@ -2488,9 +2488,6 @@
     <p style="margin:0 0 18px">Send your details and {{name}} will get back to you.</p>
     <form method="post" action="/api/lead">
       <input type="hidden" name="slug" value="{{slug}}">
-      <input type="hidden" name="home" value="house">
-      <input type="hidden" name="timing" value="planning">
-      <input type="hidden" name="age" value="Not sure">
       <div style="position:absolute!important;left:-10000px;width:1px;height:1px;overflow:hidden" aria-hidden="true">
         <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
       </div>
@@ -2505,6 +2502,30 @@
           <option value="storm">Storm or hail damage</option>
           <option value="repair">Repair or leak</option>
           <option value="unsure">Not sure yet</option>
+        </select></p>
+      <p style="margin:0 0 10px"><label for="ns-home">Property type</label><br>
+        <select id="ns-home" name="home" required style="width:100%;padding:8px">
+          <option value="">Choose one</option>
+          <option value="house">Single-family home</option>
+          <option value="multi">Townhome or duplex</option>
+          <option value="commercial">Commercial building</option>
+          <option value="other">Something else</option>
+        </select></p>
+      <p style="margin:0 0 10px"><label for="ns-age">How old is the roof?</label><br>
+        <select id="ns-age" name="age" required style="width:100%;padding:8px">
+          <option value="">Choose one</option>
+          <option>Under 10 years</option>
+          <option>10 to 20 years</option>
+          <option>Over 20 years</option>
+          <option>Not sure</option>
+        </select></p>
+      <p style="margin:0 0 10px"><label for="ns-timing">When do you want to start?</label><br>
+        <select id="ns-timing" name="timing" required style="width:100%;padding:8px">
+          <option value="">Choose one</option>
+          <option value="asap">As soon as possible</option>
+          <option value="month">Within a month</option>
+          <option value="quarter">In 1 to 3 months</option>
+          <option value="planning">Just planning ahead</option>
         </select></p>
       <p style="margin:0 0 16px"><label for="ns-notes">Anything we should know? (optional)</label><br>
         <textarea id="ns-notes" name="notes" maxlength="2000" rows="4" style="width:100%;padding:8px"></textarea></p>

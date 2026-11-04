@@ -112,11 +112,42 @@ try {
   });
   let j = null; try { j = await r5.json(); } catch {}
   line(r5.status === 200 && j && j.ok === true, 'E5', 'JSON path still returns {ok:true}', `${r5.status} ${JSON.stringify(j)}`);
+
+  /* E6: urlencoded missing any of the four choice fields -> 400 HTML, nothing stored.
+     The server must supply NO defaults for service/home/timing/age on form posts. */
+  const marker6 = `E6 ${RUN}`;
+  const missingResults = [];
+  for (const field of ['service', 'home', 'timing', 'age']) {
+    const partial = form({ notes: marker6 });
+    delete partial[field];
+    const r = await postForm(partial);
+    const html = await r.text();
+    missingResults.push(`${field}:${r.status}/${/text\/html/.test(r.headers.get('content-type') || '')}/${html.includes('check your details')}`);
+  }
+  const rows6 = await rowsFor(marker6);
+  line(missingResults.length === 4 && missingResults.every((s) => s.endsWith('/true/true')) && rows6.length === 0,
+    'E6', 'missing service/home/timing/age -> 400 HTML, no row', `${missingResults.join(' ')} rows=${rows6.length}`);
+
+  /* E7: a complete urlencoded post stores exactly the chosen values */
+  const marker7 = `E7 ${RUN}`;
+  const r7 = await postForm(form({
+    service: 'storm', home: 'multi', timing: 'quarter', age: 'Over 20 years', notes: marker7,
+  }));
+  const rows7 = await rowsFor(marker7);
+  const row7 = rows7.length === 1
+    ? (await svc.from('leads').select('service, home, timing, roof_age').eq('notes', marker7).single()).data
+    : null;
+  line(r7.status === 200 && row7 && row7.service === 'storm' && row7.home === 'multi'
+    && row7.timing === 'quarter' && row7.roof_age === 'Over 20 years',
+    'E7', 'complete form stores exactly the chosen values',
+    r7.status + (row7 ? ` ${row7.service}/${row7.home}/${row7.timing}/${row7.roof_age}` : ' no-row'));
 } catch (e) {
   line(false, 'E0', 'fallback suite threw', e.message);
 } finally {
   await svc.from('leads').delete().like('notes', `E1 ${RUN}%`);
   await svc.from('leads').delete().like('notes', `E2 ${RUN}%`);
+  await svc.from('leads').delete().like('notes', `E6 ${RUN}%`);
+  await svc.from('leads').delete().like('notes', `E7 ${RUN}%`);
   await svc.from('leads').delete().eq('idempotency_key', `${RUN}-json`);
   await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
 }
