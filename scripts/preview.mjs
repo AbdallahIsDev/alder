@@ -88,26 +88,25 @@ fs.mkdirSync(OUT, { recursive: true });
 const files = [];
 const add = (name, title, body, html) => { files.push({ name, title, body, html }); };
 
-for (const v of ['O1', 'O2', 'O3']) {
-  add(`owner-email-${v}-clean.html`, `Owner email ${v} — CLEAN lead`, wrapHtml(`Owner email ${v}`, ownerEmail({ business, lead: cleanLead, variant: v }).html), true);
-  add(`owner-email-${v}-minimal.html`, `Owner email ${v} — MINIMAL lead`, wrapHtml(`Owner email ${v}`, ownerEmail({ business, lead: minimalLead, variant: v }).html), true);
+for (const v of ['O1']) {
+  add(`owner-email-${v}-clean.html`, `Owner email — CLEAN lead`, wrapHtml(`Owner email`, ownerEmail({ business, lead: cleanLead }).html), true);
+  add(`owner-email-${v}-minimal.html`, `Owner email — MINIMAL lead`, wrapHtml(`Owner email`, ownerEmail({ business, lead: minimalLead }).html), true);
 }
-add('owner-email-stress.html', 'Owner email — STRESS lead', wrapHtml('Owner email', ownerEmail({ business, lead: stressLead, variant: 'O1' }).html), true);
+add('owner-email-stress.html', 'Owner email — STRESS lead', wrapHtml('Owner email', ownerEmail({ business, lead: stressLead }).html), true);
 add('owner-email.txt', 'Owner email (plain text) — full lead', ownerEmail({ business, lead: cleanLead }).text, false);
 add('auto-reply.html', 'Customer auto-reply', wrapHtml('Auto reply', autoReply({ business, lead: cleanLead }).html), true);
-add('review-request-R1.html', 'Review request — R1 (button)', wrapHtml('Review request', reviewEmail({ business, token, siteUrl, variant: 'R1' }).html), true);
-add('review-request-R2.html', 'Review request — R2 (stars)', wrapHtml('Review request', reviewEmail({ business, token, siteUrl, variant: 'R2' }).html), true);
+add('review-request.html', 'Review request email (five stars)', wrapHtml('Review request', reviewEmail({ business, token, siteUrl }).html), true);
 add('telegram-alert-new.txt', 'Telegram alert — new', renderAlert({ business, lead: cleanLead, view: 'new', reviewResult: null }), false);
 add('telegram-alert-contacted.txt', 'Telegram alert — contacted', renderAlert({ business, lead: cleanLead, view: 'contacted', reviewResult: null }), false);
 add('telegram-alert-confirm.txt', 'Telegram alert — confirm', renderAlert({ business, lead: cleanLead, view: 'confirm', reviewResult: null }), false);
 add('telegram-alert-done.txt', 'Telegram alert — done', renderAlert({ business, lead: cleanLead, view: 'done', reviewResult: 'sent' }), false);
 // Landing pages with a stubbed Google URL on 127.0.0.1 so the redirect can be seen
-// without leaving the machine (a loopback URL is not allowlisted, so inject via a
-// local stub — use a google-shaped display URL instead).
+// without leaving the machine.
 const STUB_GOOGLE = 'https://g.page/stub';
 for (const [q, n] of [['s1', 1], ['s5', 5], ['go', 0]]) {
   add(`review-landing-${q}.html`, `Review landing page (?${q === 'go' ? 'go=1' : 's=' + n})`, reviewLandingPage({ business, token, googleUrl: STUB_GOOGLE, stars: n }) , true);
 }
+add('review-landing-unavailable.html', 'Review landing page (unavailable link)', reviewLandingPage({ business, token, googleUrl: 'http://evil.example', stars: 3 }), true);
 
 for (const f of files) write(f.name, f.body);
 
@@ -129,33 +128,24 @@ this machine.</p>
 <script>document.getElementById('dark').addEventListener('change',function(){document.body.classList.toggle('dark',this.checked);});</script>
 `;
 
-// Side-by-side owner variants for the CLEAN lead
-index += '<h2>Owner email — three variants side by side (CLEAN lead)</h2>\n'
-  + '<p class="cap">The same lead in the three available owner-email designs. O1 is the default (dark brand band), O2 is the light version (accent bar on top, light body), O3 paints the whole header with the accent colour. Changing the variant is a one-line constant (docs/EMAIL_SYSTEM.md).</p><div class="cols">';
-for (const v of ['O1', 'O2', 'O3']) {
-  index += `<div class="col"><h3 style="margin:8px 0">${v}</h3>`
-    + `<p class="cap">Desktop width</p><iframe src="owner-email-${v}-clean.html" width="640" height="420"></iframe>`
-    + `<p class="cap">Phone width</p><iframe src="owner-email-${v}-clean.html" width="375" height="420"></iframe></div>`;
-}
-index += '</div>';
-index += '<p class="cap">MINIMAL lead: a customer who filled only the required fields, to check the layout when email and notes are empty.</p><div class="cols">';
-for (const v of ['O1', 'O2', 'O3']) {
-  index += `<div class="col"><h3 style="margin:8px 0">${v} (minimal)</h3>`
-    + `<iframe src="owner-email-${v}-minimal.html" width="640" height="420"></iframe></div>`;
-}
-index += '</div>';
+// Owner variants side-by-side REMOVED: there is one design now.
+index += '<h2>Owner email — CLEAN lead</h2>\n'
+  + '<p class="cap">The same lead in the current owner-email design.</p>'
+  + '<p class="cap">Desktop width</p><iframe src="owner-email-O1-clean.html" width="640" height="420"></iframe>'
+  + '<p class="cap">Phone width</p><iframe src="owner-email-O1-clean.html" width="375" height="420"></iframe>\n';
+index += '<p class="cap">MINIMAL lead: a customer who filled only the required fields, to check the layout when email and notes are empty. This lead has no email, so only the Call button appears.</p>\n'
+  + '<iframe src="owner-email-O1-minimal.html" width="640" height="420"></iframe>\n';
 index += '<p class="cap">STRESS lead: weird characters on purpose, proves nothing a customer types can break the email.</p>\n'
   + '<iframe src="owner-email-stress.html" width="640" height="420"></iframe>\n';
 index += '<h2>Customer auto-reply</h2><p class="cap">Sent to the customer right after their request lands. NO time promise and no studio name — only the roofer\'s business name.</p>\n'
   + '<iframe src="auto-reply.html" width="640" height="420"></iframe>\n';
-index += '<h2>Review request email — R1 (button)</h2><p class="cap">One button that opens the review landing page. No private-feedback sentences and no incentives.</p>\n'
-  + '<iframe src="review-request-R1.html" width="640" height="420"></iframe>\n';
-index += '<h2>Review request email — R2 (stars)</h2><p class="cap">Five hollow stars that open the landing page pre-selecting that rating.</p>\n'
-  + '<iframe src="review-request-R2.html" width="640" height="420"></iframe>\n';
+index += '<h2>Review request email (five stars)</h2><p class="cap">Five hollow stars that open the landing page pre-selecting that rating.</p>\n'
+  + '<iframe src="review-request.html" width="640" height="420"></iframe>\n';
 index += '<h2>Review landing page</h2><p class="cap">Opened from the email. Opening it writes NOTHING to the database (mail scanners open every link); the page\'s JavaScript records the rating and the Google click, then sends you to Google.</p>\n'
-  + '<iframe src="review-landing-s1.html" width="640" height="420"></iframe>\n'
-  + '<iframe src="review-landing-s5.html" width="640" height="420"></iframe>\n'
-  + '<iframe src="review-landing-go.html" width="640" height="420"></iframe>\n';
+  + '<iframe src="review-landing-s1.html" width="640" height="700"></iframe>\n'
+  + '<iframe src="review-landing-s5.html" width="640" height="700"></iframe>\n'
+  + '<iframe src="review-landing-go.html" width="640" height="700"></iframe>\n'
+  + '<iframe src="review-landing-unavailable.html" width="640" height="700"></iframe>\n';
 index += '<h2>Telegram alerts (text)</h2>\n'
   + '<p class="cap">Telegram: lead just arrived</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-new.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: roofer tapped Contacted</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-contacted.txt').body) + '</pre>\n'
