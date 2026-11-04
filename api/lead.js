@@ -7,6 +7,7 @@
 
 import { createHash } from 'node:crypto';
 import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit } from '../lib/db.js';
+import { sendMessage } from '../lib/tg.js';
 
 const SERVICES = ['replacement', 'storm', 'repair', 'unsure'];
 const HOMES = ['house', 'multi', 'commercial', 'other'];
@@ -62,20 +63,13 @@ function telegramText(v, leadId) {
   return body + '\nLead ID: ' + String(leadId).slice(0, 8);
 }
 
+/* Routing is unchanged for this step: every alert goes to TELEGRAM_CHAT_ID.
+   The transport moved to lib/tg.js, which owns the timeout, the plain-text rule,
+   the dev-only base override and the .test-mode interlock. */
 async function notify(text) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
   const chat = process.env.TELEGRAM_CHAT_ID;
-  if (!token || !chat) return { ok: false, status: 'missing_env' };
-  try {
-    const r = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chat, text, disable_web_page_preview: true }),
-    });
-    return r.ok ? { ok: true, status: '200' } : { ok: false, status: String(r.status) };
-  } catch {
-    return { ok: false, status: 'network' };
-  }
+  if (!chat) return { ok: false, status: 'missing_env' };
+  return sendMessage(chat, text);
 }
 
 export default async function handler(req, res) {

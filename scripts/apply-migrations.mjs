@@ -17,12 +17,19 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const FILES = [
+const ALL_FILES = [
   'supabase/migrations/0001_init.sql',
   'supabase/seed.sql',
   'supabase/migrations/0002_default_privileges.sql',
   'supabase/migrations/0003_service_role_grants.sql',
 ];
+
+/* --only <path> applies a single later migration against an already-installed database.
+   The "businesses must be absent" guard is deliberately skipped in that mode; nothing
+   else changes: the file still runs in its own transaction and all post-checks still run. */
+const onlyIdx = process.argv.indexOf('--only');
+const ONLY = onlyIdx > -1 ? process.argv[onlyIdx + 1] : null;
+const FILES = ONLY ? [ONLY] : ALL_FILES;
 
 const out = (s = '') => process.stdout.write(s + '\n');
 const pad = (s, n) => String(s).padEnd(n);
@@ -137,20 +144,35 @@ out(`${pad('connected', 26)}yes`);
 out('');
 
 /* ---------- guard ---------- */
-try {
-  const { rows } = await client.query(`select to_regclass('public.businesses') is not null as present`);
-  if (rows[0].present) {
-    out('FAIL  already applied, aborting');
-    out('      public.businesses exists, so this database is past 0001. Nothing was touched.');
+if (ONLY) {
+  out(`${pad('mode', 26)}--only ${ONLY}`);
+  out(`${pad('guard', 26)}skipped (later migration on an installed database)`);
+} else {
+  try {
+    const { rows } = await client.query(`select to_regclass('public.businesses') is not null as present`);
+    if (rows[0].present) {
+      out('FAIL  already applied, aborting');
+      out('      public.businesses exists, so this database is past 0001. Nothing was touched.');
+      await client.end();
+      process.exit(1);
+    }
+    out(`${pad('guard', 26)}public.businesses absent — proceeding`);
+  } catch (e) {
+    fail(`guard query failed: ${e.message}`);
     await client.end();
     process.exit(1);
   }
-  out(`${pad('guard', 26)}public.businesses absent — proceeding`);
-} catch (e) {
-  fail(`guard query failed: ${e.message}`);
-  await client.end();
-  process.exit(1);
 }
+
+/* Show the constraint this migration is about to change, when relevant. */
+const constraintSql = `select pg_get_constraintdef(oid) as def from pg_constraint
+  where conrelid = 'public.lead_events'::regclass and conname = 'lead_events_kind_check'`;
+const showConstraint = async (label) => {
+  if (!ONLY || !ONLY.includes('0004')) return;
+  const { rows } = await client.query(constraintSql);
+  out(`${pad(label, 26)}${rows.length ? rows[0].def : '(missing)'}`);
+};
+await showConstraint('constraint before');
 out('');
 
 /* ---------- apply ---------- */
@@ -187,6 +209,7 @@ for (const rel of FILES) {
 
 /* ---------- post-checks ---------- */
 if (!failed) {
+  await showConstraint('constraint after');
   out('');
   out('--- grants held by anon / authenticated (must be empty) ---');
   try {

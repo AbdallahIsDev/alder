@@ -31,7 +31,14 @@ if (fs.existsSync(path.join(ROOT, '.env'))) {
     if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, '');
   }
 }
-const TELEGRAM_SET = !!(env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN);
+const FAKE_TG_URL = process.env.FAKE_TG_URL;
+async function fakeTg(cfg) {
+  if (!FAKE_TG_URL) throw new Error('FAKE_TG_URL is not set — run through tests/run.mjs');
+  const r = await fetch(FAKE_TG_URL + '/__control', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
+  });
+  return r.json();
+}
 
 /* ---------- printer ---------- */
 let failed = 0;
@@ -199,19 +206,20 @@ const logOffset = fs.statSync(LOG).size;
   line(res.status === 405, '10', 'GET -> 405', res.status);
 }
 
-/* ---------- 11. Telegram failure path ---------- */
+/* ---------- 11. Telegram failure path (fake server returns 500) ---------- */
 {
   await resetLimits();
   const key = `${RUN}-t11`;
+  await fakeTg({ mode: '500' });
   const { status } = await post(payload({ idempotencyKey: key }));
+  await fakeTg({ mode: 'ok' });
   const rows = await leadFor(key);
   const evs = rows.length ? await eventsFor(rows[0].id) : [];
   const tgFail = evs.find((e) => e.kind === 'tg_failed');
-  const ok = status === 200 && rows.length === 1 && !!tgFail;
-  line(ok, '11', 'telegram down -> 200, lead kept, tg_failed',
+  const ok = status === 200 && rows.length === 1 && !!tgFail
+    && tgFail.meta && tgFail.meta.status === 500;
+  line(ok, '11', 'telegram 500 -> 200, lead kept, tg_failed',
     `${status} rows=${rows.length} tg_failed=${tgFail ? JSON.stringify(tgFail.meta) : 'none'}`);
-  if (!TELEGRAM_SET) note('Telegram env is absent in .env, so this exercised status "missing_env".');
-  else note('Telegram env is set; this only proves the failure path if the token is wrong.');
 }
 
 /* ---------- 12. the page's own estimateDeliver ---------- */
@@ -276,6 +284,22 @@ const logOffset = fs.statSync(LOG).size;
   const rows = await leadFor(key);
   line(status === 200 && after > before && rows.length === 0, '14', 'honeypot drop logged, no row',
     `${status} log ${before}->${after} rows=${rows.length}`);
+}
+
+/* ---------- 15. response body exposes nothing ---------- */
+{
+  await resetLimits();
+  const key = `${RUN}-t15`;
+  const res = await fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-real-ip': `203.0.113.${ipSeq++}` },
+    body: JSON.stringify(payload({ idempotencyKey: key })),
+  });
+  let body = null;
+  try { body = await res.json(); } catch {}
+  const exact = res.status === 200 && body && Object.keys(body).length === 1 && body.ok === true;
+  line(exact, '15', 'POST /api/lead body is exactly {ok:true}',
+    `${res.status} ${JSON.stringify(body)}`);
 }
 
 /* ---------- cleanup ---------- */

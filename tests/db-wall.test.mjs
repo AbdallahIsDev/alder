@@ -130,6 +130,12 @@ let leadId = null;
   line(!!error, '4', 'duplicate (business,idempotency) rejected'.padEnd(34), error ? error.code || error.message : 'INSERT SUCCEEDED');
 }
 
+/* ---------- 5b. 0004 extended the allow-list but did not remove the wall ---------- */
+if (leadId) {
+  const { error } = await svc.from('lead_events').insert({ lead_id: leadId, kind: 'definitely_not_a_kind', meta: {} });
+  line(!!error, '5b', 'unknown event kind still rejected'.padEnd(34), error ? error.code || error.message : 'INSERT SUCCEEDED');
+}
+
 /* ---------- 5. constraints ---------- */
 const bad = [
   ['zip abcde', { zip: 'abcde' }],
