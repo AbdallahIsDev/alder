@@ -124,8 +124,23 @@ try {
   line(res.code === 200 && okFrom && okTo && okReply && okPrefix && escaped && bothParts && noCrLf && rows.length === 1
     && labelsOk && telOk && noExternal && preheaderOk && smallOk && linkMailOk,
     'A1', 'owner email payload exact + escaped',
-    `from=${okFrom} to=${okTo} reply_to=${okReply} prefix=${okPrefix} esc=${escaped} crlf=${noCrLf} labels=${labelsOk} tel=${telOk} ext=${!noExternal}`);
+    `from=${okFrom} to=${okTo} reply_to=${okReply} prefix=${okPrefix} esc=${escaped} crlf=${noCrLf} labels=${labelsOk} tel=${telOk} noExternal=${noExternal}`);
   line(!!(owner && owner.headers && owner.headers['idempotency-key']), 'A2', 'Idempotency-Key header sent');
+
+  /* G1: toTelHref normalisation (unit-level, no DB). US formats get +1; the
+     international number keeps its own +; leftover digits stay as typed. */
+  const { toTelHref } = await import('../lib/content.js');
+  const cases = [
+    ['+201005408111', 'tel:+201005408111'],
+    ['(555) 501-2345', 'tel:+15555012345'],
+    ['555-501-2345', 'tel:+15555012345'],
+    ['1 555 501 2345', 'tel:+15555012345'],
+    ['+1 (555) 501-2345', 'tel:+15555012345'],
+    ['0100 540 8111', 'tel:01005408111'],
+  ];
+  const bad = cases.filter(([input, want]) => toTelHref(input) !== want);
+  line(bad.length === 0, 'G1', 'toTelHref: US gets +1, international keeps +, rest untouched',
+    bad.length ? 'bad: ' + bad.map(([i, w]) => `${i}->${toTelHref(i)} (want ${w})`).join('; ') : `${cases.length} cases ok`);
 
   /* A1b: MAIL_REDIRECT_PREFIX=off skips ONLY the subject prefix; recipient still redirected */
   await clean(); await reset(RS);
