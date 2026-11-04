@@ -20,7 +20,18 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MARKER = path.join(ROOT, '.test-mode');
 const LOG = path.join(ROOT, '_debug', 'vercel-dev.log');
 const API = 'http://localhost:3000/api/lead';
-const SUITES = process.argv.slice(2);
+// Default when no suites are named on the command line. outbound is LAST on purpose:
+// its finally removes the .test-mode marker that the other suites rely on.
+const DEFAULT_SUITES = [
+  'tests/db-wall.test.mjs',
+  'tests/lead-api.test.mjs',
+  'tests/notify.test.mjs',
+  'tests/webhook.test.mjs',
+  'tests/review.test.mjs',
+  'tests/fallback.test.mjs',
+  'tests/outbound.test.mjs',
+];
+const SUITES = process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_SUITES;
 
 const out = (s) => process.stdout.write(s + '\n');
 const FORBIDDEN = ['TELEGRAM_API_BASE', 'RESEND_API_BASE'];
