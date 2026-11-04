@@ -212,6 +212,36 @@ try {
   line(footerSep, 'G9', 'footer lines are separate elements', `ok=${footerSep}`);
   line(g10Ok, 'G10', 'stress lead stays escaped in HTML, raw in text', `ok=${g10Ok}`);
 
+  /* H: review-request email variants (unit-level) */
+  const { reviewEmail: reviewEmailNew, autoReply: autoReplyNew } = await import('../lib/content.js');
+  const site = 'https://reviews.example';
+  // H1: R1 button carries the G img when the file exists, plain button when not
+  const hasG = fs.existsSync(new URL('../assets/email/google-g.png', import.meta.url));
+  const r1 = reviewEmailNew({ business: biz, token: 'tok123', siteUrl: site, variant: 'R1' });
+  const r1Ok = r1.html.includes('/r/tok123?go=1') && r1.html.includes('Leave a Google review')
+    && (hasG ? r1.html.includes('/assets/email/google-g.png') : !r1.html.includes('google-g.png'));
+  // H2: R2 five links only, nothing else clickable
+  const r2 = reviewEmailNew({ business: biz, token: 'tok123', siteUrl: site, variant: 'R2' });
+  const r2stars = [1, 2, 3, 4, 5].every((n) => r2.html.includes(`/r/tok123?s=${n}`));
+  const r2links = (r2.html.match(/<a href=/g) || []).length;
+  const r2ok = r2stars && r2links === 5 && !r2.html.includes('Leave a Google review');
+  // H3: no private-feedback sentence and no incentive wording
+  const h3ok = !r1.html.includes('private feedback') && !r1.text.includes('private feedback')
+    && !r2.html.includes('private feedback') && !r1.html.includes('Google link works')
+    && !/(discount|coupon|free[^a-z]|cash back|incentive)/i.test(r1.html + r2.html + r1.text + r2.text);
+  // H4: customer footers read "Sent by <business>", never "Lead Alerts"
+  const autoNew = autoReplyNew({ business: biz, lead: leads.full });
+  const h4ok = autoNew.html.includes('Sent by Alder Roofing') && !autoNew.html.includes('Lead Alerts')
+    && r1.html.includes('Sent by Alder Roofing') && !r1.html.includes('Lead Alerts')
+    && r2.html.includes('Sent by Alder Roofing') && !r2.html.includes('Lead Alerts');
+  // H5: owner email keeps "Sent by Lead Alerts"
+  const h5ok = renders['full-O1'].html.includes('Sent by Lead Alerts') && renders['full-O1'].text.includes('Sent by Lead Alerts');
+  line(r1Ok, 'H1', 'R1 button with G img only when the file exists', `hasG=${hasG} link=${r1.html.includes('/r/tok123?go=1')}`);
+  line(r2ok, 'H2', 'R2 five ?s=1..5 links, nothing else clickable', `links=${(r2.html.match(/<a href=/g) || []).length}`);
+  line(h3ok, 'H3', 'no private-feedback sentence, no incentives', `ok=${h3ok}`);
+  line(h4ok, 'H4', 'customer footers: Sent by <business>, never Lead Alerts', `ok=${h4ok}`);
+  line(h5ok, 'H5', 'owner footer still Sent by Lead Alerts', `ok=${h5ok}`);
+
   /* A1b: MAIL_REDIRECT_PREFIX=off skips ONLY the subject prefix; recipient still redirected */
   await clean(); await reset(RS);
   const savedPrefix = process.env.MAIL_REDIRECT_PREFIX;

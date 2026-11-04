@@ -164,13 +164,95 @@ try {
   line(d10First === 1 && d10Repeat === 1 && d10Mid === 1 && d10Back === 2 && fb10.data.rating === 1,
     'D10', 'low-rating alert fires once per move into 1-2', `alerts=${d10First}/${d10Repeat}/${d10Mid}/${d10Back} final=${fb10.data.rating}`);
 
-  /* /go redirect, including a forced DB write failure */
+  /* /go — REWRITTEN (item 4): the old behaviour was a GET that wrote
+     google_clicked and 302'd, which contradicts the scanner-safety rule
+     (mail scanners open every link and would register fake clicks).
+     Now the legacy path lands on the new landing page: GET writes nothing,
+     the page's POST records the click. */
   const t2 = token(); await seed(t2);
-  const go = await fetch(`${ORIGIN}/r/${t2}/go`, { redirect: 'manual' });
-  const goFail = await fetch(`${ORIGIN}/r/${t2}/go`, { redirect: 'manual', headers: { 'x-review-force-fail': '1' } });
-  line(go.status === 302 && go.headers.get('location') === biz.google_review_url
-    && goFail.status === 302 && goFail.headers.get('location') === biz.google_review_url,
-    'D8', '/go redirects even when the DB write fails', `${go.status}/${goFail.status}`);
+  const goPage = await fetch(`${ORIGIN}/r/${t2}/go`, { redirect: 'manual' });
+  const goHtml = await goPage.text();
+  const goFb = await svc.from('review_feedback').select('lead_id').eq('lead_id', (await svc.from('leads').select('id').eq('review_token', t2).maybeSingle()).data?.id || '');
+  const goEvents = await svc.from('lead_events').select('id').eq('lead_id', (await svc.from('leads').select('id').eq('review_token', t2).maybeSingle()).data?.id || '');
+  await fetch(`${ORIGIN}/r/${t2}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'go=1', redirect: 'manual' });
+  const goFbAfter = await svc.from('review_feedback').select('google_clicked').eq('lead_id', (await svc.from('leads').select('id').eq('review_token', t2).maybeSingle()).data?.id || '');
+  line(goPage.status === 200 && goHtml.includes('location.replace') && goHtml.includes('Continue to Google')
+    && (await goFb.data).length === 0 && (await goEvents.data).length === 0
+    && goFbAfter.data.length === 1 && goFbAfter.data[0].google_clicked === true,
+    'D8', '/go lands on the landing page now; POST records the click', `status=${goPage.status} fbAfter=${goFbAfter.data.length}`);
+
+  /* I: new landing page (?s=N / ?go=1). GET must never write; POST records. */
+  const tI = token(); const lidI = await seed(tI);
+  // I1: GET ?s=1..5 and ?go=1 write nothing
+  await reset(TG);
+  const fbBefore = await svc.from('review_feedback').select('lead_id').eq('lead_id', lidI);
+  for (const q of ['?s=1', '?s=2', '?s=3', '?s=4', '?s=5', '?go=1']) {
+    await fetch(`${ORIGIN}/r/${tI}${q}`, { redirect: 'manual' });
+  }
+  const fbAfter = await svc.from('review_feedback').select('lead_id').eq('lead_id', lidI);
+  const evAfter = await svc.from('lead_events').select('id').eq('lead_id', lidI);
+  line((await fbBefore.data).length === 0 && (await fbAfter.data).length === 0 && (await evAfter.data).length === 0
+    && (await tgCalls()).length === 0,
+    'I1', 'GET ?s=1..5 and ?go=1 create zero rows/events/requests', `fb=${(await fbAfter.data).length} ev=${(await evAfter.data).length}`);
+  // I2: copy identical for s=1 and s=5 except star glyphs/config
+  const p1 = await (await fetch(`${ORIGIN}/r/${tI}?s=1`)).text();
+  const p5 = await (await fetch(`${ORIGIN}/r/${tI}?s=5`)).text();
+  const norm = (h) => h
+    .split(tI).join('TOKEN')
+    .replace(/"stars":\d/g, '"stars":N')
+    .replace(/"googleUrl":"[^"]*"/g, '"googleUrl":"G"');
+  line(norm(p1) === norm(p5), 'I2', 'landing copy identical for s=1 and s=5 except stars', `identical=${norm(p1) === norm(p5)}`);
+  // I3: POST from the page's path records once, repeat changes nothing new
+  const postLanding = (body) => fetch(`${ORIGIN}/r/${tI}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body, redirect: 'manual' });
+  await reset(TG);
+  await postLanding('stars=4&comment=&go=1');
+  const fbI1 = await svc.from('review_feedback').select('rating, google_clicked').eq('lead_id', lidI).maybeSingle();
+  const ev1 = await svc.from('lead_events').select('kind').eq('lead_id', lidI);
+  await postLanding('stars=4&comment=&go=1');
+  const fbI2 = await svc.from('review_feedback').select('rating').eq('lead_id', lidI);
+  line(fbI1.data.rating === 4 && fbI1.data.google_clicked === true && ev1.data.length === 2 && fbI2.data.length === 1,
+    'I3', 'page POST records rating + click once; repeat adds nothing', `rating=${fbI1.data.rating} events=${ev1.data.length}`);
+  // I4: rating 2 alerts once and the landing page still redirects to Google
+  const t4 = token(); await seed(t4);
+  await reset(TG);
+  const r4 = await fetch(`${ORIGIN}/r/${t4}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'stars=2&comment=Meh&go=1', redirect: 'manual' });
+  const alerts4 = (await tgCalls()).length;
+  const landing4 = await (await fetch(`${ORIGIN}/r/${t4}?s=2`)).text();
+  // The redirect target is whatever allowlisted URL the business row holds
+  // (g.page etc. do not contain the string "google.com"), so assert location.replace
+  // carries a non-empty googleUrl that IS allowlisted rather than a substring.
+  const m4 = /"googleUrl":"([^"]*)"/.exec(landing4);
+  const targetOk = m4 && m4[1].length > 1 && m4[1].startsWith('https://');
+  line(alerts4 === 1 && r4.status === 303 && landing4.includes('location.replace') && targetOk,
+    'I4', '2-star POST alerts once and the landing page still redirects to Google', `alerts=${alerts4} target=${targetOk}`);
+  // I5: disallowed Google hosts never produce a redirect
+  const bads = ['http://evil.example', 'javascript:alert(1)', 'https://google.com.evil.example'];
+  const hostGuard = (v) => { try { const u = new URL(v); return u.protocol === 'https:' && ['www.google.com', 'google.com', 'search.google.com', 'maps.google.com', 'g.page', 'maps.app.goo.gl', 'goo.gl'].includes(u.hostname); } catch { return false; } };
+  const badAllowed = bads.filter(hostGuard);
+  line(badAllowed.length === 0 && landing4.includes('Continue to Google'),
+    'I5', 'disallowed Google hosts never produce a redirect', `badAllowed=${badAllowed.join(',')}`);
+  // I6: s=0, s=6, s=abc -> go behaviour (Verify: page renders, redirects, no stars)
+  const i6pages = ['?s=0', '?s=6', '?s=abc'];
+  const i6ok = [];
+  for (const q of i6pages) {
+    const h = await (await fetch(`${ORIGIN}/r/${t4}${q}`)).text();
+    i6ok.push(h.includes('Thank you!') && h.includes('Continue to Google')
+      && h.includes('location.replace') && !h.includes('id="stars"'));
+  }
+  line(i6ok.every(Boolean), 'I6', 's=0, s=6, s=abc fall back to go behaviour', i6ok.join('/'));
+  // I7: token from another business changes nothing (tenancy on the landing page)
+  const t7 = token(); await seed(t7);
+  const foreignBefore = await svc.from('review_feedback').select('lead_id').eq('lead_id', (await svc.from('leads').select('id').eq('review_token', t7).maybeSingle()).data?.id || '');
+  await fetch(`${ORIGIN}/r/${tI}?s=5`, { redirect: 'manual' });
+  await fetch(`${ORIGIN}/r/${t7}?s=5`, { redirect: 'manual' });
+  const foreignAfter = await svc.from('review_feedback').select('lead_id').eq('lead_id', (await svc.from('leads').select('id').eq('review_token', t7).maybeSingle()).data?.id || '');
+  line((await foreignBefore.data).length === 0 && (await foreignAfter.data).length === 0,
+    'I7', 'landing GET for another business token writes nothing', `fb=${(await foreignAfter.data).length}`);
 
   /* no studio branding, no AI, no auto-posting claim */
   const haystack = [html0, html1, ...pages.map((p) => p.html), ...(await resendCalls()).map((x) => (x.body?.html || '') + (x.body?.text || ''))].join('\n');

@@ -2,7 +2,12 @@
 //
 // GET  /r/:token      — review page (server-rendered, works with JS disabled)
 // GET  /r/:token/go   — record the click, then 302 to the roofer's Google review URL
-// POST /r/:token      — optional private rating; always 303 back to the page
+// GET  /r/:token?s=N  — landing page for the review-request email (GET NEVER WRITES)
+// GET  /r/:token?go=1 — same landing page without stars (GET NEVER WRITES)
+// POST /r/:token      — optional private rating; always 303 back to the page.
+//                        Also accepts go=1 to record the Google click mark sent by
+//                        the landing page's JavaScript (a GET is never trusted to
+//                        record anything: mail scanners open every link).
 //
 // Review gating is banned. The Google button is rendered identically on every visit,
 // before any rating and after every rating, and is never hidden, delayed, disabled or
@@ -14,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { getBusinessById, addEvent, hitRateLimit } from '../lib/db.js';
 import { getLeadByReviewToken, getFeedback, upsertFeedback, markGoogleClicked } from '../lib/review-db.js';
-import { reviewPage } from '../lib/content.js';
+import { reviewPage, reviewLandingPage } from '../lib/content.js';
 import { sendLowRatingAlert } from '../lib/notify.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -65,24 +70,25 @@ export default async function handler(req, res) {
   if (!business) return notFound(res);
   const googleUrl = usableGoogleUrl(business.google_review_url);
 
-  /* ---------- /go ---------- */
-  if (req.query && req.query.go === '1') {
-    // The click WRITE here is best effort: a failed write is logged and cannot block
-    // the 302. The lead and business lookups above are NOT best effort — if they fail,
-    // this handler never reaches this line and the visitor gets a 404 instead.
-    const location = googleUrl || '/r/' + encodeURIComponent(token);
-    try {
-      if (forceWriteFailure(req)) throw new Error('forced');
-      await markGoogleClicked(lead.id);
-      await addEvent(lead.id, 'review_clicked', {});
-    } catch (e) {
-      console.error('review_click_write_failed', (e && e.code) || 'no_code');
-    }
-    res.setHeader('Location', location);
-    return res.status(302).end();
+  /* ---------- GET landing page (?s=N or ?go=1): NEVER writes --------------
+     The legacy /r/:token/go links from emails already sent arrive here too
+     (the vercel.json rewrite maps them to the same query). They now land on
+     this page and redirect client-side after ~150 ms; the click mark is
+     recorded by the page's POST, not by the GET — so mail scanners that open
+     the link without running JS no longer register fake clicks. */
+  if (req.query && (req.query.s !== undefined || req.query.go === '1')) {
+    const n = Number(req.query.s);
+    const stars = Number.isInteger(n) && n >= 1 && n <= 5 ? n : 0;   // anything else behaves as ?go=1
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    const page = reviewLandingPage({ business, token, googleUrl, stars });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(200).send(page);
   }
 
-  /* ---------- POST rating ---------- */
+  /* ---------- POST rating (and go=1 click mark from the landing page) ----------
+     The landing page's own JS sends go=1 before it redirects. A POST carrying
+     go=1 records the click mark; a POST carrying a valid stars writes the rating.
+     Either may be absent, and a POST with neither writes nothing. */
   if (req.method === 'POST') {
     let b = req.body;
     if (typeof b === 'string') {
@@ -91,7 +97,18 @@ export default async function handler(req, res) {
     if (!b || typeof b !== 'object') b = {};
     const stars = Number(b.stars);
     const comment = typeof b.comment === 'string' ? b.comment.slice(0, 1000) : '';
-    if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+    const hasStars = Number.isInteger(stars) && stars >= 1 && stars <= 5;
+    const hasGo = b.go === '1' || b.go === 1;
+
+    if (hasGo) {
+      try { await markGoogleClicked(lead.id); } catch (e) {
+        console.error('review_click_write_failed', (e && e.code) || 'no_code');
+      }
+      try { await addEvent(lead.id, 'review_clicked', {}); } catch (e) {
+        console.error('review_click_event_failed', (e && e.code) || 'no_code');
+      }
+    }
+    if (!hasStars) {
       res.setHeader('Location', '/r/' + encodeURIComponent(token));
       return res.status(303).end();
     }
@@ -132,7 +149,7 @@ export default async function handler(req, res) {
     return res.status(405).end();
   }
 
-  /* ---------- GET page ---------- */
+  /* ---------- GET page (existing one unchanged) ---------- */
   let rating = null;
   try { const f = await getFeedback(lead.id); rating = f && f.rating ? f.rating : null; } catch {}
   const page = reviewPage({ business, token, googleUrl, rating });
