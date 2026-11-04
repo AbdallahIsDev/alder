@@ -1,0 +1,43 @@
+{
+  "name": "Alder Roofing",
+  "siteUrlPath": "/assets",
+  "colors": {
+    "canvas": "#F2F3F5",
+    "card": "#FFFFFF",
+    "bg": "#1C1F24",
+    "onBg": "#FFFFFF",
+    "onBgMuted": "#BBBCBD",
+    "accent": "#D93917",
+    "accentText": "#FFFFFF",
+    "text": "#2A2D33",
+    "muted": "#73777D",
+    "border": "#E3E6EA",
+    "tint": "#F4F5F7"
+  },
+  "fonts": {
+    "heading": "Geist",
+    "body": "Inter",
+    "fallback": "Arial, Helvetica, sans-serif",
+    "headingStack": "'Geist', Arial, Helvetica, sans-serif",
+    "bodyStack": "'Inter', Arial, Helvetica, sans-serif",
+    "faces": [
+      {
+        "family": "Geist",
+        "weight": 700,
+        "style": "normal",
+        "file": "geist-var.woff2"
+      },
+      {
+        "family": "Inter",
+        "weight": 700,
+        "style": "normal",
+        "file": "inter-var.woff2"
+      }
+    ]
+  },
+  "logo": {
+    "onDark": "/assets/email/logo-on-dark.png",
+    "onLight": "/assets/email/logo-on-light.png",
+    "height": 36
+  }
+}

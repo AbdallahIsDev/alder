@@ -6,3 +6,7 @@ _debug/
 *experiments*/
 # Verification screenshots and crops.
 _shots/
+# Secrets, the test interlock marker, and the test suites.
+.env*
+.test-mode
+tests/

@@ -9,9 +9,15 @@
     "og": "node scripts/make-og-image.mjs",
     "icons": "node scripts/make-icons.mjs",
     "images": "node scripts/optimize-images.mjs",
-    "images:force": "node scripts/optimize-images.mjs --force"
+    "images:force": "node scripts/optimize-images.mjs --force",
+    "db:apply": "node scripts/apply-migrations.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0"
   },
   "devDependencies": {
+    "jsdom": "^30.1.3",
+    "pg": "^8.23.1",
     "sharp": "^0.34.2",
     "ssim.js": "^3.5.0"
   }

@@ -1,6 +1,16 @@
 {
   "buildCommand": "node build-static.js index.html --out dist/index.html",
   "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/r/:token/go",
+      "destination": "/api/review?token=:token&go=1"
+    },
+    {
+      "source": "/r/:token",
+      "destination": "/api/review?token=:token"
+    }
+  ],
   "headers": [
     {
       "source": "/site.webmanifest",

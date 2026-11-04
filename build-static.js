@@ -193,7 +193,13 @@ scan(stripComments(headHtml), 'head');
 html.split(/(<script\b[\s\S]*?<\/script>|<style\b[\s\S]*?<\/style>|<!--[\s\S]*?-->)/i).forEach((seg, i) => { if (i % 2 === 0) scan(seg, 'body'); });
 if (survivors.length) fail('placeholder tokens survived the build:\n' + survivors.join('\n') + '\nAdd the missing key to BIZ, or remove the token.');
 
-/* ---- 9. header comment, and the output directory ---- */
+/* ---- 9. header comment, brand sync, and the output directory ----
+   sync-brand.mjs writes lib/brand.generated.json and assets/email/*.png from the
+   page's :root block and logo, so the emails always match the landing page. */
+import { spawnSync } from 'node:child_process';
+const sync = spawnSync(process.execPath, [path.join(__dirname, 'scripts', 'sync-brand.mjs')], { cwd: __dirname, stdio: 'inherit' });
+if (sync.status !== 0) fail('sync-brand.mjs failed; not building with stale brand tokens.');
+
 html = html.replace(/<head\b[^>]*>/i, tag => tag + '\n  <!-- Static build: business details are baked in from the BIZ config by build-static.js. Rebuild after changing them. The footer year below is the year this build ran; the page corrects it to the current year on load, so it stays right without a rebuild. -->');
 const outDir = path.dirname(path.resolve(opt.out));
 fs.mkdirSync(outDir, { recursive: true });

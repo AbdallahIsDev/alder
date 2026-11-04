@@ -2478,6 +2478,62 @@
   </div>
 </footer>
 
+
+<!-- No-JS fallback. The modal above is opened by JavaScript, so without it none of the
+     estimate buttons work. This block renders only when scripts are disabled and posts
+     straight to /api/lead as urlencoded data. It does not change what JS users see. -->
+<noscript>
+  <section style="max-width:560px;margin:48px auto;padding:24px;font:16px/1.5 Arial,Helvetica,sans-serif;color:#1c1f24">
+    <h2 style="font-size:22px;margin:0 0 8px">Request an estimate</h2>
+    <p style="margin:0 0 18px">Send your details and {{name}} will get back to you.</p>
+    <form method="post" action="/api/lead">
+      <input type="hidden" name="slug" value="{{slug}}">
+      <div style="position:absolute!important;left:-10000px;width:1px;height:1px;overflow:hidden" aria-hidden="true">
+        <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+      </div>
+      <p style="margin:0 0 10px"><label for="ns-name">Your name</label><br><input id="ns-name" name="name" type="text" maxlength="80" required style="width:100%;padding:8px"></p>
+      <p style="margin:0 0 10px"><label for="ns-phone">Phone</label><br><input id="ns-phone" name="phone" type="tel" maxlength="32" required style="width:100%;padding:8px"></p>
+      <p style="margin:0 0 10px"><label for="ns-email">Email (optional)</label><br><input id="ns-email" name="email" type="email" maxlength="254" style="width:100%;padding:8px"></p>
+      <p style="margin:0 0 10px"><label for="ns-zip">ZIP code</label><br><input id="ns-zip" name="zip" type="text" inputmode="numeric" maxlength="5" required style="width:100%;padding:8px"></p>
+      <p style="margin:0 0 10px"><label for="ns-service">What do you need?</label><br>
+        <select id="ns-service" name="service" required style="width:100%;padding:8px">
+          <option value="">Choose one</option>
+          <option value="replacement">Full roof replacement</option>
+          <option value="storm">Storm or hail damage</option>
+          <option value="repair">Repair or leak</option>
+          <option value="unsure">Not sure yet</option>
+        </select></p>
+      <p style="margin:0 0 10px"><label for="ns-home">Property type</label><br>
+        <select id="ns-home" name="home" required style="width:100%;padding:8px">
+          <option value="">Choose one</option>
+          <option value="house">Single-family home</option>
+          <option value="multi">Townhome or duplex</option>
+          <option value="commercial">Commercial building</option>
+          <option value="other">Something else</option>
+        </select></p>
+      <p style="margin:0 0 10px"><label for="ns-age">How old is the roof?</label><br>
+        <select id="ns-age" name="age" required style="width:100%;padding:8px">
+          <option value="">Choose one</option>
+          <option>Under 10 years</option>
+          <option>10 to 20 years</option>
+          <option>Over 20 years</option>
+          <option>Not sure</option>
+        </select></p>
+      <p style="margin:0 0 10px"><label for="ns-timing">When do you want to start?</label><br>
+        <select id="ns-timing" name="timing" required style="width:100%;padding:8px">
+          <option value="">Choose one</option>
+          <option value="asap">As soon as possible</option>
+          <option value="month">Within a month</option>
+          <option value="quarter">In 1 to 3 months</option>
+          <option value="planning">Just planning ahead</option>
+        </select></p>
+      <p style="margin:0 0 16px"><label for="ns-notes">Anything we should know? (optional)</label><br>
+        <textarea id="ns-notes" name="notes" maxlength="2000" rows="4" style="width:100%;padding:8px"></textarea></p>
+      <button type="submit" style="padding:10px 20px;background:#1c1f24;color:#fff;border:0;border-radius:4px;cursor:pointer">Send my request</button>
+    </form>
+  </section>
+</noscript>
+
 <div class="est" id="est" aria-hidden="true" data-page-node-id="WMDogRjm7PqF5B0F05eH6b">
   <div class="est-scrim" data-close data-page-node-id="oTtW8GAPCoeieH9m06TLyh"></div>
   <div class="est-dialog" role="dialog" aria-modal="true" aria-label="Free estimate request" tabindex="-1" data-page-node-id="EbzpNbKwcyuEPak24ZoKrG">
@@ -2485,7 +2541,7 @@
       <div class="est-prog" data-page-node-id="bo8i2FnXCvCYDf6LdRZEgE"><p class="est-step" aria-live="polite" data-page-node-id="AEXWNUGu9EdNk1rE2nJKRJ">Step 1 of 4</p><ol class="est-dots" aria-hidden="true" data-page-node-id="ydjcs232CoglgDyh4Jh5oD"><li data-page-node-id="pRgecOP5Er694jLVrwG9yb"></li><li data-page-node-id="ALJXjJaKDRLVKQQPPYDN7H"></li><li data-page-node-id="ARD6HWIY3EGyVMFAPNDHkn"></li><li data-page-node-id="UsJS2z1g3Fivvy0Cg85bYL"></li></ol></div>
       <button type="button" class="est-x" data-close aria-label="Close" data-page-node-id="nXbxbHNBKO4VeAngBD2g0A"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" data-page-node-id="eiOMNav1A9Es5wFrHWfrFg"><path d="M5 5l14 14M19 5 5 19" data-page-node-id="0X8x3ZDd5QM7KPTR6qAxP8"/></svg></button>
     </div>
-    <form class="est-form" novalidate data-page-node-id="CnDFVpvtloZHceyJlRLUHh">
+    <form class="est-form" novalidate data-slug="{{slug}}" data-page-node-id="CnDFVpvtloZHceyJlRLUHh">
       <div class="est-body" data-lenis-prevent data-page-node-id="moreZQYve00QkT986DV0dy">
 
         <section class="est-pane" data-step="1" data-page-node-id="KnfagniFSsdKFX7yzk9PAp">
@@ -2530,7 +2586,7 @@
           </div>
           <div class="f" data-page-node-id="zSSixugw6ixwuOPfzKG8it"><label for="e-notes" data-page-node-id="tShePoY9XeOGZkulbhPsub">Anything we should know? (optional)</label><textarea id="e-notes" name="notes" maxlength="2000"></textarea></div>
           <!-- honeypot: invisible to people (off-screen, skipped by Tab and screen readers); bots fill it. Must stay empty. -->
-          <div class="hp" aria-hidden="true"><label>Leave this field empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+          <div class="hp" aria-hidden="true"><input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"></div>
           <p class="fine" data-page-node-id="4pVebfApdTCCJJIw75qS4H">By sending this, you agree to be contacted about your estimate. We only use these details to contact you about your estimate. We reply within {{reply}}.</p>
         </section>
 
@@ -2555,6 +2611,7 @@
    Everything that changes per client lives here. In the HTML, values appear as {{tokens}}
    (e.g. {{phone}}, {{tel}}, {{email}}) and are filled in below. The tel: link is built from `phone`. */
 var BIZ = {
+  slug: 'alder-demo',                                          /* which row in public.businesses this page belongs to */
   name: 'Alder Roofing', brand: 'Alder', founder: '[Founder name]',
   phone: '(555) 018-4400', countryCode: '+1',                 /* the tel: link is derived from these two */
   email: 'hello@alder-roofing.vercel.app',
@@ -3343,11 +3400,49 @@ var BIZ = {
   matchMedia('(min-width: 1141px)').addEventListener('change', function (m) { if (m.matches && menu.classList.contains('open')) setOpen(false); });
 })();
 </script>
+<!-- ESTIMATE DELIVERY: posts the collected answers to /api/lead. Kept out of the modal script
+     so the UI stays a UI; the modal calls window.estimateDeliver(data) if it exists. -->
+<script>
+(function () {
+  var form = document.querySelector('.est-form');
+  var slug = (form && form.getAttribute('data-slug')) || '';
+  var key = '';
+
+  function newKey() {
+    try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+    var b = new Uint8Array(16);
+    try { crypto.getRandomValues(b); } catch (e) { for (var i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256); }
+    var out = 'k'; for (var j = 0; j < 16; j++) out += ('0' + b[j].toString(16)).slice(-2);
+    return out;
+  }
+
+  /* One key per form-open. A retry after a failed send reuses it, so the server drops the
+     duplicate instead of storing the same lead twice. */
+  window.estimateReset = function () { key = newKey(); };
+
+  window.estimateDeliver = function (data) {
+    if (!key) key = newKey();
+    var body = {};
+    for (var k in data) if (Object.prototype.hasOwnProperty.call(data, k)) body[k] = data[k];
+    body.slug = slug;
+    body.idempotencyKey = key;
+    return fetch('/api/lead', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(function (r) {
+      if (!r.ok) throw new Error('send failed: ' + r.status);   /* the modal shows its error state */
+      key = '';                                                  /* next open is a new submission */
+      return r.json().catch(function () { return {}; });
+    });
+  };
+})();
+</script>
 <!-- ESTIMATE MODAL behavior: UI-only 4-step flow, animated steps and height, sending / sent / failed states -->
 <script>
-/* Estimate modal: a self-contained, UI-only preview. Nothing is submitted, stored or sent anywhere.
-   Buttons are type="button" and the Enter key is handled here, so it also works inside a sandboxed
-   iframe that has no "allow-forms" permission. To connect a real provider later, replace deliver(). */
+/* Estimate modal: a four-step flow that posts through window.estimateDeliver (defined above), which
+   sends the answers to /api/lead. Buttons are type="button" and the Enter key is handled here, so it
+   also works inside a sandboxed iframe that has no "allow-forms" permission. */
 (function () {
   var root = document.getElementById('est'), dlg = root.querySelector('.est-dialog'), form = root.querySelector('form'), html = document.documentElement;
   var body = root.querySelector('.est-body'), panes = [].slice.call(root.querySelectorAll('.est-pane[data-step]')), done = root.querySelector('.est-done');
@@ -3566,6 +3661,8 @@ var BIZ = {
   /* ---------- open / close: no layout shift (scrollbar-gutter), page scroll locked and inert, modal body scrolls, position restored ---------- */
   function open(t) {
     if (root.classList.contains('open')) return;
+    if (window.estimateReset) window.estimateReset();          /* one idempotency key per form-open */
+    openedAt = Date.now();                                     /* elapsed is measured from here, not from page load */
     trigger = t || document.activeElement; savedY = window.scrollY;
     if (!CSS.supports('scrollbar-gutter', 'stable')) { var sw = innerWidth - html.clientWidth; if (sw > 0) { html.style.paddingRight = sw + 'px'; if (header) header.style.right = 12 + sw + 'px'; } }
     html.classList.add('est-open'); if (window.__lenis) window.__lenis.stop();
