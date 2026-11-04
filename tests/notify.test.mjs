@@ -100,7 +100,7 @@ try {
   const { res, key } = await post(special);
   const rows = await leadFor(key);
   const rreq = (await requests(RS)).filter((x) => x.method === 'POST' && x.path === '/emails');
-  const owner = rreq.find((x) => x.body && x.body.subject && x.body.subject.includes('New estimate request')) || rreq[0];
+  const owner = rreq.find((x) => x.body && x.body.subject && x.body.subject.startsWith('New lead:')) || rreq[0];
   const b = owner && owner.body;
   const okFrom = b && b.from && b.from.startsWith('Lead Alerts <');
   const okTo = b && Array.isArray(b.to) && b.to[0] === process.env.MAIL_REDIRECT_TO;
@@ -109,9 +109,22 @@ try {
   const escaped = b && b.html.includes('&lt;script&gt;') && b.html.includes('Bob&quot; &lt;x@y&gt;');
   const bothParts = b && typeof b.html === 'string' && typeof b.text === 'string';
   const noCrLf = b && !/[\r\n]/.test(b.subject) && !/[\r\n]/.test(b.from);
-  line(res.code === 200 && okFrom && okTo && okReply && okPrefix && escaped && bothParts && noCrLf && rows.length === 1,
+  // NEW (item 4): table-based shell, labels in both parts, tel: has only digits and +,
+  // no external resources, preheader present, escaped notes, under 100 KB.
+  const TABLE_LABELS = ['Name', 'Phone', 'Email', 'Service', 'Timing', 'Property', 'Roof age', 'Insurance claim', 'ZIP'];
+  const labelsOk = b && TABLE_LABELS.every((l) => b.html.includes('>' + l + '</td>') && b.text.includes(l + ':'))
+    && b.text.includes('Notes:');   // the HTML part carries notes in the quoted box, not a table row
+  const tel = b && b.html.match(/href="tel:(.*?)"/);
+  const telOk = tel && /^[+0-9]+$/.test(tel[1]);
+  const noExternal = b && !/<img|<script/.test(b.html)
+    && !(b.html.match(/https?:\/\/[^"]+/g) || []).some((u) => !u.startsWith('https://g.page') && !u.includes('alder-demo'));
+  const preheaderOk = b && b.html.includes('Bob&quot; &lt;x@y&gt;') && b.html.includes('ZIP 50265');
+  const smallOk = b && b.html.length < 100 * 1024;
+  const linkMailOk = b && !b.html.includes('<script>') && b.html.includes('&lt;script&gt;');
+  line(res.code === 200 && okFrom && okTo && okReply && okPrefix && escaped && bothParts && noCrLf && rows.length === 1
+    && labelsOk && telOk && noExternal && preheaderOk && smallOk && linkMailOk,
     'A1', 'owner email payload exact + escaped',
-    `from=${okFrom} to=${okTo} reply_to=${okReply} prefix=${okPrefix} escaped=${escaped} crlf=${noCrLf}`);
+    `from=${okFrom} to=${okTo} reply_to=${okReply} prefix=${okPrefix} esc=${escaped} crlf=${noCrLf} labels=${labelsOk} tel=${telOk} ext=${!noExternal}`);
   line(!!(owner && owner.headers && owner.headers['idempotency-key']), 'A2', 'Idempotency-Key header sent');
 } catch (e) { line(false, 'A1', 'owner email payload', e.message); }
 
