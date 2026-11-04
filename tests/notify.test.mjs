@@ -165,16 +165,58 @@ try {
   const { res, key } = await post({ notes: 'A note that should be capped' });
   const tgReq = (await requests(TG)).filter((x) => x.method === 'POST' && x.path.includes('/sendMessage'));
   const t = tgReq[0] && tgReq[0].body;
-  const expected = ['New lead for Alder Roofing (demo)', 'Notify Tester', '+15155550142',
-    'Roof replacement · House · As soon as possible',
-    'Roof age: 10 to 20 years · Insurance claim: no', 'ZIP 50265'];
-  const textOk = t && expected.every((s) => t.text.includes(s));
+  // NEW (item 2): one "Label: value" per line, blank lines between groups, title
+  // carries the only "·", phone keeps the +1 tappable form, ends with Status: New.
+  const expectedText = [
+    'New lead · Alder Roofing (demo)',
+    '',
+    'Name: Notify Tester',
+    'Phone: +15155550142',
+    'Email: notify@example.com',
+    '',
+    'Service: Roof replacement',
+    'Timing: As soon as possible',
+    'Property: House',
+    'Roof age: 10 to 20 years',
+    'Insurance claim: No',
+    'ZIP: 50265',
+    '',
+    'Notes: A note that should be capped',
+    '',
+    'Status: New',
+  ].join('\n');
+  const textOk = t && t.text === expectedText;
+  const noJoin = t && t.text.split('\n').slice(1).every((l) => !l.includes(' · '));
   const noParse = t && !('parse_mode' in t);
-  line(res.code === 200 && textOk && noParse && t.chat_id === process.env.TELEGRAM_CHAT_ID,
+  line(res.code === 200 && textOk && noJoin && noParse && t.chat_id === process.env.TELEGRAM_CHAT_ID,
     'B1', 'exact plain text, no parse_mode, demo fallback chat', `chat=${t && t.chat_id} keys=${t && Object.keys(t).join(',')}`);
   const rows = await leadFor(key);
   const evs = rows.length ? await events(rows[0].id) : [];
   line(evs.some((e) => e.kind === 'tg_sent'), 'B2', 'tg_sent event recorded');
+
+  /* minimal lead: no notes, no email — the Email and Notes lines are omitted */
+  await clean();
+  await reset(TG);
+  const noContact = await post({ email: '', notes: '' });
+  const minReq = (await requests(TG)).filter((x) => x.method === 'POST' && x.path.includes('/sendMessage'));
+  const minText = minReq[0] && minReq[0].body && minReq[0].body.text;
+  const minExpected = [
+    'New lead · Alder Roofing (demo)',
+    '',
+    'Name: Notify Tester',
+    'Phone: +15155550142',
+    '',
+    'Service: Roof replacement',
+    'Timing: As soon as possible',
+    'Property: House',
+    'Roof age: 10 to 20 years',
+    'Insurance claim: No',
+    'ZIP: 50265',
+    '',
+    'Status: New',
+  ].join('\n');
+  line(!!minText && minText === minExpected,
+    'B2b', 'minimal lead: exact text, no Email/Notes lines', `${minText ? minText.length + ' chars' : 'none'}`);
 } catch (e) { line(false, 'B1', 'telegram text', e.message); }
 
 /* Bound business -> its chat only */

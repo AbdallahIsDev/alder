@@ -5,17 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  ownerEmail, autoReply, reviewEmail, telegramAlertText,
+  ownerEmail, autoReply, reviewEmail, renderAlert,
 } from '../lib/content.js';
-import * as content from '../lib/content.js';
-
-// renderAlert is introduced in ITEM 2 of this task. Until then, fall back to the
-// current alert text so every output file can still be generated now.
-function renderAlertHuman(arg) {
-  return typeof content.renderAlert === 'function'
-    ? content.renderAlertHuman(arg)
-    : telegramAlertText(arg);
-}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, '_debug', 'previews');
@@ -87,10 +78,10 @@ const files = [
   { name: 'owner-email.txt', title: 'Owner email (plain text) — full lead', body: ownerTextFull, html: false },
   { name: 'auto-reply.html', title: 'Customer auto-reply', body: wrapHtml('Auto reply', autoFull.html), html: true },
   { name: 'review-request.html', title: 'Review request email', body: wrapHtml('Review request', reviewFull.html), html: true },
-  { name: 'telegram-alert-new.txt', title: 'Telegram alert — new', body: renderAlertHuman({ business, lead: fullLead, view: 'new', reviewResult: null }), html: false },
-  { name: 'telegram-alert-contacted.txt', title: 'Telegram alert — contacted', body: renderAlertHuman({ business, lead: fullLead, view: 'contacted', reviewResult: null }), html: false },
-  { name: 'telegram-alert-confirm.txt', title: 'Telegram alert — confirm', body: renderAlertHuman({ business, lead: fullLead, view: 'confirm', reviewResult: null }), html: false },
-  { name: 'telegram-alert-done.txt', title: 'Telegram alert — done', body: renderAlertHuman({ business, lead: fullLead, view: 'done', reviewResult: 'sent' }), html: false },
+  { name: 'telegram-alert-new.txt', title: 'Telegram alert — new', body: renderAlert({ business, lead: fullLead, view: 'new', reviewResult: null }), html: false },
+  { name: 'telegram-alert-contacted.txt', title: 'Telegram alert — contacted', body: renderAlert({ business, lead: fullLead, view: 'contacted', reviewResult: null }), html: false },
+  { name: 'telegram-alert-confirm.txt', title: 'Telegram alert — confirm', body: renderAlert({ business, lead: fullLead, view: 'confirm', reviewResult: null }), html: false },
+  { name: 'telegram-alert-done.txt', title: 'Telegram alert — done', body: renderAlert({ business, lead: fullLead, view: 'done', reviewResult: 'sent' }), html: false },
 ];
 
 for (const f of files) write(f.name, f.body);
@@ -103,7 +94,7 @@ for (const f of files) {
     : `<pre>${esc(f.body)}</pre>\n`;
 }
 index += '<h2>Minimal lead — telegram alert preview (text)</h2>\n';
-index += `<pre>${esc(renderAlertHuman({ business, lead: minimalLead, view: 'new', reviewResult: null }))}</pre>\n`;
+index += `<pre>${esc(renderAlert({ business, lead: minimalLead, view: 'new', reviewResult: null }))}</pre>\n`;
 index += '<h2>Minimal lead — owner email (plain text)</h2>\n';
 index += `<pre>${esc(ownerEmail({ business, lead: minimalLead }).text)}</pre>\n`;
 index += '</body></html>\n';

@@ -61,8 +61,9 @@ async function handleLeads(chatId, binding) {
   if (!binding) return reply(chatId, GENERIC_UNBOUND);
   const leads = await listClientLeads(binding.business_id, 10);
   if (!leads.length) return reply(chatId, 'No requests yet.');
+  const STATUS_WORD = { open: 'New', contacted: 'Contacted', quoted: 'Quoted', won: 'Won', lost: 'Lost', done: 'Done' };
   const lines = leads.map((l, i) =>
-    `${i + 1}. ${l.name} — ${l.service} · ${l.phone} · ${relativeAge(l.created_at)} · ${l.status}`);
+    `${i + 1}. ${l.name} — ${l.service} · ${l.phone} · ${relativeAge(l.created_at)} · ${STATUS_WORD[l.status] || l.status}`);
   return reply(chatId, 'Recent requests\n' + lines.join('\n'));
 }
 
