@@ -100,7 +100,8 @@ try {
   /* ---------- dev server ---------- */
   fs.mkdirSync(path.dirname(LOG), { recursive: true });
   const logFd = fs.openSync(LOG, 'w');
-  dev = spawn('npx', ['vercel', 'dev', '--listen', '3000'], {
+  // Pinned 48.12.1: 65.x needs Windows Developer Mode (symlink EPERM without it).
+  dev = spawn('npx', ['vercel@48.12.1', 'dev', '--listen', '3000'], {
     cwd: ROOT,
     env: { ...process.env, ...bases, VERCEL_ENV: 'development' },
     shell: true,
