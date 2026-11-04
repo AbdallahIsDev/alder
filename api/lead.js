@@ -20,7 +20,7 @@ const ALLOWED = new Set([
 ]);
 
 const MAX_BODY = 10 * 1024;
-const IP_LIMIT = { window: 3600, max: 3 };
+const IP_LIMIT = { window: 3600, max: 10 };
 const BIZ_LIMIT = { window: 3600, max: 200 };
 
 const str = (v) => (typeof v === 'string' ? v.trim() : '');
@@ -99,12 +99,21 @@ export default async function handler(req, res) {
   if (!b || typeof b !== 'object' || Array.isArray(b)) return res.status(400).json({ ok: false });
 
   // Bots: honeypot filled, or finished in under 2 s. Answer "ok" so they learn nothing, deliver nothing.
-  if (str(b.website) || !(Number(b.elapsed) >= 2000)) return res.status(200).json({ ok: true });
+  // The log line names the reason only; nothing from the payload goes near it.
+  if (str(b.website)) {
+    console.warn('lead_dropped_honeypot');
+    return res.status(200).json({ ok: true });
+  }
+  if (!(Number(b.elapsed) >= 2000)) {
+    console.warn('lead_dropped_timing');
+    return res.status(200).json({ ok: true });
+  }
 
   // Reject anything the form does not send, so a typo in the payload fails loudly here.
   for (const k of Object.keys(b)) if (!ALLOWED.has(k)) return res.status(400).json({ ok: false });
 
   // Rate limit 1: per caller, keyed by a salted hash. The raw IP is never stored or logged.
+  // Fail open: if the counter itself is unreachable, a real lead matters more than the cap.
   const ipHash = hashIp(clientIp(req));
   if (!ipHash) {
     console.error('lead_rate_limit_salt_missing');
@@ -114,7 +123,6 @@ export default async function handler(req, res) {
     if (!(await hitRateLimit(ipHash, IP_LIMIT.window, IP_LIMIT.max))) return res.status(429).json({ ok: false });
   } catch (e) {
     console.error('lead_rate_limit_failed', (e && e.code) || 'no_code');
-    return res.status(500).json({ ok: false });
   }
 
   // Allow-lists and length caps (same limits as the form's maxlength).
@@ -145,14 +153,13 @@ export default async function handler(req, res) {
   }
   if (!business) return res.status(400).json({ ok: false });                  // unknown, paused or churned
 
-  // Rate limit 2: per business, so one site cannot flood its own roofer.
+  // Rate limit 2: per business, so one site cannot flood its own roofer. Also fails open.
   try {
     if (!(await hitRateLimit('biz:' + business.id, BIZ_LIMIT.window, BIZ_LIMIT.max))) {
       return res.status(429).json({ ok: false });
     }
   } catch (e) {
     console.error('lead_rate_limit_failed', (e && e.code) || 'no_code');
-    return res.status(500).json({ ok: false });
   }
 
   let leadId;

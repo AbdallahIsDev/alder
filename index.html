@@ -2530,7 +2530,7 @@
           </div>
           <div class="f" data-page-node-id="zSSixugw6ixwuOPfzKG8it"><label for="e-notes" data-page-node-id="tShePoY9XeOGZkulbhPsub">Anything we should know? (optional)</label><textarea id="e-notes" name="notes" maxlength="2000"></textarea></div>
           <!-- honeypot: invisible to people (off-screen, skipped by Tab and screen readers); bots fill it. Must stay empty. -->
-          <div class="hp" aria-hidden="true"><label>Leave this field empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+          <div class="hp" aria-hidden="true"><input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"></div>
           <p class="fine" data-page-node-id="4pVebfApdTCCJJIw75qS4H">By sending this, you agree to be contacted about your estimate. We only use these details to contact you about your estimate. We reply within {{reply}}.</p>
         </section>
 
@@ -3384,9 +3384,9 @@ var BIZ = {
 </script>
 <!-- ESTIMATE MODAL behavior: UI-only 4-step flow, animated steps and height, sending / sent / failed states -->
 <script>
-/* Estimate modal: a self-contained, UI-only preview. Nothing is submitted, stored or sent anywhere.
-   Buttons are type="button" and the Enter key is handled here, so it also works inside a sandboxed
-   iframe that has no "allow-forms" permission. To connect a real provider later, replace deliver(). */
+/* Estimate modal: a four-step flow that posts through window.estimateDeliver (defined above), which
+   sends the answers to /api/lead. Buttons are type="button" and the Enter key is handled here, so it
+   also works inside a sandboxed iframe that has no "allow-forms" permission. */
 (function () {
   var root = document.getElementById('est'), dlg = root.querySelector('.est-dialog'), form = root.querySelector('form'), html = document.documentElement;
   var body = root.querySelector('.est-body'), panes = [].slice.call(root.querySelectorAll('.est-pane[data-step]')), done = root.querySelector('.est-done');

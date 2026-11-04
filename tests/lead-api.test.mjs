@@ -186,8 +186,10 @@ const logOffset = fs.statSync(LOG).size;
   await resetLimits();
   const ip = '203.0.113.99';
   const codes = [];
-  for (let i = 0; i < 4; i++) codes.push((await post(payload({ idempotencyKey: `${RUN}-t9-${i}` }), { ip })).status);
-  line(codes.join(',') === '200,200,200,429', '9', '4 from one IP -> 4th is 429', codes.join(','));
+  for (let i = 0; i < 11; i++) codes.push((await post(payload({ idempotencyKey: `${RUN}-t9-${i}` }), { ip })).status);
+  const ok = codes.slice(0, 10).every((c) => c === 200) && codes[10] === 429;
+  line(ok, '9', '11 from one IP -> 11th is 429',
+    `${codes.filter((c) => c === 200).length}x200 then ${codes[10]}`);
 }
 
 /* ---------- 10. GET ---------- */
@@ -257,6 +259,23 @@ const logOffset = fs.statSync(LOG).size;
   const hits = needles.filter((n) => text.includes(n));
   line(hits.length === 0, '13', 'server log has no name/phone/email/notes',
     hits.length ? `found: ${hits.join(', ')}` : `${text.length} bytes scanned`);
+}
+
+/* ---------- 14. a honeypot drop is logged, and writes nothing ---------- */
+{
+  await resetLimits();
+  const key = `${RUN}-t14`;
+  const count = () => (fs.readFileSync(LOG, 'utf8').slice(logOffset).match(/lead_dropped_honeypot/g) || []).length;
+  const before = count();
+  const { status } = await post(payload({ idempotencyKey: key, website: 'http://spam.example' }));
+  let after = before;
+  for (let i = 0; i < 24 && after <= before; i++) {
+    await new Promise((r) => setTimeout(r, 125));
+    after = count();
+  }
+  const rows = await leadFor(key);
+  line(status === 200 && after > before && rows.length === 0, '14', 'honeypot drop logged, no row',
+    `${status} log ${before}->${after} rows=${rows.length}`);
 }
 
 /* ---------- cleanup ---------- */

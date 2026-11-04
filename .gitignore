@@ -36,3 +36,10 @@ npm-debug.log*
 # Any _debug/ folder and any experiment folder, wherever they sit. Never published, never committed.
 _debug/
 *experiments*/
+
+# --- tooling state ----------------------------------------------------------
+# `vercel link` writes projectId and orgId here. Machine-specific, never shared.
+.vercel/
+
+.vercel
+.env*
