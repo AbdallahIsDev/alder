@@ -156,76 +156,127 @@ try {
   line(listA.includes('Alpha Only') && !listA.includes('Beta Only') && listB.includes('Beta Only') && !listB.includes('Alpha Only'),
     'C7', 'each /leads shows only its own business', `A_hasB=${listA.includes('Beta Only')} B_hasA=${listB.includes('Alpha Only')}`);
 
-  /* forged callback across businesses */
+  /* forged callback across businesses — every kind (c, d, y, n) */
   const statusBefore = (await svc.from('leads').select('status').eq('id', aLead1).single()).data.status;
   await reset();
-  await good(cb(chatB, 'c:' + aLead1));
+  for (const kind of ['c', 'd', 'y', 'n']) await good(cb(chatB, kind + ':' + aLead1));
   const statusAfter = (await svc.from('leads').select('status').eq('id', aLead1).single()).data.status;
   const forged = await sent();
   line(statusBefore === statusAfter && statusAfter === 'open' && forged.some((x) => x.path.includes('/answerCallbackQuery')),
-    'C8', 'forged cross-business callback -> no DB change', `${statusBefore} -> ${statusAfter}`);
+    'C8', 'forged cross-business callbacks (c/d/y/n) -> no DB change', `${statusBefore} -> ${statusAfter}`);
 
-  /* double tap Job done -> review email once */
+  /* malformed callback_data is ignored (never triggers a transition) */
+  await reset();
+  for (const bad of ['x:' + aLead1, 'c:not-a-uuid', 'cd:00000000-0000-0000-0000-000000000000', 'c:' + aLead1 + 'extra']) {
+    await good(cb(chatB, bad));
+  }
+  const malformedStatus = (await svc.from('leads').select('status').eq('id', aLead1).single()).data.status;
+  const malformedSent = await sent();
+  line(malformedStatus === 'open' && malformedSent.every((x) => !x.path.includes('/editMessageText')),
+    'C8b', 'malformed callback_data ignored, no edit', `status=${malformedStatus} edits=${malformedSent.filter((x) => x.path.includes('/editMessageText')).length}`);
+
+  /* NEW FLOW (item 3): d: now only asks for confirmation; it never emails or changes status */
   await resetResend();
-  const bLead = createdLeads[3];
+  const askLead = createdLeads[3];
   await reset();
-  await good(cb(chatB, 'd:' + bLead));
-  const afterFirst = (await resendCalls()).length;
-  const events1 = (await svc.from('lead_events').select('kind').eq('lead_id', bLead).in('kind', ['review_requested', 'review_request_failed'])).data.length;
+  await good(cb(chatB, 'c:' + askLead));
   await reset();
-  await good(cb(chatB, 'd:' + bLead));
-  const afterSecond = (await resendCalls()).length;
-  const st = (await svc.from('leads').select('status, review_token').eq('id', bLead).single()).data;
-  line(afterFirst === 1 && afterSecond === 1 && events1 === 1 && st.status === 'done' && !!st.review_token,
-    'C9', 'double tap Job done -> review email once', `emails=${afterFirst}/${afterSecond} events=${events1} token=${st.review_token ? st.review_token.length + ' chars' : 'none'}`);
+  await good(cb(chatB, 'd:' + askLead));
+  const askRow = (await svc.from('leads').select('status, review_token').eq('id', askLead).single()).data;
+  const askEmails = (await resendCalls()).length;
+  const askEdits = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+  const askKb = askEdits.length === 1 && askEdits[0].body.reply_markup.inline_keyboard[0].length === 2
+    && askEdits[0].body.reply_markup.inline_keyboard[0][0].callback_data === 'y:' + askLead;
+  line(askRow.status === 'contacted' && !askRow.review_token && askEmails === 0 && askKb,
+    'C9', 'Job completed asks, does not email or change status', `status=${askRow.status} emails=${askEmails}`);
 
-  /* C11: full human sequence Contacted -> Job done: keyboards and one review email */
+  /* NEW FLOW (item 3): full sequence c -> d (confirm) -> y sends exactly one email, empty keyboard */
   await resetResend();
   const seqLead = await seedLead(bizB.id, 'Seq Tester', 'seq@example.com');
   await reset();
   await good(cb(chatB, 'c:' + seqLead));
   const seqRow1 = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
   const edits1 = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+  const s1Kb = edits1.length === 1 && JSON.stringify(edits1[0].body.reply_markup)
+    === JSON.stringify({ inline_keyboard: [[{ text: 'Job completed', callback_data: 'd:' + seqLead }]] })
+    && edits1[0].body.text.includes('Status: Contacted');
   await reset();
-  // Telegram sends the CURRENT message text back on the second callback.
-  await good(cb(chatB, 'd:' + seqLead, 100, 'Original alert\nContacted'));
+  await good(cb(chatB, 'd:' + seqLead));
   const seqRow2 = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
   const edits2 = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+  const s2Kb = edits2.length === 1 && JSON.stringify(edits2[0].body.reply_markup)
+    === JSON.stringify({ inline_keyboard: [[
+      { text: 'Yes, send review request', callback_data: 'y:' + seqLead },
+      { text: 'Cancel', callback_data: 'n:' + seqLead }]] })
+    && edits2[0].body.text.includes('Send a review request to Seq');
+  await reset();
+  await good(cb(chatB, 'y:' + seqLead));
+  const seqRow3 = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
+  const edits3 = (await sent()).filter((x) => x.path.includes('/editMessageText'));
   const seqEmails = (await resendCalls()).length;
-  const kb1 = edits1.length === 1 && edits1[0].body.text === 'Original alert\nContacted'
-    && JSON.stringify(edits1[0].body.reply_markup) === JSON.stringify({ inline_keyboard: [[{ text: 'Job done', callback_data: 'd:' + seqLead }]] });
-  const kb2 = edits2.length === 1 && edits2[0].body.text === 'Original alert\nContacted\nDone'
-    && JSON.stringify(edits2[0].body.reply_markup) === JSON.stringify({ inline_keyboard: [] });
-  line(seqRow1.status === 'contacted' && kb1 && seqRow2.status === 'done' && !!seqRow2.review_token && kb2 && seqEmails === 1,
-    'C11', 'Contacted keeps Job done, Done clears, one email', `kb1=${kb1} kb2=${kb2} emails=${seqEmails}`);
+  const s3Kb = edits3.length === 1 && JSON.stringify(edits3[0].body.reply_markup)
+    === JSON.stringify({ inline_keyboard: [] })
+    && edits3[0].body.text.includes('Status: Done. Review request sent to seq@example.com.');
+  line(seqRow1.status === 'contacted' && s1Kb && seqRow2.status === 'contacted' && s2Kb
+    && seqRow3.status === 'done' && !!seqRow3.review_token && s3Kb && seqEmails === 1,
+    'C11', 'c -> d -> y: done, one email, empty keyboard', `s1=${s1Kb} s2=${s2Kb} s3=${s3Kb} emails=${seqEmails}`);
 
-  /* C12: Job done directly from open */
+  /* Cancel returns to the one-button contacted view with no DB change */
   await resetResend();
-  const dirLead = await seedLead(bizB.id, 'Direct Done', 'direct@example.com');
+  const cancelLead = await seedLead(bizB.id, 'Cancel Tester', 'cancel@example.com');
+  await good(cb(chatB, 'c:' + cancelLead));
+  await good(cb(chatB, 'd:' + cancelLead));
+  const cancelBefore = (await svc.from('leads').select('status, review_token').eq('id', cancelLead).single()).data;
   await reset();
-  await good(cb(chatB, 'd:' + dirLead));
-  const dirRow = (await svc.from('leads').select('status, review_token').eq('id', dirLead).single()).data;
-  const dirEmails = (await resendCalls()).length;
-  const dirEdits = (await sent()).filter((x) => x.path.includes('/editMessageText'));
-  line(dirRow.status === 'done' && !!dirRow.review_token && dirEmails === 1
-    && dirEdits.length === 1 && JSON.stringify(dirEdits[0].body.reply_markup) === JSON.stringify({ inline_keyboard: [] }),
-    'C12', 'Job done directly from open -> done, one email', `status=${dirRow.status} emails=${dirEmails}`);
+  await good(cb(chatB, 'n:' + cancelLead));
+  const cancelAfter = (await svc.from('leads').select('status, review_token').eq('id', cancelLead).single()).data;
+  const cancelEdits = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+  const cancelEmails = (await resendCalls()).length;
+  line(cancelAfter.status === 'contacted' && !cancelAfter.review_token
+    && cancelEdits.length === 1 && JSON.stringify(cancelEdits[0].body.reply_markup)
+      === JSON.stringify({ inline_keyboard: [[{ text: 'Job completed', callback_data: 'd:' + cancelLead }]] })
+    && cancelEmails === 0,
+    'C11b', 'Cancel returns to Job completed, no DB change, no email', `emails=${cancelEmails}`);
 
-  /* C13: Contacted on a done lead changes nothing, still answers the callback */
-  const doneLead = await seedLead(bizB.id, 'Done Guard', 'doneguard@example.com');
-  await good(cb(chatB, 'd:' + doneLead));
-  const doneBefore = (await svc.from('leads').select('status, review_token').eq('id', doneLead).single()).data;
-  const eventsBefore = (await svc.from('lead_events').select('kind').eq('lead_id', doneLead)).data.length;
+  /* d: and y: on an OPEN lead are refused with "Mark this lead as contacted first." */
+  await resetResend();
+  const openLead = await seedLead(bizB.id, 'Open Guard', 'openguard@example.com');
+  for (const kind of ['d', 'y']) {
+    await reset();
+    await good(cb(chatB, kind + ':' + openLead));
+    const refusal = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery'));
+    const refusedText = refusal.map((x) => x.body && x.body.text).join(' ');
+    const row = (await svc.from('leads').select('status, review_token').eq('id', openLead).single()).data;
+    const emails = (await resendCalls()).length;
+    const editsN = (await sent()).filter((x) => x.path.includes('/editMessageText')).length;
+    line(row.status === 'open' && !row.review_token && emails === 0 && editsN === 0
+      && refusedText.includes('Mark this lead as contacted first.'),
+      kind === 'd' ? 'C12d' : 'C12y', `${kind}: on open lead refused, no DB change, no email`,
+      `status=${row.status} emails=${emails} edits=${editsN}`);
+  }
+
+  /* second y: tap changes nothing and sends nothing */
+  await resetResend();
   await reset();
-  await good(cb(chatB, 'c:' + doneLead));
-  const doneAfter = (await svc.from('leads').select('status, review_token').eq('id', doneLead).single()).data;
-  const eventsAfter = (await svc.from('lead_events').select('kind').eq('lead_id', doneLead)).data.length;
+  await good(cb(chatB, 'y:' + seqLead));
+  const seqSecond = (await svc.from('leads').select('status').eq('id', seqLead).single()).data;
+  const secondEmails = (await resendCalls()).length;
+  line(seqSecond.status === 'done' && secondEmails === 0,
+    'C13', 'second y: changes nothing, no second email', `emails=${secondEmails}`);
+
+  /* Contacted tap on a done lead changes nothing, still answers */
+  const doneBefore = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
+  const eventsBefore = (await svc.from('lead_events').select('kind').eq('lead_id', seqLead)).data.length;
+  await reset();
+  await good(cb(chatB, 'c:' + seqLead));
+  const doneAfter = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
+  const eventsAfter = (await svc.from('lead_events').select('kind').eq('lead_id', seqLead)).data.length;
   const guardSent = await sent();
   const guardEdits = guardSent.filter((x) => x.path.includes('/editMessageText'));
   const guardAnswered = guardSent.some((x) => x.path.includes('/answerCallbackQuery'));
   line(doneAfter.status === 'done' && doneAfter.review_token === doneBefore.review_token
     && eventsAfter === eventsBefore && guardEdits.length === 0 && guardAnswered,
-    'C13', 'Contacted on done lead -> no DB change, answers', `status=${doneAfter.status} edits=${guardEdits.length} answered=${guardAnswered}`);
+    'C13b', 'Contacted on done lead -> no DB change, answers', `status=${doneAfter.status} edits=${guardEdits.length} answered=${guardAnswered}`);
 
   /* C14: double tap Contacted -> one transition, one edit, still answers twice */
   const ccLead = await seedLead(bizB.id, 'Double Tap C', 'doublec@example.com');

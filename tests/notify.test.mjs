@@ -188,7 +188,10 @@ try {
   const textOk = t && t.text === expectedText;
   const noJoin = t && t.text.split('\n').slice(1).every((l) => !l.includes(' · '));
   const noParse = t && !('parse_mode' in t);
-  line(res.code === 200 && textOk && noJoin && noParse && t.chat_id === process.env.TELEGRAM_CHAT_ID,
+  const kb = t && t.reply_markup && t.reply_markup.inline_keyboard;
+  const oneBtn = Array.isArray(kb) && kb.length === 1 && kb[0].length === 1
+    && kb[0][0].text === 'Mark contacted' && /^c:[0-9a-f-]{36}$/.test(kb[0][0].callback_data || '');
+  line(res.code === 200 && textOk && noJoin && noParse && oneBtn && t.chat_id === process.env.TELEGRAM_CHAT_ID,
     'B1', 'exact plain text, no parse_mode, demo fallback chat', `chat=${t && t.chat_id} keys=${t && Object.keys(t).join(',')}`);
   const rows = await leadFor(key);
   const evs = rows.length ? await events(rows[0].id) : [];

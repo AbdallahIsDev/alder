@@ -7,10 +7,11 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import {
   getChatBinding, bindChat, claimBindCode, getBusinessById,
-  listClientLeads, transitionLead, addEvent,
+  listClientLeads, getClientLead, transitionLead, addEvent,
 } from '../lib/db.js';
-import { sendMessage, answerCallbackQuery, editMessageText } from '../lib/tg.js';
+import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup } from '../lib/tg.js';
 import { sendReviewRequest } from '../lib/notify.js';
+import { renderAlert, jobDoneKeyboard, confirmKeyboard } from '../lib/content.js';
 
 const GENERIC_UNBOUND = 'This chat is not linked to a business. Ask your administrator for a link.';
 const GENERIC_BAD_CODE = 'That link is not valid. Ask for a new one.';
@@ -72,50 +73,88 @@ async function handleCallback(cb, binding) {
   const data = String(cb.data || '');
   const chatId = cb.message && cb.message.chat && cb.message.chat.id;
   const messageId = cb.message && cb.message.message_id;
-  const originalText = (cb.message && cb.message.text) || '';
   const answer = (text) => answerCallbackQuery(id, text).catch(() => {});
 
   if (!binding) { await answer(GENERIC_NOT_FOUND); return; }
+  if (!/^[cdyn]:[0-9a-f-]{36}$/.test(data)) { await answer(GENERIC_NOT_FOUND); return; }
   const kind = data[0];
-  if ((kind !== 'c' && kind !== 'd') || data[1] !== ':') { await answer(GENERIC_NOT_FOUND); return; }
   const leadId = data.slice(2);
-  if (!/^[0-9a-f-]{36}$/i.test(leadId)) { await answer(GENERIC_NOT_FOUND); return; }
 
-  const target = kind === 'c' ? 'contacted' : 'done';
-  const token = kind === 'd' ? randomBytes(24).toString('base64url') : null;
-  const result = await transitionLead(leadId, binding.business_id, target, token);
-  if (!result.changed) { await answer(GENERIC_NOT_FOUND); return; }
+  const lead = await getClientLead(leadId, binding.business_id);
+  if (!lead) { await answer(GENERIC_NOT_FOUND); return; }
+  const business = await getBusinessById(binding.business_id);
+  if (!business) { await answer(GENERIC_NOT_FOUND); return; }
 
-  await answer('');
-  try { await addEvent(leadId, 'status_changed', { status: target }); } catch (e) {
-    console.error('tg_status_event_failed', (e && e.code) || 'no_code');
-  }
-  if (kind === 'c') {
+  // Re-render from the database through the roofer-facing path, never from the
+  // previous message text. If the read fails, edit only the keyboard.
+  const render = async (view, keyboardExtra, reviewResult = null) => {
+    if (!chatId || !messageId) return;
+    try {
+      const fresh = await getClientLead(leadId, binding.business_id);
+      if (!fresh) throw new Error('lead_gone');
+      const text = renderAlert({ business, lead: fresh, view, reviewResult });
+      await editMessageText(chatId, messageId, text, keyboardExtra).catch(() => {});
+    } catch (e) {
+      console.error('tg_rerender_failed', (e && e.code) || 'no_code');
+      await editMessageReplyMarkup(chatId, messageId, keyboardExtra && keyboardExtra.reply_markup).catch(() => {});
+    }
+  };
+
+  if (kind === 'c') {                                   // open -> contacted only
+    const result = await transitionLead(leadId, binding.business_id, 'contacted', null);
+    if (!result.changed) { await answer(GENERIC_NOT_FOUND); return; }
+    await answer('');
+    try { await addEvent(leadId, 'status_changed', { status: 'contacted' }); } catch (e) {
+      console.error('tg_status_event_failed', (e && e.code) || 'no_code');
+    }
     try { await addEvent(leadId, 'contacted', {}); } catch (e) {
       console.error('tg_contacted_event_failed', (e && e.code) || 'no_code');
     }
+    await render('contacted', { reply_markup: jobDoneKeyboard(leadId) });
+    return;
   }
 
-  const mark = kind === 'c' ? 'Contacted' : 'Done';
-  // After Contacted keep ONLY the "Job done" button so the natural order can
-  // continue; after Done remove every button.
-  const keyboard = kind === 'c'
-    ? { inline_keyboard: [[{ text: 'Job done', callback_data: 'd:' + leadId }]] }
-    : { inline_keyboard: [] };
-  if (chatId && messageId) {
-    await editMessageText(chatId, messageId, originalText + '\n' + mark, { reply_markup: keyboard }).catch(() => {});
+  if (kind === 'd') {                                   // ask before emailing
+    if (lead.status === 'done') { await answer('This lead is already completed.'); return; }
+    if (lead.status !== 'contacted' && lead.status !== 'quoted' && lead.status !== 'won') {
+      await answer('Mark this lead as contacted first.');
+      return;
+    }
+    await answer('');
+    await render('confirm', { reply_markup: confirmKeyboard(leadId) });
+    return;
   }
 
-  // The review email is triggered only when the done-UPDATE actually returned a row.
-  if (kind === 'd' && result.lead && result.lead.review_token) {
-    const business = await getBusinessById(binding.business_id);
-    if (business) {
-      await sendReviewRequest({
+  if (kind === 'n') {                                   // cancel back to step 2
+    await answer('');
+    await render('contacted', { reply_markup: jobDoneKeyboard(leadId) });
+    return;
+  }
+
+  if (kind === 'y') {                                   // contacted/quoted/won -> done
+    if (lead.status === 'done') { await answer('This lead is already completed.'); return; }
+    if (lead.status !== 'contacted' && lead.status !== 'quoted' && lead.status !== 'won') {
+      await answer('Mark this lead as contacted first.');
+      return;
+    }
+    const token = randomBytes(24).toString('base64url');
+    const result = await transitionLead(leadId, binding.business_id, 'done', token);
+    if (!result.changed) { await answer('This lead is already completed.'); return; }
+    await answer('');
+    try { await addEvent(leadId, 'status_changed', { status: 'done' }); } catch (e) {
+      console.error('tg_status_event_failed', (e && e.code) || 'no_code');
+    }
+    let reviewResult = 'no_email';
+    if (result.lead && result.lead.email) {
+      const r = await sendReviewRequest({
         leadId, business,
         lead: { email: result.lead.email, name: result.lead.name, phone: result.lead.phone },
-        token: result.lead.review_token,
+        token: result.lead.review_token || token,
       });
+      reviewResult = r && r.ok ? 'sent' : 'failed';
     }
+    await render('done', { reply_markup: { inline_keyboard: [] } }, reviewResult);
+    return;
   }
 }
 
