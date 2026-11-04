@@ -67,7 +67,9 @@ export default async function handler(req, res) {
 
   /* ---------- /go ---------- */
   if (req.query && req.query.go === '1') {
-    // The redirect is decided before any database work, and the work is best effort.
+    // The click WRITE here is best effort: a failed write is logged and cannot block
+    // the 302. The lead and business lookups above are NOT best effort — if they fail,
+    // this handler never reaches this line and the visitor gets a 404 instead.
     const location = googleUrl || '/r/' + encodeURIComponent(token);
     try {
       if (forceWriteFailure(req)) throw new Error('forced');
