@@ -65,9 +65,9 @@ async function call(update, secret) {
 }
 const good = (u) => call(u, SECRET);
 const msg = (chatId, text, type = 'private') => ({ message: { message_id: 100, chat: { id: chatId, type }, text } });
-const cb = (chatId, data, messageId = 100) => ({
+const cb = (chatId, data, messageId = 100, text = 'Original alert') => ({
   callback_query: { id: 'cb-' + Math.random().toString(36).slice(2, 9), data,
-    message: { message_id: messageId, chat: { id: chatId, type: 'private' }, text: 'Original alert' } },
+    message: { message_id: messageId, chat: { id: chatId, type: 'private' }, text } },
 });
 
 const ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -178,6 +178,67 @@ try {
   const st = (await svc.from('leads').select('status, review_token').eq('id', bLead).single()).data;
   line(afterFirst === 1 && afterSecond === 1 && events1 === 1 && st.status === 'done' && !!st.review_token,
     'C9', 'double tap Job done -> review email once', `emails=${afterFirst}/${afterSecond} events=${events1} token=${st.review_token ? st.review_token.length + ' chars' : 'none'}`);
+
+  /* C11: full human sequence Contacted -> Job done: keyboards and one review email */
+  await resetResend();
+  const seqLead = await seedLead(bizB.id, 'Seq Tester', 'seq@example.com');
+  await reset();
+  await good(cb(chatB, 'c:' + seqLead));
+  const seqRow1 = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
+  const edits1 = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+  await reset();
+  // Telegram sends the CURRENT message text back on the second callback.
+  await good(cb(chatB, 'd:' + seqLead, 100, 'Original alert\nContacted'));
+  const seqRow2 = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
+  const edits2 = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+  const seqEmails = (await resendCalls()).length;
+  const kb1 = edits1.length === 1 && edits1[0].body.text === 'Original alert\nContacted'
+    && JSON.stringify(edits1[0].body.reply_markup) === JSON.stringify({ inline_keyboard: [[{ text: 'Job done', callback_data: 'd:' + seqLead }]] });
+  const kb2 = edits2.length === 1 && edits2[0].body.text === 'Original alert\nContacted\nDone'
+    && JSON.stringify(edits2[0].body.reply_markup) === JSON.stringify({ inline_keyboard: [] });
+  line(seqRow1.status === 'contacted' && kb1 && seqRow2.status === 'done' && !!seqRow2.review_token && kb2 && seqEmails === 1,
+    'C11', 'Contacted keeps Job done, Done clears, one email', `kb1=${kb1} kb2=${kb2} emails=${seqEmails}`);
+
+  /* C12: Job done directly from open */
+  await resetResend();
+  const dirLead = await seedLead(bizB.id, 'Direct Done', 'direct@example.com');
+  await reset();
+  await good(cb(chatB, 'd:' + dirLead));
+  const dirRow = (await svc.from('leads').select('status, review_token').eq('id', dirLead).single()).data;
+  const dirEmails = (await resendCalls()).length;
+  const dirEdits = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+  line(dirRow.status === 'done' && !!dirRow.review_token && dirEmails === 1
+    && dirEdits.length === 1 && JSON.stringify(dirEdits[0].body.reply_markup) === JSON.stringify({ inline_keyboard: [] }),
+    'C12', 'Job done directly from open -> done, one email', `status=${dirRow.status} emails=${dirEmails}`);
+
+  /* C13: Contacted on a done lead changes nothing, still answers the callback */
+  const doneLead = await seedLead(bizB.id, 'Done Guard', 'doneguard@example.com');
+  await good(cb(chatB, 'd:' + doneLead));
+  const doneBefore = (await svc.from('leads').select('status, review_token').eq('id', doneLead).single()).data;
+  const eventsBefore = (await svc.from('lead_events').select('kind').eq('lead_id', doneLead)).data.length;
+  await reset();
+  await good(cb(chatB, 'c:' + doneLead));
+  const doneAfter = (await svc.from('leads').select('status, review_token').eq('id', doneLead).single()).data;
+  const eventsAfter = (await svc.from('lead_events').select('kind').eq('lead_id', doneLead)).data.length;
+  const guardSent = await sent();
+  const guardEdits = guardSent.filter((x) => x.path.includes('/editMessageText'));
+  const guardAnswered = guardSent.some((x) => x.path.includes('/answerCallbackQuery'));
+  line(doneAfter.status === 'done' && doneAfter.review_token === doneBefore.review_token
+    && eventsAfter === eventsBefore && guardEdits.length === 0 && guardAnswered,
+    'C13', 'Contacted on done lead -> no DB change, answers', `status=${doneAfter.status} edits=${guardEdits.length} answered=${guardAnswered}`);
+
+  /* C14: double tap Contacted -> one transition, one edit, still answers twice */
+  const ccLead = await seedLead(bizB.id, 'Double Tap C', 'doublec@example.com');
+  await reset();
+  await good(cb(chatB, 'c:' + ccLead));
+  await good(cb(chatB, 'c:' + ccLead));
+  const ccRow = (await svc.from('leads').select('status').eq('id', ccLead).single()).data;
+  const ccEvents = (await svc.from('lead_events').select('kind').eq('lead_id', ccLead).eq('kind', 'contacted')).data.length;
+  const ccSent = await sent();
+  const ccEdits = ccSent.filter((x) => x.path.includes('/editMessageText'));
+  const ccAnswers = ccSent.filter((x) => x.path.includes('/answerCallbackQuery'));
+  line(ccRow.status === 'contacted' && ccEvents === 1 && ccEdits.length === 1 && ccAnswers.length === 2,
+    'C14', 'double tap Contacted -> one change, answers twice', `status=${ccRow.status} events=${ccEvents} edits=${ccEdits.length} answers=${ccAnswers.length}`);
 
   /* static check on api/tg.js and everything it imports */
   const seen = new Set();

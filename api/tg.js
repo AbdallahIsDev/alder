@@ -96,8 +96,13 @@ async function handleCallback(cb, binding) {
   }
 
   const mark = kind === 'c' ? 'Contacted' : 'Done';
+  // After Contacted keep ONLY the "Job done" button so the natural order can
+  // continue; after Done remove every button.
+  const keyboard = kind === 'c'
+    ? { inline_keyboard: [[{ text: 'Job done', callback_data: 'd:' + leadId }]] }
+    : { inline_keyboard: [] };
   if (chatId && messageId) {
-    await editMessageText(chatId, messageId, originalText + '\n' + mark, { reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    await editMessageText(chatId, messageId, originalText + '\n' + mark, { reply_markup: keyboard }).catch(() => {});
   }
 
   // The review email is triggered only when the done-UPDATE actually returned a row.
