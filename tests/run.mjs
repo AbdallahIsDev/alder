@@ -52,16 +52,34 @@ let fakes = null;
 let dev = null;
 let canaryKey = null;
 
+/** Kill the whole dev process tree (on Windows the child outlives the shell otherwise). */
+function killTree(child) {
+  if (!child || child.pid == null) return;
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+  } else {
+    try { child.kill('SIGTERM'); } catch {}
+  }
+}
+
 async function cleanup(svc) {
   if (canaryKey && svc) {
     try { await svc.from('leads').delete().eq('idempotency_key', canaryKey); } catch {}
   }
   if (dev) {
-    try { dev.kill('SIGTERM'); } catch {}
+    killTree(dev);
     dev = null;
   }
   if (fs.existsSync(MARKER)) { try { fs.unlinkSync(MARKER); } catch {} }
   if (fakes) { try { await fakes.stop(); } catch {} fakes = null; }
+  // Confirm nothing is left listening on port 3000.
+  const stillUp = await new Promise((resolve) => {
+    const t = setTimeout(() => resolve(false), 4000);
+    fetch(API, { method: 'GET', signal: AbortSignal.timeout(1000) })
+      .then(() => { clearTimeout(t); resolve(true); })
+      .catch(() => { clearTimeout(t); resolve(false); });
+  });
+  out('runner  port 3000 ' + (stillUp ? 'STILL LISTENING (stale dev)' : 'free'));
 }
 
 function fail(msg) {
@@ -98,6 +116,25 @@ try {
   } catch (e) {
     if (e.message && e.message.startsWith('port 3000')) throw e;
   }
+
+  // The pinned CLI is required: 65.x needs Windows Developer Mode and gets EPERM
+  // creating symlinks. Confirm we got 48.12.1 before spawning anything.
+  const verOut = await new Promise((resolve) => {
+    const p = spawn('npx', ['vercel@48.12.1', '--version'], { cwd: ROOT, shell: true, windowsHide: true });
+    let buf = '';
+    p.stdout.on('data', (d) => { buf += d; });
+    p.stderr.on('data', (d) => { buf += d; });
+    p.on('error', () => resolve(''));
+    p.on('close', () => resolve(buf));
+  });
+  if (!verOut.includes('48.12.1')) {
+    throw new Error(`expected vercel CLI 48.12.1, got: ${verOut.trim().slice(0, 120) || '(no output)'}`);
+  }
+  out('runner  vercel CLI 48.12.1 confirmed');
+
+  // Kill the dev tree on interrupt and on exit, so no stale server survives.
+  process.on('SIGINT', async () => { await cleanup(svc); process.exit(130); });
+  process.on('exit', () => { if (dev) killTree(dev); });
 
   fakes = await startFakes();
   const bases = { TELEGRAM_API_BASE: fakes.tg.url, RESEND_API_BASE: fakes.resend.url };
