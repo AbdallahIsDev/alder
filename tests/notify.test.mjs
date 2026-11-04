@@ -230,8 +230,7 @@ try {
   /* H: review-request email (unit-level) */
   const { reviewEmail: reviewEmailNew, autoReply: autoReplyNew } = await import('../lib/content.js');
   const site = 'https://reviews.example';
-  // H1 (rewrite of the old R1-button test — see the report for before/after):
-  // the review email now has exactly five ?s=1..5 links and NO button at all,
+  // H1: the review email now has exactly five ?s=1..5 links and NO button at all,
   // and does not reference the deleted google-g.png.
   const rr = reviewEmailNew({ business: biz, token: 'tok123', siteUrl: site });
   const rrLinks = (rr.html.match(/<a href="/g) || []).length;

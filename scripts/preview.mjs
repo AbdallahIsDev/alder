@@ -14,6 +14,27 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, '_debug', 'previews');
 const serve = process.argv.includes('--serve');
 
+// Clear stale outputs first — but ONLY inside this repo's _debug/previews.
+// Never touch its contents outside that folder, and never the parent itself.
+{
+  const target = OUT;
+  const expectedParent = path.resolve(ROOT, '_debug', 'previews');
+  if (target !== expectedParent) {
+    console.error('preview: output dir does not match _debug/previews; aborting without deleting anything.');
+    process.exit(1);
+  }
+  if (!target.startsWith(path.resolve(ROOT) + path.sep)) {
+    console.error('preview: output dir is outside the repo; aborting without deleting anything.');
+    process.exit(1);
+  }
+  fs.mkdirSync(target, { recursive: true });
+  for (const entry of fs.readdirSync(target, { withFileTypes: true })) {
+    const p = path.join(target, entry.name);
+    if (entry.isDirectory() && !entry.isSymbolicLink()) fs.rmSync(p, { recursive: true, force: true });
+    else fs.unlinkSync(p);
+  }
+}
+
 const business = {
   id: '00000000-0000-0000-0000-000000000001',
   slug: 'alder-demo',
