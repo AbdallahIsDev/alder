@@ -63,7 +63,7 @@ async function handleLeads(chatId, binding) {
   if (!leads.length) return reply(chatId, 'No requests yet.');
   const lines = leads.map((l, i) =>
     `${i + 1}. ${l.name} — ${l.service} · ${l.phone} · ${relativeAge(l.created_at)} · ${l.status}`);
-  return reply(chatId, 'Open requests\n' + lines.join('\n'));
+  return reply(chatId, 'Recent requests\n' + lines.join('\n'));
 }
 
 async function handleCallback(cb, binding) {
