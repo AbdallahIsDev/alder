@@ -156,18 +156,19 @@ try {
   line(listA.includes('Alpha Only') && !listA.includes('Beta Only') && listB.includes('Beta Only') && !listB.includes('Alpha Only'),
     'C7', 'each /leads shows only its own business', `A_hasB=${listA.includes('Beta Only')} B_hasA=${listB.includes('Alpha Only')}`);
 
-  /* forged callback across businesses — every kind (c, d, y, n) */
+  /* forged callback across businesses — every kind (c, d, y, n, r).
+     Before (item 3): kinds c/d/y/n. After: r: added with the retry button. */
   const statusBefore = (await svc.from('leads').select('status').eq('id', aLead1).single()).data.status;
   await reset();
-  for (const kind of ['c', 'd', 'y', 'n']) await good(cb(chatB, kind + ':' + aLead1));
+  for (const kind of ['c', 'd', 'y', 'n', 'r']) await good(cb(chatB, kind + ':' + aLead1));
   const statusAfter = (await svc.from('leads').select('status').eq('id', aLead1).single()).data.status;
   const forged = await sent();
   line(statusBefore === statusAfter && statusAfter === 'open' && forged.some((x) => x.path.includes('/answerCallbackQuery')),
-    'C8', 'forged cross-business callbacks (c/d/y/n) -> no DB change', `${statusBefore} -> ${statusAfter}`);
+    'C8', 'forged cross-business callbacks (c/d/y/n/r) -> no DB change', `${statusBefore} -> ${statusAfter}`);
 
   /* malformed callback_data is ignored (never triggers a transition) */
   await reset();
-  for (const bad of ['x:' + aLead1, 'c:not-a-uuid', 'cd:00000000-0000-0000-0000-000000000000', 'c:' + aLead1 + 'extra']) {
+  for (const bad of ['x:' + aLead1, 'c:not-a-uuid', 'r:not-a-uuid', 'cd:00000000-0000-0000-0000-000000000000', 'c:' + aLead1 + 'extra']) {
     await good(cb(chatB, bad));
   }
   const malformedStatus = (await svc.from('leads').select('status').eq('id', aLead1).single()).data.status;
@@ -214,9 +215,13 @@ try {
   const seqRow3 = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
   const edits3 = (await sent()).filter((x) => x.path.includes('/editMessageText'));
   const seqEmails = (await resendCalls()).length;
+  // Before (item 3): 'Status: Done. Review request sent to seq@example.com.'
+  // (one long line repeating the email). After: two short emoji lines, no email.
   const s3Kb = edits3.length === 1 && JSON.stringify(edits3[0].body.reply_markup)
     === JSON.stringify({ inline_keyboard: [] })
-    && edits3[0].body.text.includes('Status: Done. Review request sent to seq@example.com.');
+    && edits3[0].body.text.includes('✅ Status: Done')
+    && edits3[0].body.text.includes('✉️ Review request sent')
+    && !edits3[0].body.text.split('\n\n').pop().includes('seq@example.com');
   line(seqRow1.status === 'contacted' && s1Kb && seqRow2.status === 'contacted' && s2Kb
     && seqRow3.status === 'done' && !!seqRow3.review_token && s3Kb && seqEmails === 1,
     'C11', 'c -> d -> y: done, one email, empty keyboard', `s1=${s1Kb} s2=${s2Kb} s3=${s3Kb} emails=${seqEmails}`);
@@ -263,6 +268,67 @@ try {
   const secondEmails = (await resendCalls()).length;
   line(seqSecond.status === 'done' && secondEmails === 0,
     'C13', 'second y: changes nothing, no second email', `emails=${secondEmails}`);
+
+  /* Item 3 retry flow: y: with Resend 500 -> error view with one r: button;
+     r: with Resend ok -> exactly one email, done view, no buttons, token kept. */
+  {
+    const resendCtrl = async (cfg) => {
+      await fetch(process.env.FAKE_RESEND_URL + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+    };
+    const retryLead = await seedLead(bizB.id, 'Retry Tester', 'retry@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await good(cb(chatB, 'c:' + retryLead));
+    await good(cb(chatB, 'd:' + retryLead));
+    await resendCtrl({ mode: '500' });
+    await resetResend();
+    await reset();
+    await good(cb(chatB, 'y:' + retryLead));
+    const failRow = (await svc.from('leads').select('status, review_token').eq('id', retryLead).single()).data;
+    const failEdits = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+    const failKbOk = failEdits.length === 1 && JSON.stringify(failEdits[0].body.reply_markup)
+      === JSON.stringify({ inline_keyboard: [[{ text: 'Try again', callback_data: 'r:' + retryLead, style: 'primary' }]] })
+      && failEdits[0].body.text.includes('❌ Status: Error')
+      && failEdits[0].body.text.includes('⚠️ Review request couldn\'t be sent');
+    line(failRow.status === 'done' && !!failRow.review_token && failKbOk,
+      'C17', 'y: email fails -> error view, one Try again (r:) button', `status=${failRow.status} kb=${failKbOk}`);
+
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await reset();
+    await good(cb(chatB, 'r:' + retryLead));
+    const okRow = (await svc.from('leads').select('status, review_token').eq('id', retryLead).single()).data;
+    const okEmails = (await resendCalls()).length;
+    const okEdits = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+    const okKbOk = okEdits.length === 1 && JSON.stringify(okEdits[0].body.reply_markup)
+      === JSON.stringify({ inline_keyboard: [] })
+      && okEdits[0].body.text.includes('✅ Status: Done')
+      && okEdits[0].body.text.includes('✉️ Review request sent');
+    line(okRow.status === 'done' && okRow.review_token === failRow.review_token && okEmails === 1 && okKbOk,
+      'C18', 'r: resends with existing token, one email, ends with no buttons',
+      `emails=${okEmails} tokenKept=${okRow.review_token === failRow.review_token}`);
+
+    // Second r: after the success sends nothing and changes nothing.
+    await resetResend();
+    await reset();
+    await good(cb(chatB, 'r:' + retryLead));
+    const againEmails = (await resendCalls()).length;
+    const againEdits = (await sent()).filter((x) => x.path.includes('/editMessageText')).length;
+    const againRow = (await svc.from('leads').select('status').eq('id', retryLead).single()).data;
+    line(againEmails === 0 && againEdits === 0 && againRow.status === 'done',
+      'C19', 'second r: after success sends nothing, changes nothing', `emails=${againEmails} edits=${againEdits}`);
+
+    // r: on an open lead is refused with "Nothing to retry."
+    const openRetry = await seedLead(bizB.id, 'Open Retry', 'openretry@example.com');
+    await resetResend();
+    await reset();
+    await good(cb(chatB, 'r:' + openRetry));
+    const refSent = await sent();
+    const refText = refSent.filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => x.body && x.body.text).join(' ');
+    const refEdits = refSent.filter((x) => x.path.includes('/editMessageText')).length;
+    const refEmails = (await resendCalls()).length;
+    line(refText.includes('Nothing to retry.') && refEdits === 0 && refEmails === 0,
+      'C20', 'r: on open lead refused, no edit, no email', `text=${refText.slice(0, 40)}`);
+  }
 
   /* Contacted tap on a done lead changes nothing, still answers */
   const doneBefore = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;

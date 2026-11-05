@@ -349,7 +349,10 @@ try {
   const tgReq = (await requests(TG)).filter((x) => x.method === 'POST' && x.path.includes('/sendMessage'));
   const t = tgReq[0] && tgReq[0].body;
   // NEW (item 2): one "Label: value" per line, blank lines between groups, title
-  // carries the only "·", phone keeps the +1 tappable form, ends with Status: New.
+  // carries the only "·", phone keeps the +1 tappable form.
+  // Before (item 3): the status block ended with the plain line 'Status: New'.
+  // After (item 3, deliberate change): emoji status lines, one fact per line,
+  // and the email never appears in the status block.
   const expectedText = [
     'New lead · Alder Roofing (demo)',
     '',
@@ -366,7 +369,7 @@ try {
     '',
     'Notes: A note that should be capped',
     '',
-    'Status: New',
+    '🟡 Status: New',
   ].join('\n');
   const textOk = t && t.text === expectedText;
   const noJoin = t && t.text.split('\n').slice(1).every((l) => !l.includes(' · '));
@@ -399,10 +402,37 @@ try {
     'Insurance claim: No',
     'ZIP: 50265',
     '',
-    'Status: New',
+    '🟡 Status: New',
   ].join('\n');
   line(!!minText && minText === minExpected,
     'B2b', 'minimal lead: exact text, no Email/Notes lines', `${minText ? minText.length + ' chars' : 'none'}`);
+
+  /* S: status block (unit). Every line <= 40 chars for first name "John",
+     the email never appears in the block, and the error view carries
+     exactly one r: (Try again) button. */
+  {
+    const { renderAlert: renderS, tryAgainKeyboard } = await import('../lib/content.js');
+    const sBiz = { name: 'Alder Roofing' };
+    const sLead = { name: 'John Test', phone: '+201005408345', email: 'john@example.com', service: 'repair', timing: 'asap', home: 'house', roof_age: 'Not sure', insurance_claim: false, zip: '50265', notes: '' };
+    const views = [
+      ['new', null], ['contacted', null], ['confirm', null],
+      ['done', 'sent'], ['done', 'no_email'], ['error', 'failed'],
+    ];
+    let lineOk = true, mailOk = true, detail = '';
+    for (const [v, rr] of views) {
+      const tail = renderS({ business: sBiz, lead: sLead, view: v, reviewResult: rr }).split('\n\n').pop();
+      for (const l of tail.split('\n')) {
+        if (l.length > 40) { lineOk = false; detail += `${v}:${l.length} `; }
+        if (l.includes('john@example.com')) { mailOk = false; detail += `${v}:email `; }
+      }
+    }
+    const uid = '00000000-0000-4000-8000-000000000001';
+    const kb = tryAgainKeyboard(uid).inline_keyboard;
+    const btnOk = kb.length === 1 && kb[0].length === 1 && kb[0][0].text === 'Try again'
+      && kb[0][0].callback_data === 'r:' + uid && kb[0][0].style === 'primary';
+    line(lineOk && mailOk && btnOk, 'S1', 'status block: lines <=40, no email, one r: button',
+      `lineOk=${lineOk} mailOk=${mailOk} btnOk=${btnOk} ${detail}`);
+  }
 } catch (e) { line(false, 'B1', 'telegram text', e.message); }
 
 /* Bound business -> its chat only */

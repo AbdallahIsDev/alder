@@ -7,11 +7,11 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import {
   getChatBinding, bindChat, claimBindCode, getBusinessById,
-  listClientLeads, getClientLead, transitionLead, addEvent,
+  listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, addEvent,
 } from '../lib/db.js';
 import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup } from '../lib/tg.js';
 import { sendReviewRequest } from '../lib/notify.js';
-import { renderAlert, jobDoneKeyboard, confirmKeyboard } from '../lib/content.js';
+import { renderAlert, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard } from '../lib/content.js';
 
 const GENERIC_UNBOUND = 'This chat is not linked to a business. Ask your administrator for a link.';
 const GENERIC_BAD_CODE = 'That link is not valid. Ask for a new one.';
@@ -77,7 +77,7 @@ async function handleCallback(cb, binding) {
   const answer = (text) => answerCallbackQuery(id, text).catch(() => {});
 
   if (!binding) { await answer(GENERIC_NOT_FOUND); return; }
-  if (!/^[cdyn]:[0-9a-f-]{36}$/.test(data)) { await answer(GENERIC_NOT_FOUND); return; }
+  if (!/^[cdynr]:[0-9a-f-]{36}$/.test(data)) { await answer(GENERIC_NOT_FOUND); return; }
   const kind = data[0];
   const leadId = data.slice(2);
 
@@ -154,7 +154,30 @@ async function handleCallback(cb, binding) {
       });
       reviewResult = r && r.ok ? 'sent' : 'failed';
     }
-    await render('done', { reply_markup: { inline_keyboard: [] } }, reviewResult);
+    if (reviewResult === 'failed') {
+      await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
+    } else {
+      await render('done', { reply_markup: { inline_keyboard: [] } }, reviewResult);
+    }
+    return;
+  }
+
+  if (kind === 'r') {                                   // retry the failed review email only
+    if (lead.status !== 'done') { await answer('Nothing to retry.'); return; }
+    if (await hasReviewSent(leadId)) { await answer('Nothing to retry.'); return; }
+    const retry = await getDoneLeadForRetry(leadId, binding.business_id);
+    if (!retry || !retry.review_token || !retry.email) { await answer('Nothing to retry.'); return; }
+    await answer('');
+    const r = await sendReviewRequest({
+      leadId, business,
+      lead: { email: retry.email, name: retry.name, phone: retry.phone },
+      token: retry.review_token,
+    });
+    if (r && r.ok) {
+      await render('done', { reply_markup: { inline_keyboard: [] } }, 'sent');
+    } else {
+      await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
+    }
     return;
   }
 }
