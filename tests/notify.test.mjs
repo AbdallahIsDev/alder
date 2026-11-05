@@ -210,6 +210,22 @@ try {
   line(footerSep, 'G9', 'footer lines are separate elements', `ok=${footerSep}`);
   line(g10Ok, 'G10', 'stress lead stays escaped in HTML, raw in text', `ok=${g10Ok}`);
 
+  /* G12: item 2 — compact layout. Exactly one border-radius container
+     (besides the buttons and the notes box), an edge-to-edge divider between
+     Customer and Job sections, label width 96, mobile @media block. */
+  const compact = renders.full;
+  // (The header band itself carries `border-radius:10px 10px 0 0` and the outer
+  // card `border-radius:10px` — two paired radii, exactly one card box.)
+  const radii = (compact.html.match(/border-radius:10px/g) || []).length;
+  const divider = `<tr><td height="1" style="font-size:0;line-height:0;border-top:1px solid ${getBrand().colors.border}">&nbsp;</td></tr>`;
+  const dividerOk = compact.html.includes(divider)
+    && compact.html.indexOf('>Customer<') < compact.html.indexOf(divider)
+    && compact.html.indexOf(divider) < compact.html.indexOf('>Job<');
+  const label96 = compact.html.includes('width="96"');
+  const mobileOk = compact.html.includes('@media (max-width:480px){.outer{padding:0!important}.card{border-radius:0!important;border:0!important}.px{padding-left:16px!important;padding-right:16px!important}}');
+  line(radii === 2 && dividerOk && label96 && mobileOk, 'G12', 'one radius container, divider, label-96, mobile block',
+    `radius=${radii} divider=${dividerOk} label96=${label96} mobile=${mobileOk}`);
+
   /* G11: pinned button colours (from brand tokens) */
   const bc = getBrand().colors;
   const fullHtml = renders.full.html;
