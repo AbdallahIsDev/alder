@@ -330,6 +330,79 @@ try {
       'C20', 'r: on open lead refused, no edit, no email', `text=${refText.slice(0, 40)}`);
   }
 
+  /* Item 1 (this bundle): retry idempotency keys, asserted at the fake
+     Resend server's Idempotency-Key header. */
+  {
+    const resendCtrl = async (cfg) => {
+      await fetch(process.env.FAKE_RESEND_URL + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+    };
+    const keyOf = async () => {
+      const calls = await resendCalls();
+      return calls.length === 1 ? (calls[0].headers && calls[0].headers['idempotency-key']) : `calls=${calls.length}`;
+    };
+    const toContacted = async (leadId) => { await good(cb(chatB, 'c:' + leadId)); await good(cb(chatB, 'd:' + leadId)); };
+
+    // C21: first send uses the plain key.
+    const firstLead = await seedLead(bizB.id, 'Key First', 'keyfirst@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(firstLead);
+    await resetResend();
+    await good(cb(chatB, 'y:' + firstLead));
+    const firstKey = await keyOf();
+    line(firstKey === `${firstLead}:review`, 'C21', 'first review send uses plain <leadId>:review key',
+      `header=${firstKey}`);
+
+    // C22: retry after a non-timeout (HTTP 500) failure uses :review:r1.
+    const httpLead = await seedLead(bizB.id, 'Key Http', 'keyhttp@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(httpLead);
+    await resendCtrl({ mode: '500' });
+    await resetResend();
+    await good(cb(chatB, 'y:' + httpLead));
+    const yKey = await keyOf();
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + httpLead));
+    const rKey = await keyOf();
+    line(yKey === `${httpLead}:review` && rKey === `${httpLead}:review:r1`,
+      'C22', 'retry after HTTP failure uses :review:r1',
+      `y=${yKey} r=${rKey}`);
+
+    // C23: retry after a timeout failure reuses the plain key (the first
+    // request may have delivered; Resend dedupes on the same key).
+    const slowLead = await seedLead(bizB.id, 'Key Slow', 'keyslow@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(slowLead);
+    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resetResend();
+    await good(cb(chatB, 'y:' + slowLead));
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + slowLead));
+    const slowKey = await keyOf();
+    line(slowKey === `${slowLead}:review`,
+      'C23', 'retry after timeout reuses plain key',
+      `header=${slowKey}`);
+
+    // C24: two sequential failures then a retry yields :review:r2.
+    const twoLead = await seedLead(bizB.id, 'Key Two', 'keytwo@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(twoLead);
+    await resendCtrl({ mode: '500' });
+    await resetResend();
+    await good(cb(chatB, 'y:' + twoLead));
+    await resetResend();
+    await good(cb(chatB, 'r:' + twoLead));
+    const secondKey = await keyOf();
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + twoLead));
+    const thirdKey = await keyOf();
+    line(secondKey === `${twoLead}:review:r1` && thirdKey === `${twoLead}:review:r2`,
+      'C24', 'two failures then retry yields :review:r2',
+      `second=${secondKey} third=${thirdKey}`);
+  }
+
   /* Contacted tap on a done lead changes nothing, still answers */
   const doneBefore = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
   const eventsBefore = (await svc.from('lead_events').select('kind').eq('lead_id', seqLead)).data.length;

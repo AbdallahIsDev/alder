@@ -7,7 +7,7 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import {
   getChatBinding, bindChat, claimBindCode, getBusinessById,
-  listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, addEvent,
+  listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent,
 } from '../lib/db.js';
 import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup } from '../lib/tg.js';
 import { sendReviewRequest } from '../lib/notify.js';
@@ -167,11 +167,20 @@ async function handleCallback(cb, binding) {
     if (await hasReviewSent(leadId)) { await answer('Nothing to retry.'); return; }
     const retry = await getDoneLeadForRetry(leadId, binding.business_id);
     if (!retry || !retry.review_token || !retry.email) { await answer('Nothing to retry.'); return; }
+    // Idempotency key: Resend caches per key for 24 h. After a timeout the
+    // first request may have delivered, so reuse the plain key and let
+    // Resend dedupe; after an HTTP error the cached failure must not be
+    // replayed, so use a fresh suffixed key per earlier failure count.
+    const failInfo = await getReviewFailureInfo(leadId);
+    const retryKey = failInfo.lastStatus === 'timeout'
+      ? `${leadId}:review`
+      : `${leadId}:review:r${failInfo.count}`;
     await answer('');
     const r = await sendReviewRequest({
       leadId, business,
       lead: { email: retry.email, name: retry.name, phone: retry.phone },
       token: retry.review_token,
+      idempotencyKey: retryKey,
     });
     if (r && r.ok) {
       await render('done', { reply_markup: { inline_keyboard: [] } }, 'sent');
