@@ -18,6 +18,7 @@ const GENERIC_BAD_CODE = 'That link is not valid. Ask for a new one.';
 const GENERIC_HELP = 'Send /start followed by the link code you were given, or use /leads to see open requests.';
 const GENERIC_NOT_FOUND = 'Not found.';
 const ALREADY_BOUND = 'This chat is already linked to a business. Contact support to move it.';
+const COMMAND_HELP = 'This bot sends new lead requests here. Use /leads to see recent requests. A new roofer links their chat with the link their provider sends, then sends /start with the code.';
 
 function secretOk(req) {
   const want = process.env.TELEGRAM_WEBHOOK_SECRET;
@@ -187,6 +188,8 @@ export default async function handler(req, res) {
         await handleStart(chatId, text.slice(6).trim());
       } else if (text.startsWith('/leads')) {
         await handleLeads(chatId, binding);
+      } else if (text.startsWith('/help')) {
+        await reply(chatId, COMMAND_HELP);
       }
     } else if (u.callback_query) {
       await handleCallback(u.callback_query, binding);

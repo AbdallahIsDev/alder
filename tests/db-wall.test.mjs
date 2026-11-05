@@ -171,15 +171,62 @@ for (const [label, over] of bad) {
   line(ok, '7', 'v_client_leads has no money columns'.padEnd(34), error ? error.code || error.message : `${cols.length} cols: ${cols.join(',')}`);
 }
 
+/* ---------- 9. bind_codes wall + lifecycle ---------- */
+const BIND_CODE = ('DBTEST' + RUN).replace(/[^A-Z0-9]/g, '').toUpperCase().slice(0, 12).padEnd(12, '7');
+{
+  const { error } = await anon.from('bind_codes').insert({ code: BIND_CODE, business_id: BIZ_ID, expires_at: new Date(Date.now() + 3600 * 1000).toISOString() });
+  line(!!error, '9', 'anon INSERT bind_codes rejected'.padEnd(34), error ? error.code || error.message : 'INSERT SUCCEEDED');
+}
+{
+  const expires = new Date(Date.now() + 3600 * 1000).toISOString();
+  const ins = await svc.from('bind_codes').insert({ code: BIND_CODE, business_id: BIZ_ID, expires_at: expires });
+  const sel = ins.error ? { data: null } : await svc.from('bind_codes').select('code, business_id').eq('code', BIND_CODE).maybeSingle();
+  const del = await svc.from('bind_codes').delete().eq('code', BIND_CODE);
+  const gone = await svc.from('bind_codes').select('code').eq('code', BIND_CODE);
+  const ok = !ins.error && sel.data && sel.data.business_id === BIZ_ID && !del.error && (gone.data || []).length === 0;
+  line(ok, '9', 'service_role bind_code create/read/delete'.padEnd(34), ok ? 'lifecycle ok' : `ins=${ins.error ? ins.error.code : 'ok'} del=${del.error ? del.error.code : 'ok'}`);
+}
+
 /* ---------- 8. cleanup ---------- */
 {
   await svc.from('leads').delete().like('idempotency_key', `${TAG}-%`);
   await svc.from('rate_limits').delete().eq('key', 'test');
+  await svc.from('bind_codes').delete().eq('code', BIND_CODE);
   const { data: left, error } = await svc.from('leads').select('id').like('idempotency_key', `${TAG}-%`);
   const { data: rl } = await svc.from('rate_limits').select('key').eq('key', 'test');
   const { data: ev } = leadId ? await svc.from('lead_events').select('id').eq('lead_id', leadId) : { data: [] };
-  const ok = !error && (left || []).length === 0 && (rl || []).length === 0 && (ev || []).length === 0;
-  line(ok, '8', 'test rows cleaned up'.padEnd(34), `leads=${(left || []).length} rate_limits=${(rl || []).length} events=${(ev || []).length}`);
+  const { data: bc } = await svc.from('bind_codes').select('code').eq('code', BIND_CODE);
+  const ok = !error && (left || []).length === 0 && (rl || []).length === 0 && (ev || []).length === 0 && (bc || []).length === 0;
+  line(ok, '8', 'test rows cleaned up'.padEnd(34), `leads=${(left || []).length} rate_limits=${(rl || []).length} events=${(ev || []).length} bind=${(bc || []).length}`);
+}
+
+/* ---------- E: bind env loading (temp files, no DB) ---------- */
+{
+  const { applyDotEnvEntries, loadDotEnvFiles, missingEnvNames } = await import('../scripts/make-bind-code.mjs');
+  // E1: only .env.local has the vars
+  const e1env = {};
+  applyDotEnvEntries(e1env, [{ file: '.env.local', text: 'ONLY_LOCAL=local_val\nSHARED=local_val\n' }, { file: '.env', text: 'ONLY_BASE=base_val\nSHARED=base_val\n' }]);
+  const e1ok = e1env.ONLY_LOCAL === 'local_val' && e1env.ONLY_BASE === 'base_val';
+  line(e1ok, 'E1', 'env loader: only .env.local supplies its vars', `local=${e1env.ONLY_LOCAL} base=${e1env.ONLY_BASE}`);
+  // E2: both present — .env.local wins over .env; non-empty process env wins over both
+  const e2env = { ALREADY: 'proc_val' };
+  applyDotEnvEntries(e2env, [{ file: '.env.local', text: 'SHARED=local_val\nALREADY=local_val\n' }, { file: '.env', text: 'SHARED=base_val\nALREADY=base_val\n' }]);
+  const e2ok = e2env.SHARED === 'local_val' && e2env.ALREADY === 'proc_val';
+  line(e2ok, 'E2', 'env loader: .env.local beats .env, process beats both', `shared=${e2env.SHARED} already=${e2env.ALREADY}`);
+  // E3: neither present — nothing filled, missing names listed
+  const e3env = {};
+  applyDotEnvEntries(e3env, [{ file: '.env.local', text: '' }, { file: '.env', text: '# empty\n' }]);
+  const e3ok = Object.keys(e3env).length === 0 && missingEnvNames(e3env, ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']).join(',') === 'SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY';
+  // Real temp files: same function through the filesystem (inside the repo).
+  const tmpRoot = path.join(ROOT, '_debug', 'envtest-' + RUN);
+  fs.mkdirSync(tmpRoot, { recursive: true });
+  fs.writeFileSync(path.join(tmpRoot, '.env.local'), 'TMP_LOCAL=file_local\nTMP_SHARED=file_local\n');
+  fs.writeFileSync(path.join(tmpRoot, '.env'), 'TMP_SHARED=file_base\n');
+  const tmpEnv = {};
+  loadDotEnvFiles({ env: tmpEnv, root: tmpRoot });
+  const tmpOk = tmpEnv.TMP_LOCAL === 'file_local' && tmpEnv.TMP_SHARED === 'file_local';
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+  line(e3ok && tmpOk, 'E3', 'env loader: neither present fills nothing; temp files match', `keys=${Object.keys(e3env).length} tmpShared=${tmpEnv.TMP_SHARED}`);
 }
 
 console.log('');

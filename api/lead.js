@@ -6,6 +6,7 @@
 // Nothing here logs a name, phone, email, note, raw IP, token or URL. Failures are codes only.
 
 import { createHash, randomUUID } from 'node:crypto';
+import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js';
 import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit } from '../lib/db.js';
 import { notifyAllAfterLead } from '../lib/notify.js';
 
@@ -133,17 +134,11 @@ export default async function handler(req, res) {
   }
 
   // Allow-lists and length caps (same limits as the form's maxlength).
+  // Phone is validated AFTER the business lookup so the business region can
+  // be used (business.country when present, else 'US'. The businesses table
+  // has no country column today — see lib/db.js — so 'US' applies).
   const service = str(b.service), home = str(b.home), timing = str(b.timing), age = str(b.age);
   const zip = str(b.zip), phone = clean(str(b.phone)), name = clean(str(b.name)), email = clean(str(b.email)), notes = clean(str(b.notes));
-  const digits = phone.replace(/\D/g, '');
-  const bad =
-    !SERVICES.includes(service) || !HOMES.includes(home) || !TIMINGS.includes(timing) || !AGES.includes(age) ||
-    !/^\d{5}$/.test(zip) ||
-    !/^[+()\-.\s\d]{7,32}$/.test(phone) || digits.length < 7 || digits.length > 15 ||
-    name.length < 2 || name.length > 80 ||
-    email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) ||
-    notes.length > 2000;
-  if (bad) return isForm ? badForm(null) : res.status(400).json({ ok: false });
 
   const slug = str(b.slug);
   if (!/^[a-z0-9-]{2,60}$/.test(slug)) return isForm ? badForm(null) : res.status(400).json({ ok: false });
@@ -160,6 +155,28 @@ export default async function handler(req, res) {
   }
   if (!business) return isForm ? badForm(null) : res.status(400).json({ ok: false });     // unknown, paused or churned
 
+  // Phone: validated and normalised to E.164 (business country, else US).
+  // Anything that does not parse as a valid number is a 400; stored value
+  // is always E.164; the number is never logged.
+  let phoneE164 = null;
+  let phoneBad = false;
+  const region = (business && typeof business.country === 'string' && /^[A-Za-z]{2}$/.test(business.country)) ? business.country.toUpperCase() : 'US';
+  try {
+    if (!phone || !isValidPhoneNumber(phone, region)) phoneBad = true;
+    else phoneE164 = parsePhoneNumber(phone, region).number;
+  } catch { phoneBad = true; }
+  const bad =
+    !SERVICES.includes(service) || !HOMES.includes(home) || !TIMINGS.includes(timing) || !AGES.includes(age) ||
+    !/^\d{5}$/.test(zip) ||
+    phoneBad ||
+    name.length < 2 || name.length > 80 ||
+    email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) ||
+    notes.length > 2000;
+  if (bad) {
+    if (isForm && phoneBad) return htmlReply(400, 'Check your details', 'Enter a valid phone number.', business.name);
+    return isForm ? badForm(null) : res.status(400).json({ ok: false });
+  }
+
   // Rate limit 2: per business, so one site cannot flood its own roofer. Also fails open.
   try {
     if (!(await hitRateLimit('biz:' + business.id, BIZ_LIMIT.window, BIZ_LIMIT.max))) {
@@ -173,7 +190,7 @@ export default async function handler(req, res) {
   try {
     leadId = await insertLead({
       business_id: business.id,
-      name, phone, email: email || null, zip, service, home, timing,
+      name, phone: phoneE164, email: email || null, zip, service, home, timing,
       roof_age: age, insurance_claim: b.claim === true,
       notes: notes || null, source: isForm ? 'form-nojs' : 'form', idempotency_key: idem,
     });
@@ -196,7 +213,7 @@ export default async function handler(req, res) {
   // Save first, notify second. Nothing below can change the response.
   await notifyAllAfterLead({
     leadId, business,
-    lead: { name, phone, email, zip, service, home, timing, roof_age: age, insurance_claim: b.claim === true, notes },
+    lead: { name, phone: phoneE164, email, zip, service, home, timing, roof_age: age, insurance_claim: b.claim === true, notes },
   });
 
   return isForm ? htmlReply(200, 'Request received', 'We received your request.', business.name) : res.status(200).json({ ok: true });

@@ -210,6 +210,22 @@ try {
   line(footerSep, 'G9', 'footer lines are separate elements', `ok=${footerSep}`);
   line(g10Ok, 'G10', 'stress lead stays escaped in HTML, raw in text', `ok=${g10Ok}`);
 
+  /* G12: item 2 — compact layout. Exactly one border-radius container
+     (besides the buttons and the notes box), an edge-to-edge divider between
+     Customer and Job sections, label width 96, mobile @media block. */
+  const compact = renders.full;
+  // (The header band itself carries `border-radius:10px 10px 0 0` and the outer
+  // card `border-radius:10px` — two paired radii, exactly one card box.)
+  const radii = (compact.html.match(/border-radius:10px/g) || []).length;
+  const divider = `<tr><td height="1" style="font-size:0;line-height:0;border-top:1px solid ${getBrand().colors.border}">&nbsp;</td></tr>`;
+  const dividerOk = compact.html.includes(divider)
+    && compact.html.indexOf('>Customer<') < compact.html.indexOf(divider)
+    && compact.html.indexOf(divider) < compact.html.indexOf('>Job<');
+  const label96 = compact.html.includes('width="96"');
+  const mobileOk = compact.html.includes('@media (max-width:480px){.outer{padding:0!important}.card{border-radius:0!important;border:0!important}.px{padding-left:16px!important;padding-right:16px!important}}');
+  line(radii === 2 && dividerOk && label96 && mobileOk, 'G12', 'one radius container, divider, label-96, mobile block',
+    `radius=${radii} divider=${dividerOk} label96=${label96} mobile=${mobileOk}`);
+
   /* G11: pinned button colours (from brand tokens) */
   const bc = getBrand().colors;
   const fullHtml = renders.full.html;
@@ -230,12 +246,13 @@ try {
   /* H: review-request email (unit-level) */
   const { reviewEmail: reviewEmailNew, autoReply: autoReplyNew } = await import('../lib/content.js');
   const site = 'https://reviews.example';
-  // H1: the review email now has exactly five ?s=1..5 links and NO button at all,
-  // and does not reference the deleted google-g.png.
+  // H1: the review email now has exactly one link, to /r/<token> — no star
+  // glyphs and no button.
   const rr = reviewEmailNew({ business: biz, token: 'tok123', siteUrl: site });
   const rrLinks = (rr.html.match(/<a href="/g) || []).length;
-  const rrOk = [1, 2, 3, 4, 5].every((n) => rr.html.includes(`/r/tok123?s=${n}`))
-    && rrLinks === 5 && !rr.html.includes('Leave a Google review') && !rr.html.includes('google-g');
+  const rrOk = rr.html.includes('/r/tok123') && rrLinks === 1
+    && !rr.html.includes('Leave a Google review') && !rr.html.includes('google-g')
+    && !/[★☆]/.test(rr.html);
   const h3ok = !rr.html.includes('private feedback') && !rr.text.includes('private feedback')
     && !rr.html.includes('Google link works')
     && !/(discount|coupon|free[^a-z]|cash back|incentive)/i.test(rr.html + rr.text);
@@ -245,8 +262,8 @@ try {
     && rr.html.includes('Sent by Alder Roofing') && !rr.html.includes('Lead Alerts');
   // H5: owner email keeps "Sent by Lead Alerts"
   const h5ok = renders.full.html.includes('Sent by Lead Alerts') && renders.full.text.includes('Sent by Lead Alerts');
-  line(rrOk, 'H1', 'review email: exactly five ?s=1..5 links, no button', `links=${rrLinks}`);
-  line(rrOk, 'H2', 'nothing else clickable', `links=${rrLinks}`);
+  line(rrOk, 'H1', 'review email: one plain-URL link, no button or star glyphs', `links=${rrLinks}`);
+  line(rrOk, 'H2', 'nothing else clickable, no star links', `links=${rrLinks}`);
   line(h3ok, 'H3', 'no private-feedback sentence, no incentives', `ok=${h3ok}`);
   line(h4ok, 'H4', 'customer footers: Sent by <business>, never Lead Alerts', `ok=${h4ok}`);
   line(h5ok, 'H5', 'owner footer still Sent by Lead Alerts', `ok=${h5ok}`);

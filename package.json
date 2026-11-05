@@ -10,10 +10,14 @@
     "icons": "node scripts/make-icons.mjs",
     "images": "node scripts/optimize-images.mjs",
     "images:force": "node scripts/optimize-images.mjs --force",
-    "db:apply": "node scripts/apply-migrations.mjs"
+    "db:apply": "node scripts/apply-migrations.mjs",
+    "bind": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/make-bind-code.mjs",
+    "tg:commands": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/tg-commands.mjs set",
+    "tg:commands:info": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/tg-commands.mjs info"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.118.0"
+    "@supabase/supabase-js": "^2.118.0",
+    "libphonenumber-js": "^1.13.15"
   },
   "devDependencies": {
     "jsdom": "^30.1.3",

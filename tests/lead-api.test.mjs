@@ -302,6 +302,117 @@ const logOffset = fs.statSync(LOG).size;
     `${res.status} ${JSON.stringify(body)}`);
 }
 
+/* ---------- 16-18. modal static checks (index.html text only) ---------- */
+{
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  // M1: dialog caps at 680px
+  const m1 = html.includes('width: min(680px, 100%)') && !html.includes('width: min(600px, 100%)');
+  line(m1, 'M1', 'modal dialog width min(680px,100%)', `found=${m1}`);
+  // M2: grid/input overflow fix
+  const m2 = html.includes('grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)')
+    && html.includes('min-width: 0') && html.includes('max-width: 100%');
+  line(m2, 'M2', 'row2 grid + inputs cannot overflow', `found=${m2}`);
+  // M3: success actions right-aligned (Close/Call one row, Close first, tel: via {{tel}})
+  const m3block = (html.match(/\.est-actions\s*\{[^}]*\}/) || [''])[0];
+  const m3actions = m3block.includes('justify-content: flex-end') && /gap:\s*12px/.test(m3block);
+  const m3order = /<button type="button" class="btn ghost" data-close[^>]*>Close<\/button>\s*<a class="est-call" href="tel:\{\{tel\}\}/.test(html);
+  line(m3actions && m3order, 'M3', 'success Close/Call row right-aligned (gap 12px, Close first)', `align=${m3actions} order=${m3order}`);
+  // M3b: both min-height 48px
+  const m3b = /\.est-actions\s+\.btn\.ghost\s*\{[^}]*min-height:\s*48px/.test(html)
+    && /\.est-call\s*\{[^}]*min-height:\s*48px/.test(html);
+  line(m3b, 'M3b', 'success buttons min-height 48px', `found=${m3b}`);
+  // M3c: both 1px solid border, same radius (0), no underline-only
+  const m3cCall = /\.est-call\s*\{[^}]*border:\s*1px solid\s+rgb\(255 255 255\/\.15\)[^}]*border-radius:\s*0/.test(html);
+  const m3cNoUnder = !/\.est-call\s*\{[^}]*border-bottom:/.test(html);
+  line(m3cCall && m3cNoUnder, 'M3c', 'success buttons 1px solid border + radius 0, no underline', `callBorder=${m3cCall} noUnder=${m3cNoUnder}`);
+  // M3d: 375px stacks (media <=760 row2 single column)
+  const m3d = /@media\s*\(max-width:\s*760px\)\s*\{[^}]*\.row2\s*\{\s*grid-template-columns:\s*1fr/.test(html);
+  line(m3d, 'M3d', '375px Phone/Email stack in one column', `found=${m3d}`);
+}
+
+/* ---------- P: phone E.164 validation + storage ---------- */
+{
+  // P1: bare US number is stored as E.164
+  await resetLimits();
+  const k1 = `${RUN}-p1`;
+  const s1 = await post(payload({ idempotencyKey: k1, phone: '5155550142' }));
+  const r1 = await leadFor(k1);
+  line(s1.status === 200 && r1.length === 1 && r1[0].phone === '+15155550142',
+    'P1', 'US bare -> stored E.164', `${s1.status} stored=${r1[0] && r1[0].phone}`);
+}
+{
+  // P2: international number is stored as E.164
+  await resetLimits();
+  const k2 = `${RUN}-p2`;
+  const s2 = await post(payload({ idempotencyKey: k2, phone: '+44 20 7946 0958' }));
+  const r2 = await leadFor(k2);
+  line(s2.status === 200 && r2.length === 1 && r2[0].phone === '+442079460958',
+    'P2', 'international -> stored E.164', `${s2.status} stored=${r2[0] && r2[0].phone}`);
+}
+{
+  // P3: invalid number -> 400, nothing written
+  await resetLimits();
+  const k3 = `${RUN}-p3`;
+  const s3 = await post(payload({ idempotencyKey: k3, phone: 'abc' }));
+  line(s3.status === 400 && (await leadFor(k3)).length === 0,
+    'P3', 'invalid phone -> 400, nothing written', s3.status);
+}
+{
+  // P4: +20 followed by 9 digits (real manual-test value shape) -> 400, no row
+  await resetLimits();
+  const k4 = `${RUN}-p4`;
+  const s4 = await post(payload({ idempotencyKey: k4, phone: '+20312345678' }));
+  line(s4.status === 400 && (await leadFor(k4)).length === 0,
+    'P4', '+20+9 digits -> 400, nothing written', s4.status);
+}
+{
+  // P5: 16 digits -> 400, no row
+  await resetLimits();
+  const k5 = `${RUN}-p5`;
+  const s5 = await post(payload({ idempotencyKey: k5, phone: '1234567890123456' }));
+  line(s5.status === 400 && (await leadFor(k5)).length === 0,
+    'P5', '16 digits -> 400, nothing written', s5.status);
+}
+{
+  // P6: letters -> 400, no row
+  await resetLimits();
+  const k6 = `${RUN}-p6`;
+  const s6 = await post(payload({ idempotencyKey: k6, phone: 'abcdefgh' }));
+  line(s6.status === 400 && (await leadFor(k6)).length === 0,
+    'P6', 'letters -> 400, nothing written', s6.status);
+}
+{
+  // P7: one valid US number in three formats -> identical stored E.164
+  const forms = ['(212) 555-0100', '212-555-0100', '+1 212 555 0100'];
+  const stored = [];
+  let statusesOk = true;
+  for (let i = 0; i < forms.length; i++) {
+    await resetLimits();
+    const kk = `${RUN}-p7-${i}`;
+    const ss = await post(payload({ idempotencyKey: kk, phone: forms[i] }));
+    if (ss.status !== 200) statusesOk = false;
+    const rr = await leadFor(kk);
+    stored.push(rr.length ? rr[0].phone : 'missing');
+  }
+  line(statusesOk && stored.every((v) => v === '+12125550100'),
+    'P7', 'US three formats -> identical E.164', stored.join(','));
+}
+{
+  // P8: valid +20 mobile -> stored
+  await resetLimits();
+  const k8 = `${RUN}-p8`;
+  const s8 = await post(payload({ idempotencyKey: k8, phone: '+201005408111' }));
+  const r8 = await leadFor(k8);
+  line(s8.status === 200 && r8.length === 1 && r8[0].phone === '+201005408111',
+    'P8', 'valid +20 mobile -> stored E.164', `${s8.status} stored=${r8[0] && r8[0].phone}`);
+}
+{
+  // P9: built HTML phone input has maxlength="20"
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const ok = /<input[^>]*id="e-phone"[^>]*maxlength="20"/.test(html);
+  line(ok, 'P9', 'phone input maxlength 20 (static)', `found=${ok}`);
+}
+
 /* ---------- cleanup ---------- */
 {
   await svc.from('leads').delete().like('idempotency_key', `${RUN}-%`);
