@@ -6,7 +6,7 @@
 // Nothing here logs a name, phone, email, note, raw IP, token or URL. Failures are codes only.
 
 import { createHash, randomUUID } from 'node:crypto';
-import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js';
+import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
 import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit } from '../lib/db.js';
 import { notifyAllAfterLead } from '../lib/notify.js';
 
@@ -158,6 +158,9 @@ export default async function handler(req, res) {
   // Phone: validated and normalised to E.164 (business country, else US).
   // Anything that does not parse as a valid number is a 400; stored value
   // is always E.164; the number is never logged.
+  // The /max build checks real per-country patterns; the /min build (and the
+  // default entry point) only check general length ranges and let through
+  // e.g. an 8-digit +20 "mobile" that needs 10.
   let phoneE164 = null;
   let phoneBad = false;
   const region = (business && typeof business.country === 'string' && /^[A-Za-z]{2}$/.test(business.country)) ? business.country.toUpperCase() : 'US';
@@ -165,16 +168,25 @@ export default async function handler(req, res) {
     if (!phone || !isValidPhoneNumber(phone, region)) phoneBad = true;
     else phoneE164 = parsePhoneNumber(phone, region).number;
   } catch { phoneBad = true; }
+  // Per-field errors for the JSON path: the modal maps each one to that
+  // field's existing message and stays on step 4. No values are echoed back.
+  const fieldErrors = {};
+  if (!SERVICES.includes(service)) fieldErrors.service = 'Choose what you need help with.';
+  if (!HOMES.includes(home)) fieldErrors.home = 'Choose a property type.';
+  if (!TIMINGS.includes(timing)) fieldErrors.timing = 'Choose when you want to start.';
+  if (!AGES.includes(age)) fieldErrors.age = 'Choose the roof’s approximate age.';
+  if (!/^\d{5}$/.test(zip)) fieldErrors.zip = 'Enter your 5-digit ZIP code.';
+  if (phoneBad) fieldErrors.phone = 'Enter a valid phone number.';
+  if (name.length < 2 || name.length > 80) fieldErrors.name = 'Enter your name.';
+  if (email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) fieldErrors.email = 'Enter a valid email or leave it blank.';
   const bad =
-    !SERVICES.includes(service) || !HOMES.includes(home) || !TIMINGS.includes(timing) || !AGES.includes(age) ||
-    !/^\d{5}$/.test(zip) ||
-    phoneBad ||
-    name.length < 2 || name.length > 80 ||
-    email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) ||
+    Object.keys(fieldErrors).length > 0 ||
     notes.length > 2000;
   if (bad) {
     if (isForm && phoneBad) return htmlReply(400, 'Check your details', 'Enter a valid phone number.', business.name);
-    return isForm ? badForm(null) : res.status(400).json({ ok: false });
+    if (isForm) return badForm(null);
+    if (Object.keys(fieldErrors).length > 0) return res.status(400).json({ ok: false, errors: fieldErrors });
+    return res.status(400).json({ ok: false });
   }
 
   // Rate limit 2: per business, so one site cannot flood its own roofer. Also fails open.

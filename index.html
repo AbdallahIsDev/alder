@@ -3432,7 +3432,17 @@ var BIZ = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then(function (r) {
-      if (!r.ok) throw new Error('send failed: ' + r.status);   /* the modal shows its error state */
+      if (!r.ok) {
+        /* Carry the status and the (field-error) body to the modal: a 400 that
+           names a field is shown under that field; anything else (network
+           failure, 5xx) is thrown without a 400 body so the modal shows its
+           generic panel. Never carries the submitted values. */
+        return r.json().catch(function () { return {}; }).then(function (b) {
+          var e = new Error('send failed: ' + r.status);
+          e.status = r.status; e.body = b || {};
+          throw e;
+        });
+      }
       key = '';                                                  /* next open is a new submission */
       return r.json().catch(function () { return {}; });
     });
@@ -3455,13 +3465,37 @@ var BIZ = {
   var reduced = function () { return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches; };
   var canAnimate = function () { return !reduced() && typeof form.animate === 'function' && root.classList.contains('open'); };
   /* phone numbers: any country, with or without a country code or a leading + (also 00 prefixes, spaces, dots, dashes, brackets,
-     Arabic-Indic and Persian digits, and a trailing extension). The only rule is 8 to 15 digits (the international maximum). */
+     Arabic-Indic and Persian digits, and a trailing extension).
+     PHONE_CC is injected at build time (build-static.js) from libphonenumber-js
+     max metadata: for each calling code, [min, max] NATIONAL length across its
+     countries. It stays null in the unbuilt page, which then falls back to the
+     8 to 15 digit rule below. Calling codes are prefix-free, so trying 1, 2,
+     then 3 digits is unambiguous. */
+  var PHONE_CC = /*__PHONE_CC__*/null;
+  var PHONE_DEFAULT_CC = /*__PHONE_DEFAULT__*/'1';   /* the business country (US; businesses has no country column) */
   var AR = '٠١٢٣٤٥٦٧٨٩', FA = '۰۱۲۳۴۵۶۷۸۹';
   var ascii = function (s) { return s.replace(/[٠-٩۰-۹]/g, function (c) { var i = AR.indexOf(c); return i > -1 ? i : FA.indexOf(c); }); };
+  function matchCc(digits) {
+    if (!PHONE_CC) return null;
+    for (var l = 1; l <= 3; l++) { var cc = digits.slice(0, l); if (PHONE_CC[cc]) return cc; }
+    return null;
+  }
   function phoneOk(raw) {
     var v = ascii(raw).trim().replace(/\s*(?:ext\.?|extension|x|#)\s*\d{1,6}$/i, '');
     if (!v || !/^\+?[\d\s().\-\/\u2010-\u2015]+$/.test(v)) return false;
-    var n = v.replace(/\D/g, '').length; return n >= 8 && n <= 15;
+    var digits = v.replace(/\D/g, '');
+    if (v.charAt(0) === '+') {
+      var cc = matchCc(digits);
+      if (cc) { var nat = digits.length - cc.length, r = PHONE_CC[cc]; return nat >= r[0] && nat <= r[1]; }
+      return digits.length >= 8 && digits.length <= 15;
+    }
+    var def = PHONE_CC && PHONE_CC[PHONE_DEFAULT_CC];
+    if (def) {
+      var natD = digits;
+      if (natD.length > def[1] && natD.indexOf(PHONE_DEFAULT_CC) === 0) natD = natD.slice(PHONE_DEFAULT_CC.length);
+      return natD.length >= def[0] && natD.length <= def[1];
+    }
+    return digits.length >= 8 && digits.length <= 15;
   }
 
   /* ---------- validation ---------- */
@@ -3557,10 +3591,21 @@ var BIZ = {
     var v = ascii(raw).replace(/[^+()\s.\-\d]/g, '');
     var plus = v.indexOf('+') === 0;
     var rest = v.replace(/\+/g, '');
-    var digits = 0, out = '';
+    var digits = 0, out = '', soFar = '';
     for (var i = 0; i < rest.length; i++) {
       var ch = rest[i];
-      if (ch >= '0' && ch <= '9') { if (digits >= 15) break; digits++; }
+      if (ch >= '0' && ch <= '9') {
+        var cap = 15;
+        if (plus) {
+          var cc = matchCc(soFar + ch);
+          if (cc) cap = cc.length + PHONE_CC[cc][1];
+        } else if (PHONE_CC && PHONE_CC[PHONE_DEFAULT_CC]) {
+          cap = PHONE_CC[PHONE_DEFAULT_CC][1];
+          if ((soFar + ch).indexOf(PHONE_DEFAULT_CC) === 0) cap = PHONE_DEFAULT_CC.length + PHONE_CC[PHONE_DEFAULT_CC][1];
+        }
+        if (digits >= cap) break;
+        digits++; soFar += ch;
+      }
       out += ch;
     }
     return (plus ? '+' : '') + out;
@@ -3668,9 +3713,49 @@ var BIZ = {
       dots.forEach(function (d) { d.classList.remove('on', 'busy'); d.classList.add('done'); }); body.scrollTop = 0;
     }).then(function () { if (root.classList.contains('open')) done.focus({ preventScroll: true }); });
   }
-  function showError() {
-    setBusy(false); setNext('Try again'); reflow(function () { alertBox.hidden = false; }, 320);
-    alertBox.scrollIntoView({ block: 'nearest' }); alertBox.focus({ preventScroll: true });
+  /* Plain send-error handler (exposed as window.estimateHandleError so tests
+     can feed it the real 400 body with a stub ui): a 400 whose body names
+     fields shows each field's message under that field and focuses the first
+     one, staying on step 4; the generic panel is ONLY for network failures
+     and 5xx (anything without a 400 field-error body). Returns 'field' or
+     'generic'. ui: { setField(name, msg), focusField(name), showGeneric() }. */
+  function handleLeadError(err, ui) {
+    var errors = err && err.status === 400 && err.body && err.body.errors;
+    if (errors && typeof errors === 'object') {
+      var first = null;
+      Object.keys(errors).forEach(function (k) { ui.setField(k, errors[k]); if (!first) first = k; });
+      if (first) ui.focusField(first);
+      return 'field';
+    }
+    ui.showGeneric();
+    return 'generic';
+  }
+  window.estimateHandleError = handleLeadError;
+  function showError(err) {
+    setBusy(false);
+    var ui = {
+      setField: function (k, msg) {
+        var f = form.querySelector('[data-f="' + k + '"]');
+        if (!f) return;
+        f.querySelector('.err').textContent = msg; f.classList.add('bad');
+        var c = f.querySelector('input[type=text],input[type=tel],input[type=email],select');
+        if (c) c.setAttribute('aria-invalid', 'true');
+      },
+      focusField: function (k) {
+        var f = form.querySelector('[data-f="' + k + '"]');
+        var c = f && (f.querySelector('.sel-btn,input,select') || f);
+        if (c && c.focus) c.focus({ preventScroll: true });
+      },
+      showGeneric: function () { reflow(function () { alertBox.hidden = false; }, 320); },
+    };
+    var result = handleLeadError(err, ui);
+    if (result === 'field') {
+      setNext('Send my request');
+      reflow(function () {}, 320);
+    } else {
+      setNext('Try again');
+      alertBox.scrollIntoView({ block: 'nearest' }); alertBox.focus({ preventScroll: true });
+    }
   }
 
   /* ---------- open / close: no layout shift (scrollbar-gutter), page scroll locked and inert, modal body scrolls, position restored ---------- */
