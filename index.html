@@ -3548,6 +3548,7 @@ var BIZ = {
   }
   form.addEventListener('input', function (e) {
     if (e.target === E.zip) E.zip.value = E.zip.value.replace(/\D/g, '');       /* ZIP accepts digits only */
+    if (e.target === E.phone) E.phone.value = ascii(E.phone.value).replace(/[^+()\s.\-/\d]/g, '');   /* phone keeps only number punctuation */
     var f = e.target.closest('[data-f]'); if (f && f.querySelector('.err').textContent) reflow(function () { check(f.dataset.f); }, 260);
   });
   E.phone.addEventListener('blur', function () { E.phone.value = ascii(E.phone.value).trim().replace(/\s+/g, ' '); });   /* tidy only: never reformat a number */

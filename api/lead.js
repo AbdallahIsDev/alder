@@ -6,6 +6,7 @@
 // Nothing here logs a name, phone, email, note, raw IP, token or URL. Failures are codes only.
 
 import { createHash, randomUUID } from 'node:crypto';
+import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js';
 import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit } from '../lib/db.js';
 import { notifyAllAfterLead } from '../lib/notify.js';
 
@@ -135,11 +136,18 @@ export default async function handler(req, res) {
   // Allow-lists and length caps (same limits as the form's maxlength).
   const service = str(b.service), home = str(b.home), timing = str(b.timing), age = str(b.age);
   const zip = str(b.zip), phone = clean(str(b.phone)), name = clean(str(b.name)), email = clean(str(b.email)), notes = clean(str(b.notes));
-  const digits = phone.replace(/\D/g, '');
+  // Phone: validated and normalised to E.164 (US default). Anything that does
+  // not parse as a valid number is a 400; the stored value is always E.164.
+  let phoneE164 = null;
+  let phoneBad = false;
+  try {
+    if (!phone || !isValidPhoneNumber(phone, 'US')) phoneBad = true;
+    else phoneE164 = parsePhoneNumber(phone, 'US').number;
+  } catch { phoneBad = true; }
   const bad =
     !SERVICES.includes(service) || !HOMES.includes(home) || !TIMINGS.includes(timing) || !AGES.includes(age) ||
     !/^\d{5}$/.test(zip) ||
-    !/^[+()\-.\s\d]{7,32}$/.test(phone) || digits.length < 7 || digits.length > 15 ||
+    phoneBad ||
     name.length < 2 || name.length > 80 ||
     email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) ||
     notes.length > 2000;
@@ -173,7 +181,7 @@ export default async function handler(req, res) {
   try {
     leadId = await insertLead({
       business_id: business.id,
-      name, phone, email: email || null, zip, service, home, timing,
+      name, phone: phoneE164, email: email || null, zip, service, home, timing,
       roof_age: age, insurance_claim: b.claim === true,
       notes: notes || null, source: isForm ? 'form-nojs' : 'form', idempotency_key: idem,
     });
@@ -196,7 +204,7 @@ export default async function handler(req, res) {
   // Save first, notify second. Nothing below can change the response.
   await notifyAllAfterLead({
     leadId, business,
-    lead: { name, phone, email, zip, service, home, timing, roof_age: age, insurance_claim: b.claim === true, notes },
+    lead: { name, phone: phoneE164, email, zip, service, home, timing, roof_age: age, insurance_claim: b.claim === true, notes },
   });
 
   return isForm ? htmlReply(200, 'Request received', 'We received your request.', business.name) : res.status(200).json({ ok: true });

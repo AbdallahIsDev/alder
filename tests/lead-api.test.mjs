@@ -317,6 +317,34 @@ const logOffset = fs.statSync(LOG).size;
   line(m3, 'M3', 'success Close/Call row right-aligned', `found=${m3}`);
 }
 
+/* ---------- P: phone E.164 validation + storage ---------- */
+{
+  // P1: bare US number is stored as E.164
+  await resetLimits();
+  const k1 = `${RUN}-p1`;
+  const s1 = await post(payload({ idempotencyKey: k1, phone: '5155550142' }));
+  const r1 = await leadFor(k1);
+  line(s1.status === 200 && r1.length === 1 && r1[0].phone === '+15155550142',
+    'P1', 'US bare -> stored E.164', `${s1.status} stored=${r1[0] && r1[0].phone}`);
+}
+{
+  // P2: international number is stored as E.164
+  await resetLimits();
+  const k2 = `${RUN}-p2`;
+  const s2 = await post(payload({ idempotencyKey: k2, phone: '+44 20 7946 0958' }));
+  const r2 = await leadFor(k2);
+  line(s2.status === 200 && r2.length === 1 && r2[0].phone === '+442079460958',
+    'P2', 'international -> stored E.164', `${s2.status} stored=${r2[0] && r2[0].phone}`);
+}
+{
+  // P3: invalid number -> 400, nothing written
+  await resetLimits();
+  const k3 = `${RUN}-p3`;
+  const s3 = await post(payload({ idempotencyKey: k3, phone: 'abc' }));
+  line(s3.status === 400 && (await leadFor(k3)).length === 0,
+    'P3', 'invalid phone -> 400, nothing written', s3.status);
+}
+
 /* ---------- cleanup ---------- */
 {
   await svc.from('leads').delete().like('idempotency_key', `${RUN}-%`);
