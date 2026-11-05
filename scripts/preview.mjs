@@ -90,6 +90,13 @@ const stressLead = {
 const token = 'sample-review-token-0123456789abcdef';
 const siteUrl = 'http://127.0.0.1:4173';
 
+// The real emails carry the logo as a CID inline image (cid:brand-logo,
+// attached by lib/mail.js). In this gallery only, rewrite it to a data URI
+// so the logo shows in a browser. The hosted PNGs in assets/email/ are
+// used here and nowhere else in production email.
+const logoDataUri = 'data:image/png;base64,' + fs.readFileSync(path.join(ROOT, 'assets', 'email', 'logo-on-dark.png')).toString('base64');
+const withLogo = (html) => String(html).replaceAll('cid:brand-logo', logoDataUri);
+
 function esc(v) {
   return String(v)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -110,17 +117,19 @@ const files = [];
 const add = (name, title, body, html) => { files.push({ name, title, body, html }); };
 
 for (const v of ['O1']) {
-  add(`owner-email-${v}-clean.html`, `Owner email — CLEAN lead`, wrapHtml(`Owner email`, ownerEmail({ business, lead: cleanLead }).html), true);
-  add(`owner-email-${v}-minimal.html`, `Owner email — MINIMAL lead`, wrapHtml(`Owner email`, ownerEmail({ business, lead: minimalLead }).html), true);
+  add(`owner-email-${v}-clean.html`, `Owner email — CLEAN lead`, wrapHtml(`Owner email`, withLogo(ownerEmail({ business, lead: cleanLead }).html)), true);
+  add(`owner-email-${v}-minimal.html`, `Owner email — MINIMAL lead`, wrapHtml(`Owner email`, withLogo(ownerEmail({ business, lead: minimalLead }).html)), true);
 }
-add('owner-email-stress.html', 'Owner email — STRESS lead', wrapHtml('Owner email', ownerEmail({ business, lead: stressLead }).html), true);
+add('owner-email-stress.html', 'Owner email — STRESS lead', wrapHtml('Owner email', withLogo(ownerEmail({ business, lead: stressLead }).html)), true);
 add('owner-email.txt', 'Owner email (plain text) — full lead', ownerEmail({ business, lead: cleanLead }).text, false);
-add('auto-reply.html', 'Customer auto-reply', wrapHtml('Auto reply', autoReply({ business, lead: cleanLead }).html), true);
-add('review-request.html', 'Review request email (five stars)', wrapHtml('Review request', reviewEmail({ business, token, siteUrl }).html), true);
+add('auto-reply.html', 'Customer auto-reply', wrapHtml('Auto reply', withLogo(autoReply({ business, lead: cleanLead }).html)), true);
+add('review-request.html', 'Review request email (five stars)', wrapHtml('Review request', withLogo(reviewEmail({ business, token, siteUrl }).html)), true);
 add('telegram-alert-new.txt', 'Telegram alert — new', renderAlert({ business, lead: cleanLead, view: 'new', reviewResult: null }), false);
 add('telegram-alert-contacted.txt', 'Telegram alert — contacted', renderAlert({ business, lead: cleanLead, view: 'contacted', reviewResult: null }), false);
 add('telegram-alert-confirm.txt', 'Telegram alert — confirm', renderAlert({ business, lead: cleanLead, view: 'confirm', reviewResult: null }), false);
-add('telegram-alert-done.txt', 'Telegram alert — done', renderAlert({ business, lead: cleanLead, view: 'done', reviewResult: 'sent' }), false);
+add('telegram-alert-done.txt', 'Telegram alert — done (review sent)', renderAlert({ business, lead: cleanLead, view: 'done', reviewResult: 'sent' }), false);
+add('telegram-alert-done-no-email.txt', 'Telegram alert — done (no email)', renderAlert({ business, lead: { ...cleanLead, email: '' }, view: 'done', reviewResult: 'no_email' }), false);
+add('telegram-alert-error.txt', 'Telegram alert — error (Try again)', renderAlert({ business, lead: cleanLead, view: 'error', reviewResult: 'failed' }), false);
 // Landing pages with a stubbed Google URL on 127.0.0.1 so the redirect can be seen
 // without leaving the machine.
 const STUB_GOOGLE = 'https://g.page/stub';
@@ -171,7 +180,9 @@ index += '<h2>Telegram alerts (text)</h2>\n'
   + '<p class="cap">Telegram: lead just arrived</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-new.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: roofer tapped Contacted</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-contacted.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: asked to confirm before emailing the customer</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-confirm.txt').body) + '</pre>\n'
-  + '<p class="cap">Telegram: finished</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-done.txt').body) + '</pre>\n';
+  + '<p class="cap">Telegram: finished, review request sent</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-done.txt').body) + '</pre>\n'
+  + '<p class="cap">Telegram: finished, no email on file (nothing was sent)</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-done-no-email.txt').body) + '</pre>\n'
+  + '<p class="cap">Telegram: review email failed — one "Try again" button (r:) resends it with the existing token</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-error.txt').body) + '</pre>\n';
 index += '<h2>Owner email (plain text)</h2>\n<pre>' + esc(files.find((f) => f.name === 'owner-email.txt').body) + '</pre>\n';
 index += '</body></html>\n';
 write('index.html', index);
