@@ -6,8 +6,8 @@ No secrets, no pricing, no strategy — just the mechanics.
 - **Brand tokens** — where they come from, and how to restyle every client.
 - **Owner email** — the single design and its two buttons.
 - **Customer emails** — auto-reply and review request.
-- **Review landing page** — how the Google redirect works now.
-- **Telegram** — the three-step button flow.
+- **Review rating page** — how the star + comment + Google redirect works now.
+- **Telegram** — the three-step button flow, menu commands and button colours.
 - **Env var names** — what the code reads (never values).
 - **Preview gallery** — how to eyeball everything.
 
@@ -28,7 +28,7 @@ Two logo PNGs are rendered from the page's logo SVG by `sharp`:
 - `assets/email/logo-on-light.png` — every fill replaced with the `text` colour
   (for light surfaces).
 
-Both are 72 px high (2× the 36 px display size) with a transparent background.
+Both are 72 px high (2x the 36 px display size) with a transparent background.
 Because they are single-colour versions, each works on any background the tokens
 allow: `logo-on-dark` on the dark band, `logo-on-light` on white/light cards.
 
@@ -52,9 +52,9 @@ wordmark in the heading font instead.
 | `colors.onBg` | text on `bg` |
 | `colors.onBgMuted` | `onBg` blended 70% over `bg` |
 | `colors.accent` | the page's primary button/CTA colour |
-| `colors.accentText` | text on `accent` (chosen for ≥ 4.5:1 contrast) |
+| `colors.accentText` | text on `accent` (chosen for 4.5:1 contrast) |
 | `colors.text` | primary text on white |
-| `colors.muted` | secondary text on white (darkened to ≥ 4.5:1 on white if needed) |
+| `colors.muted` | secondary text on white (darkened to 4.5:1 on white if needed) |
 | `colors.border` | hairlines and card borders |
 | `colors.tint` | light grey boxes (notes) |
 
@@ -71,22 +71,26 @@ right in both worlds.
 
 ## Owner email
 
-`ownerEmail({ business, lead })` in `lib/content.js`. There is one design only
-(the former O1 "brand dark") — no variant parameter exists any more.
+`ownerEmail({ business, lead })` in `lib/content.js`. There is one design only — no variant parameter exists.
 
-Layout: a dark brand band with the logo, title "New estimate request",
-subtitle, then a 4 px accent bar; two cards ("Customer": Name/Phone/Email;
-"Job": Service/Timing/Property/Roof age/Insurance claim/ZIP) separated by a
-16 px spacer, with the notes box inside the Job card. **Buttons come after the
-Job card, before the footer**: two half-width buttons, 2% spacer between them
-— "Call \<first name\>" (td = accent, link text = accentText, `tel:` link) and
-"Email \<first name\>" (td = bg, link text = onBg, mail link); with no email on
-the lead, one full-width Call button in the accent colour. Colours are brand
-tokens only. The plain-text part carries the same sections and labels, with the
-buttons as two "Call:"/"Email:" lines after the Job section.
+Layout (compact): a dark brand band with the logo, title "New estimate request",
+subtitle, then a 4 px accent bar; then plain sections (no inner cards): a
+"Customer" heading + Name/Phone/Email rows, one edge-to-edge divider row, a
+"Job" heading + Service/Timing/Property/Roof age/Insurance claim/ZIP rows +
+notes box, a 16 px spacer. Label width is 96, row padding 8 px. Header
+padding is 16 px 20 px 14 px with logo height 32. The shell has one
+`.outer`/`.card`/`.px` structure with a `@media (max-width:480px)` mobile
+block, and exactly one bordered rounded container besides the buttons and
+the notes box. **Buttons come after the Job section, before the footer**: two
+half-width buttons, 2% spacer between them — "Call \<first name\>" (td = accent,
+link text = accentText, `tel:` link) and "Email \<first name\>" (td = bg, link
+text = onBg, mail link); with no email on the lead, one full-width Call button
+in the accent colour. Colours are brand tokens only. The plain-text part
+carries the same sections and labels, with the buttons as two "Call:"/"Email:"
+lines after the Job section.
 
-**Phone links** use `toTelHref()` in `lib/content.js`: 10 digits → `+1`, 11
-digits starting with 1 → `+`, a leading `+` stays, anything else is the bare
+**Phone links** use `toTelHref()` in `lib/content.js`: 10 digits to `+1`, 11
+digits starting with 1 to `+`, a leading `+` stays, anything else is the bare
 digits. Display text is never altered.
 
 ## Customer emails
@@ -99,45 +103,52 @@ never "Lead Alerts". The owner email keeps "Sent by Lead Alerts".
   are unchanged: only the roofer's business name, no studio name, no time
   promise ("we'll be in touch about it", never "within 24 hours"), no AI claims.
 
-- **Review request** (`reviewEmail`): five hollow-star TEXT links to
-  `/r/<token>?s=1`…`?s=5` under the line "How did we do? Tap a star to rate
-  your experience." The star is the text character ☆ with a variation selector
-  so iOS shows the outline, not an emoji. No button, no "private feedback"
-  sentences, and no incentives, discounts, or promises of any kind. The
-  `?go=1` landing-page entry point (used by legacy `/r/<token>/go` links) is
-  unchanged and serves the same landing page.
+- **Review request** (`reviewEmail`): one "Share your feedback" button linking
+  to `/r/<token>` (plain URL, no star links and no star glyphs). No "private
+  feedback" sentences, and no incentives, discounts, or promises of any kind.
+  Legacy entry points (`?s=N`, `?go=1`, `/r/<token>/go`) land on the same
+  rating page below.
 
-## Review landing page
+## Review rating page
 
-`reviewLandingPage()` in `lib/content.js`, served by `api/review.js` on the same
-`/r/<token>` route for `?s=N` and `?go=1`. The old page at plain `/r/<token>`
-(and its behaviour) is unchanged for links already sent.
+`reviewPage()` in `lib/content.js`, served by `api/review.js` on the same
+`/r/<token>` route for plain, `?s=N`, `?go=1` and `/go` (all show the same
+interactive rating page; `reviewLandingPage()` is the backwards-compatible
+name for that same page).
 
 How it works:
 
 1. **A GET never writes anything** — no rows, no events, no alerts. Mail
-   scanners open every link in the inbox, so a GET that recorded a click would
-   register fake ones. The legacy `/r/<token>/go` links from old emails land
-   here too (same rewrite) and now open this page instead of a 302.
-2. The page's JavaScript sends **one POST** (with `keepalive`) when the redirect
-   starts. The handler splits the fields: a valid `stars` writes the rating
-   (the existing POST path, including the ≤2 owner-alert dedupe); a `go=1`
-   records `google_clicked` and a `review_clicked` event. A POST with neither
-   writes nothing.
-3. `?s=N` (N = 1..5, anything else behaves as `?go=1`) shows five stars that
-   fill one by one every 90 ms (instantly with `prefers-reduced-motion`), then
-   `location.replace(googleUrl)` at 1000 ms regardless of whether the POST
-   finished. `?go=1` has no stars and redirects at ~150 ms.
-4. A `<noscript>` meta refresh (1 s) covers JS-off browsers.
+    scanners open every link in the inbox, so a GET that recorded a click would
+    register fake ones. Legacy `/r/<token>/go` links land here too (same
+    rewrite) and now open the rating page instead of a 302.
+2. The page shows five inline-SVG star buttons in
+    `<div role="radiogroup" aria-label="Rating">`, each
+    `role="radio" aria-label="N stars"` at least 44x44 px with
+    `user-select:none`. Unselected stars are `fill:none stroke:#9AA0A6`;
+    selected (this and lower) are `fill:#F4B400 stroke:#F4B400`. Arrow keys,
+    pointer hover/focus and click all work.
+3. Below the stars: a textarea (`maxlength=1000 rows=4`) labelled
+    "Anything you'd like to tell \<business>? (optional)" with the helper
+    "This note goes to \<business>. Your public review is written on Google
+    next." "Continue to Google" is disabled until a star is chosen. A
+    `<noscript>` link to the Google URL covers JS-off browsers.
+4. On "Continue", the page POSTs `{stars, comment, go}` (keepalive; `stars`
+    is the rating value stored as `rating`). A valid `stars` writes the
+    rating (including the 2-or-lower owner-alert dedupe); `go=1` records
+    `google_clicked` and a `review_clicked` event. The comment is stored via
+    the server (never logged), shown only as plain text in the low-rating
+    owner alert truncated to 300 chars. Then the page navigates to the
+    Google URL regardless of whether the POST finished.
 5. The Google URL comes only from the business row, never the query string,
-   and must be `https` on exactly one of: `www.google.com`, `google.com`,
-   `search.google.com`, `maps.google.com`, `g.page`, `maps.app.goo.gl`,
-   `goo.gl`. Anything else (http, `javascript:`, look-alike domains) shows
-   "Review link unavailable" and redirects nowhere; only a log code is emitted,
-   never the URL.
+    and must be `https` on exactly one of: `www.google.com`, `google.com`,
+    `search.google.com`, `maps.google.com`, `g.page`, `maps.app.goo.gl`,
+    `goo.gl`. Anything else (http, `javascript:`, look-alike domains) shows
+    "Review link unavailable" and redirects nowhere; only a log code is
+    emitted, never the URL.
 6. Values are embedded as JSON with `<` escaped as `\u003c`. No `comgooglemaps://`
-   style app schemes — a plain https redirect lets Google hand off to the Maps
-   app or the browser on its own.
+    style app schemes — a plain https redirect lets Google hand off to the Maps
+    app or the browser on its own.
 
 ## Telegram alerts
 
@@ -150,30 +161,47 @@ email outcome). `parse_mode` is never set anywhere in the Telegram path.
 The button flow (enforced by the conditional UPDATEs in `lib/db.js`, not only
 the UI):
 
-1. Fresh alert: one button **Mark contacted** (`c:`) — no way to email the
-   customer from a lead nobody has called yet.
-2. `c:` → alert re-renders `Status: Contacted` from the database (via the
-   roofer-facing view only), one button **Job completed** (`d:`).
-3. `d:` → asks: re-render with the confirm line, two buttons **Yes, send review
-   request** (`y:`) and **Cancel** (`n:`). On an open lead it is refused: "Mark
-   this lead as contacted first."
-4. `y:` → `contacted|quoted|won → done` in one conditional UPDATE (token filled
-   only if null), exactly one review email, message ends with the outcome and
-   no buttons. A second `y:` changes nothing and sends nothing.
-5. `n:` → back to the one-button contacted view, no DB change.
+1. Fresh alert: one button **Mark contacted** (`c:`, style `primary`) — no way to email the
+    customer from a lead nobody has called yet.
+2. `c:` — alert re-renders `Status: Contacted` from the database (via the
+    roofer-facing view only), one button **Job completed** (`d:`, style `primary`).
+3. `d:` — asks: re-render with the confirm line, two buttons **Yes, send review
+    request** (`y:`, style `success`) and **Cancel** (`n:`, style `danger`). On an open lead it is refused: "Mark
+    this lead as contacted first."
+4. `y:` — `contacted|quoted|won` to `done` in one conditional UPDATE (token filled
+    only if null), exactly one review email, message ends with the outcome and
+    no buttons. A second `y:` changes nothing and sends nothing.
+5. `n:` — back to the one-button contacted view, no DB change.
+
+Button colours use the Bot API `style` field (only `primary`, `success`,
+`danger` exist). `callback_data`, labels and the flow are unchanged. Older
+Telegram clients ignore the field.
 
 Tenancy always comes from the chat binding. Forged callbacks from another
 business change nothing; malformed `callback_data` is answered and ignored.
 
+## Telegram menu commands
+
+The bot menu has exactly two entries (names only):
+
+- `leads` — Show recent requests
+- `help` — How this bot works
+
+Set them with `npm run tg:commands` (calls `setMyCommands`) and print the
+names with `npm run tg:commands:info` (calls `getMyCommands`).
+`/help` in the chat replies with the same short text for linked and unlinked
+chats and reveals no business data. `/leads` still returns no lead data for
+unlinked chats.
+
 ## Env var names
 
-The email and Telegram code reads these names (never values — do not copy
+The email and Telegram code reads these names (never values - do not copy
 `.env` content into docs, tickets or screenshots):
 
 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`,
 `IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
 `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `MAIL_REDIRECT_TO`,
-`MAIL_REDIRECT_PREFIX` (demo recordings: set to `off` to drop the `[TEST for …]`
+`MAIL_REDIRECT_PREFIX` (demo recordings: set to `off` to drop the `[TEST for .]`
 subject prefix; the recipient is still redirected), `SITE_URL`,
 `DATABASE_URL` (local migrations only).
 
@@ -186,8 +214,9 @@ node scripts/preview.mjs --serve   # also serve them at http://127.0.0.1:4173/
 
 No env, no network (except the loopback server), no DB. The gallery shows the
 owner email for the CLEAN, MINIMAL and STRESS leads at 640 px and 375 px widths,
-the auto-reply, the five-star review email, the three landing pages (with the
-unavailable state), and the four Telegram states, each with a caption. A
+the auto-reply, the one-button review email ("Share your feedback"), the
+rating pages (s1, s5, go, and the unavailable state), and the four Telegram
+states, each with a caption. A
 "Simulate dark mode" checkbox applies `invert(1) hue-rotate(180deg)` to the
-iframes — a rough approximation of mail-app dark-mode inversion, not a real
+iframes - a rough approximation of mail-app dark-mode inversion, not a real
 dark mode.

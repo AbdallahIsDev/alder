@@ -55,6 +55,27 @@ that business. An expired or reused code binds nothing and says so in the chat.
 
 Codes are minted only by this local script. No public endpoint creates them.
 
+## Telegram menu and buttons
+
+The bot menu has exactly two entries (names only, no secrets):
+
+- `leads` — Show recent requests
+- `help` — How this bot works
+
+Set them with `npm run tg:commands` (calls `setMyCommands`) and print the
+names with `npm run tg:commands:info` (calls `getMyCommands`).
+`/help` in the chat replies with the same short text for linked and unlinked
+chats and reveals no business data. `/leads` still returns no lead data for
+unlinked chats.
+
+Inline buttons use the Bot API `style` field (only `primary`, `success`,
+`danger` exist; older clients ignore it):
+
+- Mark contacted — `primary`
+- Job completed — `primary`
+- Yes, send review request — `success`
+- Cancel — `danger`
+
 ## Send a test lead
 
 Open the client's page (or the demo), run through the estimate modal with a
