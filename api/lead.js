@@ -134,9 +134,9 @@ export default async function handler(req, res) {
   }
 
   // Allow-lists and length caps (same limits as the form's maxlength).
-  // Phone is validated AFTER the business lookup so the business region can
-  // be used (business.country when present, else 'US'. The businesses table
-  // has no country column today — see lib/db.js — so 'US' applies).
+  // Phone is validated AFTER the business lookup, but the region is always
+  // 'US': lib/db.js getActiveBusinessBySlug does not select a country column
+  // (the businesses table has none), so business.country is never present.
   const service = str(b.service), home = str(b.home), timing = str(b.timing), age = str(b.age);
   const zip = str(b.zip), phone = clean(str(b.phone)), name = clean(str(b.name)), email = clean(str(b.email)), notes = clean(str(b.notes));
 
@@ -155,7 +155,7 @@ export default async function handler(req, res) {
   }
   if (!business) return isForm ? badForm(null) : res.status(400).json({ ok: false });     // unknown, paused or churned
 
-  // Phone: validated and normalised to E.164 (business country, else US).
+  // Phone: validated and normalised to E.164 (region is always 'US'; see above).
   // Anything that does not parse as a valid number is a 400; stored value
   // is always E.164; the number is never logged.
   // The /max build checks real per-country patterns; the /min build (and the
