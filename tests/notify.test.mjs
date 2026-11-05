@@ -158,6 +158,23 @@ try {
   line(bad.length === 0, 'G1', 'toTelHref: US gets +1, international keeps +, rest untouched',
     bad.length ? 'bad: ' + bad.map(([i, w]) => `${i}->${toTelHref(i)} (want ${w})`).join('; ') : `${cases.length} cases ok`);
 
+  /* G1b: displayPhone (Telegram alert) applies the same rule as toTelHref:
+     a leading + is shown unchanged (never "+1+20..."); bare 10 digits get
+     +1; bare 11 digits starting with 1 get +. */
+  const { displayPhone, renderAlert } = await import('../lib/content.js');
+  const dispCases = [
+    ['+201005408345', '+201005408345'],
+    ['+12125550100', '+12125550100'],
+    ['2125550100', '+12125550100'],
+    ['12125550100', '+12125550100'],
+  ];
+  const dispBad = dispCases.filter(([input, want]) => displayPhone(input) !== want);
+  const telParity = dispCases.every(([input, want]) => toTelHref(input) === 'tel:' + want);
+  const alertLine = renderAlert({ business: { name: 'Alder Roofing', }, lead: { name: 'John Test', phone: '+201005408345', email: '', service: 'repair', timing: 'asap', home: 'house', roof_age: 'Not sure', insurance_claim: false, zip: '50265', notes: '' }, view: 'new', reviewResult: null });
+  const alertOk = alertLine.includes('Phone: +201005408345') && !alertLine.includes('+1+20');
+  line(dispBad.length === 0 && telParity && alertOk, 'G1b', 'displayPhone: + unchanged, 10->+1, 11/1->+; tel parity',
+    dispBad.length ? 'bad: ' + dispBad.map(([i, w]) => `${i}->${displayPhone(i)} (want ${w})`).join('; ') : `${dispCases.length} cases ok telParity=${telParity} alert=${alertOk}`);
+
   /* G: owner email structure (unit-level, no DB). */
   const { ownerEmail } = await import('../lib/content.js');
   const { getBrand } = await import('../lib/brand.js');
