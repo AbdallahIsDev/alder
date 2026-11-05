@@ -1354,8 +1354,9 @@
     .est-steps { list-style: none; counter-reset: s; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; font-size: var(--fs) }
     .est-steps li { counter-increment: s; display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: start }
     .est-steps li::before { content: counter(s); display: grid; place-items: center; width: 28px; height: 28px; background: var(--card-h); font-weight: 500 }
-    .est-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; width: 100%; justify-content: flex-end }
-    .est-call { color: var(--fg); font-weight: 500; font-size: var(--fs); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 2px }
+    .est-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; width: 100%; justify-content: flex-end }
+    .est-actions .btn.ghost { min-height: 48px }
+    .est-call { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; padding: 0 16px; color: var(--fg); font-weight: 500; font-size: var(--fs); text-decoration: none; border: 1px solid rgb(255 255 255/.15); border-radius: 0; }
     .est-call:hover { border-color: var(--fg) }
 
     @media (max-width: 760px) { .opts, .row2 { grid-template-columns: 1fr } .est { padding: 8px } .est-dialog { max-height: calc(100dvh - 16px) } .est-top { padding: 16px 16px 0 } .est-body { padding: 16px } .est-nav { padding: 12px 16px 16px } .est-recap div { grid-template-columns: 6em 1fr } }
