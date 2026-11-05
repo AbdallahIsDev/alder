@@ -198,7 +198,7 @@ try {
   const seqRow1 = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
   const edits1 = (await sent()).filter((x) => x.path.includes('/editMessageText'));
   const s1Kb = edits1.length === 1 && JSON.stringify(edits1[0].body.reply_markup)
-    === JSON.stringify({ inline_keyboard: [[{ text: 'Job completed', callback_data: 'd:' + seqLead }]] })
+    === JSON.stringify({ inline_keyboard: [[{ text: 'Job completed', callback_data: 'd:' + seqLead, style: 'primary' }]] })
     && edits1[0].body.text.includes('Status: Contacted');
   await reset();
   await good(cb(chatB, 'd:' + seqLead));
@@ -206,8 +206,8 @@ try {
   const edits2 = (await sent()).filter((x) => x.path.includes('/editMessageText'));
   const s2Kb = edits2.length === 1 && JSON.stringify(edits2[0].body.reply_markup)
     === JSON.stringify({ inline_keyboard: [[
-      { text: 'Yes, send review request', callback_data: 'y:' + seqLead },
-      { text: 'Cancel', callback_data: 'n:' + seqLead }]] })
+      { text: 'Yes, send review request', callback_data: 'y:' + seqLead, style: 'success' },
+      { text: 'Cancel', callback_data: 'n:' + seqLead, style: 'danger' }]] })
     && edits2[0].body.text.includes('Send a review request to Seq');
   await reset();
   await good(cb(chatB, 'y:' + seqLead));
@@ -234,7 +234,7 @@ try {
   const cancelEmails = (await resendCalls()).length;
   line(cancelAfter.status === 'contacted' && !cancelAfter.review_token
     && cancelEdits.length === 1 && JSON.stringify(cancelEdits[0].body.reply_markup)
-      === JSON.stringify({ inline_keyboard: [[{ text: 'Job completed', callback_data: 'd:' + cancelLead }]] })
+      === JSON.stringify({ inline_keyboard: [[{ text: 'Job completed', callback_data: 'd:' + cancelLead, style: 'primary' }]] })
     && cancelEmails === 0,
     'C11b', 'Cancel returns to Job completed, no DB change, no email', `emails=${cancelEmails}`);
 
@@ -290,6 +290,52 @@ try {
   const ccAnswers = ccSent.filter((x) => x.path.includes('/answerCallbackQuery'));
   line(ccRow.status === 'contacted' && ccEvents === 1 && ccEdits.length === 1 && ccAnswers.length === 2,
     'C14', 'double tap Contacted -> one change, answers twice', `status=${ccRow.status} events=${ccEvents} edits=${ccEdits.length} answers=${ccAnswers.length}`);
+
+  /* C11c: every button style is allowed and callback_data is unchanged */
+  {
+    const { alertKeyboard, jobDoneKeyboard, confirmKeyboard } = await import('../lib/content.js');
+    const uid = '00000000-0000-4000-8000-000000000001';
+    const allBtns = [
+      ...alertKeyboard(uid).inline_keyboard[0],
+      ...jobDoneKeyboard(uid).inline_keyboard[0],
+      ...confirmKeyboard(uid).inline_keyboard[0],
+    ];
+    const allowed = new Set(['primary', 'success', 'danger']);
+    const expect = {
+      'Mark contacted': { cb: 'c:' + uid, style: 'primary' },
+      'Job completed': { cb: 'd:' + uid, style: 'primary' },
+      'Yes, send review request': { cb: 'y:' + uid, style: 'success' },
+      'Cancel': { cb: 'n:' + uid, style: 'danger' },
+    };
+    const ok = allBtns.length === 4 && allBtns.every((b) => allowed.has(b.style) && expect[b.text] && b.callback_data === expect[b.text].cb && b.style === expect[b.text].style);
+    line(ok, 'C11c', 'button styles allowed, callback_data unchanged', `btns=${allBtns.map((b) => b.text + ':' + b.style).join(',')}`);
+  }
+
+  /* C15: /help same text linked + unlinked, no lead data */
+  {
+    await reset();
+    await good(msg(chatB, '/help'));
+    const helpLinked = await sent();
+    const linkedText = helpLinked.filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text).join('\n');
+    await reset();
+    await good(msg(chatX, '/help'));
+    const helpUnlinked = await sent();
+    const unlinkedText = helpUnlinked.filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text).join('\n');
+    const hasLeadsRef = linkedText.includes('/leads') && unlinkedText.includes('/leads');
+    const noLeadData = !/Recent requests|Status:/.test(linkedText) && !/Recent requests|Status:/.test(unlinkedText);
+    line(linkedText === unlinkedText && linkedText.length > 0 && hasLeadsRef && noLeadData,
+      'C15', '/help same text linked + unlinked, no lead data', `linked=${linkedText.length} unlinked=${unlinkedText.length}`);
+  }
+
+  /* C16: /leads from unlinked still returns no lead data (assert only) */
+  {
+    await reset();
+    await good(msg(chatX, '/leads'));
+    const leadsSent = await sent();
+    const unlinkedLeads = leadsSent.filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text).join('\n');
+    line(unlinkedLeads.includes('not linked') && !/Recent requests/.test(unlinkedLeads),
+      'C16', '/leads unlinked returns no lead data', `textLen=${unlinkedLeads.length}`);
+  }
 
   /* static check on api/tg.js and everything it imports */
   const seen = new Set();
