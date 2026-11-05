@@ -2585,7 +2585,7 @@
             <div class="f" data-f="phone" data-page-node-id="NtWgZLB4FosSGjd7YJ4Jk9"><label for="e-phone" data-page-node-id="JSG77Qb247YiSpVlXMaJLX">Phone</label><input id="e-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" enterkeyhint="next" maxlength="20" data-page-node-id="CWg0Pqsjqi71zUbxgnrNK4"><p class="err" role="alert" data-page-node-id="eA9LBPWnJBheDe07dfkn4x"></p></div>
             <div class="f" data-f="email" data-page-node-id="6AmpmIrMm9TiMQk0n4sBDK"><label for="e-mail" data-page-node-id="051o6UMyk4OXNMuUsxf2GV">Email (optional)</label><input id="e-mail" name="email" type="email" inputmode="email" autocomplete="email" enterkeyhint="done" maxlength="254" data-page-node-id="ESnq4TUvsqhCx3oEnm1gTU"><p class="err" role="alert" data-page-node-id="wkSVFFGqQBZ9DdD8uhjcdR"></p></div>
           </div>
-          <div class="f" data-page-node-id="zSSixugw6ixwuOPfzKG8it"><label for="e-notes" data-page-node-id="tShePoY9XeOGZkulbhPsub">Anything we should know? (optional)</label><textarea id="e-notes" name="notes" maxlength="2000"></textarea></div>
+          <div class="f" data-f="notes" data-page-node-id="zSSixugw6ixwuOPfzKG8it"><label for="e-notes" data-page-node-id="tShePoY9XeOGZkulbhPsub">Anything we should know? (optional)</label><textarea id="e-notes" name="notes" maxlength="2000"></textarea><p class="err" role="alert" data-page-node-id="notesErr"></p></div>
           <!-- honeypot: invisible to people (off-screen, skipped by Tab and screen readers); bots fill it. Must stay empty. -->
           <div class="hp" aria-hidden="true"><input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"></div>
           <p class="fine" data-page-node-id="4pVebfApdTCCJJIw75qS4H">By sending this, you agree to be contacted about your estimate. We only use these details to contact you about your estimate. We reply within {{reply}}.</p>
@@ -3507,7 +3507,8 @@ var BIZ = {
     timing: function () { return E.timing.value ? '' : 'Choose when you want to start.'; },
     name: function () { return E.name.value.trim().length > 1 ? '' : 'Enter your name.'; },
     phone: function () { return phoneOk(E.phone.value) ? '' : 'Enter a valid phone number. A country code is optional.'; },
-    email: function () { var v = E.email.value.trim(); return !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? '' : 'Enter a valid email or leave it blank.'; }
+    email: function () { var v = E.email.value.trim(); return !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? '' : 'Enter a valid email or leave it blank.'; },
+    notes: function () { return E.notes.value.length > 2000 ? 'Keep notes under 2000 characters.' : ''; }
   };
   var STEPS = [['service'], ['zip', 'home', 'age'], ['timing'], ['name', 'phone', 'email']];
   /* ---------- themed dropdown: built from the native <select>, which stays hidden as the data source ---------- */
@@ -3571,11 +3572,11 @@ var BIZ = {
   [].forEach.call(form.querySelectorAll('select'), enhanceSelect);
 
   [].forEach.call(form.querySelectorAll('[data-f]'), function (f) {            /* link each message to its field for screen readers */
-    var k = f.dataset.f, err = f.querySelector('.err'), c = f.querySelector('input[type=text],input[type=tel],input[type=email],.sel-btn,[role=radiogroup]');
+    var k = f.dataset.f, err = f.querySelector('.err'), c = f.querySelector('input[type=text],input[type=tel],input[type=email],textarea,.sel-btn,[role=radiogroup]');
     err.id = 'err-' + k; if (c) c.setAttribute('aria-describedby', err.id);
   });
   function check(k) {
-    var m = R[k](), f = form.querySelector('[data-f="' + k + '"]'), c = f.querySelector('input[type=text],input[type=tel],input[type=email],select');
+    var m = R[k](), f = form.querySelector('[data-f="' + k + '"]'), c = f.querySelector('input[type=text],input[type=tel],input[type=email],textarea,select');
     f.querySelector('.err').textContent = m; f.classList.toggle('bad', !!m);
     if (c) { if (m) c.setAttribute('aria-invalid', 'true'); else c.removeAttribute('aria-invalid'); }
     var sb = f.querySelector('.sel-btn'); if (sb) { if (m) sb.setAttribute('aria-invalid', 'true'); else sb.removeAttribute('aria-invalid'); }
@@ -3743,7 +3744,7 @@ var BIZ = {
       },
       focusField: function (k) {
         var f = form.querySelector('[data-f="' + k + '"]');
-        var c = f && (f.querySelector('.sel-btn,input,select') || f);
+        var c = f && (f.querySelector('.sel-btn,input,textarea,select') || f);
         if (c && c.focus) c.focus({ preventScroll: true });
       },
       showGeneric: function () { reflow(function () { alertBox.hidden = false; }, 320); },

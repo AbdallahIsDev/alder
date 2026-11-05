@@ -179,9 +179,8 @@ export default async function handler(req, res) {
   if (phoneBad) fieldErrors.phone = 'Enter a valid phone number.';
   if (name.length < 2 || name.length > 80) fieldErrors.name = 'Enter your name.';
   if (email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) fieldErrors.email = 'Enter a valid email or leave it blank.';
-  const bad =
-    Object.keys(fieldErrors).length > 0 ||
-    notes.length > 2000;
+  if (notes.length > 2000) fieldErrors.notes = 'Keep notes under 2000 characters.';
+  const bad = Object.keys(fieldErrors).length > 0;
   if (bad) {
     if (isForm && phoneBad) return htmlReply(400, 'Check your details', 'Enter a valid phone number.', business.name);
     if (isForm) return badForm(null);

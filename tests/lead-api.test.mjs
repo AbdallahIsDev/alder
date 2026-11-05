@@ -511,6 +511,45 @@ const logOffset = fs.statSync(LOG).size;
   } else detail = `build failed: ${(r.stderr || r.stdout || '').slice(0, 80)}`;
   line(ok, 'P15', 'built HTML has calling-code table under 6 KB', detail);
 }
+{
+  // P16: notes of 2001 chars -> 400 WITH errors.notes (never the bare
+  // {ok:false} that showed the generic panel), and no row written.
+  await resetLimits();
+  const k16 = `${RUN}-p16`;
+  const s16 = await post(payload({ idempotencyKey: k16, notes: 'x'.repeat(2001) }));
+  line(s16.status === 400 && s16.json && s16.json.errors && s16.json.errors.notes === 'Keep notes under 2000 characters.'
+    && (await leadFor(k16)).length === 0,
+    'P16', 'notes 2001 chars -> 400 with errors.notes, no row',
+    `${s16.status} ${JSON.stringify(s16.json)}`);
+}
+{
+  // P17: the real notes 400 body through the modal handler (same node:vm
+  // approach as P13): an inline message is set and generic stays false.
+  // Plus a static check that the notes field has its own .err element.
+  await resetLimits();
+  const k17 = `${RUN}-p17`;
+  const s17 = await post(payload({ idempotencyKey: k17, notes: 'y'.repeat(2001) }));
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const m17 = /function handleLeadError\(err, ui\) \{([\s\S]*?)\n  \}\n  window\.estimateHandleError/.exec(html);
+  const notesMarkup = /<div class="f" data-f="notes"[^>]*>[\s\S]*?<textarea id="e-notes"[^>]*><\/textarea><p class="err"/.test(html);
+  if (!m17 || s17.status !== 400 || !s17.json || !s17.json.errors) {
+    line(false, 'P17', 'modal handler: notes 400 -> inline message, no generic panel',
+      `handler=${!!m17} status=${s17.status} markup=${notesMarkup}`);
+  } else {
+    const { default: vm } = await import('node:vm');
+    const fn = vm.runInNewContext('(function handleLeadError(err, ui) {' + m17[1] + '\n})', Object.create(null));
+    const seen = { fields: {}, focused: null, generic: false };
+    const kind = fn({ status: s17.status, body: s17.json }, {
+      setField: (k, msg) => { seen.fields[k] = msg; },
+      focusField: (k) => { seen.focused = k; },
+      showGeneric: () => { seen.generic = true; },
+    });
+    const ok = kind === 'field' && seen.fields.notes === 'Keep notes under 2000 characters.'
+      && seen.focused === 'notes' && seen.generic === false && notesMarkup;
+    line(ok, 'P17', 'modal handler: notes 400 -> inline message, no generic panel',
+      `kind=${kind} notes=${seen.fields.notes} focused=${seen.focused} generic=${seen.generic} markup=${notesMarkup}`);
+  }
+}
 
 /* ---------- cleanup ---------- */
 {
