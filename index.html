@@ -1247,7 +1247,7 @@
     .est.open { visibility: visible; transition-delay: 0s }
     .est-scrim { position: absolute; inset: 0; background: rgb(28 31 36/.5); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); opacity: 0; transition: opacity .35s }
     .est.open .est-scrim { opacity: 1 }
-    .est-dialog { position: relative; display: flex; flex-direction: column; width: min(600px, 100%); max-height: calc(100dvh - 32px); background: var(--bg); color: var(--fg); border: 1px solid var(--line); -webkit-backdrop-filter: blur(26px); backdrop-filter: blur(26px); box-shadow: 0 30px 90px rgb(0 0 0/.35); opacity: 0; transform: translateY(18px); transition: opacity .35s, transform .45s cubic-bezier(.2, .7, .2, 1); outline: 0 }
+    .est-dialog { position: relative; display: flex; flex-direction: column; width: min(680px, 100%); max-height: calc(100dvh - 32px); background: var(--bg); color: var(--fg); border: 1px solid var(--line); -webkit-backdrop-filter: blur(26px); backdrop-filter: blur(26px); box-shadow: 0 30px 90px rgb(0 0 0/.35); opacity: 0; transform: translateY(18px); transition: opacity .35s, transform .45s cubic-bezier(.2, .7, .2, 1); outline: 0 }
     .est.open .est-dialog { opacity: 1; transform: none }
     .est .label { color: var(--fg) }
     .est :focus-visible { outline: 2px solid var(--sel); outline-offset: 2px }
@@ -1288,8 +1288,8 @@
     .opt:has(input:focus-visible) { outline: 2px solid var(--sel); outline-offset: 2px }
 
     /* fields */
-    .f { display: flex; flex-direction: column; gap: 8px } .f > label, .f > .lab { font-weight: 500; font-size: var(--fs) }
-    .f input[type="text"], .f input[type="tel"], .f input[type="email"] { height: 52px; padding: 0 14px; border: 1px solid var(--line); background: var(--field); color: var(--fg); font: 400 var(--fs) var(--f); border-radius: 0 }
+    .f { display: flex; flex-direction: column; gap: 8px; min-width: 0 } .f > label, .f > .lab { font-weight: 500; font-size: var(--fs) }
+    .f input[type="text"], .f input[type="tel"], .f input[type="email"] { height: 52px; padding: 0 14px; border: 1px solid var(--line); background: var(--field); color: var(--fg); font: 400 var(--fs) var(--f); border-radius: 0; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box }
     /* themed dropdown (replaces the browser's native select list) */
     .sel { position: relative } .sel-native { display: none }
     .sel-btn { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; height: 52px; padding: 0 14px; border: 1px solid var(--line); background: var(--field); color: var(--fg); font: 400 var(--fs) var(--f); text-align: left; cursor: pointer; border-radius: 0; transition: border-color .2s, background .2s }
@@ -1315,7 +1315,7 @@
     .f [aria-invalid="true"] { border-color: var(--err) } .f.grp.bad .opt { border-color: rgb(255 138 122/.55) }
     .err { color: var(--err); font-size: var(--fs) } .err:empty { display: none } .err:not(:empty) { animation: estFade .28s ease both }
     @keyframes estFade { from { opacity: 0; transform: translateY(-4px) } }
-    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px }
+    .row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px }
     .fine { font-size: var(--fs); color: var(--mut) }
     .hp { position: absolute !important; left: -10000px; top: auto; width: 1px; height: 1px; overflow: hidden }   /* honeypot: off-screen, not display:none (some bots skip hidden fields) */
     .chk { display: flex; gap: 12px; align-items: center; padding: 14px 16px; background: var(--card); border: 1px solid var(--line); cursor: pointer; font-size: var(--fs); transition: background .2s, border-color .2s, transform .15s }
@@ -1354,7 +1354,7 @@
     .est-steps { list-style: none; counter-reset: s; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; font-size: var(--fs) }
     .est-steps li { counter-increment: s; display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: start }
     .est-steps li::before { content: counter(s); display: grid; place-items: center; width: 28px; height: 28px; background: var(--card-h); font-weight: 500 }
-    .est-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px }
+    .est-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; width: 100%; justify-content: flex-end }
     .est-call { color: var(--fg); font-weight: 500; font-size: var(--fs); text-decoration: none; border-bottom: 1px solid var(--line); padding-bottom: 2px }
     .est-call:hover { border-color: var(--fg) }
 

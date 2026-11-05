@@ -302,6 +302,21 @@ const logOffset = fs.statSync(LOG).size;
     `${res.status} ${JSON.stringify(body)}`);
 }
 
+/* ---------- 16-18. modal static checks (index.html text only) ---------- */
+{
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  // M1: dialog caps at 680px
+  const m1 = html.includes('width: min(680px, 100%)') && !html.includes('width: min(600px, 100%)');
+  line(m1, 'M1', 'modal dialog width min(680px,100%)', `found=${m1}`);
+  // M2: grid/input overflow fix
+  const m2 = html.includes('grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)')
+    && html.includes('min-width: 0') && html.includes('max-width: 100%');
+  line(m2, 'M2', 'row2 grid + inputs cannot overflow', `found=${m2}`);
+  // M3: success actions right-aligned
+  const m3 = /\.est-actions\s*\{[^}]*justify-content:\s*flex-end[^}]*\}/.test(html);
+  line(m3, 'M3', 'success Close/Call row right-aligned', `found=${m3}`);
+}
+
 /* ---------- cleanup ---------- */
 {
   await svc.from('leads').delete().like('idempotency_key', `${RUN}-%`);
