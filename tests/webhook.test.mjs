@@ -403,6 +403,43 @@ try {
       `second=${secondKey} third=${thirdKey}`);
   }
 
+  /* Item 2 (this bundle): a thrown DB error answers once with
+     "Something went wrong. Try again.", no edit, no email, still 200.
+     How the throw is injected: wrap global fetch and return a 500
+     PostgREST error for the targeted query only (v_client_leads for
+     getClientLead; review_requested on lead_events for hasReviewSent),
+     delegating everything else to the real fetch. */
+  {
+    const withDbFailure = async (match, fn) => {
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = async (url, opts) => {
+        if (match(String(url))) {
+          return new Response(JSON.stringify({ code: 'XX000', message: 'forced failure', details: '', hint: '' }),
+            { status: 500, headers: { 'Content-Type': 'application/json' } });
+        }
+        return realFetch(url, opts);
+      };
+      try { return await fn(); } finally { globalThis.fetch = realFetch; }
+    };
+    const checkOnce = async (label, data, match) => {
+      await resetResend();
+      await reset();
+      let res;
+      await withDbFailure(match, async () => { res = await good(cb(chatB, data)); });
+      const s = await sent();
+      const answers = s.filter((x) => x.path.includes('/answerCallbackQuery'));
+      const edits = s.filter((x) => x.path.includes('/editMessageText'));
+      const emails = (await resendCalls()).length;
+      const ok = res.code === 200 && answers.length === 1
+        && answers[0].body && answers[0].body.text === 'Something went wrong. Try again.'
+        && edits.length === 0 && emails === 0;
+      line(ok, label, `throw -> one "Something went wrong. Try again." answer, no edit/email, 200`,
+        `code=${res.code} answers=${answers.length} edits=${edits.length} emails=${emails}`);
+    };
+    await checkOnce('C25', 'c:' + seqLead, (u) => u.includes('v_client_leads'));
+    await checkOnce('C26', 'r:' + seqLead, (u) => u.includes('review_requested'));
+  }
+
   /* Contacted tap on a done lead changes nothing, still answers */
   const doneBefore = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
   const eventsBefore = (await svc.from('lead_events').select('kind').eq('lead_id', seqLead)).data.length;

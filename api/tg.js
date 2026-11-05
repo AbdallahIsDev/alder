@@ -74,9 +74,15 @@ async function handleCallback(cb, binding) {
   const data = String(cb.data || '');
   const chatId = cb.message && cb.message.chat && cb.message.chat.id;
   const messageId = cb.message && cb.message.message_id;
-  const answer = (text) => answerCallbackQuery(id, text).catch(() => {});
+  let answered = false;
+  const answer = (text) => {
+    if (answered) return Promise.resolve();
+    answered = true;
+    return answerCallbackQuery(id, text).catch(() => {});
+  };
 
   if (!binding) { await answer(GENERIC_NOT_FOUND); return; }
+  try {
   if (!/^[cdynr]:[0-9a-f-]{36}$/.test(data)) { await answer(GENERIC_NOT_FOUND); return; }
   const kind = data[0];
   const leadId = data.slice(2);
@@ -188,6 +194,13 @@ async function handleCallback(cb, binding) {
       await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
     }
     return;
+  }
+  } catch (e) {
+    // A stuck spinner is worse than a generic error: whatever threw (lead
+    // read, business read, sent-check, retry read, transition, email send),
+    // log the code only and answer once.
+    console.error('tg_callback_failed', (e && e.code) || 'no_code');
+    await answer('Something went wrong. Try again.');
   }
 }
 
