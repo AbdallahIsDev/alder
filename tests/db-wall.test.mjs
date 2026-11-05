@@ -171,15 +171,33 @@ for (const [label, over] of bad) {
   line(ok, '7', 'v_client_leads has no money columns'.padEnd(34), error ? error.code || error.message : `${cols.length} cols: ${cols.join(',')}`);
 }
 
+/* ---------- 9. bind_codes wall + lifecycle ---------- */
+const BIND_CODE = ('DBTEST' + RUN).replace(/[^A-Z0-9]/g, '').toUpperCase().slice(0, 12).padEnd(12, '7');
+{
+  const { error } = await anon.from('bind_codes').insert({ code: BIND_CODE, business_id: BIZ_ID, expires_at: new Date(Date.now() + 3600 * 1000).toISOString() });
+  line(!!error, '9', 'anon INSERT bind_codes rejected'.padEnd(34), error ? error.code || error.message : 'INSERT SUCCEEDED');
+}
+{
+  const expires = new Date(Date.now() + 3600 * 1000).toISOString();
+  const ins = await svc.from('bind_codes').insert({ code: BIND_CODE, business_id: BIZ_ID, expires_at: expires });
+  const sel = ins.error ? { data: null } : await svc.from('bind_codes').select('code, business_id').eq('code', BIND_CODE).maybeSingle();
+  const del = await svc.from('bind_codes').delete().eq('code', BIND_CODE);
+  const gone = await svc.from('bind_codes').select('code').eq('code', BIND_CODE);
+  const ok = !ins.error && sel.data && sel.data.business_id === BIZ_ID && !del.error && (gone.data || []).length === 0;
+  line(ok, '9', 'service_role bind_code create/read/delete'.padEnd(34), ok ? 'lifecycle ok' : `ins=${ins.error ? ins.error.code : 'ok'} del=${del.error ? del.error.code : 'ok'}`);
+}
+
 /* ---------- 8. cleanup ---------- */
 {
   await svc.from('leads').delete().like('idempotency_key', `${TAG}-%`);
   await svc.from('rate_limits').delete().eq('key', 'test');
+  await svc.from('bind_codes').delete().eq('code', BIND_CODE);
   const { data: left, error } = await svc.from('leads').select('id').like('idempotency_key', `${TAG}-%`);
   const { data: rl } = await svc.from('rate_limits').select('key').eq('key', 'test');
   const { data: ev } = leadId ? await svc.from('lead_events').select('id').eq('lead_id', leadId) : { data: [] };
-  const ok = !error && (left || []).length === 0 && (rl || []).length === 0 && (ev || []).length === 0;
-  line(ok, '8', 'test rows cleaned up'.padEnd(34), `leads=${(left || []).length} rate_limits=${(rl || []).length} events=${(ev || []).length}`);
+  const { data: bc } = await svc.from('bind_codes').select('code').eq('code', BIND_CODE);
+  const ok = !error && (left || []).length === 0 && (rl || []).length === 0 && (ev || []).length === 0 && (bc || []).length === 0;
+  line(ok, '8', 'test rows cleaned up'.padEnd(34), `leads=${(left || []).length} rate_limits=${(rl || []).length} events=${(ev || []).length} bind=${(bc || []).length}`);
 }
 
 console.log('');
