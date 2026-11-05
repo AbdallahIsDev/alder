@@ -2581,7 +2581,7 @@
           <div class="est-head" data-page-node-id="4Q4U141jvUywAjhfKeVOaF"><h3 data-page-node-id="eosuZSVyEpqsGfIkYeJT1S">Where should we send your estimate?</h3></div>
           <div class="f" data-f="name" data-page-node-id="Gn4ErDIjJSOP6w2YlYkb8y"><label for="e-name" data-page-node-id="H3eVR3yTjKClXslTjF2NPU">Your name</label><input id="e-name" name="name" type="text" autocomplete="name" enterkeyhint="next" maxlength="80" data-page-node-id="ELXVmZKUs9uljJuMtgXDzU"><p class="err" role="alert" data-page-node-id="UdCEaxWcBUjQXjTsAvCbGH"></p></div>
           <div class="row2" data-page-node-id="A7XuJNFptI6EFCgAXevfjo">
-            <div class="f" data-f="phone" data-page-node-id="NtWgZLB4FosSGjd7YJ4Jk9"><label for="e-phone" data-page-node-id="JSG77Qb247YiSpVlXMaJLX">Phone</label><input id="e-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" enterkeyhint="next" maxlength="32" data-page-node-id="CWg0Pqsjqi71zUbxgnrNK4"><p class="err" role="alert" data-page-node-id="eA9LBPWnJBheDe07dfkn4x"></p></div>
+            <div class="f" data-f="phone" data-page-node-id="NtWgZLB4FosSGjd7YJ4Jk9"><label for="e-phone" data-page-node-id="JSG77Qb247YiSpVlXMaJLX">Phone</label><input id="e-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" enterkeyhint="next" maxlength="20" data-page-node-id="CWg0Pqsjqi71zUbxgnrNK4"><p class="err" role="alert" data-page-node-id="eA9LBPWnJBheDe07dfkn4x"></p></div>
             <div class="f" data-f="email" data-page-node-id="6AmpmIrMm9TiMQk0n4sBDK"><label for="e-mail" data-page-node-id="051o6UMyk4OXNMuUsxf2GV">Email (optional)</label><input id="e-mail" name="email" type="email" inputmode="email" autocomplete="email" enterkeyhint="done" maxlength="254" data-page-node-id="ESnq4TUvsqhCx3oEnm1gTU"><p class="err" role="alert" data-page-node-id="wkSVFFGqQBZ9DdD8uhjcdR"></p></div>
           </div>
           <div class="f" data-page-node-id="zSSixugw6ixwuOPfzKG8it"><label for="e-notes" data-page-node-id="tShePoY9XeOGZkulbhPsub">Anything we should know? (optional)</label><textarea id="e-notes" name="notes" maxlength="2000"></textarea></div>
@@ -3454,13 +3454,13 @@ var BIZ = {
   var reduced = function () { return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches; };
   var canAnimate = function () { return !reduced() && typeof form.animate === 'function' && root.classList.contains('open'); };
   /* phone numbers: any country, with or without a country code or a leading + (also 00 prefixes, spaces, dots, dashes, brackets,
-     Arabic-Indic and Persian digits, and a trailing extension). The only rule is 7 to 15 digits (the international maximum). */
+     Arabic-Indic and Persian digits, and a trailing extension). The only rule is 8 to 15 digits (the international maximum). */
   var AR = '٠١٢٣٤٥٦٧٨٩', FA = '۰۱۲۳۴۵۶۷۸۹';
   var ascii = function (s) { return s.replace(/[٠-٩۰-۹]/g, function (c) { var i = AR.indexOf(c); return i > -1 ? i : FA.indexOf(c); }); };
   function phoneOk(raw) {
     var v = ascii(raw).trim().replace(/\s*(?:ext\.?|extension|x|#)\s*\d{1,6}$/i, '');
     if (!v || !/^\+?[\d\s().\-\/\u2010-\u2015]+$/.test(v)) return false;
-    var n = v.replace(/\D/g, '').length; return n >= 7 && n <= 15;
+    var n = v.replace(/\D/g, '').length; return n >= 8 && n <= 15;
   }
 
   /* ---------- validation ---------- */
@@ -3548,9 +3548,22 @@ var BIZ = {
   }
   form.addEventListener('input', function (e) {
     if (e.target === E.zip) E.zip.value = E.zip.value.replace(/\D/g, '');       /* ZIP accepts digits only */
-    if (e.target === E.phone) E.phone.value = ascii(E.phone.value).replace(/[^+()\s.\-/\d]/g, '');   /* phone keeps only number punctuation */
+    if (e.target === E.phone) E.phone.value = sanitizePhone(E.phone.value);
     var f = e.target.closest('[data-f]'); if (f && f.querySelector('.err').textContent) reflow(function () { check(f.dataset.f); }, 260);
   });
+  E.phone.addEventListener('paste', function () { setTimeout(function () { E.phone.value = sanitizePhone(E.phone.value); }, 0); });
+  function sanitizePhone(raw) {
+    var v = ascii(raw).replace(/[^+()\s.\-\d]/g, '');
+    var plus = v.indexOf('+') === 0;
+    var rest = v.replace(/\+/g, '');
+    var digits = 0, out = '';
+    for (var i = 0; i < rest.length; i++) {
+      var ch = rest[i];
+      if (ch >= '0' && ch <= '9') { if (digits >= 15) break; digits++; }
+      out += ch;
+    }
+    return (plus ? '+' : '') + out;
+  }
   E.phone.addEventListener('blur', function () { E.phone.value = ascii(E.phone.value).trim().replace(/\s+/g, ' '); });   /* tidy only: never reformat a number */
   function shake(el) { if (canAnimate() && el.animate) el.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(-3px)' }, { transform: 'none' }], { duration: 320, easing: 'ease-out' }); }
 

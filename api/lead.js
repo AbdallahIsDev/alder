@@ -134,24 +134,11 @@ export default async function handler(req, res) {
   }
 
   // Allow-lists and length caps (same limits as the form's maxlength).
+  // Phone is validated AFTER the business lookup so the business region can
+  // be used (business.country when present, else 'US'. The businesses table
+  // has no country column today — see lib/db.js — so 'US' applies).
   const service = str(b.service), home = str(b.home), timing = str(b.timing), age = str(b.age);
   const zip = str(b.zip), phone = clean(str(b.phone)), name = clean(str(b.name)), email = clean(str(b.email)), notes = clean(str(b.notes));
-  // Phone: validated and normalised to E.164 (US default). Anything that does
-  // not parse as a valid number is a 400; the stored value is always E.164.
-  let phoneE164 = null;
-  let phoneBad = false;
-  try {
-    if (!phone || !isValidPhoneNumber(phone, 'US')) phoneBad = true;
-    else phoneE164 = parsePhoneNumber(phone, 'US').number;
-  } catch { phoneBad = true; }
-  const bad =
-    !SERVICES.includes(service) || !HOMES.includes(home) || !TIMINGS.includes(timing) || !AGES.includes(age) ||
-    !/^\d{5}$/.test(zip) ||
-    phoneBad ||
-    name.length < 2 || name.length > 80 ||
-    email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) ||
-    notes.length > 2000;
-  if (bad) return isForm ? badForm(null) : res.status(400).json({ ok: false });
 
   const slug = str(b.slug);
   if (!/^[a-z0-9-]{2,60}$/.test(slug)) return isForm ? badForm(null) : res.status(400).json({ ok: false });
@@ -167,6 +154,28 @@ export default async function handler(req, res) {
     return isForm ? htmlReply(500, 'Try again', 'Please try again shortly.', null) : res.status(500).json({ ok: false });
   }
   if (!business) return isForm ? badForm(null) : res.status(400).json({ ok: false });     // unknown, paused or churned
+
+  // Phone: validated and normalised to E.164 (business country, else US).
+  // Anything that does not parse as a valid number is a 400; stored value
+  // is always E.164; the number is never logged.
+  let phoneE164 = null;
+  let phoneBad = false;
+  const region = (business && typeof business.country === 'string' && /^[A-Za-z]{2}$/.test(business.country)) ? business.country.toUpperCase() : 'US';
+  try {
+    if (!phone || !isValidPhoneNumber(phone, region)) phoneBad = true;
+    else phoneE164 = parsePhoneNumber(phone, region).number;
+  } catch { phoneBad = true; }
+  const bad =
+    !SERVICES.includes(service) || !HOMES.includes(home) || !TIMINGS.includes(timing) || !AGES.includes(age) ||
+    !/^\d{5}$/.test(zip) ||
+    phoneBad ||
+    name.length < 2 || name.length > 80 ||
+    email.length > 254 || (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) ||
+    notes.length > 2000;
+  if (bad) {
+    if (isForm && phoneBad) return htmlReply(400, 'Check your details', 'Enter a valid phone number.', business.name);
+    return isForm ? badForm(null) : res.status(400).json({ ok: false });
+  }
 
   // Rate limit 2: per business, so one site cannot flood its own roofer. Also fails open.
   try {

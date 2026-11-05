@@ -344,6 +344,61 @@ const logOffset = fs.statSync(LOG).size;
   line(s3.status === 400 && (await leadFor(k3)).length === 0,
     'P3', 'invalid phone -> 400, nothing written', s3.status);
 }
+{
+  // P4: +20 followed by 9 digits (real manual-test value shape) -> 400, no row
+  await resetLimits();
+  const k4 = `${RUN}-p4`;
+  const s4 = await post(payload({ idempotencyKey: k4, phone: '+20312345678' }));
+  line(s4.status === 400 && (await leadFor(k4)).length === 0,
+    'P4', '+20+9 digits -> 400, nothing written', s4.status);
+}
+{
+  // P5: 16 digits -> 400, no row
+  await resetLimits();
+  const k5 = `${RUN}-p5`;
+  const s5 = await post(payload({ idempotencyKey: k5, phone: '1234567890123456' }));
+  line(s5.status === 400 && (await leadFor(k5)).length === 0,
+    'P5', '16 digits -> 400, nothing written', s5.status);
+}
+{
+  // P6: letters -> 400, no row
+  await resetLimits();
+  const k6 = `${RUN}-p6`;
+  const s6 = await post(payload({ idempotencyKey: k6, phone: 'abcdefgh' }));
+  line(s6.status === 400 && (await leadFor(k6)).length === 0,
+    'P6', 'letters -> 400, nothing written', s6.status);
+}
+{
+  // P7: one valid US number in three formats -> identical stored E.164
+  const forms = ['(212) 555-0100', '212-555-0100', '+1 212 555 0100'];
+  const stored = [];
+  let statusesOk = true;
+  for (let i = 0; i < forms.length; i++) {
+    await resetLimits();
+    const kk = `${RUN}-p7-${i}`;
+    const ss = await post(payload({ idempotencyKey: kk, phone: forms[i] }));
+    if (ss.status !== 200) statusesOk = false;
+    const rr = await leadFor(kk);
+    stored.push(rr.length ? rr[0].phone : 'missing');
+  }
+  line(statusesOk && stored.every((v) => v === '+12125550100'),
+    'P7', 'US three formats -> identical E.164', stored.join(','));
+}
+{
+  // P8: valid +20 mobile -> stored
+  await resetLimits();
+  const k8 = `${RUN}-p8`;
+  const s8 = await post(payload({ idempotencyKey: k8, phone: '+201005408111' }));
+  const r8 = await leadFor(k8);
+  line(s8.status === 200 && r8.length === 1 && r8[0].phone === '+201005408111',
+    'P8', 'valid +20 mobile -> stored E.164', `${s8.status} stored=${r8[0] && r8[0].phone}`);
+}
+{
+  // P9: built HTML phone input has maxlength="20"
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const ok = /<input[^>]*id="e-phone"[^>]*maxlength="20"/.test(html);
+  line(ok, 'P9', 'phone input maxlength 20 (static)', `found=${ok}`);
+}
 
 /* ---------- cleanup ---------- */
 {
