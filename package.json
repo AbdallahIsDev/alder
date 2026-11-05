@@ -11,7 +11,7 @@
     "images": "node scripts/optimize-images.mjs",
     "images:force": "node scripts/optimize-images.mjs --force",
     "db:apply": "node scripts/apply-migrations.mjs",
-    "bind": "node scripts/make-bind-code.mjs"
+    "bind": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/make-bind-code.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

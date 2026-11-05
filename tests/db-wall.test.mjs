@@ -200,6 +200,35 @@ const BIND_CODE = ('DBTEST' + RUN).replace(/[^A-Z0-9]/g, '').toUpperCase().slice
   line(ok, '8', 'test rows cleaned up'.padEnd(34), `leads=${(left || []).length} rate_limits=${(rl || []).length} events=${(ev || []).length} bind=${(bc || []).length}`);
 }
 
+/* ---------- E: bind env loading (temp files, no DB) ---------- */
+{
+  const { applyDotEnvEntries, loadDotEnvFiles, missingEnvNames } = await import('../scripts/make-bind-code.mjs');
+  // E1: only .env.local has the vars
+  const e1env = {};
+  applyDotEnvEntries(e1env, [{ file: '.env.local', text: 'ONLY_LOCAL=local_val\nSHARED=local_val\n' }, { file: '.env', text: 'ONLY_BASE=base_val\nSHARED=base_val\n' }]);
+  const e1ok = e1env.ONLY_LOCAL === 'local_val' && e1env.ONLY_BASE === 'base_val';
+  line(e1ok, 'E1', 'env loader: only .env.local supplies its vars', `local=${e1env.ONLY_LOCAL} base=${e1env.ONLY_BASE}`);
+  // E2: both present — .env.local wins over .env; non-empty process env wins over both
+  const e2env = { ALREADY: 'proc_val' };
+  applyDotEnvEntries(e2env, [{ file: '.env.local', text: 'SHARED=local_val\nALREADY=local_val\n' }, { file: '.env', text: 'SHARED=base_val\nALREADY=base_val\n' }]);
+  const e2ok = e2env.SHARED === 'local_val' && e2env.ALREADY === 'proc_val';
+  line(e2ok, 'E2', 'env loader: .env.local beats .env, process beats both', `shared=${e2env.SHARED} already=${e2env.ALREADY}`);
+  // E3: neither present — nothing filled, missing names listed
+  const e3env = {};
+  applyDotEnvEntries(e3env, [{ file: '.env.local', text: '' }, { file: '.env', text: '# empty\n' }]);
+  const e3ok = Object.keys(e3env).length === 0 && missingEnvNames(e3env, ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']).join(',') === 'SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY';
+  // Real temp files: same function through the filesystem (inside the repo).
+  const tmpRoot = path.join(ROOT, '_debug', 'envtest-' + RUN);
+  fs.mkdirSync(tmpRoot, { recursive: true });
+  fs.writeFileSync(path.join(tmpRoot, '.env.local'), 'TMP_LOCAL=file_local\nTMP_SHARED=file_local\n');
+  fs.writeFileSync(path.join(tmpRoot, '.env'), 'TMP_SHARED=file_base\n');
+  const tmpEnv = {};
+  loadDotEnvFiles({ env: tmpEnv, root: tmpRoot });
+  const tmpOk = tmpEnv.TMP_LOCAL === 'file_local' && tmpEnv.TMP_SHARED === 'file_local';
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+  line(e3ok && tmpOk, 'E3', 'env loader: neither present fills nothing; temp files match', `keys=${Object.keys(e3env).length} tmpShared=${tmpEnv.TMP_SHARED}`);
+}
+
 console.log('');
 console.log(`${results.length - failed}/${results.length} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);

@@ -34,7 +34,9 @@ owner email and review link above. Run `npm run build` after any page change.
 ## Mint a bind code
 
 From the repo root, with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` set
-in `.env` (or the environment):
+in `.env.local` (preferred) — otherwise in `.env` or the environment —
+a non-empty value already in the environment wins, then `.env.local`,
+then `.env`:
 
 ```bash
 npm run bind -- <slug>
@@ -43,7 +45,8 @@ npm run bind -- <slug>
 The script prints exactly four lines to stdout — the business name, a single-use
 12-character code, its expiry (24 hours), and a `https://t.me/<bot>?start=<code>`
 deep link. Every failure is one `bind: …` line to stderr with exit 1 and no
-code is minted.
+code is minted. A missing variable names the missing variable(s) only; an
+unknown slug lists the valid slugs (slug and status only).
 
 Send the roofer the deep link (or the code itself). They open the link and send
 `/start <code>` to the bot, or send the bare code. The webhook claims the code
