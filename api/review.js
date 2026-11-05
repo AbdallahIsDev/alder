@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { getBusinessById, addEvent, hitRateLimit } from '../lib/db.js';
 import { getLeadByReviewToken, getFeedback, upsertFeedback, markGoogleClicked } from '../lib/review-db.js';
-import { reviewPage, reviewLandingPage } from '../lib/content.js';
+import { reviewPage, googleUrlAllowed } from '../lib/content.js';
 import { sendLowRatingAlert } from '../lib/notify.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -69,23 +69,23 @@ export default async function handler(req, res) {
   try { business = await getBusinessById(lead.business_id); } catch { business = null; }
   if (!business) return notFound(res);
   const googleUrl = usableGoogleUrl(business.google_review_url);
-
-  /* ---------- GET landing page (?s=N or ?go=1): NEVER writes --------------
-     The legacy /r/:token/go links from emails already sent arrive here too
-     (the vercel.json rewrite maps them to the same query). They now land on
-     this page and redirect client-side after ~150 ms; the click mark is
-     recorded by the page's POST, not by the GET — so mail scanners that open
-     the link without running JS no longer register fake clicks. */
-  if (req.query && (req.query.s !== undefined || req.query.go === '1')) {
-    const n = Number(req.query.s);
-    const stars = Number.isInteger(n) && n >= 1 && n <= 5 ? n : 0;   // anything else behaves as ?go=1
-    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-    const page = reviewLandingPage({ business, token, googleUrl, stars });
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    return res.status(200).send(page);
+  if (!googleUrlAllowed(googleUrl)) {
+    console.error('review_google_url_invalid');
   }
 
-  /* ---------- POST rating (and go=1 click mark from the landing page) ----------
+  /* ---------- GET rating page: one interactive page for every entry point.
+     Legacy ?s=N, ?go=1 and /r/<token>/go (mapped to go=1 by the rewrite) render
+     this same page. A GET never writes; only the page's POST (below) records. */
+  if (req.method === 'GET') {
+    const n = req.query && req.query.s === undefined ? 0 : Number(req.query.s);
+    const stars = Number.isInteger(n) && n >= 1 && n <= 5 ? n : 0;
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    const page = reviewPage({ business, token, googleUrl, stars });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(200).send(page.html);
+  }
+
+  /* ---------- POST rating (and go=1 click mark from the rating page) ----------
      The landing page's own JS sends go=1 before it redirects. A POST carrying
      go=1 records the click mark; a POST carrying a valid stars writes the rating.
      Either may be absent, and a POST with neither writes nothing. */
@@ -144,15 +144,6 @@ export default async function handler(req, res) {
     return res.status(303).end();
   }
 
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET, POST');
-    return res.status(405).end();
-  }
-
-  /* ---------- GET page (existing one unchanged) ---------- */
-  let rating = null;
-  try { const f = await getFeedback(lead.id); rating = f && f.rating ? f.rating : null; } catch {}
-  const page = reviewPage({ business, token, googleUrl, rating });
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  return res.status(200).send(page.html);
+  res.setHeader('Allow', 'GET, POST');
+  return res.status(405).end();
 }
