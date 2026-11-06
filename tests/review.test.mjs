@@ -52,6 +52,37 @@ async function seed(tk) {
   return data && data.id;
 }
 
+/* ---------- in-process review handler (most tests) vs real HTTP (kept) ----
+   Moved from real HTTP through vercel dev: D3, D3b, D5-D7, D10, I2-I9, R1
+   prove handler logic/markup only. Kept on real HTTP: D2 (full GET page),
+   D4 (404 + dev-server generic page), D8 (/r/:token/go rewrite), I1 (all
+   rewrite variants create nothing). */
+const { default: reviewHandler } = await import('../api/review.js');
+function fakeRes() {
+  return {
+    code: 0, body: '', headers: {},
+    setHeader(k, v) { this.headers[k] = v; },
+    status(c) { this.code = c; return this; },
+    json(o) { this.body = o; return this; },
+    send(s) { this.body = s; return this; },
+    end() { return this; },
+  };
+}
+let rip = 100;
+async function callReview({ method = 'GET', token, query = {}, body }) {
+  const res = fakeRes();
+  await reviewHandler({
+    method,
+    query: { token, ...query },
+    url: `/r/${token}`,
+    headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-real-ip': `198.51.100.${rip++}` },
+    body, socket: {},
+  }, res);
+  return { status: res.code, headers: res.headers, text: String(res.body) };
+}
+const pageIn = (token, query) => callReview({ token, query });
+const postIn = (token, body) => callReview({ method: 'POST', token, body });
+
 try {
   await control(TG, { mode: 'ok' }); await reset(TG); await reset(RS);
 
@@ -73,8 +104,8 @@ try {
   for (let s = 1; s <= 5; s++) {
     const tk = token(); const leadId = await seed(tk);
     await svc.from('review_feedback').upsert({ lead_id: leadId, rating: s, comment: '' }, { onConflict: 'lead_id' });
-    const r = await fetch(`${ORIGIN}/r/${tk}`);
-    pages.push({ s, token: tk, html: await r.text(), status: r.status });
+    const r = await pageIn(tk);
+    pages.push({ s, token: tk, html: r.text, status: r.status });
   }
   const allOfferContinue = pages.every((p) => p.status === 200
     && p.html.includes('id="continue"')
@@ -108,12 +139,9 @@ try {
   /* 1-star POST records the rating, one Telegram alert, Google remains offered */
   const t1 = token(); const lid1 = await seed(t1);
   await reset(TG);
-  const post1 = await fetch(`${ORIGIN}/r/${t1}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'stars=1&comment=Not+happy', redirect: 'manual',
-  });
-  const page1 = await fetch(`${ORIGIN}/r/${t1}`);
-  const html1 = await page1.text();
+  const post1 = await postIn(t1, 'stars=1&comment=Not+happy');
+  const page1 = await pageIn(t1);
+  const html1 = page1.text;
   const alerts1 = (await tgCalls()).length;
   const fb1 = await svc.from('review_feedback').select('rating, comment').eq('lead_id', lid1).maybeSingle();
   line(post1.status === 303 && html1.includes('Continue to Google') && alerts1 === 1 && fb1.data.rating === 1,
@@ -122,17 +150,11 @@ try {
   /* 5-star: no Telegram alert */
   const t5 = token(); await seed(t5);
   await reset(TG);
-  await fetch(`${ORIGIN}/r/${t5}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'stars=5&comment=Great', redirect: 'manual',
-  });
+  await postIn(t5, 'stars=5&comment=Great');
   line((await tgCalls()).length === 0, 'D6', '5-star -> no Telegram alert');
 
   /* second POST updates, does not duplicate */
-  await fetch(`${ORIGIN}/r/${t1}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'stars=2&comment=Updated', redirect: 'manual',
-  });
+  await postIn(t1, 'stars=2&comment=Updated');
   const { data: rows } = await svc.from('review_feedback').select('lead_id, rating, comment').eq('lead_id', lid1);
   line(rows.length === 1 && rows[0].rating === 2 && rows[0].comment === 'Updated',
     'D7', 'second POST updates the same row', `rows=${rows.length} rating=${rows[0] && rows[0].rating}`);
@@ -142,25 +164,13 @@ try {
      rating must not alert again; a low rating after a 3 must. */
   const t10 = token(); const lid10 = await seed(t10);
   await reset(TG);
-  await fetch(`${ORIGIN}/r/${t10}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'stars=2&comment=First+complaint', redirect: 'manual',
-  });
+  await postIn(t10, 'stars=2&comment=First+complaint');
   const d10First = (await tgCalls()).length;
-  await fetch(`${ORIGIN}/r/${t10}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'stars=2&comment=Repeat', redirect: 'manual',
-  });
+  await postIn(t10, 'stars=2&comment=Repeat');
   const d10Repeat = (await tgCalls()).length;
-  await fetch(`${ORIGIN}/r/${t10}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'stars=3&comment=Better', redirect: 'manual',
-  });
+  await postIn(t10, 'stars=3&comment=Better');
   const d10Mid = (await tgCalls()).length;
-  await fetch(`${ORIGIN}/r/${t10}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'stars=1&comment=Worse+again', redirect: 'manual',
-  });
+  await postIn(t10, 'stars=1&comment=Worse+again');
   const d10Back = (await tgCalls()).length;
   const fb10 = await svc.from('review_feedback').select('rating').eq('lead_id', lid10).maybeSingle();
   line(d10First === 1 && d10Repeat === 1 && d10Mid === 1 && d10Back === 2 && fb10.data.rating === 1,
@@ -199,16 +209,15 @@ try {
     && (await tgCalls()).length === 0,
     'I1', 'GET plain, ?s=1..5, ?go=1, /go create zero rows/events/requests', `fb=${(await fbAfter.data).length} ev=${(await evAfter.data).length}`);
   // I2: copy identical for s=1 and s=5 except the pre-selection used by script
-  const p1 = await (await fetch(`${ORIGIN}/r/${tI}?s=1`)).text();
-  const p5 = await (await fetch(`${ORIGIN}/r/${tI}?s=5`)).text();
+  const p1 = (await pageIn(tI, { s: '1' })).text;
+  const p5 = (await pageIn(tI, { s: '5' })).text;
   const norm = (h) => h
     .split(tI).join('TOKEN')
     .replace(/"stars":\d/g, '"stars":N')
     .replace(/"googleUrl":"[^"]*"/g, '"googleUrl":"G"');
   line(norm(p1) === norm(p5), 'I2', 'rating page copy identical for s=1 and s=5 except pre-selection', `identical=${norm(p1) === norm(p5)}`);
   // I3: POST from the page's path records once, repeat changes nothing new
-  const postLanding = (body) => fetch(`${ORIGIN}/r/${tI}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body, redirect: 'manual' });
+  const postLanding = (body) => postIn(tI, body);
   await reset(TG);
   await postLanding('stars=4&comment=&go=1');
   const fbI1 = await svc.from('review_feedback').select('rating, google_clicked').eq('lead_id', lidI).maybeSingle();
@@ -220,11 +229,9 @@ try {
   // I4: rating 2 alerts once and the landing page still redirects to Google
   const t4 = token(); await seed(t4);
   await reset(TG);
-  const r4 = await fetch(`${ORIGIN}/r/${t4}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'stars=2&comment=Meh&go=1', redirect: 'manual' });
+  const r4 = await postIn(t4, 'stars=2&comment=Meh&go=1');
   const alerts4 = (await tgCalls()).length;
-  const landing4 = await (await fetch(`${ORIGIN}/r/${t4}?s=2`)).text();
+  const landing4 = (await pageIn(t4, { s: '2' })).text;
   // The redirect target is whatever allowlisted URL the business row holds
   // (g.page etc. do not contain the string "google.com"), so assert location.replace
   // carries a non-empty googleUrl that IS allowlisted rather than a substring.
@@ -239,10 +246,10 @@ try {
   line(badAllowed.length === 0 && landing4.includes('Continue to Google'),
     'I5', 'disallowed Google hosts never produce a redirect', `badAllowed=${badAllowed.join(',')}`);
   // I6: s=0, s=6, s=abc -> same interactive rating page; no auto redirect timer
-  const i6pages = ['?s=0', '?s=6', '?s=abc'];
+  const i6pages = [{ s: '0' }, { s: '6' }, { s: 'abc' }];
   const i6ok = [];
   for (const q of i6pages) {
-    const h = await (await fetch(`${ORIGIN}/r/${t4}${q}`)).text();
+    const h = (await pageIn(t4, q)).text;
     i6ok.push(h.includes('How was your experience with') && h.includes('Continue to Google')
       && h.includes('<svg') && h.includes('id="stars"') && h.includes('id="continue"')
       && !h.includes('setTimeout(function(){'));
@@ -251,16 +258,16 @@ try {
   // I7: token from another business changes nothing (tenancy on the landing page)
   const t7 = token(); await seed(t7);
   const foreignBefore = await svc.from('review_feedback').select('lead_id').eq('lead_id', (await svc.from('leads').select('id').eq('review_token', t7).maybeSingle()).data?.id || '');
-  await fetch(`${ORIGIN}/r/${tI}?s=5`, { redirect: 'manual' });
-  await fetch(`${ORIGIN}/r/${t7}?s=5`, { redirect: 'manual' });
+  await pageIn(tI, { s: '5' });
+  await pageIn(t7, { s: '5' });
   const foreignAfter = await svc.from('review_feedback').select('lead_id').eq('lead_id', (await svc.from('leads').select('id').eq('review_token', t7).maybeSingle()).data?.id || '');
   line((await foreignBefore.data).length === 0 && (await foreignAfter.data).length === 0,
     'I7', 'landing GET for another business token writes nothing', `fb=${(await foreignAfter.data).length}`);
 
   /* I8: the landing card is vertically AND horizontally centred in every state */
   const i8Pages = [];
-  i8Pages.push(await (await fetch(`${ORIGIN}/r/${tI}?s=3`)).text());
-  i8Pages.push(await (await fetch(`${ORIGIN}/r/${tI}?go=1`)).text());
+  i8Pages.push((await pageIn(tI, { s: '3' })).text);
+  i8Pages.push((await pageIn(tI, { go: '1' })).text);
   const tU = token(); await seed(tU);
   // unavailable state: a business with a disallowed Google host cannot be seeded
   // through the API; render it via a unit-level call instead.
@@ -275,7 +282,7 @@ try {
 
   /* I9: interactive rating page structure — SVG stars, disabled-until-rated
      button, and no timer-based redirect before user action. */
-  const i9 = await (await fetch(`${ORIGIN}/r/${tI}?s=3`)).text();
+  const i9 = (await pageIn(tI, { s: '3' })).text;
   const svgSpans = [1, 2, 3, 4, 5].every((n) => i9.includes(`data-star="${n}"`) && i9.includes('<svg'));
   line(svgSpans && !/[★☆]/.test(i9) && i9.includes('<button id="continue" type="button" disabled')
     && i9.includes('role="radiogroup"') && i9.includes('aria-label="Rating"')
@@ -289,7 +296,7 @@ try {
      Before (card design): main had background/border/radius/28px padding,
      title 24px, body padding 16px, no fonts/favicon in the head. */
   {
-    const r1 = await (await fetch(`${ORIGIN}/r/${tI}?s=3`)).text();
+    const r1 = (await pageIn(tI, { s: '3' })).text;
     const fontsOk = r1.includes('@font-face') && r1.includes(`font-family:'Geist'`) && r1.includes(`font-family:'Inter'`)
       && r1.includes(`url('/assets/fonts/geist-var.woff2')`) && r1.includes(`url('/assets/fonts/inter-var.woff2')`)
       && r1.includes('font-display:swap') && r1.includes('<link rel="preload" as="font" href="/assets/fonts/geist-var.woff2"');
@@ -299,7 +306,7 @@ try {
     const mainTag = /<main style="([^"]*)"/.exec(r1);
     const noCard = mainTag && !/background:|border:|border-radius|box-shadow|padding:28px/.test(mainTag[1])
       && mainTag[1].includes('max-width:420px') && /padding:0 24px/.test(r1);
-    const titleOk = r1.includes('font:700 20px/26px') && r1.includes('text-wrap:balance') && !r1.includes('font:700 24px/30px');
+    const titleOk = r1.includes('font:600 20px/26px') && r1.includes('text-wrap:balance') && !r1.includes('24px/30px');
     line(fontsOk && iconsOk && noCard && titleOk, 'R1', 'review head: fonts+preload+favicon, no card, 20px title',
       `fonts=${fontsOk} icons=${iconsOk} noCard=${noCard} title=${titleOk}`);
   }

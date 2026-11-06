@@ -69,6 +69,7 @@ function payload(over) {
 
 let ipSeq = 10;
 async function post(body, opts = {}) {
+  if (!opts.http) return postInProcess(body, opts);
   const res = await fetch(opts.url || API, {
     method: opts.method || 'POST',
     headers: { 'Content-Type': 'application/json', 'x-real-ip': opts.ip || `203.0.113.${ipSeq++}` },
@@ -95,6 +96,39 @@ async function eventsFor(leadId) {
   const { data } = await svc.from('lead_events').select('kind, meta').eq('lead_id', leadId);
   return data || [];
 }
+
+/* ---------- in-process handler (most tests) vs real HTTP (kept tests) ----
+   Moved from real HTTP through vercel dev: tests 1-9, 11, 15, M*, P* prove
+   handler logic only (validation, phone, errors, limits, idempotency,
+   events, notifications against the fake servers). Kept on real HTTP:
+   test 10 (405 method), 12/12b (page estimateDeliver end-to-end), 13/14
+   (dev-server LOG file assertions). 413/415 have no tests in this suite. */
+const { default: leadHandler } = await import('../api/lead.js');
+function fakeRes() {
+  return {
+    code: 0, body: null, headers: {},
+    setHeader(k, v) { this.headers[k] = v; },
+    status(c) { this.code = c; return this; },
+    json(o) { this.body = o; return this; },
+    send(s) { this.body = s; return this; },
+    end() { return this; },
+  };
+}
+async function postInProcess(body, opts) {
+  const res = fakeRes();
+  await leadHandler({
+    method: opts.method || 'POST',
+    headers: { 'content-type': 'application/json', 'x-real-ip': opts.ip || `203.0.113.${ipSeq++}` },
+    body: body === null || body === undefined ? body : { ...body },
+    socket: {},
+  }, res);
+  return { status: res.code, json: res.body && typeof res.body === 'object' ? res.body : null };
+}
+
+/* In-process handler calls read process.env (e.g. IP_HASH_SALT); load it
+   the same way the other in-process suites do. */
+import { loadEnv } from './env.mjs';
+loadEnv();
 
 /* ---------- reachability ---------- */
 try {
@@ -275,7 +309,7 @@ const logOffset = fs.statSync(LOG).size;
   const key = `${RUN}-t14`;
   const count = () => (fs.readFileSync(LOG, 'utf8').slice(logOffset).match(/lead_dropped_honeypot/g) || []).length;
   const before = count();
-  const { status } = await post(payload({ idempotencyKey: key, website: 'http://spam.example' }));
+  const { status } = await post(payload({ idempotencyKey: key, website: 'http://spam.example' }), { http: true });
   let after = before;
   for (let i = 0; i < 24 && after <= before; i++) {
     await new Promise((r) => setTimeout(r, 125));
@@ -290,16 +324,10 @@ const logOffset = fs.statSync(LOG).size;
 {
   await resetLimits();
   const key = `${RUN}-t15`;
-  const res = await fetch(API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-real-ip': `203.0.113.${ipSeq++}` },
-    body: JSON.stringify(payload({ idempotencyKey: key })),
-  });
-  let body = null;
-  try { body = await res.json(); } catch {}
-  const exact = res.status === 200 && body && Object.keys(body).length === 1 && body.ok === true;
+  const { status, json: body } = await post(payload({ idempotencyKey: key }));
+  const exact = status === 200 && body && Object.keys(body).length === 1 && body.ok === true;
   line(exact, '15', 'POST /api/lead body is exactly {ok:true}',
-    `${res.status} ${JSON.stringify(body)}`);
+    `${status} ${JSON.stringify(body)}`);
 }
 
 /* ---------- 16-18. modal static checks (index.html text only) ---------- */
