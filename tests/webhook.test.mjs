@@ -517,7 +517,9 @@ try {
      view otherwise, with no second answer. */
   {
     const src = fs.readFileSync(path.join(ROOT, 'api', 'tg.js'), 'utf8');
-    const yBlock = src.slice(src.indexOf("if (kind === 'y')"), src.indexOf("if (kind === 'r')"));
+    // Anchors are the handler boundaries, not the old inline `if (kind === 'y')`
+    // branches: the y: body now lives in onConfirm, the r: body in onRetry.
+    const yBlock = src.slice(src.indexOf('async function onConfirm'), src.indexOf('async function onRetry'));
     const hasTry = yBlock.includes('} catch (e) {') && yBlock.includes("console.error('tg_callback_failed'");
     const errorView = yBlock.includes("render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed')");
     const noEmailView = yBlock.includes("render('done', { reply_markup: { inline_keyboard: [] } }, 'no_email')");
