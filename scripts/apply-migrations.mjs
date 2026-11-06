@@ -218,10 +218,17 @@ for (const rel of FILES) {
   }
 }
 
-/* ---------- post-checks ---------- */
-if (!failed) {
+/* ---------- post-checks ----------
+   One function per check. The SQL and the printed lines are unchanged from the
+   single block these were cut out of; only the nesting changed, so a failure
+   names the check that produced it and each query is readable on its own. */
+
+async function checkConstraintAfter() {
   await showConstraint('constraint after');
   out('');
+}
+
+async function checkRoleTableGrants() {
   out('--- grants held by anon / authenticated (must be empty) ---');
   try {
     const { rows } = await client.query(`
@@ -239,9 +246,11 @@ if (!failed) {
   } catch (e) {
     fail(`grant check failed: ${e.message}`);
   }
+}
 
-  // Independent sweep: role_table_grants only shows grants where the grantor or grantee
-  // is a currently-enabled role, so it can under-report. has_table_privilege cannot.
+/* role_table_grants only shows grants where the grantor or grantee is a currently
+   enabled role, so it can under-report. has_table_privilege cannot. */
+async function checkPrivilegeSweep() {
   out('');
   out('--- independent sweep: has_table_privilege(anon|authenticated) ---');
   try {
@@ -261,6 +270,14 @@ if (!failed) {
       for (const r of leaks) out(`  ${r.schema}.${r.name}  anon(sel=${r.anon_sel},ins=${r.anon_ins})  auth(sel=${r.auth_sel},ins=${r.auth_ins})`);
       fail('the independent sweep found reachable objects the information_schema query did not.');
     }
+  } catch (e) {
+    fail(`sweep failed: ${e.message}`);
+  }
+}
+
+/* The schema-level half of the same wall: no USAGE on private for either role. */
+async function checkPrivateSchemaUsage() {
+  try {
     const { rows: sch } = await client.query(`
       select has_schema_privilege('anon','private','USAGE') as anon_usage,
              has_schema_privilege('authenticated','private','USAGE') as auth_usage`);
@@ -270,7 +287,9 @@ if (!failed) {
   } catch (e) {
     fail(`sweep failed: ${e.message}`);
   }
+}
 
+async function checkBusinessCount() {
   out('');
   out('--- state ---');
   try {
@@ -281,7 +300,9 @@ if (!failed) {
   } catch (e) {
     fail(`count failed: ${e.message}`);
   }
+}
 
+async function checkTableInventory() {
   try {
     const { rows } = await client.query(`
       select table_schema, table_name, table_type
@@ -297,6 +318,15 @@ if (!failed) {
   } catch (e) {
     fail(`table list failed: ${e.message}`);
   }
+}
+
+if (!failed) {
+  await checkConstraintAfter();
+  await checkRoleTableGrants();
+  await checkPrivilegeSweep();
+  await checkPrivateSchemaUsage();
+  await checkBusinessCount();
+  await checkTableInventory();
 }
 
 await client.end();
