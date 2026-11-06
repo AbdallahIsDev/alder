@@ -33,10 +33,31 @@ Because they are single-colour versions, each works on any background the tokens
 allow: `logo-on-dark` on the dark band, `logo-on-light` on white/light cards.
 
 At email-render time, `lib/brand.js`'s `getBrand()` reads **only**
-`lib/brand.generated.json` — never `index.html`. Asset paths are prefixed with
-`process.env.SITE_URL` (https, no trailing slash). If a future brand has no
-logo, `logo` is `null` in the JSON and emails render the business name as a text
-wordmark in the heading font instead.
+`lib/brand.generated.json` — never `index.html`. Font asset paths are prefixed
+with `process.env.SITE_URL` (https, no trailing slash). If a future brand has
+no logo, `logo` is `null` in the JSON and emails render the business name as a
+text wordmark in the heading font instead.
+
+**Logo delivery in email (CID, no hosted image):** the three emails reference
+the logo as `<img src="cid:brand-logo" width="32" height="32" alt="">` — an
+empty `alt`, because the business name is printed right next to it, with the
+32 px space reserved in both attributes and style. `lib/mail.js` attaches the
+PNG bytes as one `attachments` entry (`filename: 'logo.png'`,
+`content_type: 'image/png'`, `content_id: 'brand-logo'`, base64 content) on
+the single `/emails` send (the batch endpoint does not support attachments).
+The bytes are bundled with the serverless function: `scripts/sync-brand.mjs`
+writes the base64 of the on-dark PNG into `lib/brand.generated.json` as
+`logo.onDarkB64`, and `lib/brand.js` passes it through. The function never
+reads `assets/` at run time. The hosted PNG files in `assets/email/` stay
+untouched and are used only by the preview gallery (which rewrites
+`cid:brand-logo` to a data URI so the logo shows in a browser).
+
+**One padding system:** header, body and footer cells all use `class="px"`
+with 24 px horizontal padding (16 px at max-width 480 via the mobile rule).
+Vertical: header 18 px top and bottom, body 24 px top and bottom, footer
+8 px top and 24 px bottom. No other element inside the card adds horizontal
+padding (the review email's heading, line and button share the body cell's
+left edge; its button keeps its own 15 px 28 px padding).
 
 **To restyle a client:** edit the colours, fonts and logo in `index.html`'s
 `:root` block (and the logo SVG), then run `npm run build`. That regenerates
@@ -153,25 +174,58 @@ How it works:
 ## Telegram alerts
 
 `renderAlert()` in `lib/content.js` renders one shared plain-text format —
-one "Label: value" per line, blank lines between groups, phone kept tappable
-(`+1` form), Yes/No capitalised, and a trailing status block that changes per
-step (`Status: New` / `Status: Contacted` / confirm question / Done with the
-email outcome). `parse_mode` is never set anywhere in the Telegram path.
+one "Label: value" per line, blank lines between groups, phone kept tappable,
+Yes/No capitalised, and a trailing status block that changes per step. The
+status block is one fact per line, every line at most 40 characters for a
+sample first name "John", and the email address never appears there:
+
+- new: `🟡 Status: New`
+- contacted: `🔵 Status: Contacted`
+- confirm: `🔵 Status: Contacted` / `Send a review request to John?` /
+  `They get an email with a rating link.` (no email on file:
+  `No email on file. Can't send a request.`)
+- done, review sent: `✅ Status: Done` / `✉️ Review request sent`
+- done, no email: `✅ Status: Done` / `ℹ️ No email on file, none was sent.`
+- error: `❌ Status: Error` / `⚠️ Review request couldn't be sent`
+
+`parse_mode` is never set anywhere in the Telegram path.
+
+**Phone formatting (`displayPhone`):** a value starting with `+` is shown
+unchanged (never a second `+`); only a value without `+` and with exactly
+10 digits gets `+1` (legacy rows), and 11 digits starting with 1 get `+`.
+`toTelHref()` applies the same rule to `tel:` links.
 
 The button flow (enforced by the conditional UPDATEs in `lib/db.js`, not only
 the UI):
 
 1. Fresh alert: one button **Mark contacted** (`c:`, style `primary`) — no way to email the
     customer from a lead nobody has called yet.
-2. `c:` — alert re-renders `Status: Contacted` from the database (via the
+2. `c:` — alert re-renders `🔵 Status: Contacted` from the database (via the
     roofer-facing view only), one button **Job completed** (`d:`, style `primary`).
-3. `d:` — asks: re-render with the confirm line, two buttons **Yes, send review
+3. `d:` — asks: re-render with the confirm lines, two buttons **Yes, send review
     request** (`y:`, style `success`) and **Cancel** (`n:`, style `danger`). On an open lead it is refused: "Mark
     this lead as contacted first."
 4. `y:` — `contacted|quoted|won` to `done` in one conditional UPDATE (token filled
-    only if null), exactly one review email, message ends with the outcome and
-    no buttons. A second `y:` changes nothing and sends nothing.
+    only if null), one review email attempt, message ends with the outcome.
+    On success: no buttons. On send failure: the error view with one **Try again**
+    button (`r:`, style `primary`). A second `y:` changes nothing and sends nothing.
 5. `n:` — back to the one-button contacted view, no DB change.
+6. `r:` (Try again) — allowed only when the lead is `done` AND no review request
+    was successfully sent (known from a `review_requested` row in
+    `lead_events`; a `review_request_failed` row means it may be retried). It
+    resends the review email with the existing token, never changes status,
+    then re-renders done (sent) or error again. A second `r:` after a success
+    changes nothing and sends nothing. `r:` on an open/contacted lead is
+    refused with "Nothing to retry."
+
+    **Retry idempotency key:** every review send uses a Resend idempotency key
+    (`<leadId>:review` for the first send), and each `review_request_failed`
+    event records `{ status, key }` for the attempt that failed. A retry after
+    a timeout reuses the exact key of the timed-out attempt (it may have been
+    delivered, so Resend must dedupe); a retry after any other failure uses a
+    brand-new `<leadId>:review:r<count>` key (`count` = number of earlier
+    failures), so a cached failure is never replayed and no new key can equal
+    an earlier one.
 
 Button colours use the Bot API `style` field (only `primary`, `success`,
 `danger` exist). `callback_data`, labels and the flow are unchanged. Older
@@ -193,6 +247,30 @@ names with `npm run tg:commands:info` (calls `getMyCommands`).
 chats and reveals no business data. `/leads` still returns no lead data for
 unlinked chats.
 
+## Phone validation and storage
+
+Server (`api/lead.js`): numbers are validated with `libphonenumber-js/max`
+(the **max** build checks real per-country patterns; the default/min build
+only checks general length ranges and let through e.g. an 8-digit +20 mobile
+that needs 10). Valid numbers are stored as E.164; invalid ones are a 400
+that names the field (`{ ok: false, errors: { phone: ... } }`), and the
+number is never logged. The modal maps each field error to that field's
+message (phone: "Enter a valid phone number."), focuses the field and stays
+on step 4; the generic "We couldn't send your request" panel is only for
+network failures and 5xx.
+
+Client (`index.html` modal): `build-static.js` derives, from the max
+metadata, for each calling code the min/max national length across its
+countries and inlines it as a compact JSON constant (`PHONE_CC`, ~2.5 KB
+for 206 codes). After a leading `+`, the code is matched (1, then 2, then
+3 digits; codes are prefix-free) and typing stops at calling-code digits
+plus the max national length (so +20 allows at most 10 more digits).
+Without `+`, the business country is the default (US; `businesses` has no
+country column). On submit, the national length must be between min and
+max for a recognised code, else 8–15 digits. Sanitisation is unchanged:
+digits, one leading `+`, spaces `( ) - .` only, `maxlength="20"`,
+`type="tel"`, pasted text sanitised and truncated the same way.
+
 ## Env var names
 
 The email and Telegram code reads these names (never values - do not copy
@@ -201,8 +279,8 @@ The email and Telegram code reads these names (never values - do not copy
 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`,
 `IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
 `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `MAIL_REDIRECT_TO`,
-`MAIL_REDIRECT_PREFIX` (demo recordings: set to `off` to drop the `[TEST for .]`
-subject prefix; the recipient is still redirected), `SITE_URL`,
+`MAIL_REDIRECT_PREFIX` (set to `off` to remove the `[TEST for ...]` subject
+prefix; recipients are still redirected to `MAIL_REDIRECT_TO`), `SITE_URL`,
 `DATABASE_URL` (local migrations only).
 
 ## Preview gallery
@@ -213,10 +291,12 @@ node scripts/preview.mjs --serve   # also serve them at http://127.0.0.1:4173/
 ```
 
 No env, no network (except the loopback server), no DB. The gallery shows the
-owner email for the CLEAN, MINIMAL and STRESS leads at 640 px and 375 px widths,
+owner email for the CLEAN, MINIMAL and STRESS leads at 640 px and 375 px widths
+(with the logo visible: `cid:brand-logo` is rewritten to a data URI here only),
 the auto-reply, the one-button review email ("Share your feedback"), the
-rating pages (s1, s5, go, and the unavailable state), and the four Telegram
-states, each with a caption. A
+rating pages (s1, s5, go, and the unavailable state), and the six Telegram
+states (new, contacted, confirm, done-sent, done-no-email, error), each with
+a caption. A
 "Simulate dark mode" checkbox applies `invert(1) hue-rotate(180deg)` to the
 iframes - a rough approximation of mail-app dark-mode inversion, not a real
 dark mode.

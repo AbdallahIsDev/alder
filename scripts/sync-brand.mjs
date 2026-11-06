@@ -134,7 +134,12 @@ if (logoMatch) {
     .replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72"');
   await sharp(Buffer.from(makeSvg(onBg))).resize(72, 72, { fit: 'inside' }).png().toFile(path.join(LOGO_DIR, onDarkFile));
   await sharp(Buffer.from(makeSvg(text))).resize(72, 72, { fit: 'inside' }).png().toFile(path.join(LOGO_DIR, onLightFile));
-  logo = { onDark: '/assets/email/' + onDarkFile, onLight: '/assets/email/' + onLightFile, height: 36 };
+  // The on-dark PNG bytes, base64, bundled with the serverless function as a
+  // CID inline image (lib/mail.js attaches it). The hosted PNG files above
+  // stay for the preview gallery only; the function never reads assets/ at
+  // run time, it reads this field via lib/brand.js.
+  const onDarkB64 = fs.readFileSync(path.join(LOGO_DIR, onDarkFile)).toString('base64');
+  logo = { onDark: '/assets/email/' + onDarkFile, onLight: '/assets/email/' + onLightFile, height: 36, onDarkB64 };
 }
 
 /* ---------- font faces: only .woff2 that exist on disk, max 4 ---------- */

@@ -143,6 +143,22 @@ try {
     `from=${okFrom} to=${okTo} reply_to=${okReply} prefix=${okPrefix} esc=${escaped} crlf=${noCrLf} labels=${labelsOk} tel=${telOk} noExternal=${noExternalOk} badUrls=${badUrls.map((u) => u.replace(/['")]+$/, '').slice(0, 80)).join(' | ')}`);
   line(!!(owner && owner.headers && owner.headers['idempotency-key']), 'A2', 'Idempotency-Key header sent');
 
+  /* A1c (item 4): the Resend payload carries exactly one CID attachment;
+     the HTML references cid:brand-logo and no hosted image URL remains. */
+  {
+    const atts = b && b.attachments;
+    const oneAtt = Array.isArray(atts) && atts.length === 1 && atts[0].content_id === 'brand-logo'
+      && atts[0].filename === 'logo.png' && atts[0].content_type === 'image/png'
+      && typeof atts[0].content === 'string' && atts[0].content.length > 100
+      && /^[A-Za-z0-9+/=]+$/.test(atts[0].content);
+    // single /emails endpoint, never the batch endpoint
+    const singleEndpoint = owner && owner.path === '/emails';
+    const noHostedImg = b && !/https?:\/\/[^"\s]*\.(png|jpg|jpeg|gif|webp)/i.test(b.html)
+      && b.html.includes('src="cid:brand-logo"') && b.html.includes('alt=""');
+    line(!!(oneAtt && singleEndpoint && noHostedImg), 'A1c', 'one CID attachment, single /emails, no hosted img',
+      `atts=${atts && atts.length} len=${atts && atts[0] && atts[0].content.length} path=${owner && owner.path} noHosted=${noHostedImg}`);
+  }
+
   /* G1: toTelHref normalisation (unit-level, no DB). US formats get +1; the
      international number keeps its own +; leftover digits stay as typed. */
   const { toTelHref } = await import('../lib/content.js');
@@ -157,6 +173,23 @@ try {
   const bad = cases.filter(([input, want]) => toTelHref(input) !== want);
   line(bad.length === 0, 'G1', 'toTelHref: US gets +1, international keeps +, rest untouched',
     bad.length ? 'bad: ' + bad.map(([i, w]) => `${i}->${toTelHref(i)} (want ${w})`).join('; ') : `${cases.length} cases ok`);
+
+  /* G1b: displayPhone (Telegram alert) applies the same rule as toTelHref:
+     a leading + is shown unchanged (never "+1+20..."); bare 10 digits get
+     +1; bare 11 digits starting with 1 get +. */
+  const { displayPhone, renderAlert } = await import('../lib/content.js');
+  const dispCases = [
+    ['+201005408345', '+201005408345'],
+    ['+12125550100', '+12125550100'],
+    ['2125550100', '+12125550100'],
+    ['12125550100', '+12125550100'],
+  ];
+  const dispBad = dispCases.filter(([input, want]) => displayPhone(input) !== want);
+  const telParity = dispCases.every(([input, want]) => toTelHref(input) === 'tel:' + want);
+  const alertLine = renderAlert({ business: { name: 'Alder Roofing', }, lead: { name: 'John Test', phone: '+201005408345', email: '', service: 'repair', timing: 'asap', home: 'house', roof_age: 'Not sure', insurance_claim: false, zip: '50265', notes: '' }, view: 'new', reviewResult: null });
+  const alertOk = alertLine.includes('Phone: +201005408345') && !alertLine.includes('+1+20');
+  line(dispBad.length === 0 && telParity && alertOk, 'G1b', 'displayPhone: + unchanged, 10->+1, 11/1->+; tel parity',
+    dispBad.length ? 'bad: ' + dispBad.map(([i, w]) => `${i}->${displayPhone(i)} (want ${w})`).join('; ') : `${dispCases.length} cases ok telParity=${telParity} alert=${alertOk}`);
 
   /* G: owner email structure (unit-level, no DB). */
   const { ownerEmail } = await import('../lib/content.js');
@@ -192,9 +225,13 @@ try {
   const siteEnv = process.env.SITE_URL;
   const faceUrls = [...renders.full.html.matchAll(/url\('([^']+)'\)/g)].map((m) => m[1]);
   const facesExist = faceUrls.every((u) => /^(?:https:\/\/[^/]+)?\/assets\/fonts\//.test(u));
-  // G8
+  // G8 — Before (item 4): <img src="https://.../logo-on-dark.png" alt="Alder Roofing">
+  // (hosted URL, business name duplicated as alt text).
+  // After (item 4, deliberate change): CID inline image, alt="" (the business
+  // name is printed next to it), 32x32 reserved, display:block.
   const imgs = [...renders.full.html.matchAll(/<img\b[^>]*>/g)].map((m) => m[0]);
-  const imgOk = imgs.length > 0 && imgs.every((t) => t.includes('alt="Alder Roofing"') && /(width|height)=/.test(t) && t.includes('display:block'));
+  const imgOk = imgs.length === 1 && imgs.every((t) => t.includes('src="cid:brand-logo"') && t.includes('alt=""')
+    && t.includes('width="32"') && t.includes('height="32"') && t.includes('display:block;border:0;width:32px;height:32px;'));
   // G9
   const footerSep = renders.full.html.includes('margin:0 0 8px') && renders.full.html.includes('Reply to this email');
   // G10
@@ -206,7 +243,7 @@ try {
   line(noLeftOk, 'G5', 'no border-left in owner email', `ok=${noLeftOk}`);
   line(g6Ok, 'G6', 'every markup colour is a brand hex', `ok=${g6Ok}`);
   line(facesExist, 'G7', 'font-face files exist', `urls=${faceUrls.length} siteEnv=${siteEnv ? 'set' : 'unset'}`);
-  line(imgOk, 'G8', 'every img has alt/size/display:block', `imgs=${imgs.length}`);
+  line(imgOk, 'G8', 'CID logo img: src/alt=""/32x32/display:block', `imgs=${imgs.length}`);
   line(footerSep, 'G9', 'footer lines are separate elements', `ok=${footerSep}`);
   line(g10Ok, 'G10', 'stress lead stays escaped in HTML, raw in text', `ok=${g10Ok}`);
 
@@ -332,7 +369,10 @@ try {
   const tgReq = (await requests(TG)).filter((x) => x.method === 'POST' && x.path.includes('/sendMessage'));
   const t = tgReq[0] && tgReq[0].body;
   // NEW (item 2): one "Label: value" per line, blank lines between groups, title
-  // carries the only "·", phone keeps the +1 tappable form, ends with Status: New.
+  // carries the only "·", phone keeps the +1 tappable form.
+  // Before (item 3): the status block ended with the plain line 'Status: New'.
+  // After (item 3, deliberate change): emoji status lines, one fact per line,
+  // and the email never appears in the status block.
   const expectedText = [
     'New lead · Alder Roofing (demo)',
     '',
@@ -349,7 +389,7 @@ try {
     '',
     'Notes: A note that should be capped',
     '',
-    'Status: New',
+    '🟡 Status: New',
   ].join('\n');
   const textOk = t && t.text === expectedText;
   const noJoin = t && t.text.split('\n').slice(1).every((l) => !l.includes(' · '));
@@ -382,10 +422,82 @@ try {
     'Insurance claim: No',
     'ZIP: 50265',
     '',
-    'Status: New',
+    '🟡 Status: New',
   ].join('\n');
   line(!!minText && minText === minExpected,
     'B2b', 'minimal lead: exact text, no Email/Notes lines', `${minText ? minText.length + ' chars' : 'none'}`);
+
+  /* S: status block (unit). Every line <= 40 chars for first name "John",
+     the email never appears in the block, and the error view carries
+     exactly one r: (Try again) button. */
+  {
+    const { renderAlert: renderS, tryAgainKeyboard } = await import('../lib/content.js');
+    const sBiz = { name: 'Alder Roofing' };
+    const sLead = { name: 'John Test', phone: '+201005408345', email: 'john@example.com', service: 'repair', timing: 'asap', home: 'house', roof_age: 'Not sure', insurance_claim: false, zip: '50265', notes: '' };
+    const views = [
+      ['new', null], ['contacted', null], ['confirm', null],
+      ['done', 'sent'], ['done', 'no_email'], ['error', 'failed'],
+    ];
+    let lineOk = true, mailOk = true, detail = '';
+    for (const [v, rr] of views) {
+      const tail = renderS({ business: sBiz, lead: sLead, view: v, reviewResult: rr }).split('\n\n').pop();
+      for (const l of tail.split('\n')) {
+        if (l.length > 40) { lineOk = false; detail += `${v}:${l.length} `; }
+        if (l.includes('john@example.com')) { mailOk = false; detail += `${v}:email `; }
+      }
+    }
+    const uid = '00000000-0000-4000-8000-000000000001';
+    const kb = tryAgainKeyboard(uid).inline_keyboard;
+    const btnOk = kb.length === 1 && kb[0].length === 1 && kb[0][0].text === 'Try again'
+      && kb[0][0].callback_data === 'r:' + uid && kb[0][0].style === 'primary';
+    line(lineOk && mailOk && btnOk, 'S1', 'status block: lines <=40, no email, one r: button',
+      `lineOk=${lineOk} mailOk=${mailOk} btnOk=${btnOk} ${detail}`);
+
+    /* S2 (item 4): one padding system. Header/body/footer cells all carry
+       24px horizontal padding (owner header 18px top/bottom, body 24/24,
+       footer 8px top 24px bottom). Before: header 16/20/14, customer header
+       20/28, body 8/20/0, footer 20/28/28, review wrapper 28px horizontal. */
+    const { ownerEmail: ownerEmailS, autoReply: autoReplyS, reviewEmail: reviewEmailS } = await import('../lib/content.js');
+    const biz = { name: 'Alder Roofing', timezone: 'America/Chicago' };
+    const sLeads = { full: { name: 'Daniel Whitaker', phone: '(555) 501-2345', email: 'daniel@example.com', zip: '50265', service: 'repair', home: 'house', timing: 'asap', roof_age: '10 to 20 years', insurance_claim: true, notes: 'line one\nline two' } };
+    const three = {
+      owner: ownerEmailS({ business: biz, lead: sLeads.full }).html,
+      auto: autoReplyS({ business: biz, lead: sLeads.full }).html,
+      review: reviewEmailS({ business: biz, token: 'tok123', siteUrl: 'https://reviews.example' }).html,
+    };
+    const cellPad = (html, marker) => {
+      const re = marker === 'header'
+        ? /<tr><td class="px"[^>]*style="padding:([\dpx ]+);/
+        : marker === 'body'
+          ? /<tr><td style="padding:([\dpx ]+)" class="px">/
+          : /<tr><td style="padding:([\dpx ]+)" class="px">/g;
+      if (marker === 'footer') {
+        const all = [...html.matchAll(/<tr><td style="padding:([\dpx ]+)" class="px">/g)];
+        return all.length ? all[all.length - 1][1] : null;
+      }
+      const m = re.exec(html);
+      return m && m[1];
+    };
+    let padOk = true, padDetail = '';
+    for (const [name, html] of Object.entries(three)) {
+      const h = cellPad(html, 'header'), bd = cellPad(html, 'body'), ft = cellPad(html, 'footer');
+      const horiz = (p) => { const parts = String(p || '').split(' '); return parts.length >= 2 ? parts[1] : parts[0]; };
+      const ok = h === '18px 24px' && bd === '24px 24px' && ft === '8px 24px 24px'
+        && horiz(h) === '24px' && horiz(bd) === '24px' && horiz(ft) === '24px';
+      if (!ok) { padOk = false; padDetail += `${name}:h=${h} b=${bd} f=${ft} `; }
+    }
+    // No inner element adds horizontal padding inside the card: the review
+    // wrapper's 28px horizontal inset is gone (button's own 15px 28px stays).
+    const reviewNoWrap = !three.review.includes('padding:4px 28px 6px')
+      && three.review.includes('padding:4px 0 6px')
+      && three.review.includes('padding:15px 28px');
+    const mobileOk = three.owner.includes('.px{padding-left:16px!important;padding-right:16px!important}');
+    const cidOk = Object.values(three).every((html) => html.includes('src="cid:brand-logo"')
+      && html.includes('alt=""') && html.includes('width="32"') && html.includes('height="32"')
+      && html.length < 100 * 1024 && !/https?:\/\/[^"\s]*logo[^"\s]*/.test(html));
+    line(padOk && reviewNoWrap && mobileOk && cidOk, 'S2', 'header/body/footer padding 24px, verticals as spec, no inner inset, CID in all 3',
+      `padOk=${padOk} reviewWrap=${reviewNoWrap} mobile=${mobileOk} cid=${cidOk} ${padDetail}`);
+  }
 } catch (e) { line(false, 'B1', 'telegram text', e.message); }
 
 /* Bound business -> its chat only */

@@ -75,6 +75,8 @@ Inline buttons use the Bot API `style` field (only `primary`, `success`,
 - Job completed — `primary`
 - Yes, send review request — `success`
 - Cancel — `danger`
+- Try again — `primary` (only after a failed review email; resends the
+  review email with the existing token, never changes status)
 
 ## Send a test lead
 
@@ -91,7 +93,16 @@ real phone number, and submit. Check, in order:
 ## What to check
 
 - The phone lands as E.164 (e.g. `+15155550142`), never bare digits.
-- An invalid phone is a 400 on the server and never stored.
+- An invalid phone is a 400 on the server and never stored. The server uses
+  `libphonenumber-js/max` (real per-country patterns), and the modal caps
+  digits per calling code from the same metadata (inlined at build time by
+  `build-static.js`). A 400 that names the phone shows "Enter a valid phone
+  number." under the field and stays on step 4.
+- Emails carry the logo as a CID inline image (attached by `lib/mail.js`
+  from `logo.onDarkB64` in `lib/brand.generated.json`); the hosted PNGs in
+  `assets/email/` are for the preview gallery only. `MAIL_REDIRECT_PREFIX`
+  set to `off` removes the `[TEST for ...]` subject prefix while recipients
+  are still redirected via `MAIL_REDIRECT_TO` (names only here, never values).
 - The anon key still cannot read or write `businesses`, `bind_codes`, or
   `leads` (`tests/db-wall.test.mjs` proves the wall; run it through
   `node tests/run.mjs`).

@@ -200,6 +200,38 @@ import { spawnSync } from 'node:child_process';
 const sync = spawnSync(process.execPath, [path.join(__dirname, 'scripts', 'sync-brand.mjs')], { cwd: __dirname, stdio: 'inherit' });
 if (sync.status !== 0) fail('sync-brand.mjs failed; not building with stale brand tokens.');
 
+/* ---- 9b. phone calling-code table, from libphonenumber-js max metadata ----
+   For each calling code, [min, max] NATIONAL length across its countries.
+   Inlined into the modal script (compact JSON, ~2.5 KB) so the phone input
+   can cap digits per country without shipping the full library. The source
+   page carries a PHONE_CC placeholder (null until built). */
+{
+  const metaPath = path.join(__dirname, 'node_modules', 'libphonenumber-js', 'metadata.max.json');
+  if (!fs.existsSync(metaPath)) fail('libphonenumber-js metadata.max.json not found; run npm install first.');
+  let meta;
+  try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')); } catch (e) { fail('libphonenumber-js metadata does not parse: ' + e.message); }
+  const table = {};
+  for (const [code, countries] of Object.entries(meta.country_calling_codes || {})) {
+    let min = Infinity, max = 0, found = false;
+    for (const c of Array.isArray(countries) ? countries : []) {
+      const entry = (meta.countries || {})[c];
+      if (!entry || !Array.isArray(entry[3])) continue;
+      found = true;
+      min = Math.min(min, ...entry[3]);
+      max = Math.max(max, ...entry[3]);
+    }
+    if (found) table[code] = [min, max];
+  }
+  const tableJson = JSON.stringify(table);
+  if (tableJson.length >= 6 * 1024) fail('calling-code table is ' + tableJson.length + ' bytes, over the 6 KB target.');
+  const defCc = String(biz.countryCode || '+1').replace(/\D/g, '') || '1';
+  if (!Object.prototype.hasOwnProperty.call(table, defCc)) warnings.push('BIZ.countryCode +' + defCc + ' is not in the calling-code table; the phone input falls back to 8-15 digits.');
+  if (!html.includes('/*__PHONE_CC__*/')) fail('phone calling-code placeholder not found in the modal script.');
+  html = html.replace('/*__PHONE_CC__*/null', tableJson);
+  html = html.replace("/*__PHONE_DEFAULT__*/'1'", JSON.stringify(defCc));
+  console.log('  phone caps: ' + Object.keys(table).length + ' calling codes, ' + tableJson.length + ' bytes, default +' + defCc);
+}
+
 html = html.replace(/<head\b[^>]*>/i, tag => tag + '\n  <!-- Static build: business details are baked in from the BIZ config by build-static.js. Rebuild after changing them. The footer year below is the year this build ran; the page corrects it to the current year on load, so it stays right without a rebuild. -->');
 const outDir = path.dirname(path.resolve(opt.out));
 fs.mkdirSync(outDir, { recursive: true });

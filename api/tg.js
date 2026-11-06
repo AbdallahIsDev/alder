@@ -7,11 +7,11 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import {
   getChatBinding, bindChat, claimBindCode, getBusinessById,
-  listClientLeads, getClientLead, transitionLead, addEvent,
+  listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent,
 } from '../lib/db.js';
 import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup } from '../lib/tg.js';
 import { sendReviewRequest } from '../lib/notify.js';
-import { renderAlert, jobDoneKeyboard, confirmKeyboard } from '../lib/content.js';
+import { renderAlert, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard } from '../lib/content.js';
 
 const GENERIC_UNBOUND = 'This chat is not linked to a business. Ask your administrator for a link.';
 const GENERIC_BAD_CODE = 'That link is not valid. Ask for a new one.';
@@ -74,88 +74,148 @@ async function handleCallback(cb, binding) {
   const data = String(cb.data || '');
   const chatId = cb.message && cb.message.chat && cb.message.chat.id;
   const messageId = cb.message && cb.message.message_id;
-  const answer = (text) => answerCallbackQuery(id, text).catch(() => {});
-
-  if (!binding) { await answer(GENERIC_NOT_FOUND); return; }
-  if (!/^[cdyn]:[0-9a-f-]{36}$/.test(data)) { await answer(GENERIC_NOT_FOUND); return; }
-  const kind = data[0];
-  const leadId = data.slice(2);
-
-  const lead = await getClientLead(leadId, binding.business_id);
-  if (!lead) { await answer(GENERIC_NOT_FOUND); return; }
-  const business = await getBusinessById(binding.business_id);
-  if (!business) { await answer(GENERIC_NOT_FOUND); return; }
-
-  // Re-render from the database through the roofer-facing path, never from the
-  // previous message text. If the read fails, edit only the keyboard.
-  const render = async (view, keyboardExtra, reviewResult = null) => {
-    if (!chatId || !messageId) return;
-    try {
-      const fresh = await getClientLead(leadId, binding.business_id);
-      if (!fresh) throw new Error('lead_gone');
-      const text = renderAlert({ business, lead: fresh, view, reviewResult });
-      await editMessageText(chatId, messageId, text, keyboardExtra).catch(() => {});
-    } catch (e) {
-      console.error('tg_rerender_failed', (e && e.code) || 'no_code');
-      await editMessageReplyMarkup(chatId, messageId, keyboardExtra && keyboardExtra.reply_markup).catch(() => {});
-    }
+  let answered = false;
+  const answer = (text) => {
+    if (answered) return Promise.resolve();
+    answered = true;
+    return answerCallbackQuery(id, text).catch(() => {});
   };
 
-  if (kind === 'c') {                                   // open -> contacted only
-    const result = await transitionLead(leadId, binding.business_id, 'contacted', null);
-    if (!result.changed) { await answer(GENERIC_NOT_FOUND); return; }
-    await answer('');
-    try { await addEvent(leadId, 'status_changed', { status: 'contacted' }); } catch (e) {
-      console.error('tg_status_event_failed', (e && e.code) || 'no_code');
-    }
-    try { await addEvent(leadId, 'contacted', {}); } catch (e) {
-      console.error('tg_contacted_event_failed', (e && e.code) || 'no_code');
-    }
-    await render('contacted', { reply_markup: jobDoneKeyboard(leadId) });
-    return;
-  }
+  if (!binding) { await answer(GENERIC_NOT_FOUND); return; }
+  try {
+    if (!/^[cdynr]:[0-9a-f-]{36}$/.test(data)) { await answer(GENERIC_NOT_FOUND); return; }
+    const kind = data[0];
+    const leadId = data.slice(2);
 
-  if (kind === 'd') {                                   // ask before emailing
-    if (lead.status === 'done') { await answer('This lead is already completed.'); return; }
-    if (lead.status !== 'contacted' && lead.status !== 'quoted' && lead.status !== 'won') {
-      await answer('Mark this lead as contacted first.');
+    const lead = await getClientLead(leadId, binding.business_id);
+    if (!lead) { await answer(GENERIC_NOT_FOUND); return; }
+    const business = await getBusinessById(binding.business_id);
+    if (!business) { await answer(GENERIC_NOT_FOUND); return; }
+
+    // Re-render from the database through the roofer-facing path, never from the
+    // previous message text. If the read fails, edit only the keyboard.
+    const render = async (view, keyboardExtra, reviewResult = null) => {
+      if (!chatId || !messageId) return;
+      try {
+        const fresh = await getClientLead(leadId, binding.business_id);
+        if (!fresh) throw new Error('lead_gone');
+        const text = renderAlert({ business, lead: fresh, view, reviewResult });
+        await editMessageText(chatId, messageId, text, keyboardExtra).catch(() => {});
+      } catch (e) {
+        console.error('tg_rerender_failed', (e && e.code) || 'no_code');
+        await editMessageReplyMarkup(chatId, messageId, keyboardExtra && keyboardExtra.reply_markup).catch(() => {});
+      }
+    };
+
+    if (kind === 'c') {                                   // open -> contacted only
+      const result = await transitionLead(leadId, binding.business_id, 'contacted', null);
+      if (!result.changed) { await answer(GENERIC_NOT_FOUND); return; }
+      await answer('');
+      try { await addEvent(leadId, 'status_changed', { status: 'contacted' }); } catch (e) {
+        console.error('tg_status_event_failed', (e && e.code) || 'no_code');
+      }
+      try { await addEvent(leadId, 'contacted', {}); } catch (e) {
+        console.error('tg_contacted_event_failed', (e && e.code) || 'no_code');
+      }
+      await render('contacted', { reply_markup: jobDoneKeyboard(leadId) });
       return;
     }
-    await answer('');
-    await render('confirm', { reply_markup: confirmKeyboard(leadId) });
-    return;
-  }
 
-  if (kind === 'n') {                                   // cancel back to step 2
-    await answer('');
-    await render('contacted', { reply_markup: jobDoneKeyboard(leadId) });
-    return;
-  }
-
-  if (kind === 'y') {                                   // contacted/quoted/won -> done
-    if (lead.status === 'done') { await answer('This lead is already completed.'); return; }
-    if (lead.status !== 'contacted' && lead.status !== 'quoted' && lead.status !== 'won') {
-      await answer('Mark this lead as contacted first.');
+    if (kind === 'd') {                                   // ask before emailing
+      if (lead.status === 'done') { await answer('This lead is already completed.'); return; }
+      if (lead.status !== 'contacted' && lead.status !== 'quoted' && lead.status !== 'won') {
+        await answer('Mark this lead as contacted first.');
+        return;
+      }
+      await answer('');
+      await render('confirm', { reply_markup: confirmKeyboard(leadId) });
       return;
     }
-    const token = randomBytes(24).toString('base64url');
-    const result = await transitionLead(leadId, binding.business_id, 'done', token);
-    if (!result.changed) { await answer('This lead is already completed.'); return; }
-    await answer('');
-    try { await addEvent(leadId, 'status_changed', { status: 'done' }); } catch (e) {
-      console.error('tg_status_event_failed', (e && e.code) || 'no_code');
+
+    if (kind === 'n') {                                   // cancel back to step 2
+      await answer('');
+      await render('contacted', { reply_markup: jobDoneKeyboard(leadId) });
+      return;
     }
-    let reviewResult = 'no_email';
-    if (result.lead && result.lead.email) {
+
+    if (kind === 'y') {                                   // contacted/quoted/won -> done
+      if (lead.status === 'done') { await answer('This lead is already completed.'); return; }
+      if (lead.status !== 'contacted' && lead.status !== 'quoted' && lead.status !== 'won') {
+        await answer('Mark this lead as contacted first.');
+        return;
+      }
+      const token = randomBytes(24).toString('base64url');
+      const result = await transitionLead(leadId, binding.business_id, 'done', token);
+      if (!result.changed) { await answer('This lead is already completed.'); return; }
+      // Post-transition: the lead is done, so a throw here must not leave the
+      // old Yes/Cancel buttons on screen (Yes would only say "already
+      // completed" and Try again would never be offered). Best-effort render
+      // of the error view (or the no-email done view) instead; no second answer.
+      try {
+        await answer('');
+        try { await addEvent(leadId, 'status_changed', { status: 'done' }); } catch (e) {
+          console.error('tg_status_event_failed', (e && e.code) || 'no_code');
+        }
+        let reviewResult = 'no_email';
+        if (result.lead && result.lead.email) {
+          const r = await sendReviewRequest({
+            leadId, business,
+            lead: { email: result.lead.email, name: result.lead.name, phone: result.lead.phone },
+            token: result.lead.review_token || token,
+          });
+          reviewResult = r && r.ok ? 'sent' : 'failed';
+        }
+        if (reviewResult === 'failed') {
+          await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
+        } else {
+          await render('done', { reply_markup: { inline_keyboard: [] } }, reviewResult);
+        }
+      } catch (e) {
+        console.error('tg_callback_failed', (e && e.code) || 'no_code');
+        if (result.lead && result.lead.email) {
+          await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
+        } else {
+          await render('done', { reply_markup: { inline_keyboard: [] } }, 'no_email');
+        }
+      }
+      return;
+    }
+
+    if (kind === 'r') {                                   // retry the failed review email only
+      if (lead.status !== 'done') { await answer('Nothing to retry.'); return; }
+      if (await hasReviewSent(leadId)) { await answer('Nothing to retry.'); return; }
+      const retry = await getDoneLeadForRetry(leadId, binding.business_id);
+      if (!retry || !retry.review_token || !retry.email) { await answer('Nothing to retry.'); return; }
+      // Idempotency key: Resend caches per key for 24 h. After a timeout the
+      // timed-out attempt may have delivered, so reuse its EXACT key (recorded
+      // in that failure's meta) and let Resend dedupe; after any other failure
+      // the cached failure must not be replayed, so use a fresh suffixed key
+      // named by the earlier failure count. A new suffixed key can never equal
+      // an earlier one: earlier suffixes are r1..r(count-1), this one is r<count>.
+      const failInfo = await getReviewFailureInfo(leadId);
+      const retryKey = failInfo.lastStatus === 'timeout'
+        ? (failInfo.lastKey || `${leadId}:review`)
+        : `${leadId}:review:r${failInfo.count}`;
+      await answer('');
       const r = await sendReviewRequest({
         leadId, business,
-        lead: { email: result.lead.email, name: result.lead.name, phone: result.lead.phone },
-        token: result.lead.review_token || token,
+        lead: { email: retry.email, name: retry.name, phone: retry.phone },
+        token: retry.review_token,
+        idempotencyKey: retryKey,
       });
-      reviewResult = r && r.ok ? 'sent' : 'failed';
+      if (r && r.ok) {
+        await render('done', { reply_markup: { inline_keyboard: [] } }, 'sent');
+      } else {
+        await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
+      }
+      return;
     }
-    await render('done', { reply_markup: { inline_keyboard: [] } }, reviewResult);
-    return;
+  } catch (e) {
+    // A stuck spinner is worse than a generic error: whatever threw (lead
+    // read, business read, sent-check, retry read, transition, email send),
+    // log the code only and answer once.
+    console.error('tg_callback_failed', (e && e.code) || 'no_code');
+    await answer('Something went wrong. Try again.');
   }
 }
 

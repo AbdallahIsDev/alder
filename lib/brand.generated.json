@@ -38,6 +38,7 @@
   "logo": {
     "onDark": "/assets/email/logo-on-dark.png",
     "onLight": "/assets/email/logo-on-light.png",
-    "height": 36
+    "height": 36,
+    "onDarkB64": "iVBORw0KGgoAAAANSUhEUgAAAEgAAABICAYAAABV7bNHAAAACXBIWXMAAAsTAAALEwEAmpwYAAACTklEQVR4nO2ZP2sUQRiHV2MhYoi1iKiNZWxSiEKCn0EEQYKC2vgBbK8Uu1RibRVsgimC2FgbxCLY2NmIQixFDomPHG4kcrv7vpPZ2Zvd/B6Y5tjZPw/Dc3tzRSGEEEIIIYQQwwa4NRmzvo/sAI4Bj4E94DfwBDg+6/vKAuAk8IJpXgKnjLl3gVHDOFP0GeAs8I56PgDnG+a/pZkLRV8BrgCfsfkCLB0pQcBN4Ad+fgJ3Bi+I/2McylS8ByWI+hiH8i/egxHE3xhvOx7+aTkststz9l8QvhiPgXsH5twuu2PF+32vBeGL8S6wUjH3KvDVmLvXS0H4Y7wDXGw4zznHKumXIPwx3gIWHOc7DWwMQhD2m/E+a8BcxfwHk1GzIke9FsQhYnxg7lz5jrPPc+BExXGeeOcniLgYzwOvKo5/XfVj0xnvPAQRGWPgEvCxYd4n4HJEvJ/NbNuEyBgD14BvjvnfgRs18Z6c28LcNskxxvfLHnn5BTyKiHfjtknOMQ4lJt612ya5xziUmHhXbpv0IcahxMS7/T1vYN1x05PVMR8R41Dq4u1dqettCuoqxqFExbsLQeNEMe4k3qkF7SaOcfJ4pxS001GMk8Y7laCtyDfj1DS9eW+kFrQ2oxgniXebgsaZxLjVeLcp6HrN58vkz3LIM7UKsEL+TH3TdgYS1IwEGUiQgQQZSFB6QZvAQ2NsHuVvsZHjGof5w1CCAtAKMpAgAwkykCADCTKQIAMJMpAgAwnKWdAi8CZirDqusRp5jcVubAghhBBCCCFE4eUPjewurojUrOsAAAAASUVORK5CYII="
   }
 }

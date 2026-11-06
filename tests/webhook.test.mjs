@@ -156,18 +156,19 @@ try {
   line(listA.includes('Alpha Only') && !listA.includes('Beta Only') && listB.includes('Beta Only') && !listB.includes('Alpha Only'),
     'C7', 'each /leads shows only its own business', `A_hasB=${listA.includes('Beta Only')} B_hasA=${listB.includes('Alpha Only')}`);
 
-  /* forged callback across businesses — every kind (c, d, y, n) */
+  /* forged callback across businesses — every kind (c, d, y, n, r).
+     Before (item 3): kinds c/d/y/n. After: r: added with the retry button. */
   const statusBefore = (await svc.from('leads').select('status').eq('id', aLead1).single()).data.status;
   await reset();
-  for (const kind of ['c', 'd', 'y', 'n']) await good(cb(chatB, kind + ':' + aLead1));
+  for (const kind of ['c', 'd', 'y', 'n', 'r']) await good(cb(chatB, kind + ':' + aLead1));
   const statusAfter = (await svc.from('leads').select('status').eq('id', aLead1).single()).data.status;
   const forged = await sent();
   line(statusBefore === statusAfter && statusAfter === 'open' && forged.some((x) => x.path.includes('/answerCallbackQuery')),
-    'C8', 'forged cross-business callbacks (c/d/y/n) -> no DB change', `${statusBefore} -> ${statusAfter}`);
+    'C8', 'forged cross-business callbacks (c/d/y/n/r) -> no DB change', `${statusBefore} -> ${statusAfter}`);
 
   /* malformed callback_data is ignored (never triggers a transition) */
   await reset();
-  for (const bad of ['x:' + aLead1, 'c:not-a-uuid', 'cd:00000000-0000-0000-0000-000000000000', 'c:' + aLead1 + 'extra']) {
+  for (const bad of ['x:' + aLead1, 'c:not-a-uuid', 'r:not-a-uuid', 'cd:00000000-0000-0000-0000-000000000000', 'c:' + aLead1 + 'extra']) {
     await good(cb(chatB, bad));
   }
   const malformedStatus = (await svc.from('leads').select('status').eq('id', aLead1).single()).data.status;
@@ -214,9 +215,13 @@ try {
   const seqRow3 = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
   const edits3 = (await sent()).filter((x) => x.path.includes('/editMessageText'));
   const seqEmails = (await resendCalls()).length;
+  // Before (item 3): 'Status: Done. Review request sent to seq@example.com.'
+  // (one long line repeating the email). After: two short emoji lines, no email.
   const s3Kb = edits3.length === 1 && JSON.stringify(edits3[0].body.reply_markup)
     === JSON.stringify({ inline_keyboard: [] })
-    && edits3[0].body.text.includes('Status: Done. Review request sent to seq@example.com.');
+    && edits3[0].body.text.includes('✅ Status: Done')
+    && edits3[0].body.text.includes('✉️ Review request sent')
+    && !edits3[0].body.text.split('\n\n').pop().includes('seq@example.com');
   line(seqRow1.status === 'contacted' && s1Kb && seqRow2.status === 'contacted' && s2Kb
     && seqRow3.status === 'done' && !!seqRow3.review_token && s3Kb && seqEmails === 1,
     'C11', 'c -> d -> y: done, one email, empty keyboard', `s1=${s1Kb} s2=${s2Kb} s3=${s3Kb} emails=${seqEmails}`);
@@ -263,6 +268,279 @@ try {
   const secondEmails = (await resendCalls()).length;
   line(seqSecond.status === 'done' && secondEmails === 0,
     'C13', 'second y: changes nothing, no second email', `emails=${secondEmails}`);
+
+  /* Item 3 retry flow: y: with Resend 500 -> error view with one r: button;
+     r: with Resend ok -> exactly one email, done view, no buttons, token kept. */
+  {
+    const resendCtrl = async (cfg) => {
+      await fetch(process.env.FAKE_RESEND_URL + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+    };
+    const retryLead = await seedLead(bizB.id, 'Retry Tester', 'retry@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await good(cb(chatB, 'c:' + retryLead));
+    await good(cb(chatB, 'd:' + retryLead));
+    await resendCtrl({ mode: '500' });
+    await resetResend();
+    await reset();
+    await good(cb(chatB, 'y:' + retryLead));
+    const failRow = (await svc.from('leads').select('status, review_token').eq('id', retryLead).single()).data;
+    const failEdits = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+    const failKbOk = failEdits.length === 1 && JSON.stringify(failEdits[0].body.reply_markup)
+      === JSON.stringify({ inline_keyboard: [[{ text: 'Try again', callback_data: 'r:' + retryLead, style: 'primary' }]] })
+      && failEdits[0].body.text.includes('❌ Status: Error')
+      && failEdits[0].body.text.includes('⚠️ Review request couldn\'t be sent');
+    line(failRow.status === 'done' && !!failRow.review_token && failKbOk,
+      'C17', 'y: email fails -> error view, one Try again (r:) button', `status=${failRow.status} kb=${failKbOk}`);
+
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await reset();
+    await good(cb(chatB, 'r:' + retryLead));
+    const okRow = (await svc.from('leads').select('status, review_token').eq('id', retryLead).single()).data;
+    const okEmails = (await resendCalls()).length;
+    const okEdits = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+    const okKbOk = okEdits.length === 1 && JSON.stringify(okEdits[0].body.reply_markup)
+      === JSON.stringify({ inline_keyboard: [] })
+      && okEdits[0].body.text.includes('✅ Status: Done')
+      && okEdits[0].body.text.includes('✉️ Review request sent');
+    line(okRow.status === 'done' && okRow.review_token === failRow.review_token && okEmails === 1 && okKbOk,
+      'C18', 'r: resends with existing token, one email, ends with no buttons',
+      `emails=${okEmails} tokenKept=${okRow.review_token === failRow.review_token}`);
+
+    // Second r: after the success sends nothing and changes nothing.
+    await resetResend();
+    await reset();
+    await good(cb(chatB, 'r:' + retryLead));
+    const againEmails = (await resendCalls()).length;
+    const againEdits = (await sent()).filter((x) => x.path.includes('/editMessageText')).length;
+    const againRow = (await svc.from('leads').select('status').eq('id', retryLead).single()).data;
+    line(againEmails === 0 && againEdits === 0 && againRow.status === 'done',
+      'C19', 'second r: after success sends nothing, changes nothing', `emails=${againEmails} edits=${againEdits}`);
+
+    // r: on an open lead is refused with "Nothing to retry."
+    const openRetry = await seedLead(bizB.id, 'Open Retry', 'openretry@example.com');
+    await resetResend();
+    await reset();
+    await good(cb(chatB, 'r:' + openRetry));
+    const refSent = await sent();
+    const refText = refSent.filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => x.body && x.body.text).join(' ');
+    const refEdits = refSent.filter((x) => x.path.includes('/editMessageText')).length;
+    const refEmails = (await resendCalls()).length;
+    line(refText.includes('Nothing to retry.') && refEdits === 0 && refEmails === 0,
+      'C20', 'r: on open lead refused, no edit, no email', `text=${refText.slice(0, 40)}`);
+  }
+
+  /* Item 1 (this bundle): retry idempotency keys, asserted at the fake
+     Resend server's Idempotency-Key header. */
+  {
+    const resendCtrl = async (cfg) => {
+      await fetch(process.env.FAKE_RESEND_URL + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+    };
+    const keyOf = async () => {
+      const calls = await resendCalls();
+      return calls.length === 1 ? (calls[0].headers && calls[0].headers['idempotency-key']) : `calls=${calls.length}`;
+    };
+    const toContacted = async (leadId) => { await good(cb(chatB, 'c:' + leadId)); await good(cb(chatB, 'd:' + leadId)); };
+
+    // C21: first send uses the plain key.
+    const firstLead = await seedLead(bizB.id, 'Key First', 'keyfirst@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(firstLead);
+    await resetResend();
+    await good(cb(chatB, 'y:' + firstLead));
+    const firstKey = await keyOf();
+    line(firstKey === `${firstLead}:review`, 'C21', 'first review send uses plain <leadId>:review key',
+      `header=${firstKey}`);
+
+    // C22: retry after a non-timeout (HTTP 500) failure uses :review:r1.
+    const httpLead = await seedLead(bizB.id, 'Key Http', 'keyhttp@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(httpLead);
+    await resendCtrl({ mode: '500' });
+    await resetResend();
+    await good(cb(chatB, 'y:' + httpLead));
+    const yKey = await keyOf();
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + httpLead));
+    const rKey = await keyOf();
+    line(yKey === `${httpLead}:review` && rKey === `${httpLead}:review:r1`,
+      'C22', 'retry after HTTP failure uses :review:r1',
+      `y=${yKey} r=${rKey}`);
+
+    // C23: retry after a timeout failure reuses the plain key (the first
+    // request may have delivered; Resend dedupes on the same key).
+    const slowLead = await seedLead(bizB.id, 'Key Slow', 'keyslow@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(slowLead);
+    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resetResend();
+    await good(cb(chatB, 'y:' + slowLead));
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + slowLead));
+    const slowKey = await keyOf();
+    line(slowKey === `${slowLead}:review`,
+      'C23', 'retry after timeout reuses plain key',
+      `header=${slowKey}`);
+
+    // C24: two sequential failures then a retry yields :review:r2.
+    const twoLead = await seedLead(bizB.id, 'Key Two', 'keytwo@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(twoLead);
+    await resendCtrl({ mode: '500' });
+    await resetResend();
+    await good(cb(chatB, 'y:' + twoLead));
+    await resetResend();
+    await good(cb(chatB, 'r:' + twoLead));
+    const secondKey = await keyOf();
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + twoLead));
+    const thirdKey = await keyOf();
+    line(secondKey === `${twoLead}:review:r1` && thirdKey === `${twoLead}:review:r2`,
+      'C24', 'two failures then retry yields :review:r2',
+      `second=${secondKey} third=${thirdKey}`);
+  }
+
+  /* Retry-key follow-up: a timeout reuses the EXACT key of the timed-out
+     attempt (which may be suffixed), never the plain key blindly. */
+  {
+    const resendCtrl = async (cfg) => {
+      await fetch(process.env.FAKE_RESEND_URL + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+    };
+    const keyOf = async () => {
+      const calls = await resendCalls();
+      return calls.length === 1 ? (calls[0].headers && calls[0].headers['idempotency-key']) : `calls=${calls.length}`;
+    };
+    const toContacted = async (leadId) => { await good(cb(chatB, 'c:' + leadId)); await good(cb(chatB, 'd:' + leadId)); };
+
+    // C27 (a): 500 (plain) -> timeout on :r1 -> retry reuses :r1.
+    const aLead = await seedLead(bizB.id, 'Key Seq A', 'keyseqa@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(aLead);
+    await resendCtrl({ mode: '500' });
+    await resetResend();
+    await good(cb(chatB, 'y:' + aLead));
+    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resetResend();
+    await good(cb(chatB, 'r:' + aLead));
+    const aSecond = await keyOf();
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + aLead));
+    const aThird = await keyOf();
+    line(aSecond === `${aLead}:review:r1` && aThird === `${aLead}:review:r1`,
+      'C27', '500 -> timeout(:r1) -> retry reuses :r1',
+      `second=${aSecond} third=${aThird}`);
+
+    // C28 (b): timeout, timeout, retry -> all three plain.
+    const bLead = await seedLead(bizB.id, 'Key Seq B', 'keyseqb@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(bLead);
+    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resetResend();
+    await good(cb(chatB, 'y:' + bLead));
+    const bFirst = await keyOf();
+    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resetResend();
+    await good(cb(chatB, 'r:' + bLead));
+    const bSecond = await keyOf();
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + bLead));
+    const bThird = await keyOf();
+    line(bFirst === `${bLead}:review` && bSecond === `${bLead}:review` && bThird === `${bLead}:review`,
+      'C28', 'timeout, timeout, retry -> all plain key',
+      `keys=${bFirst},${bSecond},${bThird}`);
+
+    // C29 (c): timeout (plain) -> 500 (plain reuse) -> retry :r2.
+    const cLead = await seedLead(bizB.id, 'Key Seq C', 'keyseqc@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(cLead);
+    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resetResend();
+    await good(cb(chatB, 'y:' + cLead));
+    await resendCtrl({ mode: '500' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + cLead));
+    const cSecond = await keyOf();
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + cLead));
+    const cThird = await keyOf();
+    line(cSecond === `${cLead}:review` && cThird === `${cLead}:review:r2`,
+      'C29', 'timeout -> 500 -> retry yields :r2',
+      `second=${cSecond} third=${cThird}`);
+
+    // C30 (e): failure meta is exactly { status, key } — no PII.
+    const failEvents = (await svc.from('lead_events').select('meta').eq('lead_id', aLead).eq('kind', 'review_request_failed')).data || [];
+    const metaOk = failEvents.length > 0 && failEvents.every((e) => {
+      const keys = Object.keys(e.meta || {}).sort();
+      const s = JSON.stringify(e.meta || {});
+      return keys.join(',') === 'key,status'
+        && typeof e.meta.key === 'string' && e.meta.key.startsWith(aLead + ':review')
+        && !s.includes('keyseqa@example.com') && !s.includes('Key Seq A');
+    });
+    line(metaOk, 'C30', 'review_request_failed meta is {status,key}, no PII',
+      `events=${failEvents.length} keys=${failEvents.length ? Object.keys(failEvents[0].meta).sort().join(',') : 'none'}`);
+  }
+
+  /* Post-transition failure (static): nothing between transitionLead and the
+     email attempt can be made to throw without changing production code —
+     the only query there (status_changed insert) is already caught, and
+     render() swallows its own read. So assert the y: post-transition wrap
+     exists in source: it logs tg_callback_failed, renders the error view
+     with one r: button when the lead has an email, and the no-email done
+     view otherwise, with no second answer. */
+  {
+    const src = fs.readFileSync(path.join(ROOT, 'api', 'tg.js'), 'utf8');
+    const yBlock = src.slice(src.indexOf("if (kind === 'y')"), src.indexOf("if (kind === 'r')"));
+    const hasTry = yBlock.includes('} catch (e) {') && yBlock.includes("console.error('tg_callback_failed'");
+    const errorView = yBlock.includes("render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed')");
+    const noEmailView = yBlock.includes("render('done', { reply_markup: { inline_keyboard: [] } }, 'no_email')");
+    const noSecondAnswer = !/catch \(e\) \{[^}]*answer\(/.test(yBlock.slice(yBlock.lastIndexOf('} catch (e) {')));
+    line(hasTry && errorView && noEmailView,
+      'C31', 'y: post-transition wrap renders error (or no-email done) on throw',
+      `try=${hasTry} error=${errorView} noEmail=${noEmailView} innerCatchAnswers=${!noSecondAnswer}`);
+  }
+
+  /* Item 2 (this bundle): a thrown DB error answers once with
+     "Something went wrong. Try again.", no edit, no email, still 200.
+     How the throw is injected: wrap global fetch and return a 500
+     PostgREST error for the targeted query only (v_client_leads for
+     getClientLead; review_requested on lead_events for hasReviewSent),
+     delegating everything else to the real fetch. */
+  {
+    const withDbFailure = async (match, fn) => {
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = async (url, opts) => {
+        if (match(String(url))) {
+          return new Response(JSON.stringify({ code: 'XX000', message: 'forced failure', details: '', hint: '' }),
+            { status: 500, headers: { 'Content-Type': 'application/json' } });
+        }
+        return realFetch(url, opts);
+      };
+      try { return await fn(); } finally { globalThis.fetch = realFetch; }
+    };
+    const checkOnce = async (label, data, match) => {
+      await resetResend();
+      await reset();
+      let res;
+      await withDbFailure(match, async () => { res = await good(cb(chatB, data)); });
+      const s = await sent();
+      const answers = s.filter((x) => x.path.includes('/answerCallbackQuery'));
+      const edits = s.filter((x) => x.path.includes('/editMessageText'));
+      const emails = (await resendCalls()).length;
+      const ok = res.code === 200 && answers.length === 1
+        && answers[0].body && answers[0].body.text === 'Something went wrong. Try again.'
+        && edits.length === 0 && emails === 0;
+      line(ok, label, `throw -> one "Something went wrong. Try again." answer, no edit/email, 200`,
+        `code=${res.code} answers=${answers.length} edits=${edits.length} emails=${emails}`);
+    };
+    await checkOnce('C25', 'c:' + seqLead, (u) => u.includes('v_client_leads'));
+    await checkOnce('C26', 'r:' + seqLead, (u) => u.includes('review_requested'));
+  }
 
   /* Contacted tap on a done lead changes nothing, still answers */
   const doneBefore = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;

@@ -413,6 +413,174 @@ const logOffset = fs.statSync(LOG).size;
   line(ok, 'P9', 'phone input maxlength 20 (static)', `found=${ok}`);
 }
 
+/* ---------- P10+: max-build phone validation + modal error handler ---------- */
+{
+  // P10: +20 with 8 national digits (mobile prefix needs 10) -> 400, no row.
+  // The /min build accepted this; the /max build rejects it.
+  await resetLimits();
+  const k10 = `${RUN}-p10`;
+  const s10 = await post(payload({ idempotencyKey: k10, phone: '+2010054083' }));
+  line(s10.status === 400 && (await leadFor(k10)).length === 0,
+    'P10', '+20+8 digits -> 400, nothing written (max build)', s10.status);
+}
+{
+  // P11: +20 with 13 national digits -> 400, no row.
+  await resetLimits();
+  const k11 = `${RUN}-p11`;
+  const s11 = await post(payload({ idempotencyKey: k11, phone: '+201005408345333' }));
+  line(s11.status === 400 && (await leadFor(k11)).length === 0,
+    'P11', '+20+13 digits -> 400, nothing written', s11.status);
+}
+{
+  // P12: valid +20 mobile (10 national digits) -> stored E.164.
+  await resetLimits();
+  const k12 = `${RUN}-p12`;
+  const s12 = await post(payload({ idempotencyKey: k12, phone: '+201005408345' }));
+  const r12 = await leadFor(k12);
+  line(s12.status === 200 && r12.length === 1 && r12[0].phone === '+201005408345',
+    'P12', 'valid +20 mobile -> stored E.164', `${s12.status} stored=${r12[0] && r12[0].phone}`);
+}
+{
+  // P13: the real 400 body for a bad phone, fed to the modal's plain handler:
+  // the phone error is shown under the phone field and the generic panel is NOT.
+  await resetLimits();
+  const k13 = `${RUN}-p13`;
+  const s13 = await post(payload({ idempotencyKey: k13, phone: '+2010054083' }));
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const m13 = /function handleLeadError\(err, ui\) \{([\s\S]*?)\n  \}\n  window\.estimateHandleError/.exec(html);
+  if (!m13 || s13.status !== 400 || !s13.json || !s13.json.errors) {
+    line(false, 'P13', 'modal handler: real 400 body -> phone field error, no generic panel',
+      `handlerFound=${!!m13} status=${s13.status} body=${JSON.stringify(s13.json)}`);
+  } else {
+    const { default: vm } = await import('node:vm');
+    const fn = vm.runInNewContext('(function handleLeadError(err, ui) {' + m13[1] + '\n})', Object.create(null));
+    const seen = { fields: {}, focused: null, generic: false };
+    const ui = {
+      setField: (k, msg) => { seen.fields[k] = msg; },
+      focusField: (k) => { seen.focused = k; },
+      showGeneric: () => { seen.generic = true; },
+    };
+    const kind = fn({ status: s13.status, body: s13.json }, ui);
+    const ok = kind === 'field' && seen.fields.phone === 'Enter a valid phone number.'
+      && seen.focused === 'phone' && seen.generic === false;
+    line(ok, 'P13', 'modal handler: real 400 body -> phone field error, no generic panel',
+      `kind=${kind} phone=${seen.fields.phone} focused=${seen.focused} generic=${seen.generic}`);
+  }
+}
+{
+  // P14: 5xx and network failure still show the generic panel, never a field error.
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const m14 = /function handleLeadError\(err, ui\) \{([\s\S]*?)\n  \}\n  window\.estimateHandleError/.exec(html);
+  if (!m14) {
+    line(false, 'P14', 'modal handler: 5xx/network -> generic panel only', 'handler not found');
+  } else {
+    const { default: vm } = await import('node:vm');
+    const fn = vm.runInNewContext('(function handleLeadError(err, ui) {' + m14[1] + '\n})', Object.create(null));
+    const run = (err) => {
+      const seen = { fields: {}, generic: false };
+      const kind = fn(err, {
+        setField: (k, msg) => { seen.fields[k] = msg; },
+        focusField: () => {},
+        showGeneric: () => { seen.generic = true; },
+      });
+      return kind === 'generic' && seen.generic === true && Object.keys(seen.fields).length === 0;
+    };
+    const ok = run({ status: 500, body: { ok: false } }) && run({ status: 503, body: {} }) && run(new Error('network'));
+    line(ok, 'P14', 'modal handler: 5xx/network -> generic panel only', `ok=${ok}`);
+  }
+}
+{
+  // P15: the built HTML inlines the calling-code table, under 6 KB, with the
+  // known entries baked in. Runs the real build to a scratch output.
+  const { spawnSync } = await import('node:child_process');
+  const outFile = path.join(ROOT, '_debug', 'build-test', 'index.html');
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'build-static.js'), 'index.html', '--out', outFile], { cwd: ROOT, encoding: 'utf8' });
+  let ok = false, detail = '';
+  if (r.status === 0 && fs.existsSync(outFile)) {
+    const built = fs.readFileSync(outFile, 'utf8');
+    const m = /var PHONE_CC = (\{[\s\S]*?\});/.exec(built);
+    if (m) {
+      let table = null;
+      try { table = JSON.parse(m[1]); } catch {}
+      const want = { '1': [7, 10], '20': [8, 10], '44': [7, 10], '971': [5, 12] };
+      const entriesOk = table && Object.entries(want).every(([k, v]) => JSON.stringify(table[k]) === JSON.stringify(v));
+      ok = built.includes('var PHONE_CC = {') && !built.includes('/*__PHONE_CC__*/')
+        && m[1].length < 6 * 1024 && entriesOk;
+      detail = `bytes=${m[1].length} entries=${entriesOk} 1=${JSON.stringify(table && table['1'])} 20=${JSON.stringify(table && table['20'])} 44=${JSON.stringify(table && table['44'])} 971=${JSON.stringify(table && table['971'])}`;
+    } else detail = 'table not found in built HTML';
+  } else detail = `build failed: ${(r.stderr || r.stdout || '').slice(0, 80)}`;
+  line(ok, 'P15', 'built HTML has calling-code table under 6 KB', detail);
+}
+{
+  // P16: notes of 2001 chars -> 400 WITH errors.notes (never the bare
+  // {ok:false} that showed the generic panel), and no row written.
+  await resetLimits();
+  const k16 = `${RUN}-p16`;
+  const s16 = await post(payload({ idempotencyKey: k16, notes: 'x'.repeat(2001) }));
+  line(s16.status === 400 && s16.json && s16.json.errors && s16.json.errors.notes === 'Keep notes under 2000 characters.'
+    && (await leadFor(k16)).length === 0,
+    'P16', 'notes 2001 chars -> 400 with errors.notes, no row',
+    `${s16.status} ${JSON.stringify(s16.json)}`);
+}
+{
+  // P17: the real notes 400 body through the modal handler (same node:vm
+  // approach as P13): an inline message is set and generic stays false.
+  // Plus a static check that the notes field has its own .err element.
+  await resetLimits();
+  const k17 = `${RUN}-p17`;
+  const s17 = await post(payload({ idempotencyKey: k17, notes: 'y'.repeat(2001) }));
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const m17 = /function handleLeadError\(err, ui\) \{([\s\S]*?)\n  \}\n  window\.estimateHandleError/.exec(html);
+  const notesMarkup = /<div class="f" data-f="notes"[^>]*>[\s\S]*?<textarea id="e-notes"[^>]*><\/textarea><p class="err"/.test(html);
+  if (!m17 || s17.status !== 400 || !s17.json || !s17.json.errors) {
+    line(false, 'P17', 'modal handler: notes 400 -> inline message, no generic panel',
+      `handler=${!!m17} status=${s17.status} markup=${notesMarkup}`);
+  } else {
+    const { default: vm } = await import('node:vm');
+    const fn = vm.runInNewContext('(function handleLeadError(err, ui) {' + m17[1] + '\n})', Object.create(null));
+    const seen = { fields: {}, focused: null, generic: false };
+    const kind = fn({ status: s17.status, body: s17.json }, {
+      setField: (k, msg) => { seen.fields[k] = msg; },
+      focusField: (k) => { seen.focused = k; },
+      showGeneric: () => { seen.generic = true; },
+    });
+    const ok = kind === 'field' && seen.fields.notes === 'Keep notes under 2000 characters.'
+      && seen.focused === 'notes' && seen.generic === false && notesMarkup;
+    line(ok, 'P17', 'modal handler: notes 400 -> inline message, no generic panel',
+      `kind=${kind} notes=${seen.fields.notes} focused=${seen.focused} generic=${seen.generic} markup=${notesMarkup}`);
+  }
+}
+
+{
+  // P18: firstErrorStep (vm, same approach as P13/P17): earliest step in
+  // step order wins; notes/unknown land on the last step.
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const m18 = /function firstErrorStep\(errors\) \{([\s\S]*?)\n  \}\n  window\.estimateFirstErrorStep/.exec(html);
+  const stepsMatch = /var STEPS = (\[[\s\S]*?\]);/.exec(html);
+  if (!m18 || !stepsMatch) {
+    line(false, 'P18', 'firstErrorStep: earliest errored step', `found=${!!m18}/${!!stepsMatch}`);
+  } else {
+    const { default: vm } = await import('node:vm');
+    const STEPS = vm.runInNewContext('(' + stepsMatch[1] + ')', Object.create(null));
+    const fn = vm.runInNewContext('(function firstErrorStep(errors) {' + m18[1] + '\n})', { STEPS });
+    const cases = [
+      [{ service: 'x' }, 0, 'service'],
+      [{ zip: 'x', timing: 'x' }, 1, 'zip'],
+      [{ timing: 'x' }, 2, 'timing'],
+      [{ phone: 'x', service: 'x' }, 0, 'service'],
+      [{ phone: 'x' }, 3, 'phone'],
+      [{ notes: 'x' }, 3, 'notes'],
+      [{}, null, null],
+    ];
+    const bad = cases.filter(([errors, step, field]) => {
+      const r = fn(errors);
+      return step === null ? r !== null : (!r || r.step !== step || r.field !== field);
+    });
+    line(bad.length === 0, 'P18', 'firstErrorStep: earliest errored step',
+      bad.length ? 'bad: ' + JSON.stringify(bad) : `${cases.length} cases ok`);
+  }
+}
+
 /* ---------- cleanup ---------- */
 {
   await svc.from('leads').delete().like('idempotency_key', `${RUN}-%`);

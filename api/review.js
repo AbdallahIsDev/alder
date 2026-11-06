@@ -1,13 +1,11 @@
 // Vercel serverless function behind /r/:token.
 //
-// GET  /r/:token      — review page (server-rendered, works with JS disabled)
-// GET  /r/:token/go   — record the click, then 302 to the roofer's Google review URL
-// GET  /r/:token?s=N  — landing page for the review-request email (GET NEVER WRITES)
-// GET  /r/:token?go=1 — same landing page without stars (GET NEVER WRITES)
-// POST /r/:token      — optional private rating; always 303 back to the page.
-//                        Also accepts go=1 to record the Google click mark sent by
-//                        the landing page's JavaScript (a GET is never trusted to
-//                        record anything: mail scanners open every link).
+// Every GET renders the interactive rating page and never writes anything
+// (no rows, no events, no clicks): plain /r/:token, ?s=N, ?go=1, and the
+// legacy /r/:token/go (mapped to go=1 by the rewrite) all land on the same
+// page. Only POST records: a valid stars writes the rating, and go=1 (sent
+// by the page's JavaScript) records the Google click mark. A GET is never
+// trusted to record anything: mail scanners open every link.
 //
 // Review gating is banned. The Google button is rendered identically on every visit,
 // before any rating and after every rating, and is never hidden, delayed, disabled or

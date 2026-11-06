@@ -84,6 +84,16 @@ async function checkLogo() {
 }
 await checkLogo();
 
+/* F6: the module actually loads the logo bytes (the file vercel.json's
+   functions.includeFiles guarantees in the deployed bundle). */
+{
+  const b64 = brand.logo && brand.logo.onDarkB64;
+  const bytes = b64 ? Buffer.from(b64, 'base64') : Buffer.alloc(0);
+  const isPng = bytes.length > 100 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  line(isPng, 'F6', 'brand module loads logo PNG bytes from generated JSON',
+    `len=${bytes.length} png=${isPng}`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
