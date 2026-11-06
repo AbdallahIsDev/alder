@@ -289,6 +289,21 @@ const BIND_CODE = ('DBTEST' + RUN).replace(/[^A-Z0-9]/g, '').toUpperCase().slice
     `len=${a && a.length} stable=${a === c} saltMatters=${a !== b} noSalt=${noSalt === null} env=${!!fromEnv}`);
 }
 
+/* ---------- E8: --seed-check is read-only and exempt from the production guard ----------
+   The guard protects suites. --seed-check runs two SELECTs and exits, and it is the
+   command the handoff recommends instead of a full run, so refusing it would make
+   the documented workflow unusable against production. Exit code is not asserted:
+   it is 0 when the row matches seed and 1 when it does not, and both are fine here. */
+{
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'tests', 'run.mjs'), '--seed-check'], {
+    cwd: ROOT, encoding: 'utf8', timeout: 60000, env: { ...process.env, ALLOW_PROD_TESTS: '' },
+  });
+  const refused = /refusing to run/.test(r.stdout || '');
+  const ran = /seed-check\s+(OK|FAIL|differing-columns)/.test(r.stdout || '');
+  line(!refused && ran, 'E8', 'seed-check runs without ALLOW_PROD_TESTS', `refused=${refused} ran=${ran} exit=${r.status}`);
+}
+
 /* ---------- E6: the runner rejects unknown flags ----------
    `--timing` used to be dropped silently, so it looked like a working flag.
    The child is given a real suite so that, if the check regresses, it exits 0

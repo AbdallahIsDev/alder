@@ -115,9 +115,15 @@ const { sources: envSources, files: envFiles } = loadEnv();
 out(`runner  env files: ${envFiles.join(', ')}${isTestEnv() ? '' : ' (TEST_ENV=1 would add .env.test)'}`);
 out(`runner  SUPABASE_URL from ${envSources.SUPABASE_URL || '(unset)'}`);
 
-/* Refuse to run against the project named in .env. The comparison is by value,
-   and neither URL is ever printed. ALLOW_PROD_TESTS=1 is the deliberate opt-out. */
-{
+const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+/* Refuse to run suites against the project named in .env. The comparison is by
+   value, and neither URL is ever printed. ALLOW_PROD_TESTS=1 is the opt-out.
+   Deliberately placed AFTER --seed-check: that path runs two SELECTs and exits,
+   and it is the command the handoff tells you to run instead of a full suite. */
+function assertNotProductionProject() {
   const check = checkNotProduction();
   if (check.reason === 'no-url') {
     out('FAIL  runner  SUPABASE_URL is not set — check .env or .env.test');
@@ -134,10 +140,6 @@ out(`runner  SUPABASE_URL from ${envSources.SUPABASE_URL || '(unset)'}`);
     out('runner  WARNING: SUPABASE_URL is the project in .env (production), allowed by ALLOW_PROD_TESTS=1');
   }
 }
-
-const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
 
 /* ---------- seed check (quick, read-only; no tests run) ---------- */
 if (RUN_SEED_CHECK) {
@@ -161,6 +163,8 @@ if (RUN_SEED_CHECK) {
   out('seed-check  OK  alder-demo matches seed, no chats bound');
   process.exit(0);
 }
+
+assertNotProductionProject();
 
 try {
   /* ---------- refusals ---------- */
