@@ -6,7 +6,7 @@
 
 import { randomBytes } from 'node:crypto';
 import {
-  getChatBinding, bindChat, claimBindCode, getBusinessById,
+  getChatBinding, bindChat, claimBindCode, getBusinessById, clearRateLimit,
   listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
 } from '../lib/db.js';
 import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup } from '../lib/tg.js';
@@ -176,6 +176,17 @@ async function handleCallback(cb, binding) {
     if (kind === 'r') {                                   // retry the failed review email only
       if (lead.status !== 'done') { await answer('Nothing to retry.'); return; }
       if (await hasReviewSent(leadId)) { await answer('Nothing to retry.'); return; }
+      // Mutex for a double tap. Two concurrent r: callbacks both pass the checks
+      // above; rate_limits is the only atomic primitive available without a schema
+      // change, so the first tap claims the retry and the second becomes a no-op.
+      // The claim is RELEASED when the attempt finishes (finally below), so this is
+      // a lock for the duration of the send, not a debounce: a later retry after a
+      // failure is allowed again. Fails open — a retry the owner asked for matters
+      // more than the lock.
+      let claimed = true;
+      try { claimed = await hitRateLimit('retry:' + leadId, 10, 1); } catch { claimed = true; }
+      if (!claimed) { await answer('Nothing to retry.'); return; }
+      try {
       const retry = await getDoneLeadForRetry(leadId, binding.business_id);
       if (!retry || !retry.review_token || !retry.email) { await answer('Nothing to retry.'); return; }
       // Idempotency key: Resend caches per key for 24 h. After a timeout the
@@ -199,6 +210,9 @@ async function handleCallback(cb, binding) {
         await render('done', { reply_markup: { inline_keyboard: [] } }, 'sent');
       } else {
         await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
+      }
+      } finally {
+        try { await clearRateLimit('retry:' + leadId); } catch { /* the window expires on its own */ }
       }
       return;
     }

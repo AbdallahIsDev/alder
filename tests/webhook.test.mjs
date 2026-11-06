@@ -318,6 +318,23 @@ try {
     line(againEmails === 0 && againEdits === 0 && againRow.status === 'done',
       'C19', 'second r: after success sends nothing, changes nothing', `emails=${againEmails} edits=${againEdits}`);
 
+    // C33: two r: callbacks fired at the same time send exactly one email.
+    // Both pass the "done and nothing sent yet" checks before either writes, so
+    // without a compare-and-set both would send. rate_limits is the CAS.
+    const raceLead = await seedLead(bizB.id, 'Race Retry', 'raceretry@example.com');
+    await resendCtrl({ mode: '500' });
+    await good(cb(chatB, 'c:' + raceLead));
+    await good(cb(chatB, 'd:' + raceLead));
+    await good(cb(chatB, 'y:' + raceLead));            // email fails -> error view
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await svc.from('rate_limits').delete().eq('key', 'retry:' + raceLead);
+    await Promise.all([good(cb(chatB, 'r:' + raceLead)), good(cb(chatB, 'r:' + raceLead))]);
+    const raceEmails = (await resendCalls()).length;
+    const raceRow = (await svc.from('leads').select('status').eq('id', raceLead).single()).data;
+    line(raceEmails === 1 && raceRow.status === 'done',
+      'C33', 'two r: at once -> exactly one send', `emails=${raceEmails} status=${raceRow.status}`);
+
     // r: on an open lead is refused with "Nothing to retry."
     const openRetry = await seedLead(bizB.id, 'Open Retry', 'openretry@example.com');
     await resetResend();
