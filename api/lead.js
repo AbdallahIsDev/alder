@@ -9,7 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { hashIp } from '../lib/hash.js';
 import { clientIp } from '../lib/request.js';
 import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
-import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit, findRecentDuplicate } from '../lib/db.js';
+import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit } from '../lib/db.js';
+import { findRecentDuplicate } from '../lib/lead-intake.js';
 import { notifyAllAfterLead } from '../lib/notify.js';
 
 const SERVICES = ['replacement', 'storm', 'repair', 'unsure'];
