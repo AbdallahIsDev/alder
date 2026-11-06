@@ -86,12 +86,20 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 
 ## Env var names in use
 
-`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX`, `SITE_URL`, `DATABASE_URL`, `RESEND_API_BASE`, `TELEGRAM_API_BASE`, `VERCEL_ENV`.
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX`, `SITE_URL`, `DATABASE_URL`, `RESEND_API_BASE`, `TELEGRAM_API_BASE`, `VERCEL_ENV`, `HEALTH_SECRET`, `CRON_SECRET` (test-only: `TEST_ENV`, `ALLOW_PROD_TESTS`).
 
 - `VERCEL_ENV`: read in `lib/outbound.js` only (`api/review.js` imports `isDev()` from it). Vercel sets it (`production`/`preview`/`development`). Two predicates with opposite polarity, on purpose: `isDev()` is `=== 'development'` and gates everything that WEAKENS a guard (shorter timeout, loopback host) — fail-closed; `testModeActive()` is `!isDeployed() && marker` and decides whether to BLOCK a real send — fail-safe. An unset `VERCEL_ENV` therefore gets production timeouts, real hosts, and still blocks when the marker is present.
 
 - `MAIL_REDIRECT_TO`: when set, every email recipient is redirected there and the subject gets a `[TEST for ...]` prefix.
 - `MAIL_REDIRECT_PREFIX`: value `off` removes the `[TEST for ...]` subject prefix; recipients are still redirected.
+
+## Ops endpoints
+
+- `GET /api/health` — seven event counts for the last hour and the last 24 hours (`created`, `tg_sent`, `tg_failed`, `email_owner_sent`, `email_owner_failed`, `autoreply_failed`, `review_request_failed`) plus `mail_redirect_active`, `webhook_secret_set`, `salt_set`. Numbers and booleans only; no PII, no business names, no env values. Auth: `x-health-secret` compared in constant time; **503 when `HEALTH_SECRET` is unset**, 401 otherwise, 405 for anything but GET.
+- `GET /api/selfcheck` — same counts, but it only messages anyone when something is wrong: any `*_failed` in 24 h, or `MAIL_REDIRECT_TO` set while `VERCEL_ENV=production`. It then sends one plain-text, counts-only Telegram message to the bound chats of the affected businesses (every business with a chat, in the redirect case). Clean state sends nothing.
+- `vercel.json` schedules `/api/selfcheck` daily at `0 9 * * *`. Vercel documents **Hobby as one run per day minimum interval** — a more frequent expression fails the deployment — and Pro/Enterprise as once per minute, so daily is legal on every plan (source: https://vercel.com/docs/schedules/cron-jobs/usage-and-pricing, read 2026-11-06). Cron Jobs are marked legacy there in favour of "Schedules".
+- A cron request carries `Authorization: Bearer $CRON_SECRET`; set `CRON_SECRET` to the same value as `HEALTH_SECRET` and `/api/selfcheck` accepts it. `/api/health` accepts the header only.
+- Neither endpoint is linked from the site and both set `Cache-Control: no-store`.
 
 ## Security posture (audit 2026-11-06)
 
@@ -103,6 +111,10 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - **Headers:** HSTS preload, `nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, Permissions-Policy, noindex. CSP needs `'unsafe-inline'` because the page and the review page use inline scripts — there is no known injection point, but that removes the backstop.
 - **Logging:** every `console.*` in `api/` and `lib/` prints a fixed event name plus an error code. No PII, token, URL or message body.
 - Open items are tracked in the list below (#14-#18).
+
+## Commit notes
+
+- `700b13a` (alerts: collapse CR/LF) also carries the owner's pre-existing unstaged edit to `lib/content.js`: the review textarea `border-radius` 6px → 8px. Same file, committed together; the change is intentional.
 
 ## Known issues / next
 
@@ -123,4 +135,5 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 15. No retention or deletion path. `leads.business_id` has no `on delete cascade`, so removing a business needs its leads deleted first; `lead_events`, `review_feedback` and `private.lead_financials` cascade from `leads`. A customer deletion request is manual SQL today.
 16. The per-business cap is 200 leads/hour. At two emails per lead that exhausts a Resend free-plan daily quota (100/day) in about 15 minutes, after which owner emails and auto-replies stop while Telegram keeps working.
 17. `sharp` 0.34.5 carries libvips/libheif/librsvg advisories (`npm audit`: 1 high). Dev-only image pipeline, fed only local trusted files; the fix is sharp 0.35.5, a breaking change.
-18. No observability: a failed alert is one `*_failed` row in `lead_events` and nothing surfaces it. No health endpoint, no counter, no digest.
+18. ~~No observability~~ Partly addressed: `/api/health` (counts on demand) and `/api/selfcheck` (daily, only speaks when something failed). Still missing: an alert when the *check itself* stops running.
+19. `lead_events` has no index on `(kind, created_at)` — only `(lead_id, created_at)`. Every health/selfcheck count is a sequential scan. Fine at this size; add `create index lead_events_kind_created on public.lead_events (kind, created_at desc)` when the table grows. **Schema change, not applied.**
