@@ -462,6 +462,26 @@ try {
     `rows=${rows} tg=${tg} mail=${mail} capped=${capped}`);
 } catch (e) { line(false, 'B13', 'auto-reply cap', e.message); }
 
+/* B15: the email is lowercased at the boundary, so a differently-cased address
+   is the same address for storage AND for duplicate detection. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const dupEmail = nextEmail();
+  const mixed = await post({ email: dupEmail.toUpperCase() });
+  const lower = await post({ email: dupEmail });
+  const mixedRows = await leadFor(mixed.key);
+  const lowerRows = await leadFor(lower.key);
+  const stored = mixedRows.length ? (await svc.from('leads').select('email').eq('id', mixedRows[0].id).single()).data.email : null;
+  const evs = lowerRows.length ? await events(lowerRows[0].id) : [];
+  const created = evs.find((e) => e.kind === 'created');
+  const flagged = created && created.meta && created.meta.duplicate_of === (mixedRows[0] && mixedRows[0].id);
+  line(stored === dupEmail && flagged, 'B15',
+    'email lowercased at insert and matched by the duplicate check',
+    `stored=${stored === dupEmail} flagged=${!!flagged}`);
+} catch (e) { line(false, 'B15', 'lowercase email', e.message); }
+
 /* B14: a repeat phone or email is flagged in the alert and on the created event.
    The lead is always stored — nothing is blocked or merged — and the alert never
    carries any detail of the earlier request. */
@@ -469,9 +489,13 @@ try {
   await clean();
   await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
   await reset(TG); await reset(RS);
-  const first = await post({ phone: '+15155550177', email: 'dupa@example.com' });
-  const second = await post({ phone: '+15155550177', email: 'dupb@example.com' });
-  const third = await post({ phone: '+15155550188', email: 'dupc@example.com' });
+  // Unique per run: a hardcoded phone can collide with a lead an earlier run left
+  // behind, and then duplicate_of points at that older row instead of the one this
+  // test created.
+  const dupPhone = nextPhone();
+  const first = await post({ phone: dupPhone, email: nextEmail() });
+  const second = await post({ phone: dupPhone, email: nextEmail() });
+  const third = await post({ phone: nextPhone(), email: nextEmail() });
   const ids = [];
   for (const k of [first.key, second.key, third.key]) {
     const rows = await leadFor(k);

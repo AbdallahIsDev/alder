@@ -125,7 +125,12 @@ export default async function handler(req, res) {
   // 'US': lib/db.js getActiveBusinessBySlug does not select a country column
   // (the businesses table has none), so business.country is never present.
   const service = str(b.service), home = str(b.home), timing = str(b.timing), age = str(b.age);
-  const zip = str(b.zip), phone = clean(str(b.phone)), name = clean(str(b.name)), email = clean(str(b.email)), notes = clean(str(b.notes));
+  const zip = str(b.zip), phone = clean(str(b.phone)), name = clean(str(b.name)), notes = clean(str(b.notes));
+  // Lowercased once, at the boundary: storage, the auto-reply recipient and the
+  // duplicate lookup all use this value, so 'A@b.com' and 'a@b.com' are the same
+  // address everywhere. Rows written before this change keep their original case
+  // and will not match a lowercased address in the duplicate check.
+  const email = clean(str(b.email)).toLowerCase();
 
   const slug = str(b.slug);
   if (!/^[a-z0-9-]{2,60}$/.test(slug)) return isForm ? badForm(null) : res.status(400).json({ ok: false });
