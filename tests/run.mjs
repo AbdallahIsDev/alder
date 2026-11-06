@@ -30,6 +30,7 @@ const DEFAULT_SUITES = [
   { file: 'tests/db-wall.test.mjs', needsHttp: false },
   { file: 'tests/migrations.test.mjs', needsHttp: false },
   { file: 'tests/health.test.mjs', needsHttp: false },
+  { file: 'tests/delete-scripts.test.mjs', needsHttp: false },
   { file: 'tests/lead-api.test.mjs', needsHttp: true },
   { file: 'tests/notify.test.mjs', needsHttp: false },
   { file: 'tests/webhook.test.mjs', needsHttp: false },

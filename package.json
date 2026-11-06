@@ -13,7 +13,9 @@
     "db:apply": "node scripts/apply-migrations.mjs",
     "bind": "node scripts/make-bind-code.mjs",
     "tg:commands": "node scripts/tg-commands.mjs set",
-    "tg:commands:info": "node scripts/tg-commands.mjs info"
+    "tg:commands:info": "node scripts/tg-commands.mjs info",
+    "delete:lead": "node scripts/delete-lead.mjs",
+    "offboard": "node scripts/offboard-business.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
