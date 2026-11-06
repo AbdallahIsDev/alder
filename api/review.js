@@ -12,6 +12,7 @@
 // de-emphasised. A rating is never required for the link to work.
 
 import { hashIp } from '../lib/hash.js';
+import { clientIp } from '../lib/request.js';
 import { getBusinessById, addEvent, hitRateLimit } from '../lib/db.js';
 import { getLeadByReviewToken, getFeedback, upsertFeedback, markGoogleClicked } from '../lib/review-db.js';
 import { reviewPage, googleUrlAllowed } from '../lib/content.js';
@@ -37,11 +38,6 @@ function usableGoogleUrl(v) {
   return typeof v === 'string' && /^https:\/\//.test(v) && v !== '#' ? v : null;
 }
 
-function clientIp(req) {
-  const first = (v) => String(v || '').split(',')[0].trim();
-  return first(req.headers['x-real-ip']) || first(req.headers['x-vercel-forwarded-for'])
-    || first(req.headers['x-forwarded-for']) || String((req.socket && req.socket.remoteAddress) || '');
-}
 
 export default async function handler(req, res) {
   const token = tokenFrom(req);

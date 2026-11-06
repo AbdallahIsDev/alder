@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { hashIp } from '../lib/hash.js';
+import { clientIp } from '../lib/request.js';
 import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
 import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit } from '../lib/db.js';
 import { notifyAllAfterLead } from '../lib/notify.js';
@@ -28,18 +29,6 @@ const BIZ_LIMIT = { window: 3600, max: 200 };
 
 const str = (v) => (typeof v === 'string' ? v.trim() : '');
 const clean = (v) => String(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');   // strip control characters, keep \n and \t
-
-/* Vercel's edge sets x-real-ip and x-vercel-forwarded-for; x-forwarded-for is the last resort
-   (and the only one a client can influence, which is why it is not first). */
-function clientIp(req) {
-  const first = (v) => String(v || '').split(',')[0].trim();
-  return (
-    first(req.headers['x-real-ip']) ||
-    first(req.headers['x-vercel-forwarded-for']) ||
-    first(req.headers['x-forwarded-for']) ||
-    String((req.socket && req.socket.remoteAddress) || '')
-  );
-}
 
 /* Small standalone page for the no-JS form. Inline styles only (the CSP allows them). */
 function htmlPage(title, message, businessName) {

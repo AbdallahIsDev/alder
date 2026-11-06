@@ -289,6 +289,23 @@ const BIND_CODE = ('DBTEST' + RUN).replace(/[^A-Z0-9]/g, '').toUpperCase().slice
     `len=${a && a.length} stable=${a === c} saltMatters=${a !== b} noSalt=${noSalt === null} env=${!!fromEnv}`);
 }
 
+/* ---------- E9: clientIp trusts the Vercel headers before x-forwarded-for ----------
+   On Vercel the edge sets x-real-ip and x-vercel-forwarded-for; x-forwarded-for's
+   left-most entry is whatever the client sent. If the order ever flips, a caller
+   can rotate that header and walk past the per-IP rate limit. */
+{
+  const { clientIp } = await import('../lib/request.js');
+  const h = (o) => ({ headers: o });
+  const realWins = clientIp(h({ 'x-real-ip': '1.1.1.1', 'x-forwarded-for': '9.9.9.9' })) === '1.1.1.1';
+  const vercelWins = clientIp(h({ 'x-vercel-forwarded-for': '2.2.2.2', 'x-forwarded-for': '9.9.9.9' })) === '2.2.2.2';
+  const firstOfList = clientIp(h({ 'x-forwarded-for': '3.3.3.3, 4.4.4.4' })) === '3.3.3.3';
+  const socketFallback = clientIp({ headers: {}, socket: { remoteAddress: '5.5.5.5' } }) === '5.5.5.5';
+  const empty = clientIp({ headers: {} }) === '';
+  line(realWins && vercelWins && firstOfList && socketFallback && empty, 'E9',
+    'clientIp: real-ip, then vercel, then xff, then socket',
+    `real=${realWins} vercel=${vercelWins} xff=${firstOfList} socket=${socketFallback} empty=${empty}`);
+}
+
 /* ---------- E8: --seed-check is read-only and exempt from the production guard ----------
    The guard protects suites. --seed-check runs two SELECTs and exits, and it is the
    command the handoff recommends instead of a full run, so refusing it would make
