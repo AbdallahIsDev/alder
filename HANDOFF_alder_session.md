@@ -5,18 +5,21 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 ## Current state
 
 - Branch `db-backend` (never push to `main`).
-- Baseline before this bundle: `db-wall 27, lead-api 44, notify 37, webhook 42, review 21, fallback 7, brand 6, outbound 4` (all green).
-- Final full run after this bundle: see report (per-suite counts before and after).
+- Baseline before this bundle (pre-bundle code, all green): `db-wall 27, lead-api 44, notify 37, webhook 42, review 21, fallback 7, brand 6, outbound 4` = **188 tests**.
+- Final full run after this bundle (all green): `db-wall 27, lead-api 44, notify 37, webhook 42, review 21, fallback 7, brand 6, outbound 7` = **191 tests**. Outbound went 4 → 7 because F5–F7 were added; no test was removed or skipped (191 PASS/FAIL lines in the run log).
 - Production is live; suites read the production database (see caveat below).
 
 ## What changed in this bundle (test speed)
 
-- Before/after (warm full run): lead-api 119s→~40s, webhook 102s→~80s, review 63s→~35s, notify 33s→~20s (via dev-only 1000ms outbound timeout + 2500ms hangs), fallback unchanged 17s. Total ~352s→~200s class. One shared `vercel dev` for all suites; suites run sequentially; dev-ready poll is 60× (fetch 1500ms timeout + 1000ms sleep).
-- `lib/outbound.js` reads `OUTBOUND_TIMEOUT_MS` only when `isDev()` (integer 200–3000); `tests/run.mjs` sets 1000 for dev + suites; fake hangs 6000→2500ms. Tests F5–F7, 3× stable notify/webhook runs.
+- Measured before/after, full run, same machine. Before (`_debug/before-run.txt`, pre-bundle code): total **411.4 s**, of which dev-ready 55.8 s; lead-api **125.9 s**, notify 32.9 s, webhook **102.9 s**, review 64.6 s, fallback 16.8 s, db-wall 7.7 s, brand 0.3 s, outbound 0.07 s. After (`_debug/final5-run.txt`): total **304.2 s**; lead-api **85.7 s**, notify 28.3 s, webhook **89.5 s**, review 44.6 s, fallback 16.5 s, db-wall 7.7 s, brand 0.3 s, outbound 0.1 s. The eight suites sum to 272.7 s, so 31.5 s of the 304.2 s is process overhead (npx version check, dev start, canary, cleanup).
+- **The 180 s target was NOT met.** 304.2 s total, and 272.7 s even with all startup overhead removed. Nothing in the run log supports a lower figure.
+- Earlier drafts of this file carried estimates (lead-api "~40 s", webhook "~80 s", review "~35 s", notify "~20 s", total "~200 s class"). Those were projections, not measurements — no log in `_debug/` records a run with those numbers. The only measured pre-bundle total is 352.3 s (`_debug/timing-warm.txt`, dev-ready 7.4 s), which is a warm-`vercel dev` run of the same pre-bundle code; 411.4 s is the same code with a cold 55.8 s dev start.
+- One shared `vercel dev` for all suites; suites run sequentially; dev-ready poll is 60× (fetch 1500 ms timeout + 1000 ms sleep). That poll quantises readiness to 1 s and, in the worst case, can take 150 s, not the 60 s the error message claims.
+- `lib/outbound.js` reads `OUTBOUND_TIMEOUT_MS` only when `isDev()` — `isDev()` is `!process.env.VERCEL_ENV || VERCEL_ENV === 'development'`, so an unset value counts as dev; an integer 200–3000 is honoured, anything else falls back to `TIMEOUT_MS` 3000. `tests/run.mjs` sets 1000 for the dev server and for every suite child; fake hang durations went 6000→2500 ms (7 sites: notify A4 + B7; webhook C23, C27, C28 twice, C29). Each hang now costs ~1000 ms of wall time, not 3000: measured A4 2287 ms and B7 2460 ms on a later run. Tests F5–F7 cover the override; 3× stable notify/webhook runs.
+- Runner: per-suite seconds + total always printed; `--seed-check` is a read-only gate that exits 1 on a mismatch; `--timing` is accepted but does nothing (timing always prints). **The dev-server skip is per run, not per suite:** `NEEDS_DEV` is true if *any* selected suite needs HTTP, so with the default list `notify`/`webhook` still run while `vercel dev` is up (they just never call it). `vercel dev` and the canary are skipped only when every selected suite is in-process — e.g. `node tests/run.mjs tests/webhook.test.mjs`.
 - lead-api/review logic tests moved in-process (same IDs/assertions); real HTTP kept only for lead 10/12/12b/13/14 and review D2/D4/D8/I1 (rewrites, headers, dev log, full round trips). Mutation checks: 5/5 kill tests.
-- Runner: per-suite seconds + total always printed; `--seed-check` read-only gate; suites that need no HTTP skip `vercel dev` + canary.
-- Supabase round trip from this machine: median ~196ms (20 SELECTs: min 178, median 196, max 354). Request counts per op: lead POST success 9, 400 POST 2, /start bind 5, /leads 2, c+d callbacks 11, y: 8, r: 4.
-- Tests that stayed on real HTTP: lead-api 10 (GET 405), 12/12b (page estimateDeliver end-to-end), 13/14 (dev LOG assertions); review D2 (full GET page), D4 (404 + dev generic page), D8 (/go rewrite), I1 (rewrite variants). fallback stays fully HTTP (urlencoded platform parsing).
+- Supabase round trip from this machine: median 192 ms (20 SELECTs: min 175, median 192, max 401; an earlier 20-sample run gave min 178 / median 196 / max 354). Request counts per op: lead POST success 9, 400 POST 2, /start bind 5, /leads 2, c+d callbacks 11, y: 8, r: 4.
+- Tests that stayed on real HTTP: lead-api 10 (GET 405), 12/12b (page estimateDeliver end-to-end), 13/14 (dev LOG assertions); review D2 (full GET page), D4 (404 + dev generic page), D8 (/go rewrite), I1 (rewrite variants). fallback stays fully HTTP (urlencoded platform parsing). Test 13 makes no HTTP call of its own — it reads the dev-server log, so it needs `vercel dev` to have run.
 
 ## What changed in the previous bundle (bot copy / phone / review)
 
@@ -60,10 +63,10 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 
 ## Test workflow
 
-- `node tests/run.mjs [suites...]` — one shared `vercel dev` for the run; suites run sequentially in the listed order. Per-suite seconds and total always print. Flags: `--seed-check` runs the read-only alder-demo seed check only (no tests, exits 1 on mismatch); `--timing` is accepted (timing always prints). Suites that need no HTTP (`db-wall`, `notify`, `webhook`, `brand`, `outbound`) skip `vercel dev` and the canary.
+- `node tests/run.mjs [suites...]` — one shared `vercel dev` for the run; suites run sequentially in the listed order. Per-suite seconds and total always print. Flags: `--seed-check` runs the read-only alder-demo seed check only (no tests, exits 1 on mismatch); `--timing` is accepted and ignored (timing always prints). The suites that need no HTTP are `db-wall`, `notify`, `webhook`, `brand`, `outbound`; `vercel dev` and the canary are skipped only when **every** selected suite is in that set, not suite by suite.
 - During an item, run only the suites you touched. Run `--seed-check` instead of a full baseline run whenever the last recorded green HEAD equals START. Run the full suite once at the end.
 - Outbound timeout rule: production code uses 3000 ms always. In tests only, `OUTBOUND_TIMEOUT_MS=1000` is honoured when `VERCEL_ENV` is unset or `development` (integer 200–3000); fake "hang" durations must stay above it (2500 ms).
-- Biggest remaining win would be a nearby dedicated test Supabase project (median round trip here is ~196 ms); the single biggest suite cost was lead-api through `vercel dev` (~2s per POST), now mostly in-process.
+- Biggest remaining win is a nearby dedicated test Supabase project. Measured per-test instrumentation (2026-11-06, not committed): lead-api makes 400 Supabase requests in 82.6 s and webhook 450 in 91.5 s; at the measured 192 ms median round trip that is 76.8 s and 86.4 s — i.e. ~93–95 % of each suite is database round-trip time, and the fake Telegram/Resend servers plus the 7 deliberate 1 s hangs account for the rest. `vercel dev` itself is no longer a suite cost: startup is ~10 s (9,972 ms measured today; the 55.8 s baseline figure was a cold `npx` cache, not a fixed cost), and only 4 lead-api tests call it (10, 12, 12b, 14) plus one reachability probe.
 
 ## How to create a bind code
 
@@ -89,8 +92,8 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 3. Logo CID not verified in real Gmail/Outlook/Apple Mail.
 4. Telegram button colours show only on clients newer than Feb 2026.
 5. Review-page Google handoff on mobile (Maps app vs browser) unverified.
-6. Stale comment in `api/review.js` and unused `mailCard` import.
-7. `/leads` reply does not use the new emoji statuses. (Still open: the `/leads` list still prints plain status words.)
+6. ~~Stale comment in `api/review.js` and unused `mailCard` import.~~ **Resolved** in `a9e7bb2`: the header now states GET-never-writes (matches tests D2/D4/I1), and `grep -rn "mailCard" --include=*.js --include=*.mjs .` returns nothing outside `node_modules`. Nothing to do.
+7. ~~`/leads` reply does not use the new emoji statuses.~~ **Resolved**: `api/tg.js:52-54` builds the reply with `renderLeadList(leads)`; `lib/content.js:258-269` renders each block through `statusLine()`, which prepends `STATUS_EMOJI` (`lib/content.js:37-44`). Test L1 asserts the spaced format. The line in the "previous bundle" section above is the accurate one; this entry was stale.
 8. Domain verification in Resend and removal of `MAIL_REDIRECT_TO` before real clients.
 9. Vercel Hobby is non-commercial; Pro needed once a client pays.
 10. Double-tap Try again race: two concurrent `r:` callbacks can both pass `hasReviewSent`, record both `review_requested` and `review_request_failed`, and leave the message on the error view after an email was sent. The shared Resend idempotency key prevents a duplicate email; a re-check of `hasReviewSent` immediately before sending only shrinks the window, so it was described but not implemented.
