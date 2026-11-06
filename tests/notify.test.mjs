@@ -427,31 +427,43 @@ try {
   line(!!minText && minText === minExpected,
     'B2b', 'minimal lead: exact text, no Email/Notes lines', `${minText ? minText.length + ' chars' : 'none'}`);
 
-  /* S: status block (unit). Every line <= 40 chars for first name "John",
-     the email never appears in the block, and the error view carries
-     exactly one r: (Try again) button. */
+  /* S: status block (unit). Before (26-char rule): every line <= 40 chars for
+     a sample first name "John". After: every line <= 26 chars (JS length,
+     emojis counted) and neither the name nor the email ever appears in the
+     block — checked with a 60-char name too. The error view carries exactly
+     one r: (Try again) button. */
   {
-    const { renderAlert: renderS, tryAgainKeyboard } = await import('../lib/content.js');
+    const { renderAlert: renderS, tryAgainKeyboard, confirmKeyboard } = await import('../lib/content.js');
     const sBiz = { name: 'Alder Roofing' };
     const sLead = { name: 'John Test', phone: '+201005408345', email: 'john@example.com', service: 'repair', timing: 'asap', home: 'house', roof_age: 'Not sure', insurance_claim: false, zip: '50265', notes: '' };
+    const longLead = { ...sLead, name: 'N'.repeat(60) };
     const views = [
       ['new', null], ['contacted', null], ['confirm', null],
       ['done', 'sent'], ['done', 'no_email'], ['error', 'failed'],
     ];
-    let lineOk = true, mailOk = true, detail = '';
+    let lineOk = true, mailOk = true, nameOk = true, detail = '';
     for (const [v, rr] of views) {
-      const tail = renderS({ business: sBiz, lead: sLead, view: v, reviewResult: rr }).split('\n\n').pop();
-      for (const l of tail.split('\n')) {
-        if (l.length > 40) { lineOk = false; detail += `${v}:${l.length} `; }
-        if (l.includes('john@example.com')) { mailOk = false; detail += `${v}:email `; }
+      for (const lead of [sLead, longLead]) {
+        const tail = renderS({ business: sBiz, lead, view: v, reviewResult: rr }).split('\n\n').pop();
+        for (const l of tail.split('\n')) {
+          if (l.length > 26) { lineOk = false; detail += `${v}:${l.length} `; }
+          if (l.includes('john@example.com')) { mailOk = false; detail += `${v}:email `; }
+          if (l.includes('John') || l.includes('NNN')) { nameOk = false; detail += `${v}:name `; }
+        }
       }
     }
     const uid = '00000000-0000-4000-8000-000000000001';
     const kb = tryAgainKeyboard(uid).inline_keyboard;
     const btnOk = kb.length === 1 && kb[0].length === 1 && kb[0][0].text === 'Try again'
       && kb[0][0].callback_data === 'r:' + uid && kb[0][0].style === 'primary';
-    line(lineOk && mailOk && btnOk, 'S1', 'status block: lines <=40, no email, one r: button',
-      `lineOk=${lineOk} mailOk=${mailOk} btnOk=${btnOk} ${detail}`);
+    // confirm keyboard: with email "Send request", without email "Mark done".
+    const ckEmail = confirmKeyboard(uid, true).inline_keyboard[0];
+    const ckNoEmail = confirmKeyboard(uid, false).inline_keyboard[0];
+    const ckOk = ckEmail[0].text === 'Send request' && ckEmail[0].callback_data === 'y:' + uid && ckEmail[0].style === 'success'
+      && ckNoEmail[0].text === 'Mark done' && ckNoEmail[0].callback_data === 'y:' + uid && ckNoEmail[0].style === 'success'
+      && ckEmail[1].text === 'Cancel' && ckNoEmail[1].text === 'Cancel';
+    line(lineOk && mailOk && nameOk && btnOk && ckOk, 'S1', 'status block: lines <=26, no name/email, one r: button, confirm labels',
+      `lineOk=${lineOk} mailOk=${mailOk} nameOk=${nameOk} btnOk=${btnOk} ck=${ckOk} ${detail}`);
 
     /* S2 (item 4): one padding system. Header/body/footer cells all carry
        24px horizontal padding (owner header 18px top/bottom, body 24/24,
@@ -549,6 +561,44 @@ try {
   line(res.code === 200 && reqs.length === 2 && !!reqs[0].body.reply_markup && !reqs[1].body.reply_markup,
     'B6', '400 with keyboard -> one retry without it', `calls=${reqs.length} keyboard=${!!reqs[0]?.body?.reply_markup}/${!!reqs[1]?.body?.reply_markup}`);
 } catch (e) { line(false, 'B6', 'keyboard retry', e.message); }
+
+/* L: renderLeadList exact format (unit). Before: "1. Name — service · phone
+   · age · Word" single crowded lines with numbering and an em dash.
+   After: title, blank line, three-line blocks, no numbering, no dashes. */
+{
+  const { renderLeadList } = await import('../lib/content.js');
+  const now = Date.now();
+  const at = (minAgo) => new Date(now - minAgo * 60000).toISOString();
+  const leads = [
+    { name: 'Legacy Phone', service: 'repair', phone: '5550102345', status: 'contacted', created_at: at(41) },
+    { name: 'A'.repeat(40), service: 'storm', phone: '+201005408345', status: 'done', created_at: at(1500) },
+    { name: 'Unknown Status', service: 'unsure', phone: '+15125550100', status: 'banana', created_at: at(5000) },
+  ];
+  const out = renderLeadList(leads, now);
+  const expected = [
+    'Recent requests',
+    '',
+    'Legacy Phone',
+    'Repair · +15550102345',
+    '41m ago · 🔵 Contacted',
+    '',
+    'A'.repeat(27) + '…',
+    'Storm damage · +201005408345',
+    '1d ago · ✅ Done',
+    '',
+    'Unknown Status',
+    'Not sure · +15125550100',
+    '3d ago · banana',
+  ].join('\n');
+  const maxLeads = Array.from({ length: 10 }, () => ({
+    name: 'N'.repeat(80), service: 'S'.repeat(60), phone: '+20100540834533333333333333', status: 'contacted', created_at: at(1),
+  }));
+  const maxLen = renderLeadList(maxLeads, now).length;
+  const ok = out === expected && !out.includes('—') && !/^\d+\./m.test(out)
+    && out.split('\n')[1] === '' && maxLen < 4096;
+  line(ok, 'L1', 'renderLeadList: exact spaced format, 10 max leads < 4096', `len=${out.length} maxLen=${maxLen}`);
+  if (out !== expected) console.log('NOTE       got:\n' + out);
+}
 
 /* 6 s hang */
 try {

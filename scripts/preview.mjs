@@ -7,7 +7,9 @@ import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import {
-  ownerEmail, autoReply, reviewEmail, renderAlert, reviewLandingPage,
+  ownerEmail, autoReply, reviewEmail, renderAlert, renderLeadList,
+  botLinkedText, BOT_HELP, BOT_ALREADY_CONNECTED, BOT_NOT_CONNECTED, BOT_PLAIN_TEXT,
+  reviewLandingPage,
 } from '../lib/content.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -130,6 +132,13 @@ add('telegram-alert-confirm.txt', 'Telegram alert — confirm', renderAlert({ bu
 add('telegram-alert-done.txt', 'Telegram alert — done (review sent)', renderAlert({ business, lead: cleanLead, view: 'done', reviewResult: 'sent' }), false);
 add('telegram-alert-done-no-email.txt', 'Telegram alert — done (no email)', renderAlert({ business, lead: { ...cleanLead, email: '' }, view: 'done', reviewResult: 'no_email' }), false);
 add('telegram-alert-error.txt', 'Telegram alert — error (Try again)', renderAlert({ business, lead: cleanLead, view: 'error', reviewResult: 'failed' }), false);
+add('telegram-leads.txt', 'Telegram /leads list', renderLeadList([
+  { name: 'Daniel Whitaker', service: 'repair', phone: '+15155550142', status: 'contacted', created_at: new Date(Date.now() - 41 * 60000).toISOString() },
+  { name: 'Maria Lopez', service: 'storm', phone: '5550102345', status: 'open', created_at: new Date(Date.now() - 1500 * 60000).toISOString() },
+  { name: 'A customer with a very long name that must be truncated', service: 'unsure', phone: '+201005408345', status: 'done', created_at: new Date(Date.now() - 5000 * 60000).toISOString() },
+]), false);
+add('telegram-bot-copy.txt', 'Telegram bot copy (linked/help/already/unconnected/plain)',
+  [botLinkedText(business.name), BOT_HELP, BOT_ALREADY_CONNECTED, BOT_NOT_CONNECTED, BOT_PLAIN_TEXT].join('\n\n---\n\n'), false);
 // Landing pages with a stubbed Google URL on 127.0.0.1 so the redirect can be seen
 // without leaving the machine.
 const STUB_GOOGLE = 'https://g.page/stub';
@@ -182,7 +191,9 @@ index += '<h2>Telegram alerts (text)</h2>\n'
   + '<p class="cap">Telegram: asked to confirm before emailing the customer</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-confirm.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: finished, review request sent</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-done.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: finished, no email on file (nothing was sent)</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-done-no-email.txt').body) + '</pre>\n'
-  + '<p class="cap">Telegram: review email failed — one "Try again" button (r:) resends it with the existing token</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-error.txt').body) + '</pre>\n';
+  + '<p class="cap">Telegram: review email failed — one "Try again" button (r:) resends it with the existing token</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-error.txt').body) + '</pre>\n'
+  + '<p class="cap">Telegram: /leads list (spaced format)</p><pre>' + esc(files.find((f) => f.name === 'telegram-leads.txt').body) + '</pre>\n'
+  + '<p class="cap">Telegram: bot copy — linked, help, already connected, not connected, plain-text hint</p><pre>' + esc(files.find((f) => f.name === 'telegram-bot-copy.txt').body) + '</pre>\n';
 index += '<h2>Owner email (plain text)</h2>\n<pre>' + esc(files.find((f) => f.name === 'owner-email.txt').body) + '</pre>\n';
 index += '</body></html>\n';
 write('index.html', index);

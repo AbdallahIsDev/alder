@@ -222,6 +222,9 @@ if (sync.status !== 0) fail('sync-brand.mjs failed; not building with stale bran
     }
     if (found) table[code] = [min, max];
   }
+  // NANP numbers always have exactly 10 national digits; the metadata min
+  // covers one small territory, which let 7-digit "US" numbers pass.
+  if (table['1']) table['1'] = [10, 10];
   const tableJson = JSON.stringify(table);
   if (tableJson.length >= 6 * 1024) fail('calling-code table is ' + tableJson.length + ' bytes, over the 6 KB target.');
   const defCc = String(biz.countryCode || '+1').replace(/\D/g, '') || '1';

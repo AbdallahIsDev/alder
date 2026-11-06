@@ -284,6 +284,26 @@ try {
     'I9', 'SVG stars, no text glyphs, Continue disabled until rating, no auto-redirect timer',
     `svg=${svgSpans}`);
 
+  /* R1: review page head — same-origin @font-face (Geist+Inter) with swap,
+     heading preload, favicon links, no card styling, smaller title.
+     Before (card design): main had background/border/radius/28px padding,
+     title 24px, body padding 16px, no fonts/favicon in the head. */
+  {
+    const r1 = await (await fetch(`${ORIGIN}/r/${tI}?s=3`)).text();
+    const fontsOk = r1.includes('@font-face') && r1.includes(`font-family:'Geist'`) && r1.includes(`font-family:'Inter'`)
+      && r1.includes(`url('/assets/fonts/geist-var.woff2')`) && r1.includes(`url('/assets/fonts/inter-var.woff2')`)
+      && r1.includes('font-display:swap') && r1.includes('<link rel="preload" as="font" href="/assets/fonts/geist-var.woff2"');
+    const iconsOk = r1.includes('rel="icon" href="/assets/icons/favicon.svg"')
+      && r1.includes('rel="icon" href="/assets/icons/favicon-32x32.png"')
+      && r1.includes('rel="apple-touch-icon" href="/assets/icons/apple-touch-icon-v1.png"');
+    const mainTag = /<main style="([^"]*)"/.exec(r1);
+    const noCard = mainTag && !/background:|border:|border-radius|box-shadow|padding:28px/.test(mainTag[1])
+      && mainTag[1].includes('max-width:420px') && /padding:0 24px/.test(r1);
+    const titleOk = r1.includes('font:700 20px/26px') && r1.includes('text-wrap:balance') && !r1.includes('font:700 24px/30px');
+    line(fontsOk && iconsOk && noCard && titleOk, 'R1', 'review head: fonts+preload+favicon, no card, 20px title',
+      `fonts=${fontsOk} icons=${iconsOk} noCard=${noCard} title=${titleOk}`);
+  }
+
   /* no studio branding, no AI, no auto-posting claim */
   const haystack = [html0, html1, ...pages.map((p) => p.html), ...(await resendCalls()).map((x) => (x.body?.html || '') + (x.body?.text || ''))].join('\n');
   const banned = /\bAlder Studio\b|\bAI\b|automatic(ally)? post|missed-call text-back|Google auto-post/i.test(haystack);

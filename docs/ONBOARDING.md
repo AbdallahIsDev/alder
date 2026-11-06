@@ -59,21 +59,24 @@ Codes are minted only by this local script. No public endpoint creates them.
 
 The bot menu has exactly two entries (names only, no secrets):
 
-- `leads` — Show recent requests
+- `leads` — Your latest requests
 - `help` — How this bot works
 
-Set them with `npm run tg:commands` (calls `setMyCommands`) and print the
-names with `npm run tg:commands:info` (calls `getMyCommands`).
-`/help` in the chat replies with the same short text for linked and unlinked
-chats and reveals no business data. `/leads` still returns no lead data for
-unlinked chats.
+After deploy, run `npm run tg:commands` once: it sets the two commands plus
+the bot description and short description (`setMyDescription` /
+`setMyShortDescription`); print the names afterwards with
+`npm run tg:commands:info`. The profile photo is set manually in BotFather
+with `/setuserpic`. Every bot message reads as if the bot belongs to this
+one business only. Unlinked chats get the "not connected" message and never
+any business data. Plain (non-command) text gets a short hint, at most 3 per
+chat per hour.
 
 Inline buttons use the Bot API `style` field (only `primary`, `success`,
 `danger` exist; older clients ignore it):
 
 - Mark contacted — `primary`
 - Job completed — `primary`
-- Yes, send review request — `success`
+- Send request — `success` ("Mark done" when the lead has no email)
 - Cancel — `danger`
 - Try again — `primary` (only after a failed review email; resends the
   review email with the existing token, never changes status)
@@ -96,8 +99,10 @@ real phone number, and submit. Check, in order:
 - An invalid phone is a 400 on the server and never stored. The server uses
   `libphonenumber-js/max` (real per-country patterns), and the modal caps
   digits per calling code from the same metadata (inlined at build time by
-  `build-static.js`). A 400 that names the phone shows "Enter a valid phone
-  number." under the field and stays on step 4.
+  `build-static.js`). A leading `00` works like `+`; one trunk `0` after the
+  calling code is accepted and removed (Italy keeps its zero); North American
+  numbers must have exactly 10 national digits. A 400 that names the phone
+  shows "Enter a valid phone number." under the field and stays on step 4.
 - Emails carry the logo as a CID inline image (attached by `lib/mail.js`
   from `logo.onDarkB64` in `lib/brand.generated.json`); the hosted PNGs in
   `assets/email/` are for the preview gallery only. `MAIL_REDIRECT_PREFIX`

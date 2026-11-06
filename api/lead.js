@@ -161,13 +161,34 @@ export default async function handler(req, res) {
   // The /max build checks real per-country patterns; the /min build (and the
   // default entry point) only check general length ranges and let through
   // e.g. an 8-digit +20 "mobile" that needs 10.
+  // A leading "00" is the international call prefix: treat it as "+".
+  // A single trunk "0" right after the calling code ("+44 (0)…", "+20 0…")
+  // is allowed: when the number is not valid as given, retry once with that
+  // one 0 removed and store the result only if THAT is valid E.164. Numbers
+  // where the 0 is part of the number (Italy +39) are valid as given, so the
+  // retry never fires for them. Nothing here loosens validity.
   let phoneE164 = null;
   let phoneBad = false;
   const region = (business && typeof business.country === 'string' && /^[A-Za-z]{2}$/.test(business.country)) ? business.country.toUpperCase() : 'US';
+  const phoneIntl = phone.startsWith('00') ? '+' + phone.slice(2) : phone;
   try {
-    if (!phone || !isValidPhoneNumber(phone, region)) phoneBad = true;
-    else phoneE164 = parsePhoneNumber(phone, region).number;
+    if (!phoneIntl || !isValidPhoneNumber(phoneIntl, region)) phoneBad = true;
+    else phoneE164 = parsePhoneNumber(phoneIntl, region).number;
   } catch { phoneBad = true; }
+  if (phoneBad && phoneIntl) {
+    try {
+      const parsed = parsePhoneNumber(phoneIntl, region);
+      const cc = parsed && String(parsed.countryCallingCode || '');
+      const nat = parsed && String(parsed.nationalNumber || '');
+      if (cc && nat.startsWith('0')) {
+        const retry = '+' + cc + nat.slice(1);
+        if (isValidPhoneNumber(retry, region)) {
+          phoneE164 = parsePhoneNumber(retry, region).number;
+          phoneBad = false;
+        }
+      }
+    } catch { /* keep phoneBad */ }
+  }
   // Per-field errors for the JSON path: the modal maps each one to that
   // field's existing message and stays on step 4. No values are echoed back.
   const fieldErrors = {};

@@ -52,9 +52,11 @@ export function loadDotEnvFiles({ env = process.env, root = ROOT, files = ['.env
 }
 
 export const COMMANDS = [
-  { command: 'leads', description: 'Show recent requests' },
-  { command: 'help', description: 'How this bot works' },
+  { command: 'leads', description: 'Your latest requests' },
+  { command: 'help', description: 'How this works' },
 ];
+export const DESCRIPTION = `Get your website's new estimate requests here the moment they arrive, and keep track of each one. Tap Start to connect this chat.`;
+export const SHORT_DESCRIPTION = `New estimate requests from your website, delivered instantly.`;
 
 function fail(msg) {
   console.error('tg:commands: ' + msg);
@@ -68,15 +70,19 @@ async function main() {
   const cmd = process.argv[2];
   if (cmd !== 'set' && cmd !== 'info') fail('usage: node scripts/tg-commands.mjs set|info');
 
-  let setMyCommands, getMyCommands;
+  let setMyCommands, getMyCommands, setMyDescription, setMyShortDescription;
   try {
-    ({ setMyCommands, getMyCommands } = await import('../lib/tg.js'));
+    ({ setMyCommands, getMyCommands, setMyDescription, setMyShortDescription } = await import('../lib/tg.js'));
   } catch { fail('tg_not_configured'); }
 
   if (cmd === 'set') {
     let r;
     try { r = await setMyCommands(COMMANDS); } catch { fail('tg_not_configured'); }
     if (!r || !r.ok) fail('setMyCommands failed status=' + (r && r.status !== undefined ? r.status : 'timeout'));
+    try { r = await setMyDescription(DESCRIPTION); } catch { fail('tg_not_configured'); }
+    if (!r || !r.ok) fail('setMyDescription failed status=' + (r && r.status !== undefined ? r.status : 'timeout'));
+    try { r = await setMyShortDescription(SHORT_DESCRIPTION); } catch { fail('tg_not_configured'); }
+    if (!r || !r.ok) fail('setMyShortDescription failed status=' + (r && r.status !== undefined ? r.status : 'timeout'));
     for (const c of COMMANDS) console.log(c.command);
   } else {
     let r;

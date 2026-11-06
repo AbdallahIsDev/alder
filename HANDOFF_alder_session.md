@@ -5,11 +5,20 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 ## Current state
 
 - Branch `db-backend` (never push to `main`).
-- Baseline before this bundle: `db-wall 27, lead-api 39, notify 36, webhook 31, review 20, fallback 7, brand 5, outbound 4` (all green).
+- Baseline before this bundle: `db-wall 27, lead-api 40, notify 36, webhook 36, review 20, fallback 7, brand 6, outbound 4` (all green).
 - Final full run after this bundle: see report (per-suite counts before and after).
 - Production is live; suites read the production database (see caveat below).
 
-## What changed in this bundle (follow-up 2)
+## What changed in this bundle (bot copy / phone / review)
+
+- Phone for all countries: modal `00` → `+`, one trunk `0` after the calling code allowed past the cap while typing and stripped on submit; server retries once without that `0` and stores only valid E.164 (Italy zero kept). North America code `1` overridden to `[10, 10]` in `build-static.js`. Exhaustive proof: 245 regions, 490 mobile-example strings (E.164 + international), 0 digit drops, 0 phoneOk/server failures. Tests P19–P22.
+- Telegram status block now ≤26 chars (no name/email), confirm buttons "Send request"/"Mark done". `/leads` uses a shared status map + `renderLeadList` (spaced blocks, truncated names, emoji statuses). Tests S1, C32, L1.
+- Bot copy is single-tenant (linked/help/already/unconnected/bad-code/plain-text constants in `lib/content.js`); plain text gets a hint rate-limited 3/chat/hour (fail closed); bot description + short description via `lib/tg.js` and `npm run tg:commands`. Tests D1–D5.
+- Review page: no card (24px gutter, 420px max, centred), 20px balanced title, landing-page @font-face (Geist/Inter, swap, heading preload) + favicon links, CSP allows them. Test R1.
+- Item 5B facts (names only): schema columns/statuses/event kinds as in the report; code never touches money (`private.lead_financials` only in schema); a second bot could reuse `lib/tg.js` by threading a per-call token (not implemented).
+- HANDOFF #11 resolved (US strictness). TypeScript decided: not now (use `@ts-check` + JSDoc later/at dashboard start).
+
+## What changed in the previous bundle (follow-up 2)
 
 - Corrected retry-key rule: a timeout reuses the EXACT key of the timed-out attempt, recorded in that failure's `lead_events.meta` as `{ status, key }`; any other failure gets a fresh `<leadId>:review:r<count>`. `getReviewFailureInfo` now returns `{ count, lastStatus, lastKey }` (null for legacy rows). Tests C21–C24 unchanged, C27–C30 new.
 - Post-done error handling: the post-transition part of kind `y` is wrapped so a throw logs `tg_callback_failed` and best-effort renders the error view (or the no-email done view) with no second answer. No uncaught query exists there today, so the test is static (C31).
@@ -69,4 +78,6 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 8. Domain verification in Resend and removal of `MAIL_REDIRECT_TO` before real clients.
 9. Vercel Hobby is non-commercial; Pro needed once a client pays.
 10. Double-tap Try again race: two concurrent `r:` callbacks can both pass `hasReviewSent`, record both `review_requested` and `review_request_failed`, and leave the message on the error view after an email was sent. The shared Resend idempotency key prevents a duplicate email; a re-check of `hasReviewSent` immediately before sending only shrinks the window, so it was described but not implemented.
-11. Client/server phone minimum mismatch: with no leading `+`, client `phoneOk` accepts 7, 8, 9, 10 digits (and 11 starting with 1) for US, while the server (`isValidPhoneNumber`, region US) accepts only 10 (and 11 starting with 1). A 7–9 digit bare number passes the modal, then gets a 400 field error on submit. Report only; no change made.
+11. ~~Client/server phone minimum mismatch~~ Resolved: North America is `[10, 10]` on both sides now (see follow-up bundle above).
+12. Owner bot plan: a second bot could reuse `lib/tg.js` by threading a per-call token (today it reads `TELEGRAM_BOT_TOKEN` from env in `call()`). Not implemented.
+13. Live chat idea needs planning (no design yet).
