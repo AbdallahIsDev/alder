@@ -11,17 +11,12 @@
 // before any rating and after every rating, and is never hidden, delayed, disabled or
 // de-emphasised. A rating is never required for the link to work.
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { hashIp } from '../lib/hash.js';
 import { getBusinessById, addEvent, hitRateLimit } from '../lib/db.js';
 import { getLeadByReviewToken, getFeedback, upsertFeedback, markGoogleClicked } from '../lib/review-db.js';
 import { reviewPage, googleUrlAllowed } from '../lib/content.js';
 import { sendLowRatingAlert } from '../lib/notify.js';
-import { isDev } from '../lib/outbound.js';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NOT_FOUND = '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not found</title></head><body><p>Not found.</p></body></html>';
 
 function notFound(res) {
@@ -46,12 +41,6 @@ function clientIp(req) {
   const first = (v) => String(v || '').split(',')[0].trim();
   return first(req.headers['x-real-ip']) || first(req.headers['x-vercel-forwarded-for'])
     || first(req.headers['x-forwarded-for']) || String((req.socket && req.socket.remoteAddress) || '');
-}
-
-/* A test-only hook, guarded by the .test-mode marker. It lets Gate D prove that a
-   failed click write cannot stop the redirect. It never exists in a deployment. */
-function forceWriteFailure(req) {
-  return isDev() && fs.existsSync(path.join(ROOT, '.test-mode')) && req.headers['x-review-force-fail'] === '1';
 }
 
 export default async function handler(req, res) {
