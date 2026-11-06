@@ -142,6 +142,11 @@ for (const [label, over] of bad) {
 /* ---------- 6. hit_rate_limit ---------- */
 {
   await svc.from('rate_limits').delete().eq('key', 'test');
+  // hit_rate_limit buckets by floor(epoch / p_window_seconds). Four calls that
+  // straddle a minute boundary start a fresh counter, so the 4th would be allowed
+  // and the test would fail at random. Wait out a boundary that is too close.
+  const msLeft = 60000 - (Date.now() % 60000);
+  if (msLeft < 3000) await new Promise((r) => setTimeout(r, msLeft + 50));
   const seq = [];
   for (let i = 0; i < 4; i++) {
     const { data, error } = await svc.rpc('hit_rate_limit', { p_key: 'test', p_window_seconds: 60, p_max: 3 });
