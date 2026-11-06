@@ -290,6 +290,22 @@ const BIND_CODE = ('DBTEST' + RUN).replace(/[^A-Z0-9]/g, '').toUpperCase().slice
     `len=${a && a.length} stable=${a === c} saltMatters=${a !== b} noSalt=${noSalt === null} env=${!!fromEnv}`);
 }
 
+/* ---------- E10: the auto-reply cap default and its parsing ----------
+   40 is sized against Resend's free plan: 100 emails/day, and a capped lead can
+   still cost one uncapped owner email, so the cap must stay under half of it. */
+{
+  const { autoReplyCap } = await import('../lib/notify.js');
+  const saved = process.env.AUTOREPLY_DAILY_CAP;
+  delete process.env.AUTOREPLY_DAILY_CAP;
+  const def = autoReplyCap();
+  process.env.AUTOREPLY_DAILY_CAP = '7';
+  const seven = autoReplyCap();
+  const bad = ['0', '-3', 'abc', ''].every((v) => { process.env.AUTOREPLY_DAILY_CAP = v; return autoReplyCap() === 40; });
+  if (saved === undefined) delete process.env.AUTOREPLY_DAILY_CAP; else process.env.AUTOREPLY_DAILY_CAP = saved;
+  line(def === 40 && seven === 7 && bad, 'E10', 'auto-reply cap: default 40, invalid falls back',
+    `default=${def} explicit=${seven} invalid=${bad}`);
+}
+
 /* ---------- E9: clientIp trusts the Vercel headers before x-forwarded-for ----------
    On Vercel the edge sets x-real-ip and x-vercel-forwarded-for; x-forwarded-for's
    left-most entry is whatever the client sent. If the order ever flips, a caller
