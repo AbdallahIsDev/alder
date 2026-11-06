@@ -144,10 +144,13 @@ try {
   await createBindCode(code2, bizB.id, new Date(Date.now() + 3600000).toISOString());
   await reset();
   await good(msg(chatB, '/start ' + code2));
-  const aLead1 = await seedLead(bizA.id, 'Alpha Only', 'alpha@example.com');
-  await seedLead(bizA.id, 'Alpha Two', 'alpha2@example.com');
-  await seedLead(bizB.id, 'Beta Only', 'beta@example.com');
-  await seedLead(bizB.id, 'Beta Two', 'beta2@example.com');
+  // Seeds are order-independent (unique idempotency keys per lead).
+  const [aLead1] = await Promise.all([
+    seedLead(bizA.id, 'Alpha Only', 'alpha@example.com'),
+    seedLead(bizA.id, 'Alpha Two', 'alpha2@example.com'),
+    seedLead(bizB.id, 'Beta Only', 'beta@example.com'),
+    seedLead(bizB.id, 'Beta Two', 'beta2@example.com'),
+  ]);
 
   await reset();
   await good(msg(chatA, '/leads'));

@@ -100,13 +100,14 @@ try {
     && html0.includes('disabled');
   line(page0.status === 200 && hasRatingPage, 'D2', 'page offers a rating widget before any rating', `${page0.status} widget=${hasRatingPage}`);
 
-  const pages = [];
-  for (let s = 1; s <= 5; s++) {
+  // Seeds/pages are order-independent (unique tokens, no shared state):
+  // run them concurrently.
+  const pages = await Promise.all([1, 2, 3, 4, 5].map(async (s) => {
     const tk = token(); const leadId = await seed(tk);
     await svc.from('review_feedback').upsert({ lead_id: leadId, rating: s, comment: '' }, { onConflict: 'lead_id' });
     const r = await pageIn(tk);
-    pages.push({ s, token: tk, html: r.text, status: r.status });
-  }
+    return { s, token: tk, html: r.text, status: r.status };
+  }));
   const allOfferContinue = pages.every((p) => p.status === 200
     && p.html.includes('id="continue"')
     && p.html.includes('disabled'));

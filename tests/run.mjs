@@ -22,17 +22,27 @@ const LOG = path.join(ROOT, '_debug', 'vercel-dev.log');
 const API = 'http://localhost:3000/api/lead';
 // Default when no suites are named on the command line. outbound is LAST on purpose:
 // its finally removes the .test-mode marker that the other suites rely on.
+/* needsHttp: the suite makes real HTTP calls through `vercel dev` (platform
+   behaviour). In-process-only suites skip starting the dev server entirely. */
 const DEFAULT_SUITES = [
-  'tests/db-wall.test.mjs',
-  'tests/lead-api.test.mjs',
-  'tests/notify.test.mjs',
-  'tests/webhook.test.mjs',
-  'tests/review.test.mjs',
-  'tests/fallback.test.mjs',
-  'tests/brand.test.mjs',
-  'tests/outbound.test.mjs',
+  { file: 'tests/db-wall.test.mjs', needsHttp: false },
+  { file: 'tests/lead-api.test.mjs', needsHttp: true },
+  { file: 'tests/notify.test.mjs', needsHttp: false },
+  { file: 'tests/webhook.test.mjs', needsHttp: false },
+  { file: 'tests/review.test.mjs', needsHttp: true },
+  { file: 'tests/fallback.test.mjs', needsHttp: true },
+  { file: 'tests/brand.test.mjs', needsHttp: false },
+  { file: 'tests/outbound.test.mjs', needsHttp: false },
 ];
-const SUITES = process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_SUITES;
+const cliArgs = process.argv.slice(2);
+const RUN_SEED_CHECK = cliArgs.includes('--seed-check');
+const suiteFiles = cliArgs.filter((a) => !a.startsWith('--'));
+const SUITES_TO_RUN = (suiteFiles.length ? suiteFiles : DEFAULT_SUITES.map((s) => s.file)).map((f) => {
+  const known = DEFAULT_SUITES.find((s) => s.file === f);
+  return { file: f, needsHttp: known ? known.needsHttp : true };
+});
+const TIMING_TOTAL = Date.now();
+const NEEDS_DEV = SUITES_TO_RUN.some((s) => s.needsHttp);
 
 const out = (s) => process.stdout.write(s + '\n');
 const FORBIDDEN = ['TELEGRAM_API_BASE', 'RESEND_API_BASE'];
@@ -103,6 +113,29 @@ const svc = createClient(dotenv.SUPABASE_URL, dotenv.SUPABASE_SERVICE_ROLE_KEY, 
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+/* ---------- seed check (quick, read-only; no tests run) ---------- */
+if (RUN_SEED_CHECK) {
+  const seed = {
+    slug: 'alder-demo', name: 'Alder Roofing (demo)',
+    owner_email: 'owner@alder-demo.example.com',
+    google_review_url: 'https://g.page/r/alder-demo',
+    timezone: 'America/Chicago', status: 'demo',
+  };
+  const { data: row, error } = await svc.from('businesses').select('*').eq('slug', 'alder-demo').maybeSingle();
+  if (error) { out('seed-check  FAIL  ' + error.code); process.exit(1); }
+  if (!row) { out('seed-check  FAIL  alder-demo row missing'); process.exit(1); }
+  const differing = Object.keys(seed).filter((k) => String(row[k] ?? '') !== String(seed[k]));
+  const { data: chats } = await svc.from('business_chats').select('id').eq('business_id', row.id);
+  const chatsCount = (chats || []).length;
+  out(`seed-check  differing-columns: ${differing.length ? differing.join(',') : '(none)'} business_chats-rows: ${chatsCount}`);
+  if (differing.length || chatsCount > 0) {
+    out('seed-check  FAIL  reset the alder-demo row to seed values and delete its business_chats rows');
+    process.exit(1);
+  }
+  out('seed-check  OK  alder-demo matches seed, no chats bound');
+  process.exit(0);
+}
+
 try {
   /* ---------- refusals ---------- */
   for (const f of ['.env', '.env.local']) {
@@ -146,57 +179,62 @@ try {
 
   fs.writeFileSync(MARKER, 'tests/run.mjs active — lib/tg.js and lib/mail.js must refuse real sends\n');
 
-  /* ---------- dev server ---------- */
-  fs.mkdirSync(path.dirname(LOG), { recursive: true });
-  const logFd = fs.openSync(LOG, 'w');
-  // Pinned 48.12.1: 65.x needs Windows Developer Mode (symlink EPERM without it).
-  dev = spawn('npx', ['vercel@48.12.1', 'dev', '--listen', '3000'], {
-    cwd: ROOT,
-    env: { ...process.env, ...bases, VERCEL_ENV: 'development', OUTBOUND_TIMEOUT_MS: '1000' },
-    shell: true,
-    stdio: ['ignore', logFd, logFd],
-  });
+  /* ---------- dev server (skipped when no selected suite needs HTTP) ---------- */
+  if (NEEDS_DEV) {
+    fs.mkdirSync(path.dirname(LOG), { recursive: true });
+    const logFd = fs.openSync(LOG, 'w');
+    // Pinned 48.12.1: 65.x needs Windows Developer Mode (symlink EPERM without it).
+    dev = spawn('npx', ['vercel@48.12.1', 'dev', '--listen', '3000'], {
+      cwd: ROOT,
+      env: { ...process.env, ...bases, VERCEL_ENV: 'development', OUTBOUND_TIMEOUT_MS: '1000' },
+      shell: true,
+      stdio: ['ignore', logFd, logFd],
+    });
 
-  let ready = false;
-  for (let i = 0; i < 60; i++) {
-    try {
-      const r = await fetch(API, { method: 'GET', signal: AbortSignal.timeout(1500) });
-      if (r.status === 405) { ready = true; break; }
-    } catch {}
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-  if (!ready) throw new Error('vercel dev did not answer on port 3000 within 60 s');
-  out('runner  vercel dev ready');
+    let ready = false;
+    for (let i = 0; i < 60; i++) {
+      try {
+        const r = await fetch(API, { method: 'GET', signal: AbortSignal.timeout(1500) });
+        if (r.status === 405) { ready = true; break; }
+      } catch {}
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    if (!ready) throw new Error('vercel dev did not answer on port 3000 within 60 s');
+    out('runner  vercel dev ready');
 
-  /* ---------- canary ---------- */
-  await fakes.tg.reset();
-  canaryKey = 'canary-' + Math.random().toString(36).slice(2, 12);
-  const payload = {
-    service: 'repair', home: 'house', timing: 'asap', age: 'Not sure', zip: '50265',
-    phone: '5155550100', name: 'Canary User', email: 'canary@example.com', notes: '',
-    claim: false, website: '', elapsed: 5000, slug: 'alder-demo', idempotencyKey: canaryKey,
-  };
-  const r = await fetch(API, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-real-ip': '198.51.100.250' },
-    body: JSON.stringify(payload),
-  });
-  const tgReqs = await fakes.tg.requests();
-  out(`runner  canary: POST ${r.status}, fake telegram requests = ${tgReqs.length}`);
-  if (r.status !== 200 || tgReqs.length !== 1) {
-    throw new Error(`canary failed: the fake Telegram server received ${tgReqs.length} requests. `
-      + 'The loopback override did not reach the function. Aborting before any real send.');
+    /* ---------- canary ---------- */
+    await fakes.tg.reset();
+    canaryKey = 'canary-' + Math.random().toString(36).slice(2, 12);
+    const payload = {
+      service: 'repair', home: 'house', timing: 'asap', age: 'Not sure', zip: '50265',
+      phone: '5155550100', name: 'Canary User', email: 'canary@example.com', notes: '',
+      claim: false, website: '', elapsed: 5000, slug: 'alder-demo', idempotencyKey: canaryKey,
+    };
+    const r = await fetch(API, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-real-ip': '198.51.100.250' },
+      body: JSON.stringify(payload),
+    });
+    const tgReqs = await fakes.tg.requests();
+    out(`runner  canary: POST ${r.status}, fake telegram requests = ${tgReqs.length}`);
+    if (r.status !== 200 || tgReqs.length !== 1) {
+      throw new Error(`canary failed: the fake Telegram server received ${tgReqs.length} requests. `
+        + 'The loopback override did not reach the function. Aborting before any real send.');
+    }
+    await svc.from('leads').delete().eq('idempotency_key', canaryKey);
+    canaryKey = null;
+    await fakes.tg.reset();
+  } else {
+    out('runner  no selected suite needs HTTP: vercel dev and canary skipped');
   }
-  await svc.from('leads').delete().eq('idempotency_key', canaryKey);
-  canaryKey = null;
-  await fakes.tg.reset();
 
   /* ---------- suites ---------- */
   let failed = 0;
-  for (const suite of SUITES) {
+  for (const suite of SUITES_TO_RUN) {
     out('');
-    out(`=== ${suite} ===`);
-    const abs = path.join(ROOT, suite);
-    if (!fs.existsSync(abs)) { fail(`suite not found: ${suite}`); failed++; continue; }
+    out(`=== ${suite.file} ===`);
+    const abs = path.join(ROOT, suite.file);
+    const suiteStart = Date.now();
+    if (!fs.existsSync(abs)) { fail(`suite not found: ${suite.file}`); failed++; continue; }
     const rc = await new Promise((resolve) => {
       const c = spawn(process.execPath, [abs], {
         cwd: ROOT,
@@ -215,10 +253,12 @@ try {
       });
       c.on('exit', (code) => resolve(code || 0));
     });
-    if (rc !== 0) { failed++; fail(`${suite} exited ${rc}`); }
+    out(`runner  ${suite.file} ${((Date.now() - suiteStart) / 1000).toFixed(1)}s`);
+    if (rc !== 0) { failed++; fail(`${suite.file} exited ${rc}`); }
   }
 
   out('');
+  out(`runner  total ${((Date.now() - TIMING_TOTAL) / 1000).toFixed(1)}s`);
   out(failed ? `RUNNER  ${failed} suite(s) FAILED` : 'RUNNER  all suites passed');
   if (failed) process.exitCode = 1;
 } catch (e) {
