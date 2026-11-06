@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
+import { fakeRes, ALDER_DEMO } from './helpers.mjs';
 
 loadEnv();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,7 +40,7 @@ async function resendCalls() {
 }
 const token = () => randomBytes(24).toString('base64url');
 
-const { data: biz } = await svc.from('businesses').select('id, name, google_review_url').eq('slug', 'alder-demo').single();
+const { data: biz } = await svc.from('businesses').select('id, name, google_review_url').eq('slug', ALDER_DEMO).single();
 const leads = [];
 async function seed(tk) {
   const { data } = await svc.from('leads').insert({
@@ -58,19 +59,9 @@ async function seed(tk) {
    D4 (404 + dev-server generic page), D8 (/r/:token/go rewrite), I1 (all
    rewrite variants create nothing). */
 const { default: reviewHandler } = await import('../api/review.js');
-function fakeRes() {
-  return {
-    code: 0, body: '', headers: {},
-    setHeader(k, v) { this.headers[k] = v; },
-    status(c) { this.code = c; return this; },
-    json(o) { this.body = o; return this; },
-    send(s) { this.body = s; return this; },
-    end() { return this; },
-  };
-}
 let rip = 100;
 async function callReview({ method = 'GET', token, query = {}, body }) {
-  const res = fakeRes();
+  const res = fakeRes({ body: '' });
   await reviewHandler({
     method,
     query: { token, ...query },

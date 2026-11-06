@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
+import { fakeRes, ALDER_DEMO } from './helpers.mjs';
 
 loadEnv();
 const TG = process.env.FAKE_TG_URL;
@@ -54,17 +55,6 @@ async function clean() {
   await resetLimits();
 }
 
-function fakeRes() {
-  const r = {
-    code: 0, body: null, headers: {},
-    setHeader(k, v) { this.headers[k] = v; },
-    status(c) { this.code = c; return this; },
-    json(o) { this.body = o; return this; },
-    send(s) { this.body = s; return this; },
-    end() { return this; },
-  };
-  return r;
-}
 
 let ip = 40;
 async function post(over, extra) {
@@ -72,7 +62,7 @@ async function post(over, extra) {
     service: 'replacement', home: 'house', timing: 'asap', age: '10 to 20 years',
     zip: '50265', phone: '5155550142', name: 'Notify Tester', email: 'notify@example.com',
     notes: 'plain note', claim: false, website: '', elapsed: 5000,
-    slug: 'alder-demo', idempotencyKey: `${RUN}-${Math.random().toString(36).slice(2, 10)}`,
+    slug: ALDER_DEMO, idempotencyKey: `${RUN}-${Math.random().toString(36).slice(2, 10)}`,
     ...over,
   };
   const res = fakeRes();
@@ -130,7 +120,7 @@ try {
     const urls = b.html.match(/https?:\/\/[^"\s]+/g) || [];
     badUrls = urls.filter((u) => {
       const clean = u.replace(/['")]+$/, '');
-      return !(brandPrefix.some((p) => clean.startsWith(p)) || clean.startsWith('https://g.page') || clean.includes('alder-demo'));
+      return !(brandPrefix.some((p) => clean.startsWith(p)) || clean.startsWith('https://g.page') || clean.includes(ALDER_DEMO));
     });
   }
   const noExternalOk = !!b && !/<script/.test(b.html) && badUrls.length === 0;
@@ -543,7 +533,7 @@ try {
 let boundId = null, activeId = null;
 try {
   await clean();
-  const { data: biz } = await svc.from('businesses').select('id').eq('slug', 'alder-demo').single();
+  const { data: biz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
   const chat = 770001;
   await svc.from('business_chats').upsert({ business_id: biz.id, tg_chat_id: chat }, { onConflict: 'tg_chat_id' });
   await reset(TG);

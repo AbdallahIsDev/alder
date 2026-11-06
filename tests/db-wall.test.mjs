@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { loadEnv } from '../lib/env.js';
+import { ALDER_DEMO } from './helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RUN = Math.random().toString(36).slice(2, 8);
@@ -86,7 +87,7 @@ for (const t of PUBLIC_TABLES) {
 }
 
 /* ---------- business row ---------- */
-const { data: biz, error: bizErr } = await svc.from('businesses').select('id,slug,status').eq('slug', 'alder-demo').maybeSingle();
+const { data: biz, error: bizErr } = await svc.from('businesses').select('id,slug,status').eq('slug', ALDER_DEMO).maybeSingle();
 if (bizErr || !biz) {
   console.log(`FAIL  seed  'alder-demo' business missing — run supabase/seed.sql  (${bizErr?.message || 'no row'})`);
   process.exit(1);

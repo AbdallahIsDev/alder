@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
+import { fakeRes, ALDER_DEMO } from './helpers.mjs';
 
 loadEnv();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -44,16 +45,6 @@ async function resendCalls() {
 }
 async function resetResend() { await fetch(process.env.FAKE_RESEND_URL + '/__reset', { method: 'POST' }); }
 
-function fakeRes() {
-  return {
-    code: 0, body: null, headers: {},
-    setHeader(k, v) { this.headers[k] = v; },
-    status(c) { this.code = c; return this; },
-    json(o) { this.body = o; return this; },
-    send(s) { this.body = s; return this; },
-    end() { return this; },
-  };
-}
 async function call(update, secret) {
   const res = fakeRes();
   await tgHandler({
@@ -73,7 +64,7 @@ const cb = (chatId, data, messageId = 100, text = 'Original alert') => ({
 const ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const mkCode = (n) => { let s = ''; for (let i = 0; i < n; i++) s += ALPHA[Math.floor(Math.random() * ALPHA.length)]; return s; };
 
-const { data: bizA } = await svc.from('businesses').select('id').eq('slug', 'alder-demo').single();
+const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
 const { data: bizB } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
 const chatA = 880001, chatB = 880002, chatX = 880003;
 const createdLeads = [];

@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
+import { ALDER_DEMO } from './helpers.mjs';
 
 loadEnv();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -37,7 +38,7 @@ async function resendCalls() {
 const form = (over) => ({
   service: 'repair', home: 'house', timing: 'planning', age: 'Not sure',
   zip: '50265', phone: '5155550100', name: 'Fallback Tester',
-  email: 'fallback@example.com', notes: 'no-js note', website: '', slug: 'alder-demo',
+  email: 'fallback@example.com', notes: 'no-js note', website: '', slug: ALDER_DEMO,
   ...over,
 });
 async function postForm(values) {
@@ -87,7 +88,7 @@ try {
     'E3', 'invalid ZIP -> 400 HTML', r3.status);
 
   /* auto-reply payload */
-  const owner = await svc.from('businesses').select('name, owner_email').eq('slug', 'alder-demo').single();
+  const owner = await svc.from('businesses').select('name, owner_email').eq('slug', ALDER_DEMO).single();
   const mails = await resendCalls();
   const auto = mails.find((x) => x.body && x.body.reply_to === owner.data.owner_email);
   const b = auto && auto.body;
@@ -107,7 +108,7 @@ try {
     body: JSON.stringify({
       service: 'repair', home: 'house', timing: 'asap', age: 'Not sure', zip: '50265',
       phone: '5155550100', name: 'Json Still Works', email: '', notes: '', claim: false,
-      website: '', elapsed: 5000, slug: 'alder-demo', idempotencyKey: `${RUN}-json`,
+      website: '', elapsed: 5000, slug: ALDER_DEMO, idempotencyKey: `${RUN}-json`,
     }),
   });
   let j = null; try { j = await r5.json(); } catch {}

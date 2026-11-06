@@ -16,6 +16,7 @@ import { startFakes } from './fakes.mjs';
 import { isLoopback } from '../lib/outbound.js';
 import { loadEnv, isTestEnv, checkNotProduction } from '../lib/env.js';
 import { createClient } from '@supabase/supabase-js';
+import { ALDER_DEMO } from './helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MARKER = path.join(ROOT, '.test-mode');
@@ -144,12 +145,12 @@ function assertNotProductionProject() {
 /* ---------- seed check (quick, read-only; no tests run) ---------- */
 if (RUN_SEED_CHECK) {
   const seed = {
-    slug: 'alder-demo', name: 'Alder Roofing (demo)',
+    slug: ALDER_DEMO, name: 'Alder Roofing (demo)',
     owner_email: 'owner@alder-demo.example.com',
     google_review_url: 'https://g.page/r/alder-demo',
     timezone: 'America/Chicago', status: 'demo',
   };
-  const { data: row, error } = await svc.from('businesses').select('*').eq('slug', 'alder-demo').maybeSingle();
+  const { data: row, error } = await svc.from('businesses').select('*').eq('slug', ALDER_DEMO).maybeSingle();
   if (error) { out('seed-check  FAIL  ' + error.code); process.exit(1); }
   if (!row) { out('seed-check  FAIL  alder-demo row missing'); process.exit(1); }
   const differing = Object.keys(seed).filter((k) => String(row[k] ?? '') !== String(seed[k]));
@@ -249,7 +250,7 @@ try {
     const payload = {
       service: 'repair', home: 'house', timing: 'asap', age: 'Not sure', zip: '50265',
       phone: '5155550100', name: 'Canary User', email: 'canary@example.com', notes: '',
-      claim: false, website: '', elapsed: 5000, slug: 'alder-demo', idempotencyKey: canaryKey,
+      claim: false, website: '', elapsed: 5000, slug: ALDER_DEMO, idempotencyKey: canaryKey,
     };
     const r = await fetch(API, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-real-ip': '198.51.100.250' },

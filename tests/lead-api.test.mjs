@@ -25,6 +25,7 @@ const RUN = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 /* ---------- env, one shared loader ---------- */
 // process.env > .env.test (TEST_ENV=1) > .env.local > .env, same as every other suite.
 import { loadEnv } from '../lib/env.js';
+import { fakeRes, ALDER_DEMO } from './helpers.mjs';
 loadEnv();
 const FAKE_TG_URL = process.env.FAKE_TG_URL;
 async function fakeTg(cfg) {
@@ -57,7 +58,7 @@ function payload(over) {
     service: 'replacement', home: 'house', timing: 'asap', age: '10 to 20 years',
     zip: '50265', phone: PHONE, name: NAME, email: EMAIL, notes: NOTES,
     claim: false, website: '', elapsed: 5000,
-    slug: 'alder-demo', idempotencyKey: `${RUN}-base`,
+    slug: ALDER_DEMO, idempotencyKey: `${RUN}-base`,
     ...over,
   };
 }
@@ -99,16 +100,6 @@ async function eventsFor(leadId) {
    test 10 (405 method), 12/12b (page estimateDeliver end-to-end), 13/14
    (dev-server LOG file assertions). 413/415 have no tests in this suite. */
 const { default: leadHandler } = await import('../api/lead.js');
-function fakeRes() {
-  return {
-    code: 0, body: null, headers: {},
-    setHeader(k, v) { this.headers[k] = v; },
-    status(c) { this.code = c; return this; },
-    json(o) { this.body = o; return this; },
-    send(s) { this.body = s; return this; },
-    end() { return this; },
-  };
-}
 async function postInProcess(body, opts) {
   const res = fakeRes();
   await leadHandler({
