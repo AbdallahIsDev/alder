@@ -87,6 +87,26 @@ try {
     const r = await call({ method: 'POST', secret: 'health-test-secret-value' });
     line(r.code === 405, 'H5', 'POST -> 405', `code=${r.code}`);
   }
+  /* H6: the cron entry is valid for a Hobby plan.
+     Hobby allows one run per day and rejects a more frequent expression at deploy
+     time, so a five-minute schedule here would break the deployment, not just the
+     job. The path must also resolve to a real function. */
+  {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'vercel.json'), 'utf8'));
+    const crons = cfg.crons || [];
+    const one = crons.length === 1 ? crons[0] : null;
+    const fields = one ? one.schedule.split(' ') : [];
+    const [m, h, dom, mon, dow] = fields;
+    const daily = fields.length === 5 && m !== '*' && h !== '*' && dom === '*' && mon === '*' && dow === '*';
+    const resolves = !!one && fs.existsSync(path.join(ROOT, one.path.replace(/^\//, '') + '.js'));
+    line(!!one && daily && resolves, 'H6', 'cron: one daily job, path resolves',
+      `crons=${crons.length} schedule=${one ? one.schedule : 'none'} daily=${daily} file=${resolves}`);
+  }
+
   /* ---------- self-check ---------- */
 
   const callCheck = async ({ method = 'GET', secret, bearer } = {}) => {
