@@ -19,6 +19,7 @@ import { getBusinessById, addEvent, hitRateLimit } from '../lib/db.js';
 import { getLeadByReviewToken, getFeedback, upsertFeedback, markGoogleClicked } from '../lib/review-db.js';
 import { reviewPage, googleUrlAllowed } from '../lib/content.js';
 import { sendLowRatingAlert } from '../lib/notify.js';
+import { isDev } from '../lib/outbound.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NOT_FOUND = '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not found</title></head><body><p>Not found.</p></body></html>';
@@ -50,8 +51,7 @@ function clientIp(req) {
 /* A test-only hook, guarded by the .test-mode marker. It lets Gate D prove that a
    failed click write cannot stop the redirect. It never exists in a deployment. */
 function forceWriteFailure(req) {
-  const dev = !process.env.VERCEL_ENV || process.env.VERCEL_ENV === 'development';
-  return dev && fs.existsSync(path.join(ROOT, '.test-mode')) && req.headers['x-review-force-fail'] === '1';
+  return isDev() && fs.existsSync(path.join(ROOT, '.test-mode')) && req.headers['x-review-force-fail'] === '1';
 }
 
 export default async function handler(req, res) {

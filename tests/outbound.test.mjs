@@ -10,9 +10,12 @@
 //          the project root and loopback *_API_BASE overrides, the overrides are
 //          ignored (calls target the real Telegram and Resend hosts) and the
 //          .test-mode block does NOT apply.
-//   F3     With VERCEL_ENV unset, the loopback overrides are honoured again.
-//   F4     With VERCEL_ENV unset and the overrides missing, the .test-mode block
-//          applies and no fetch call happens at all.
+//   F3     With VERCEL_ENV=development, the loopback overrides are honoured.
+//   F4     With VERCEL_ENV=development and the overrides missing, the .test-mode
+//          block applies and no fetch call happens at all.
+//   F8     With VERCEL_ENV unset, behaviour is PRODUCTION (3000 ms, real hosts) but
+//          the .test-mode block still fires: isDev() fails closed, the interlock
+//          fails safe.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -84,8 +87,8 @@ try {
       `tg=${tgReal} resend=${rsReal} blocked=${!unblocked} calls=${recorded.length}`);
   }
 
-  /* F3: VERCEL_ENV unset — the loopback overrides are honoured */
-  delete process.env.VERCEL_ENV;
+  /* F3: VERCEL_ENV=development — the loopback overrides are honoured */
+  process.env.VERCEL_ENV = 'development';
   recorded.length = 0;
   const m3 = await sendMessage('12345', 'hello');
   const m4 = await sendMail(mail());
@@ -95,7 +98,7 @@ try {
     && !blockedByInterlock('TELEGRAM_API_BASE') && !blockedByInterlock('RESEND_API_BASE'),
     'F3', 'dev: loopback overrides honoured', `tg=${tgLoop} resend=${rsLoop} calls=${recorded.length}`);
 
-  /* F4: VERCEL_ENV unset, overrides missing — the .test-mode block applies, no fetch */
+  /* F4: dev, overrides missing — the .test-mode block applies, no fetch */
   const before = recorded.length;
   delete process.env.TELEGRAM_API_BASE;
   delete process.env.RESEND_API_BASE;
@@ -106,10 +109,11 @@ try {
   line(blockedTg && blockedRs && m5.ok === false && m5.status === 'blocked_test_mode'
     && m6.ok === false && m6.status === 'blocked_test_mode' && recorded.length === before,
     'F4', 'dev without overrides: block applies, no fetch', `blocked=${blockedTg}/${blockedRs} newCalls=${recorded.length - before}`);
+
   /* F5-F7: dev-only OUTBOUND_TIMEOUT_MS override (honoured 200..3000 only). */
   const { effectiveTimeoutMs } = await import('../lib/outbound.js');
   const savedTimeout = process.env.OUTBOUND_TIMEOUT_MS;
-  delete process.env.VERCEL_ENV;
+  process.env.VERCEL_ENV = 'development';
   process.env.OUTBOUND_TIMEOUT_MS = '1000';
   line(effectiveTimeoutMs() === 1000, 'F5', 'override honoured in dev for 1000', `eff=${effectiveTimeoutMs()}`);
 
@@ -125,6 +129,22 @@ try {
     return v === 3000;
   });
   line(prodOk, 'F7', 'override ignored when VERCEL_ENV=production/preview', `ok=${prodOk}`);
+
+  /* F8: unset is NOT dev. Production timeout, and the marker still blocks the send
+     even though the loopback overrides are present. This is the fail-closed /
+     fail-safe pair: isDev() says no, testModeActive() says still-unknown. */
+  delete process.env.VERCEL_ENV;
+  process.env.TELEGRAM_API_BASE = TG_LOOPBACK;
+  process.env.RESEND_API_BASE = RS_LOOPBACK;
+  process.env.OUTBOUND_TIMEOUT_MS = '1000';
+  const unsetTimeout = effectiveTimeoutMs();
+  const unsetBlocked = blockedByInterlock('TELEGRAM_API_BASE');
+  const before8 = recorded.length;
+  const m8 = await sendMessage('12345', 'hello');
+  line(unsetTimeout === 3000 && unsetBlocked && m8.ok === false && m8.status === 'blocked_test_mode'
+    && recorded.length === before8,
+    'F8', 'unset VERCEL_ENV: 3000 ms and still blocked', `t=${unsetTimeout} blocked=${unsetBlocked} calls=${recorded.length - before8}`);
+
   if (savedTimeout === undefined) delete process.env.OUTBOUND_TIMEOUT_MS; else process.env.OUTBOUND_TIMEOUT_MS = savedTimeout;
 } catch (e) {
   line(false, 'F0', 'outbound suite threw', e.message);
