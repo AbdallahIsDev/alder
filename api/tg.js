@@ -128,7 +128,7 @@ async function handleCallback(cb, binding) {
         return;
       }
       await answer('');
-      await render('confirm', { reply_markup: confirmKeyboard(leadId) });
+      await render('confirm', { reply_markup: confirmKeyboard(leadId, !!lead.email) });
       return;
     }
 

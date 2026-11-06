@@ -205,11 +205,14 @@ try {
   await good(cb(chatB, 'd:' + seqLead));
   const seqRow2 = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
   const edits2 = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+  // Before (26-char rule): label 'Yes, send review request' + text
+  // 'Send a review request to Seq'. After: label 'Send request' (fits the
+  // bubble) + nameless 'Send a review request?'.
   const s2Kb = edits2.length === 1 && JSON.stringify(edits2[0].body.reply_markup)
     === JSON.stringify({ inline_keyboard: [[
-      { text: 'Yes, send review request', callback_data: 'y:' + seqLead, style: 'success' },
+      { text: 'Send request', callback_data: 'y:' + seqLead, style: 'success' },
       { text: 'Cancel', callback_data: 'n:' + seqLead, style: 'danger' }]] })
-    && edits2[0].body.text.includes('Send a review request to Seq');
+    && edits2[0].body.text.includes('Send a review request?');
   await reset();
   await good(cb(chatB, 'y:' + seqLead));
   const seqRow3 = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
@@ -288,7 +291,9 @@ try {
     const failKbOk = failEdits.length === 1 && JSON.stringify(failEdits[0].body.reply_markup)
       === JSON.stringify({ inline_keyboard: [[{ text: 'Try again', callback_data: 'r:' + retryLead, style: 'primary' }]] })
       && failEdits[0].body.text.includes('❌ Status: Error')
-      && failEdits[0].body.text.includes('⚠️ Review request couldn\'t be sent');
+      // Before (26-char rule): '⚠️ Review request couldn't be sent' (34 chars).
+      // After: '⚠️ Review email failed' (fits 26).
+      && failEdits[0].body.text.includes('⚠️ Review email failed');
     line(failRow.status === 'done' && !!failRow.review_token && failKbOk,
       'C17', 'y: email fails -> error view, one Try again (r:) button', `status=${failRow.status} kb=${failKbOk}`);
 
@@ -542,6 +547,30 @@ try {
     await checkOnce('C26', 'r:' + seqLead, (u) => u.includes('review_requested'));
   }
 
+  /* No-email confirm flow: first button reads "Mark done", y: ends with the
+     no-email done view (unchanged outcome, shorter copy). */
+  {
+    const noMailLead = await seedLead(bizB.id, 'No Mail Tester', '');
+    await resetResend();
+    await good(cb(chatB, 'c:' + noMailLead));
+    await reset();
+    await good(cb(chatB, 'd:' + noMailLead));
+    const nmEdits = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+    const nmKbOk = nmEdits.length === 1 && JSON.stringify(nmEdits[0].body.reply_markup)
+      === JSON.stringify({ inline_keyboard: [[
+        { text: 'Mark done', callback_data: 'y:' + noMailLead, style: 'success' },
+        { text: 'Cancel', callback_data: 'n:' + noMailLead, style: 'danger' }]] })
+      && nmEdits[0].body.text.includes('No email on file.')
+      && nmEdits[0].body.text.includes("Can't send a request.");
+    await reset();
+    await good(cb(chatB, 'y:' + noMailLead));
+    const nmDone = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+    const nmDoneOk = nmDone.length === 1 && nmDone[0].body.text.includes('✅ Status: Done')
+      && nmDone[0].body.text.includes('ℹ️ No email, none sent.');
+    line(nmKbOk && nmDoneOk, 'C32', 'no-email confirm: Mark done label, y: ends done/no-email',
+      `kb=${nmKbOk} done=${nmDoneOk}`);
+  }
+
   /* Contacted tap on a done lead changes nothing, still answers */
   const doneBefore = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
   const eventsBefore = (await svc.from('lead_events').select('kind').eq('lead_id', seqLead)).data.length;
@@ -576,13 +605,14 @@ try {
     const allBtns = [
       ...alertKeyboard(uid).inline_keyboard[0],
       ...jobDoneKeyboard(uid).inline_keyboard[0],
-      ...confirmKeyboard(uid).inline_keyboard[0],
+      ...confirmKeyboard(uid, true).inline_keyboard[0],
     ];
     const allowed = new Set(['primary', 'success', 'danger']);
+    // Before (26-char rule): 'Yes, send review request'. After: 'Send request'.
     const expect = {
       'Mark contacted': { cb: 'c:' + uid, style: 'primary' },
       'Job completed': { cb: 'd:' + uid, style: 'primary' },
-      'Yes, send review request': { cb: 'y:' + uid, style: 'success' },
+      'Send request': { cb: 'y:' + uid, style: 'success' },
       'Cancel': { cb: 'n:' + uid, style: 'danger' },
     };
     const ok = allBtns.length === 4 && allBtns.every((b) => allowed.has(b.style) && expect[b.text] && b.callback_data === expect[b.text].cb && b.style === expect[b.text].style);
