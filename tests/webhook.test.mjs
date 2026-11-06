@@ -403,6 +403,89 @@ try {
       `second=${secondKey} third=${thirdKey}`);
   }
 
+  /* Retry-key follow-up: a timeout reuses the EXACT key of the timed-out
+     attempt (which may be suffixed), never the plain key blindly. */
+  {
+    const resendCtrl = async (cfg) => {
+      await fetch(process.env.FAKE_RESEND_URL + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+    };
+    const keyOf = async () => {
+      const calls = await resendCalls();
+      return calls.length === 1 ? (calls[0].headers && calls[0].headers['idempotency-key']) : `calls=${calls.length}`;
+    };
+    const toContacted = async (leadId) => { await good(cb(chatB, 'c:' + leadId)); await good(cb(chatB, 'd:' + leadId)); };
+
+    // C27 (a): 500 (plain) -> timeout on :r1 -> retry reuses :r1.
+    const aLead = await seedLead(bizB.id, 'Key Seq A', 'keyseqa@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(aLead);
+    await resendCtrl({ mode: '500' });
+    await resetResend();
+    await good(cb(chatB, 'y:' + aLead));
+    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resetResend();
+    await good(cb(chatB, 'r:' + aLead));
+    const aSecond = await keyOf();
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + aLead));
+    const aThird = await keyOf();
+    line(aSecond === `${aLead}:review:r1` && aThird === `${aLead}:review:r1`,
+      'C27', '500 -> timeout(:r1) -> retry reuses :r1',
+      `second=${aSecond} third=${aThird}`);
+
+    // C28 (b): timeout, timeout, retry -> all three plain.
+    const bLead = await seedLead(bizB.id, 'Key Seq B', 'keyseqb@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(bLead);
+    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resetResend();
+    await good(cb(chatB, 'y:' + bLead));
+    const bFirst = await keyOf();
+    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resetResend();
+    await good(cb(chatB, 'r:' + bLead));
+    const bSecond = await keyOf();
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + bLead));
+    const bThird = await keyOf();
+    line(bFirst === `${bLead}:review` && bSecond === `${bLead}:review` && bThird === `${bLead}:review`,
+      'C28', 'timeout, timeout, retry -> all plain key',
+      `keys=${bFirst},${bSecond},${bThird}`);
+
+    // C29 (c): timeout (plain) -> 500 (plain reuse) -> retry :r2.
+    const cLead = await seedLead(bizB.id, 'Key Seq C', 'keyseqc@example.com');
+    await resendCtrl({ mode: 'ok' });
+    await toContacted(cLead);
+    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resetResend();
+    await good(cb(chatB, 'y:' + cLead));
+    await resendCtrl({ mode: '500' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + cLead));
+    const cSecond = await keyOf();
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await good(cb(chatB, 'r:' + cLead));
+    const cThird = await keyOf();
+    line(cSecond === `${cLead}:review` && cThird === `${cLead}:review:r2`,
+      'C29', 'timeout -> 500 -> retry yields :r2',
+      `second=${cSecond} third=${cThird}`);
+
+    // C30 (e): failure meta is exactly { status, key } — no PII.
+    const failEvents = (await svc.from('lead_events').select('meta').eq('lead_id', aLead).eq('kind', 'review_request_failed')).data || [];
+    const metaOk = failEvents.length > 0 && failEvents.every((e) => {
+      const keys = Object.keys(e.meta || {}).sort();
+      const s = JSON.stringify(e.meta || {});
+      return keys.join(',') === 'key,status'
+        && typeof e.meta.key === 'string' && e.meta.key.startsWith(aLead + ':review')
+        && !s.includes('keyseqa@example.com') && !s.includes('Key Seq A');
+    });
+    line(metaOk, 'C30', 'review_request_failed meta is {status,key}, no PII',
+      `events=${failEvents.length} keys=${failEvents.length ? Object.keys(failEvents[0].meta).sort().join(',') : 'none'}`);
+  }
+
   /* Item 2 (this bundle): a thrown DB error answers once with
      "Something went wrong. Try again.", no edit, no email, still 200.
      How the throw is injected: wrap global fetch and return a 500

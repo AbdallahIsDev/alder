@@ -174,12 +174,14 @@ async function handleCallback(cb, binding) {
     const retry = await getDoneLeadForRetry(leadId, binding.business_id);
     if (!retry || !retry.review_token || !retry.email) { await answer('Nothing to retry.'); return; }
     // Idempotency key: Resend caches per key for 24 h. After a timeout the
-    // first request may have delivered, so reuse the plain key and let
-    // Resend dedupe; after an HTTP error the cached failure must not be
-    // replayed, so use a fresh suffixed key per earlier failure count.
+    // timed-out attempt may have delivered, so reuse its EXACT key (recorded
+    // in that failure's meta) and let Resend dedupe; after any other failure
+    // the cached failure must not be replayed, so use a fresh suffixed key
+    // named by the earlier failure count. A new suffixed key can never equal
+    // an earlier one: earlier suffixes are r1..r(count-1), this one is r<count>.
     const failInfo = await getReviewFailureInfo(leadId);
     const retryKey = failInfo.lastStatus === 'timeout'
-      ? `${leadId}:review`
+      ? (failInfo.lastKey || `${leadId}:review`)
       : `${leadId}:review:r${failInfo.count}`;
     await answer('');
     const r = await sendReviewRequest({
