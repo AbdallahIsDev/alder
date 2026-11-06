@@ -41,7 +41,7 @@ const call = async ({ method = 'GET', secret } = {}) => {
   return res;
 };
 
-const saved = { HEALTH_SECRET: process.env.HEALTH_SECRET, MAIL_REDIRECT_TO: process.env.MAIL_REDIRECT_TO };
+const saved = { HEALTH_SECRET: process.env.HEALTH_SECRET, CRON_SECRET: process.env.CRON_SECRET, MAIL_REDIRECT_TO: process.env.MAIL_REDIRECT_TO };
 try {
   /* H1: no secret configured */
   delete process.env.HEALTH_SECRET;
@@ -125,12 +125,18 @@ try {
     line(r.code === 503 && r.body && r.body.ok === false, 'S1', 'selfcheck: no HEALTH_SECRET -> 503', `code=${r.code}`);
   }
 
-  /* S2: wrong secret, wrong bearer */
+  /* S2: the two secrets are not interchangeable. The health secret works in the
+     header only; the cron secret works as a bearer only. */
   process.env.HEALTH_SECRET = 'health-test-secret-value';
+  process.env.CRON_SECRET = 'cron-test-secret-value';
   {
-    const wrong = await callCheck({ secret: 'nope' });
+    const wrongHeader = await callCheck({ secret: 'nope' });
     const wrongBearer = await callCheck({ bearer: 'nope' });
-    line(wrong.code === 401 && wrongBearer.code === 401, 'S2', 'selfcheck: bad secret -> 401', `${wrong.code}/${wrongBearer.code}`);
+    const healthAsBearer = await callCheck({ bearer: 'health-test-secret-value' });
+    const cronInHeader = await callCheck({ secret: 'cron-test-secret-value' });
+    const ok = [wrongHeader, wrongBearer, healthAsBearer, cronInHeader].every((r) => r.code === 401);
+    line(ok, 'S2', 'selfcheck: secrets are not interchangeable',
+      `${wrongHeader.code}/${wrongBearer.code}/${healthAsBearer.code}/${cronInHeader.code}`);
   }
 
   /* S3: the rule and the message text, without a database */
@@ -215,6 +221,18 @@ try {
       `subject=${body.subject.length} chars html=${body.html.length}`);
   }
 
+  /* S11: the header path still works on selfcheck, and the cron bearer is NOT
+     accepted by /api/health. */
+  {
+    const viaHeader = await callCheck({ secret: 'health-test-secret-value' });
+    const res2 = fakeRes();
+    await handler({ method: 'GET', headers: { authorization: 'Bearer cron-test-secret-value' } }, res2);
+    const healthOk = await callCheck({ secret: 'health-test-secret-value' });
+    line(viaHeader.code === 200 && res2.code === 401 && healthOk.code === 200, 'S11',
+      'header works on selfcheck, cron bearer rejected by health',
+      `selfcheck=${viaHeader.code} healthBearer=${res2.code} healthHeader=${healthOk.code}`);
+  }
+
   /* S5: who gets told — everyone under a redirect, only the affected businesses otherwise */
   {
     const fails = new Map([['biz-a', { tg_failed: 2 }], ['biz-b', { email_owner_failed: 1 }]]);
@@ -228,7 +246,7 @@ try {
 
   /* S4: authorised call — shape only; `sent` depends on live data and is not asserted */
   {
-    const r = await callCheck({ bearer: 'health-test-secret-value' });
+    const r = await callCheck({ bearer: 'cron-test-secret-value' });
     const b = r.body || {};
     const shapeOk = r.code === 200 && b.ok === true
       && typeof b.sent === 'number' && typeof b.failed === 'number'
@@ -241,6 +259,7 @@ try {
   line(false, 'H0', 'health suite threw', e.message);
 } finally {
   if (saved.HEALTH_SECRET === undefined) delete process.env.HEALTH_SECRET; else process.env.HEALTH_SECRET = saved.HEALTH_SECRET;
+  if (saved.CRON_SECRET === undefined) delete process.env.CRON_SECRET; else process.env.CRON_SECRET = saved.CRON_SECRET;
   if (saved.MAIL_REDIRECT_TO === undefined) delete process.env.MAIL_REDIRECT_TO; else process.env.MAIL_REDIRECT_TO = saved.MAIL_REDIRECT_TO;
 }
 

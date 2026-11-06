@@ -8,9 +8,11 @@
 // while VERCEL_ENV is production (every customer email is going to the test
 // address). Counts only — no names, no addresses, no env values.
 //
-// Auth: x-health-secret, or `Authorization: Bearer <HEALTH_SECRET>` so a Vercel
-// cron can call it (Vercel sends CRON_SECRET as a bearer token; set CRON_SECRET
-// to the same value as HEALTH_SECRET). Both are compared in constant time.
+// Auth: x-health-secret (HEALTH_SECRET), or `Authorization: Bearer <CRON_SECRET>`
+// so a Vercel cron can call it — Vercel sends its own CRON_SECRET as a bearer
+// token. The two secrets are independent: the health secret is not accepted as a
+// bearer and the cron secret is not accepted in the header. Both comparisons are
+// constant time. 503 when HEALTH_SECRET is unset.
 
 import { createClient } from '@supabase/supabase-js';
 import { secretMatches } from '../lib/request.js';
@@ -155,11 +157,12 @@ async function failuresByBusiness(iso) {
   return out;
 }
 
-function authorised(req, expected) {
-  if (secretMatches(req, HEADER, expected)) return true;
+function authorised(req, healthSecret, cronSecret) {
+  if (secretMatches(req, HEADER, healthSecret)) return true;
+  if (!cronSecret) return false;
   const auth = req && req.headers && req.headers.authorization;
   if (typeof auth === 'string' && auth.startsWith('Bearer ')) {
-    return secretMatches({ headers: { 'x-bearer': auth.slice(7) } }, 'x-bearer', expected);
+    return secretMatches({ headers: { 'x-bearer': auth.slice(7) } }, 'x-bearer', cronSecret);
   }
   return false;
 }
@@ -171,9 +174,10 @@ export default async function handler(req, res) {
   }
   res.setHeader('Cache-Control', 'no-store');
 
-  const expected = process.env.HEALTH_SECRET;
-  if (!expected) return res.status(503).json({ ok: false });
-  if (!authorised(req, expected)) return res.status(401).json({ ok: false });
+  const healthSecret = process.env.HEALTH_SECRET;
+  const cronSecret = process.env.CRON_SECRET;
+  if (!healthSecret) return res.status(503).json({ ok: false });
+  if (!authorised(req, healthSecret, cronSecret)) return res.status(401).json({ ok: false });
 
   try {
     const since = new Date(Date.now() - DAY).toISOString();
