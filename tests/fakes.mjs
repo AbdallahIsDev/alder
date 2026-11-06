@@ -4,7 +4,7 @@
 import http from 'node:http';
 
 function start(name) {
-  const state = { mode: 'ok', status: 200, hangMs: 6000, hangUsed: false, requests: [] };
+  const state = { mode: 'ok', status: 200, hangMs: 2500, hangUsed: false, requests: [] };
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);

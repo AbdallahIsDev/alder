@@ -37,6 +37,14 @@ const DEFAULT_SUITES = [
   { file: 'tests/outbound.test.mjs', needsHttp: false },
 ];
 const cliArgs = process.argv.slice(2);
+const KNOWN_FLAGS = new Set(['--seed-check']);
+const unknownFlags = cliArgs.filter((a) => a.startsWith('--') && !KNOWN_FLAGS.has(a));
+if (unknownFlags.length) {
+  // Unknown flags used to be dropped silently, so `--timing` looked like it worked.
+  console.log(`FAIL  runner  unknown flag(s): ${unknownFlags.join(', ')}`);
+  console.log(`      known flags: ${[...KNOWN_FLAGS].join(', ')} — anything else is a typo, not a no-op`);
+  process.exit(1);
+}
 const RUN_SEED_CHECK = cliArgs.includes('--seed-check');
 const suiteFiles = cliArgs.filter((a) => !a.startsWith('--'));
 const SUITES_TO_RUN = (suiteFiles.length ? suiteFiles : DEFAULT_SUITES.map((s) => s.file)).map((f) => {
@@ -228,7 +236,7 @@ try {
       } catch {}
       await new Promise((r) => setTimeout(r, 1000));
     }
-    if (!ready) throw new Error('vercel dev did not answer on port 3000 within 60 s');
+    if (!ready) throw new Error('vercel dev did not answer on port 3000 within 150 s (60 probes: up to 1.5 s each plus a 1 s gap)');
     out('runner  vercel dev ready');
 
     /* ---------- canary ---------- */

@@ -263,6 +263,19 @@ const BIND_CODE = ('DBTEST' + RUN).replace(/[^A-Z0-9]/g, '').toUpperCase().slice
   fs.rmSync(base, { recursive: true, force: true });
 }
 
+/* ---------- E6: the runner rejects unknown flags ----------
+   `--timing` used to be dropped silently, so it looked like a working flag.
+   The child is given a real suite so that, if the check regresses, it exits 0
+   after a 0.1 s run instead of starting the whole default suite. */
+{
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'tests', 'run.mjs'), '--timing', 'tests/migrations.test.mjs'], {
+    cwd: ROOT, encoding: 'utf8', timeout: 60000,
+  });
+  const ok = r.status === 1 && /unknown flag\(s\): --timing/.test(r.stdout || '');
+  line(ok, 'E6', 'runner rejects an unknown flag', `exit=${r.status} msg=${ok}`);
+}
+
 console.log('');
 console.log(`${results.length - failed}/${results.length} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
