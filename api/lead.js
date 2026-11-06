@@ -205,6 +205,16 @@ export default async function handler(req, res) {
     console.error('lead_rate_limit_failed', (e && e.code) || 'no_code');
   }
 
+  // Start the duplicate lookup before the insert and collect it after: the two
+  // overlap instead of queueing, so the customer waits for max(insert, lookup)
+  // rather than for the sum.
+  const dupSince = new Date(Date.now() - DUPLICATE_WINDOW_DAYS * 86400 * 1000).toISOString();
+  const dupPromise = findRecentDuplicate(business.id, phoneE164, email || null, dupSince)
+    .catch((e) => {
+      console.error('lead_duplicate_check_failed', (e && e.code) || 'no_code');
+      return null;
+    });
+
   let leadId;
   try {
     leadId = await insertLead({
@@ -226,16 +236,10 @@ export default async function handler(req, res) {
   // Advisory: is this the same phone or email as a recent request for this
   // business? The lead is stored either way; the answer only adds one line to the
   // owner alert and one meta field on the created event. The earlier lead's
-  // details are never read out, only its id.
-  let duplicateOf = null;
-  try {
-    duplicateOf = await findRecentDuplicate(
-      business.id, phoneE164, email || null,
-      new Date(Date.now() - DUPLICATE_WINDOW_DAYS * 86400 * 1000).toISOString(), leadId,
-    );
-  } catch (e) {
-    console.error('lead_duplicate_check_failed', (e && e.code) || 'no_code');
-  }
+  // details are never read out, only its id. A lookup that matched this very row
+  // (it started before the insert committed) is not a duplicate of anything.
+  let duplicateOf = await dupPromise;
+  if (duplicateOf === leadId) duplicateOf = null;
 
   try {
     await addEvent(leadId, 'created', {
