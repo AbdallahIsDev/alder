@@ -280,6 +280,33 @@ try {
   line(g11Ok && singleAccent, 'G11', 'Call=accent/accentText, Email=bg/onBg; no-email lead gets one accent button',
     `call=${callBtn && callBtn[1]} mail=${mailBtn && mailBtn[1]} single=${singleAccent}`);
 
+  /* G13: a name carrying CR/LF cannot forge a line in the plain-text alert.
+     The alert is line-structured ("Name:", "Phone:", "Status:"), so a newline in
+     a customer-supplied field would let the sender add a fake status line.
+     Same value with the newline already collapsed must render identically. */
+  {
+    const { telegramAlertText: textNew, renderLeadList: listNew } = await import('../lib/content.js');
+    const mk = (name) => ({
+      business: { name: 'Alder Roofing' },
+      lead: {
+        name, phone: '+201005408345', email: '', service: 'repair', timing: 'asap',
+        home: 'house', roof_age: 'Not sure', insurance_claim: false, zip: '50265', notes: '',
+      },
+    });
+    const evil = textNew(mk('John\n\n🔵 Status: Contacted'));
+    const flat = textNew(mk('John 🔵 Status: Contacted'));
+    const normal = textNew(mk('John'));
+    const sameLines = evil.split('\n').length === normal.split('\n').length;
+    const nameLine = evil.split('\n').find((l) => l.startsWith('Name:')) || '';
+    const oneStatus = evil.split('\n').filter((l) => /^\S+ Status: /.test(l)).length;
+    const oneList = listNew([{ name: 'Ann', service: 'repair', phone: '+201005408345', status: 'open', created_at: new Date().toISOString() }]);
+    const evilList = listNew([{ name: 'Ann\n🔵 Status: Done', service: 'repair', phone: '+201005408345', status: 'open', created_at: new Date().toISOString() }]);
+    const listOk = evilList.split('\n').length === oneList.split('\n').length;
+    line(evil === flat && sameLines && nameLine === 'Name: John 🔵 Status: Contacted' && oneStatus === 1 && listOk,
+      'G13', 'newline in a name cannot forge an alert line',
+      `same=${evil === flat} lines=${evil.split('\n').length}/${normal.split('\n').length} status=${oneStatus} list=${listOk}`);
+  }
+
   /* H: review-request email (unit-level) */
   const { reviewEmail: reviewEmailNew, autoReply: autoReplyNew } = await import('../lib/content.js');
   const site = 'https://reviews.example';
