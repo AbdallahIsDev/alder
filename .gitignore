@@ -21,6 +21,8 @@ client.json
 .env.*
 # .env.* would also swallow the template; the template carries names only and must ship.
 !.env.example
+# the test-project template is names-only too, and must ship
+!.env.test.example
 
 # --- OS / editor ------------------------------------------------------------
 .DS_Store
