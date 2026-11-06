@@ -334,7 +334,7 @@ try {
 /* Resend 6 s hang */
 try {
   await clean();
-  await control(RS, { mode: 'hang_once', hangMs: 6000 }); await reset(RS);
+  await control(RS, { mode: 'hang_once', hangMs: 2500 }); await reset(RS);
   const { res, key, ms } = await post({});
   await control(RS, { mode: 'ok' }); await reset(RS);
   const rows = await leadFor(key);
@@ -603,7 +603,7 @@ try {
 /* 6 s hang */
 try {
   await clean();
-  await control(TG, { mode: 'hang_once', hangMs: 6000 }); await reset(TG);
+  await control(TG, { mode: 'hang_once', hangMs: 2500 }); await reset(TG);
   const { res, key, ms } = await post({});
   await control(TG, { mode: 'ok' }); await reset(TG);
   const rows = await leadFor(key);

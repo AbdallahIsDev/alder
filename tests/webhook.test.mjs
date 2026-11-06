@@ -380,7 +380,7 @@ try {
     const slowLead = await seedLead(bizB.id, 'Key Slow', 'keyslow@example.com');
     await resendCtrl({ mode: 'ok' });
     await toContacted(slowLead);
-    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resendCtrl({ mode: 'hang_once', hangMs: 2500 });
     await resetResend();
     await good(cb(chatB, 'y:' + slowLead));
     await resendCtrl({ mode: 'ok' });
@@ -429,7 +429,7 @@ try {
     await resendCtrl({ mode: '500' });
     await resetResend();
     await good(cb(chatB, 'y:' + aLead));
-    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resendCtrl({ mode: 'hang_once', hangMs: 2500 });
     await resetResend();
     await good(cb(chatB, 'r:' + aLead));
     const aSecond = await keyOf();
@@ -445,11 +445,11 @@ try {
     const bLead = await seedLead(bizB.id, 'Key Seq B', 'keyseqb@example.com');
     await resendCtrl({ mode: 'ok' });
     await toContacted(bLead);
-    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resendCtrl({ mode: 'hang_once', hangMs: 2500 });
     await resetResend();
     await good(cb(chatB, 'y:' + bLead));
     const bFirst = await keyOf();
-    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resendCtrl({ mode: 'hang_once', hangMs: 2500 });
     await resetResend();
     await good(cb(chatB, 'r:' + bLead));
     const bSecond = await keyOf();
@@ -465,7 +465,7 @@ try {
     const cLead = await seedLead(bizB.id, 'Key Seq C', 'keyseqc@example.com');
     await resendCtrl({ mode: 'ok' });
     await toContacted(cLead);
-    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resendCtrl({ mode: 'hang_once', hangMs: 2500 });
     await resetResend();
     await good(cb(chatB, 'y:' + cLead));
     await resendCtrl({ mode: '500' });

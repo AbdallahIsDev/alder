@@ -106,6 +106,26 @@ try {
   line(blockedTg && blockedRs && m5.ok === false && m5.status === 'blocked_test_mode'
     && m6.ok === false && m6.status === 'blocked_test_mode' && recorded.length === before,
     'F4', 'dev without overrides: block applies, no fetch', `blocked=${blockedTg}/${blockedRs} newCalls=${recorded.length - before}`);
+  /* F5-F7: dev-only OUTBOUND_TIMEOUT_MS override (honoured 200..3000 only). */
+  const { effectiveTimeoutMs } = await import('../lib/outbound.js');
+  const savedTimeout = process.env.OUTBOUND_TIMEOUT_MS;
+  delete process.env.VERCEL_ENV;
+  process.env.OUTBOUND_TIMEOUT_MS = '1000';
+  line(effectiveTimeoutMs() === 1000, 'F5', 'override honoured in dev for 1000', `eff=${effectiveTimeoutMs()}`);
+
+  const badVals = ['199', '3001', 'abc', ''];
+  const badOk = badVals.every((v) => { process.env.OUTBOUND_TIMEOUT_MS = v; return effectiveTimeoutMs() === 3000; });
+  process.env.OUTBOUND_TIMEOUT_MS = '1000';
+  line(badOk, 'F6', 'override ignored for <200, >3000, non-numeric', `bad=${badVals.join(',')}`);
+
+  const prodOk = ['production', 'preview'].every((env) => {
+    process.env.VERCEL_ENV = env;
+    const v = effectiveTimeoutMs();
+    delete process.env.VERCEL_ENV;
+    return v === 3000;
+  });
+  line(prodOk, 'F7', 'override ignored when VERCEL_ENV=production/preview', `ok=${prodOk}`);
+  if (savedTimeout === undefined) delete process.env.OUTBOUND_TIMEOUT_MS; else process.env.OUTBOUND_TIMEOUT_MS = savedTimeout;
 } catch (e) {
   line(false, 'F0', 'outbound suite threw', e.message);
 } finally {
