@@ -567,10 +567,30 @@ try {
     const hasTry = yBlock.includes('} catch (e) {') && yBlock.includes("console.error('tg_callback_failed'");
     const errorView = yBlock.includes("render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed')");
     const noEmailView = yBlock.includes("render('done', { reply_markup: { inline_keyboard: [] } }, 'no_email')");
-    const noSecondAnswer = !/catch \(e\) \{[^}]*answer\(/.test(yBlock.slice(yBlock.lastIndexOf('} catch (e) {')));
-    line(hasTry && errorView && noEmailView,
+    // Slice the catch body itself: a regex bounded by [^}] would stop at the first
+    // inner brace and miss an answer() that sits after it.
+    const noSecondAnswer = !yBlock.slice(yBlock.lastIndexOf('} catch (e) {')).includes('answer(');
+    line(hasTry && errorView && noEmailView && noSecondAnswer,
       'C31', 'y: post-transition wrap renders error (or no-email done) on throw',
       `try=${hasTry} error=${errorView} noEmail=${noEmailView} innerCatchAnswers=${!noSecondAnswer}`);
+  }
+
+  /* C36: the answer-once guard, behaviourally. A callback whose handler would
+     answer twice (a branch that answers, then an error path that answers again)
+     must reach Telegram exactly once, and with the FIRST text. Exercised through
+     the real answerCallbackQuery -> lib/tg.js -> fake server path, so removing
+     the guard shows up as two requests, not as a source-text mismatch. */
+  {
+    const { createAnswerOnce } = await import('../api/tg.js');
+    await reset();
+    const answer = createAnswerOnce('cb-guard-' + Math.random().toString(36).slice(2, 8));
+    await answer('');
+    await answer('Something went wrong. Try again.');
+    await answer('third');
+    const calls = (await sent()).filter((r) => r.path.includes('/answerCallbackQuery'));
+    const firstOnly = calls.length === 1 && calls[0].body && calls[0].body.callback_query_id.startsWith('cb-guard-');
+    line(firstOnly, 'C36', 'answer-once: two answers reach Telegram once',
+      `calls=${calls.length} first=${calls[0] && calls[0].body ? 'yes' : 'no'}`);
   }
 
   /* Item 2 (this bundle): a thrown DB error answers once with

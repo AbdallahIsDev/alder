@@ -221,15 +221,25 @@ const CALLBACK_HANDLERS = {
   r: onRetry,
 };
 
-async function handleCallback(cb, binding) {
-  const id = cb.id;
-  const data = String(cb.data || '');
+/**
+ * An answerer that reaches Telegram at most once per callback query.
+ *
+ * Every branch answers exactly once (a spinner that never stops is worse than a
+ * generic toast), and a handler that somehow answered and then threw must not
+ * produce a second toast. Exported so the guard can be exercised on its own.
+ */
+export function createAnswerOnce(id) {
   let answered = false;
-  const answer = (text) => {
+  return (text) => {
     if (answered) return Promise.resolve();
     answered = true;
     return answerCallbackQuery(id, text).catch(() => {});
   };
+}
+
+async function handleCallback(cb, binding) {
+  const data = String(cb.data || '');
+  const answer = createAnswerOnce(cb.id);
 
   if (!binding) { await answer(GENERIC_NOT_FOUND); return; }
   try {
