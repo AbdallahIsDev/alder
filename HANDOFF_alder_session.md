@@ -90,7 +90,8 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 
 - `VERCEL_ENV`: read in `lib/outbound.js` only (`api/review.js` imports `isDev()` from it). Vercel sets it (`production`/`preview`/`development`). Two predicates with opposite polarity, on purpose: `isDev()` is `=== 'development'` and gates everything that WEAKENS a guard (shorter timeout, loopback host) — fail-closed; `testModeActive()` is `!isDeployed() && marker` and decides whether to BLOCK a real send — fail-safe. An unset `VERCEL_ENV` therefore gets production timeouts, real hosts, and still blocks when the marker is present.
 
-- `MAIL_REDIRECT_TO`: when set, every email recipient is redirected there and the subject gets a `[TEST for ...]` prefix.
+- `MAIL_REDIRECT_TO`: when set, every email recipient is redirected there and the subject gets a `[TEST for ...]` prefix. In production this now logs `mail_redirect_active` once per instance; sending is unchanged.
+- `AUTOREPLY_DAILY_CAP`: per-business ceiling on customer auto-replies, default 60. A 24 h `hit_rate_limit` bucket, so it resets at UTC midnight. Over the cap the reply is skipped and `autoreply_capped` is logged; the lead is still saved and the owner is still alerted.
 - `MAIL_REDIRECT_PREFIX`: value `off` removes the `[TEST for ...]` subject prefix; recipients are still redirected.
 
 ## Ops endpoints

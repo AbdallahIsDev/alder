@@ -432,6 +432,27 @@ try {
     'B12', 'both down: lead saved, one retry per channel', `tg=${tg} mail=${mail} fallback=${fb} tgFailed=${failedTg}`);
 } catch (e) { line(false, 'B12', 'both down', e.message); }
 
+/* B13: the per-business daily cap applies to the customer auto-reply only.
+   Two leads, cap of 1: the second auto-reply is skipped, but its lead is saved
+   and the owner still gets both the email and the Telegram alert. */
+try {
+  await clean();
+  const savedCap = process.env.AUTOREPLY_DAILY_CAP;
+  process.env.AUTOREPLY_DAILY_CAP = '1';
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const first = await post({ idempotencyKey: `${RUN}-cap1` });
+  const second = await post({ idempotencyKey: `${RUN}-cap2` });
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const rows = (await leadFor(`${RUN}-cap1`)).length + (await leadFor(`${RUN}-cap2`)).length;
+  const capped = logs.some((l) => l.includes('autoreply_capped'));
+  if (savedCap === undefined) delete process.env.AUTOREPLY_DAILY_CAP; else process.env.AUTOREPLY_DAILY_CAP = savedCap;
+  // 2 owner emails + 1 auto-reply (the second is capped); 2 Telegram alerts.
+  line(first.res.code === 200 && second.res.code === 200 && rows === 2 && tg === 2 && mail === 3 && capped,
+    'B13', 'daily cap: auto-reply skipped, lead and alerts kept',
+    `rows=${rows} tg=${tg} mail=${mail} capped=${capped}`);
+} catch (e) { line(false, 'B13', 'auto-reply cap', e.message); }
+
 /* Redirect off + default sender -> no HTTP call */
 try {
   await clean();
