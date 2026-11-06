@@ -4,12 +4,13 @@
 // business_chats, never from message text or callback data. Reads of leads go
 // through public.v_client_leads. Nothing here touches the private schema.
 
-import { timingSafeEqual, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import {
   getChatBinding, bindChat, claimBindCode, getBusinessById,
   listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
 } from '../lib/db.js';
 import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup } from '../lib/tg.js';
+import { secretMatches } from '../lib/request.js';
 import { sendReviewRequest } from '../lib/notify.js';
 import {
   renderAlert, renderLeadList, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard,
@@ -21,11 +22,7 @@ const GENERIC_NOT_FOUND = 'Not found.';
 function secretOk(req) {
   const want = process.env.TELEGRAM_WEBHOOK_SECRET;
   if (!want) return 'missing_env';
-  const got = req.headers['x-telegram-bot-api-secret-token'];
-  if (typeof got !== 'string' || got.length !== want.length) return 'bad';
-  try {
-    return timingSafeEqual(Buffer.from(got, 'utf8'), Buffer.from(want, 'utf8')) ? null : 'bad';
-  } catch { return 'bad'; }
+  return secretMatches(req, 'x-telegram-bot-api-secret-token', want) ? null : 'bad';
 }
 
 async function reply(chatId, text) {
