@@ -65,7 +65,7 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 
 - One loader, `lib/env.js`, used by the runner, every suite and every script (`bind`, `tg:commands`, `db:apply`, `live-smoke`). Precedence, highest first: **`process.env` > `.env.test` (only when `TEST_ENV=1`) > `.env.local` > `.env`**. `.env.*` is gitignored; `.env.example` carries names only and must ship.
 - `.env` is the production reference. It is never edited to point the tests elsewhere.
-- To point the suite at a separate Supabase project: create `.env.test` with `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (and `DATABASE_URL` if `npm run db:apply` should build it), then run `TEST_ENV=1 node tests/run.mjs`.
+- To point the suite at a separate Supabase project: copy `.env.test.example` to `.env.test`, fill it in, run `npm run test:env-check`, then `TEST_ENV=1 npm run db:apply` and `TEST_ENV=1 node tests/run.mjs`. **Full step-by-step: `docs/TEST_PROJECT.md`** (region, keys, pooler string, the free-project pause, and the three follow-ups that only become possible once it works).
 - Guard: the runner refuses to start a suite when the resolved `SUPABASE_URL` equals the value in `.env`. The comparison is by value and neither URL is printed. `ALLOW_PROD_TESTS=1` is the explicit opt-out and prints a warning; it exists only until `.env.test` exists. `--seed-check` is exempt (two SELECTs, then exit) so the read-only check keeps working against production — test E8.
 - `npm run db:apply` refuses a `DATABASE_URL` that came from the shell unless `TEST_ENV=1`, so a stray export cannot point a schema apply at another database.
 

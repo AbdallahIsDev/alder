@@ -15,7 +15,8 @@
     "tg:commands": "node scripts/tg-commands.mjs set",
     "tg:commands:info": "node scripts/tg-commands.mjs info",
     "delete:lead": "node scripts/delete-lead.mjs",
-    "offboard": "node scripts/offboard-business.mjs"
+    "offboard": "node scripts/offboard-business.mjs",
+    "test:env-check": "node scripts/test-env-check.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
