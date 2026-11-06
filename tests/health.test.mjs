@@ -29,7 +29,7 @@ const line = (ok, id, what, d) => {
 };
 
 const { default: handler } = await import('../api/health.js');
-const { default: selfcheck, shouldAlert, selfCheckText, alertTargets } = await import('../api/selfcheck.js');
+const { default: selfcheck, shouldAlert, selfCheckText, alertTargets, deliverSelfCheck, selfCheckEmail } = await import('../api/selfcheck.js');
 
 const KINDS = ['created', 'tg_sent', 'tg_failed', 'email_owner_sent', 'email_owner_failed', 'autoreply_failed', 'review_request_failed'];
 const TOP = ['last_24h', 'last_hour', 'mail_redirect_active', 'ok', 'salt_set', 'webhook_secret_set'];
@@ -129,6 +129,72 @@ try {
       `rule=${ruleOk} counts=${countsOnly} silent=${silent}`);
   }
 
+  /* S6-S9: delivery — Telegram first, email only when Telegram did not land.
+     The senders are injected, so these are behaviour tests without a database or
+     a network: the same code path the handler uses. */
+
+  /* S6: Telegram down -> the counts go out by email instead */
+  {
+    const calls = { tg: 0, mail: 0 };
+    const r = await deliverSelfCheck({
+      targets: ['biz-1'], text: 'T',
+      chatsFor: async () => ['chat-1'],
+      sendTg: async () => { calls.tg++; return { ok: false, status: 500 }; },
+      sendMailFor: async () => { calls.mail++; return { ok: true }; },
+    });
+    line(r.sent === 0 && r.emailed === 1 && calls.tg === 1 && calls.mail === 1, 'S6',
+      'telegram down: same counts go out by email', `sent=${r.sent} emailed=${r.emailed} tg=${calls.tg} mail=${calls.mail}`);
+  }
+
+  /* S7: both down -> nothing delivered, no throw, summary still says so */
+  {
+    const calls = { tg: 0, mail: 0 };
+    const r = await deliverSelfCheck({
+      targets: ['biz-1'], text: 'T',
+      chatsFor: async () => ['chat-1'],
+      sendTg: async () => { calls.tg++; return { ok: false, status: 'timeout' }; },
+      sendMailFor: async () => { calls.mail++; return { ok: false, status: 500 }; },
+    });
+    line(r.sent === 0 && r.emailed === 0 && calls.tg === 1 && calls.mail === 1, 'S7',
+      'both down: nothing delivered, no throw', `sent=${r.sent} emailed=${r.emailed}`);
+  }
+
+  /* S8: both up -> one Telegram message, no email duplicate */
+  {
+    const calls = { tg: 0, mail: 0 };
+    const r = await deliverSelfCheck({
+      targets: ['biz-1'], text: 'T',
+      chatsFor: async () => ['chat-1'],
+      sendTg: async () => { calls.tg++; return { ok: true, status: true }; },
+      sendMailFor: async () => { calls.mail++; return { ok: true }; },
+    });
+    line(r.sent === 1 && r.emailed === 0 && calls.mail === 0, 'S8',
+      'telegram up: no email duplicate', `sent=${r.sent} emailed=${r.emailed} mail=${calls.mail}`);
+  }
+
+  /* S9: no bound chat at all -> email is the only channel */
+  {
+    const calls = { tg: 0, mail: 0 };
+    const r = await deliverSelfCheck({
+      targets: ['biz-1'], text: 'T',
+      chatsFor: async () => [],
+      sendTg: async () => { calls.tg++; return { ok: true }; },
+      sendMailFor: async () => { calls.mail++; return { ok: true }; },
+    });
+    line(r.sent === 0 && r.emailed === 1 && calls.tg === 0 && calls.mail === 1, 'S9',
+      'no bound chat: email only', `sent=${r.sent} emailed=${r.emailed} tg=${calls.tg}`);
+  }
+
+  /* S10: the email body carries the counts and nothing else */
+  {
+    const zero = Object.fromEntries(KINDS.map((k) => [k, 0]));
+    const body = selfCheckEmail(selfCheckText({ ...zero, tg_failed: 1 }, { redirectActive: false }), '2026-11-07');
+    const clean = !body.subject.includes('@') && !body.html.includes('@') && !/alder/i.test(body.text + body.html)
+      && body.text.includes('tg_failed 1') && body.html.includes('tg_failed 1');
+    line(clean && body.subject.includes('2026-11-07'), 'S10', 'email fallback body: counts only',
+      `subject=${body.subject.length} chars html=${body.html.length}`);
+  }
+
   /* S5: who gets told — everyone under a redirect, only the affected businesses otherwise */
   {
     const fails = new Map([['biz-a', { tg_failed: 2 }], ['biz-b', { email_owner_failed: 1 }]]);
@@ -147,7 +213,7 @@ try {
     const shapeOk = r.code === 200 && b.ok === true
       && typeof b.sent === 'number' && typeof b.failed === 'number'
       && typeof b.redirect_active === 'boolean'
-      && JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['failed', 'ok', 'redirect_active', 'sent']);
+      && JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['emailed', 'failed', 'ok', 'redirect_active', 'sent']);
     line(shapeOk, 'S4', 'selfcheck: authorised call returns counts only', `code=${r.code} sent=${b.sent} failed=${b.failed}`);
   }
 

@@ -14,8 +14,9 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { secretMatches } from '../lib/request.js';
-import { listBusinessChats } from '../lib/db.js';
+import { listBusinessChats, getBusinessById } from '../lib/db.js';
 import { sendMessage } from '../lib/tg.js';
+import { sendMail, escHtml } from '../lib/mail.js';
 
 const HEADER = 'x-health-secret';
 const KINDS = [
@@ -69,6 +70,45 @@ export function selfCheckText(day, { redirectActive }) {
  *  only the businesses that own a failed event. */
 export function alertTargets({ redirectActive, failedByBusiness, allBusinessIds }) {
   return redirectActive ? [...allBusinessIds] : [...failedByBusiness.keys()];
+}
+
+/** The email body. Counts only, same rule as the Telegram text. */
+export function selfCheckEmail(text, dateKey) {
+  return {
+    subject: `Lead alerts self-check — ${dateKey}`,
+    text,
+    html: `<pre style="font:13px/1.5 ui-monospace,monospace;white-space:pre-wrap">${escHtml(text)}</pre>`,
+  };
+}
+
+/**
+ * Deliver one self-check to the affected businesses.
+ *
+ * Telegram first. If a business has no bound chat, or none of its sends
+ * succeeded, the same counts-only text goes to its owner_email — the email is a
+ * fallback, never a second copy, so a business that received the Telegram
+ * message gets no email.
+ *
+ * The senders are parameters so the three cases (Telegram down, both down, both
+ * up) can be tested without a database or a network.
+ */
+export async function deliverSelfCheck({ targets, text, chatsFor, sendTg, sendMailFor }) {
+  let sent = 0;
+  let emailed = 0;
+  for (const target of targets) {
+    const chats = await chatsFor(target).catch(() => []);
+    let delivered = 0;
+    for (const chat of chats) {
+      const r = await sendTg(chat, text).catch(() => ({ ok: false }));
+      if (r && r.ok) delivered++;
+    }
+    sent += delivered;
+    if (chats.length === 0 || delivered === 0) {
+      const r = await sendMailFor(target, text).catch(() => ({ ok: false }));
+      if (r && r.ok) emailed++;
+    }
+  }
+  return { sent, emailed };
 }
 
 async function countsSince(iso) {
@@ -143,7 +183,7 @@ export default async function handler(req, res) {
     const redirectActive = !!process.env.MAIL_REDIRECT_TO && process.env.VERCEL_ENV === 'production';
 
     if (!shouldAlert({ failedTotal, redirectActive })) {
-      return res.status(200).json({ ok: true, sent: 0, failed: 0, redirect_active: redirectActive });
+      return res.status(200).json({ ok: true, sent: 0, emailed: 0, failed: 0, redirect_active: redirectActive });
     }
 
     // Who to tell: the businesses that own the failed events, or every business
@@ -160,15 +200,31 @@ export default async function handler(req, res) {
     });
 
     const text = selfCheckText(day, { redirectActive });
-    let sent = 0;
-    for (const id of targets) {
-      const chats = await listBusinessChats(id).catch(() => []);
-      for (const chat of chats) {
-        const r = await sendMessage(chat, text).catch(() => ({ ok: false }));
-        if (r && r.ok) sent++;
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const owners = new Map();
+    const ownerOf = async (id) => {
+      if (!owners.has(id)) {
+        const b = await getBusinessById(id).catch(() => null);
+        owners.set(id, b && b.owner_email ? b.owner_email : null);
       }
-    }
-    return res.status(200).json({ ok: true, sent, failed: failedTotal, redirect_active: redirectActive });
+      return owners.get(id);
+    };
+
+    const { sent, emailed } = await deliverSelfCheck({
+      targets,
+      text,
+      chatsFor: (id) => listBusinessChats(id),
+      sendTg: (chat, body) => sendMessage(chat, body),
+      sendMailFor: async (id, body) => {
+        const to = await ownerOf(id);
+        if (!to) return { ok: false, status: 'no_owner_email' };
+        return sendMail({
+          to, fromName: 'Lead Alerts', ...selfCheckEmail(body, dateKey),
+          idempotencyKey: `selfcheck:${id}:${dateKey}`,
+        });
+      },
+    });
+    return res.status(200).json({ ok: true, sent, emailed, failed: failedTotal, redirect_active: redirectActive });
   } catch (e) {
     console.error('selfcheck_failed', (e && e.code) || 'no_code');
     return res.status(500).json({ ok: false });
