@@ -94,6 +94,15 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - `AUTOREPLY_DAILY_CAP`: per-business ceiling on customer auto-replies, default 60. A 24 h `hit_rate_limit` bucket, so it resets at UTC midnight. Over the cap the reply is skipped and `autoreply_capped` is logged; the lead is still saved and the owner is still alerted.
 - `MAIL_REDIRECT_PREFIX`: value `off` removes the `[TEST for ...]` subject prefix; recipients are still redirected.
 
+## Pre-launch checklist (before the first real client)
+
+1. **Remove `MAIL_REDIRECT_TO`** from the Vercel production environment. While it is set, every customer email (auto-reply, review request, owner alert) goes to the redirect address. The code now logs `mail_redirect_active` once per instance and `/api/selfcheck` reports it daily — neither stops the redirect.
+2. Verify the Resend sending domain, and set `MAIL_FROM` to an address on it (otherwise `sendMail` returns `no_verified_sender` and sends nothing).
+3. Move to Vercel Pro (Hobby is non-commercial) — and, if the daily self-check should run more than once a day, Pro is required for that too.
+4. Only then, flip the redirect check to a hard failure (currently it is a warning by decision). That change is not made.
+5. Set `HEALTH_SECRET` and `CRON_SECRET` (same value) so `/api/health` and the cron work.
+6. Decide the retention window and run `npm run offboard -- <slug>` for anything that should not ship with the client.
+
 ## Ops endpoints
 
 - `GET /api/health` — seven event counts for the last hour and the last 24 hours (`created`, `tg_sent`, `tg_failed`, `email_owner_sent`, `email_owner_failed`, `autoreply_failed`, `review_request_failed`) plus `mail_redirect_active`, `webhook_secret_set`, `salt_set`. Numbers and booleans only; no PII, no business names, no env values. Auth: `x-health-secret` compared in constant time; **503 when `HEALTH_SECRET` is unset**, 401 otherwise, 405 for anything but GET.
@@ -101,6 +110,12 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - `vercel.json` schedules `/api/selfcheck` daily at `0 9 * * *`. Vercel documents **Hobby as one run per day minimum interval** — a more frequent expression fails the deployment — and Pro/Enterprise as once per minute, so daily is legal on every plan (source: https://vercel.com/docs/schedules/cron-jobs/usage-and-pricing, read 2026-11-06). Cron Jobs are marked legacy there in favour of "Schedules".
 - A cron request carries `Authorization: Bearer $CRON_SECRET`; set `CRON_SECRET` to the same value as `HEALTH_SECRET` and `/api/selfcheck` accepts it. `/api/health` accepts the header only.
 - Neither endpoint is linked from the site and both set `Cache-Control: no-store`.
+
+## Alerting behaviour (2026-11-06 bundle)
+
+- **Fallback.** Owner email and Telegram still both send. If exactly one fails the owner already has the alert and nothing else is sent; if **both** fail and less than 2 s of the outbound budget has been spent, each channel that could still work gets one retry, recorded with `meta.fallback = true`. Tests B9-B12.
+- **Daily auto-reply cap.** `AUTOREPLY_DAILY_CAP` (default 60) per business, 24 h `hit_rate_limit` bucket, resets at UTC midnight. Over the cap the reply is skipped and `autoreply_capped` is logged; the lead is saved and the owner is still alerted.
+- **Possible repeat.** A lead whose phone or email matches one from the same business in the last 30 days gets `duplicate_of` on its `created` event and one line in the owner's Telegram alert. Never blocked, never merged, no detail of the earlier lead. Test B14.
 
 ## Security posture (audit 2026-11-06)
 
@@ -128,13 +143,13 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 7. ~~`/leads` reply does not use the new emoji statuses.~~ **Resolved**: `api/tg.js:52-54` builds the reply with `renderLeadList(leads)`; `lib/content.js:258-269` renders each block through `statusLine()`, which prepends `STATUS_EMOJI` (`lib/content.js:37-44`). Test L1 asserts the spaced format. The line in the "previous bundle" section above is the accurate one; this entry was stale.
 8. Domain verification in Resend and removal of `MAIL_REDIRECT_TO` before real clients.
 9. Vercel Hobby is non-commercial; Pro needed once a client pays.
-10. Double-tap Try again race: two concurrent `r:` callbacks can both pass `hasReviewSent`, record both `review_requested` and `review_request_failed`, and leave the message on the error view after an email was sent. The shared Resend idempotency key prevents a duplicate email; a re-check of `hasReviewSent` immediately before sending only shrinks the window, so it was described but not implemented.
+10. ~~Double-tap Try again race~~ **Resolved**: the `r:` branch takes a `rate_limits` mutex keyed `retry:<leadId>`, released in a `finally` after the attempt, so a concurrent second tap answers "Nothing to retry." and sends nothing. Test C33 fires two callbacks with `Promise.all` and asserts one email. A proper `review_attempt` counter column would be cleaner; this needs no schema change.
 11. ~~Client/server phone minimum mismatch~~ Resolved: North America is `[10, 10]` on both sides now (see follow-up bundle above).
 12. Owner bot plan: a second bot could reuse `lib/tg.js` by threading a per-call token (today it reads `TELEGRAM_BOT_TOKEN` from env in `call()`). Not implemented.
 13. Live chat idea needs planning (no design yet).
 14. `MAIL_REDIRECT_TO` in a production environment silently sends **every** customer email (auto-reply, review request) to the redirect address, with no error anywhere. Nothing in the code refuses it when `VERCEL_ENV=production`. Check the Vercel production env before the next client.
 15. No retention or deletion path. `leads.business_id` has no `on delete cascade`, so removing a business needs its leads deleted first; `lead_events`, `review_feedback` and `private.lead_financials` cascade from `leads`. A customer deletion request is manual SQL today.
-16. The per-business cap is 200 leads/hour. At two emails per lead that exhausts a Resend free-plan daily quota (100/day) in about 15 minutes, after which owner emails and auto-replies stop while Telegram keeps working.
-17. `sharp` 0.34.5 carries libvips/libheif/librsvg advisories (`npm audit`: 1 high). Dev-only image pipeline, fed only local trusted files; the fix is sharp 0.35.5, a breaking change.
+16. The per-business cap is 200 leads/hour. At two emails per lead that exhausts a Resend free-plan daily quota (100/day) in about 15 minutes, after which owner emails and auto-replies stop while Telegram keeps working. **Partly addressed:** the customer auto-reply now has its own daily ceiling (`AUTOREPLY_DAILY_CAP`, default 60). The owner email is deliberately not capped, so a flood can still exhaust the quota through owner alerts alone.
+17. `sharp` 0.34.5 carries libvips/libheif/librsvg advisories (`npm audit`: 1 high). Dev-only image pipeline, fed only local trusted files; the fix is sharp 0.35.5, a breaking change. **Deferred by decision** — revisit before the next image-pipeline run.
 18. ~~No observability~~ Partly addressed: `/api/health` (counts on demand) and `/api/selfcheck` (daily, only speaks when something failed). Still missing: an alert when the *check itself* stops running.
 19. `lead_events` has no index on `(kind, created_at)` — only `(lead_id, created_at)`. Every health/selfcheck count is a sequential scan. Fine at this size; add `create index lead_events_kind_created on public.lead_events (kind, created_at desc)` when the table grows. **Schema change, not applied.**
