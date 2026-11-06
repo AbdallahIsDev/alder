@@ -15,14 +15,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import { APPLY_ORDER, unlistedMigrations, missingApplyFiles } from '../lib/migrations.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ALL_FILES = [
-  'supabase/migrations/0001_init.sql',
-  'supabase/seed.sql',
-  'supabase/migrations/0002_default_privileges.sql',
-  'supabase/migrations/0003_service_role_grants.sql',
-];
+
+/* The list lives in lib/migrations.js so a test can prove it covers the directory.
+   Checked here too, before connecting: a new .sql file that nobody listed is a
+   silent schema gap on a fresh database. */
+const UNLISTED = unlistedMigrations(ROOT);
+const MISSING = missingApplyFiles(ROOT);
+const ALL_FILES = APPLY_ORDER;
 
 /* --only <path> applies a single later migration against an already-installed database.
    The "businesses must be absent" guard is deliberately skipped in that mode; nothing
@@ -59,6 +61,19 @@ const env = readDotEnv(path.join(ROOT, '.env'));
 const DSN = env.DATABASE_URL;
 
 out('apply-migrations');
+out('');
+
+/* ---------- list integrity (no database needed) ---------- */
+if (UNLISTED.length) {
+  fail(`these migration files are not in lib/migrations.js APPLY_ORDER: ${UNLISTED.join(', ')}`);
+  out('      A fresh database would be built without them. Add each one in order.');
+  process.exit(1);
+}
+if (MISSING.length) {
+  fail(`APPLY_ORDER lists files that do not exist: ${MISSING.join(', ')}`);
+  process.exit(1);
+}
+out(`${pad('files', 26)}${ALL_FILES.length} in order, directory fully covered`);
 out('');
 
 if (!DSN) {

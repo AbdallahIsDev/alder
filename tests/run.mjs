@@ -26,6 +26,7 @@ const API = 'http://localhost:3000/api/lead';
    behaviour). In-process-only suites skip starting the dev server entirely. */
 const DEFAULT_SUITES = [
   { file: 'tests/db-wall.test.mjs', needsHttp: false },
+  { file: 'tests/migrations.test.mjs', needsHttp: false },
   { file: 'tests/lead-api.test.mjs', needsHttp: true },
   { file: 'tests/notify.test.mjs', needsHttp: false },
   { file: 'tests/webhook.test.mjs', needsHttp: false },
