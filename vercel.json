@@ -1,6 +1,11 @@
 {
   "buildCommand": "node build-static.js index.html --out dist/index.html",
   "outputDirectory": "dist",
+  "functions": {
+    "api/*.js": {
+      "includeFiles": "lib/brand.generated.json"
+    }
+  },
   "rewrites": [
     {
       "source": "/r/:token/go",
