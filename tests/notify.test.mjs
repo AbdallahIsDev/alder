@@ -57,10 +57,19 @@ async function clean() {
 
 
 let ip = 40;
+/* One phone per post. The suite must not collide with rows already in the
+   database (duplicate detection would add a line to the alert and break the
+   exact-text assertions), and posts must not collide with each other. 515-555 is
+   a valid US exchange; the 2xxx block is not used by the seed or by prod data. */
+let contactSeq = 0;
+const nextPhone = () => '515555' + String(2000 + (parseInt(RUN, 36) % 6000) + contactSeq++).slice(-4);
+/* The email has to be unique per post too: duplicate detection matches phone OR
+   email, and earlier runs left leads on alder-demo with the old fixed address. */
+const nextEmail = () => `notify${parseInt(RUN, 36) % 100000}-${contactSeq}@example.com`;
 async function post(over, extra) {
   const body = {
     service: 'replacement', home: 'house', timing: 'asap', age: '10 to 20 years',
-    zip: '50265', phone: '5155550142', name: 'Notify Tester', email: 'notify@example.com',
+    zip: '50265', phone: nextPhone(), name: 'Notify Tester', email: nextEmail(),
     notes: 'plain note', claim: false, website: '', elapsed: 5000,
     slug: ALDER_DEMO, idempotencyKey: `${RUN}-${Math.random().toString(36).slice(2, 10)}`,
     ...over,
@@ -87,14 +96,14 @@ try {
   await clean();
   await reset(TG); await reset(RS);
   const special = { name: 'Bob" <x@y>', notes: '<script>alert(1)</script>\r\nsecond line' };
-  const { res, key } = await post(special);
+  const { res, key, body: specialBody } = await post(special);
   const rows = await leadFor(key);
   const rreq = (await requests(RS)).filter((x) => x.method === 'POST' && x.path === '/emails');
   const owner = rreq.find((x) => x.body && x.body.subject && x.body.subject.startsWith('New lead:')) || rreq[0];
   const b = owner && owner.body;
   const okFrom = b && b.from && b.from.startsWith('Lead Alerts <');
   const okTo = b && Array.isArray(b.to) && b.to[0] === process.env.MAIL_REDIRECT_TO;
-  const okReply = b && b.reply_to === 'notify@example.com';
+  const okReply = b && b.reply_to === specialBody.email;
   const okPrefix = b && b.subject.startsWith('[TEST for ');
   const escaped = b && b.html.includes('&lt;script&gt;') && b.html.includes('Bob&quot; &lt;x@y&gt;');
   const bothParts = b && typeof b.html === 'string' && typeof b.text === 'string';
@@ -453,6 +462,37 @@ try {
     `rows=${rows} tg=${tg} mail=${mail} capped=${capped}`);
 } catch (e) { line(false, 'B13', 'auto-reply cap', e.message); }
 
+/* B14: a repeat phone or email is flagged in the alert and on the created event.
+   The lead is always stored — nothing is blocked or merged — and the alert never
+   carries any detail of the earlier request. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const first = await post({ phone: '+15155550177', email: 'dupa@example.com' });
+  const second = await post({ phone: '+15155550177', email: 'dupb@example.com' });
+  const third = await post({ phone: '+15155550188', email: 'dupc@example.com' });
+  const ids = [];
+  for (const k of [first.key, second.key, third.key]) {
+    const rows = await leadFor(k);
+    ids.push(rows.length ? rows[0].id : null);
+  }
+  const evsSecond = ids[1] ? await events(ids[1]) : [];
+  const evsThird = ids[2] ? await events(ids[2]) : [];
+  const createdSecond = evsSecond.find((e) => e.kind === 'created');
+  const createdThird = evsThird.find((e) => e.kind === 'created');
+  const alerts = (await requests(TG)).filter((r) => r.path.includes('/sendMessage')).map((r) => r.body.text || '');
+  const flagged = alerts[1] && alerts[1].includes('Possible repeat of an earlier request');
+  const notFlagged = alerts[0] && !alerts[0].includes('Possible repeat')
+    && alerts[2] && !alerts[2].includes('Possible repeat');
+  const metaOk = createdSecond && createdSecond.meta && createdSecond.meta.duplicate_of === ids[0]
+    && createdThird && !(createdThird.meta && createdThird.meta.duplicate_of);
+  const allSaved = ids.every(Boolean) && alerts.length === 3;
+  line(allSaved && flagged && notFlagged && metaOk, 'B14',
+    'repeat phone flagged, lead still saved, no earlier details',
+    `alerts=${alerts.length} flagged=${!!flagged} meta=${!!metaOk} saved=${allSaved}`);
+} catch (e) { line(false, 'B14', 'duplicate detection', e.message); }
+
 /* Redirect off + default sender -> no HTTP call */
 try {
   await clean();
@@ -474,7 +514,7 @@ try {
 try {
   await clean();
   await reset(TG); await reset(RS);
-  const { res, key } = await post({ notes: 'A note that should be capped' });
+  const { res, key, body: sentBody } = await post({ notes: 'A note that should be capped' });
   const tgReq = (await requests(TG)).filter((x) => x.method === 'POST' && x.path.includes('/sendMessage'));
   const t = tgReq[0] && tgReq[0].body;
   // NEW (item 2): one "Label: value" per line, blank lines between groups, title
@@ -486,8 +526,8 @@ try {
     'New lead · Alder Roofing (demo)',
     '',
     'Name: Notify Tester',
-    'Phone: +15155550142',
-    'Email: notify@example.com',
+    `Phone: +1${sentBody.phone}`,
+    `Email: ${sentBody.email}`,
     '',
     'Service: Roof replacement',
     'Timing: As soon as possible',
@@ -522,7 +562,7 @@ try {
     'New lead · Alder Roofing (demo)',
     '',
     'Name: Notify Tester',
-    'Phone: +15155550142',
+    `Phone: +1${noContact.body.phone}`,
     '',
     'Service: Roof replacement',
     'Timing: As soon as possible',

@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { hashIp } from '../lib/hash.js';
 import { clientIp } from '../lib/request.js';
 import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
-import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit } from '../lib/db.js';
+import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit, findRecentDuplicate } from '../lib/db.js';
 import { notifyAllAfterLead } from '../lib/notify.js';
 
 const SERVICES = ['replacement', 'storm', 'repair', 'unsure'];
@@ -24,6 +24,8 @@ const ALLOWED = new Set([
 ]);
 
 const MAX_BODY = 10 * 1024;
+/* Duplicate detection window. Advisory only — the lead is always stored. */
+const DUPLICATE_WINDOW_DAYS = 30;
 const IP_LIMIT = { window: 3600, max: 10 };
 const BIZ_LIMIT = { window: 3600, max: 200 };
 
@@ -220,15 +222,33 @@ export default async function handler(req, res) {
     return isForm ? htmlReply(200, 'Request received', 'We received your request.', business.name) : res.status(200).json({ ok: true });
   }
 
+  // Advisory: is this the same phone or email as a recent request for this
+  // business? The lead is stored either way; the answer only adds one line to the
+  // owner alert and one meta field on the created event. The earlier lead's
+  // details are never read out, only its id.
+  let duplicateOf = null;
   try {
-    await addEvent(leadId, 'created', { source: isForm ? 'form-nojs' : 'form', slug: business.slug });
+    duplicateOf = await findRecentDuplicate(
+      business.id, phoneE164, email || null,
+      new Date(Date.now() - DUPLICATE_WINDOW_DAYS * 86400 * 1000).toISOString(), leadId,
+    );
+  } catch (e) {
+    console.error('lead_duplicate_check_failed', (e && e.code) || 'no_code');
+  }
+
+  try {
+    await addEvent(leadId, 'created', {
+      source: isForm ? 'form-nojs' : 'form',
+      slug: business.slug,
+      ...(duplicateOf ? { duplicate_of: duplicateOf } : {}),
+    });
   } catch (e) {
     console.error('lead_event_created_failed', (e && e.code) || 'no_code');
   }
 
   // Save first, notify second. Nothing below can change the response.
   await notifyAllAfterLead({
-    leadId, business,
+    leadId, business, duplicate: !!duplicateOf,
     lead: { name, phone: phoneE164, email, zip, service, home, timing, roof_age: age, insurance_claim: b.claim === true, notes },
   });
 
