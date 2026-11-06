@@ -3651,7 +3651,7 @@ var BIZ = {
     body.scrollTop = 0;
   }
   function setNext(t) { nextTxt.textContent = t; }
-  function goTo(n) { var dir = n > step ? 1 : -1; swap(panes[n], dir, function () { alertBox.hidden = true; chrome(n); }).then(focusFirst); }
+  function goTo(n) { var dir = n > step ? 1 : -1; return swap(panes[n], dir, function () { alertBox.hidden = true; chrome(n); }).then(focusFirst); }
   function reset() {                                                          /* no animation: used on load and after the thank-you is closed */
     state = 'edit'; moving = false; panes.forEach(function (p, i) { p.hidden = i !== 0; }); done.hidden = true; alertBox.hidden = true; nav.hidden = false;
     form.removeAttribute('aria-busy'); body.removeAttribute('inert'); next.disabled = back.disabled = false; next.classList.remove('busy'); selects.forEach(function (x) { x.render(); x.close(); }); chrome(0);
@@ -3732,6 +3732,19 @@ var BIZ = {
     return 'generic';
   }
   window.estimateHandleError = handleLeadError;
+  /* Step that holds the first errored field (in step order, not object order).
+     Fields not in STEPS (notes) live on the last step. Exposed for tests. */
+  function firstErrorStep(errors) {
+    var keys = Object.keys(errors || {}), best = -1, bestKey = null;
+    for (var i = 0; i < STEPS.length; i++) {
+      for (var j = 0; j < STEPS[i].length; j++) {
+        if (errors && errors[STEPS[i][j]] && best < 0) { best = i; bestKey = STEPS[i][j]; }
+      }
+    }
+    if (best < 0 && keys.length) { best = STEPS.length - 1; bestKey = keys[0]; }
+    return best < 0 ? null : { step: best, field: bestKey };
+  }
+  window.estimateFirstErrorStep = firstErrorStep;
   function showError(err) {
     setBusy(false);
     var ui = {
@@ -3739,7 +3752,7 @@ var BIZ = {
         var f = form.querySelector('[data-f="' + k + '"]');
         if (!f) return;
         f.querySelector('.err').textContent = msg; f.classList.add('bad');
-        var c = f.querySelector('input[type=text],input[type=tel],input[type=email],select');
+        var c = f.querySelector('input[type=text],input[type=tel],input[type=email],textarea,select');
         if (c) c.setAttribute('aria-invalid', 'true');
       },
       focusField: function (k) {
@@ -3752,6 +3765,14 @@ var BIZ = {
     var result = handleLeadError(err, ui);
     if (result === 'field') {
       setNext('Send my request');
+      // A server error can name a field on an earlier step than step 4 (its
+      // pane is hidden): navigate to that step first, then focus the field.
+      var loc = firstErrorStep(err.body && err.body.errors);
+      if (loc && loc.step !== step) {
+        goTo(loc.step).then(function () { ui.focusField(loc.field); });
+      } else if (loc) {
+        ui.focusField(loc.field);
+      }
       reflow(function () {}, 320);
     } else {
       setNext('Try again');

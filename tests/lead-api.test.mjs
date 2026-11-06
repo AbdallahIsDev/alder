@@ -551,6 +551,36 @@ const logOffset = fs.statSync(LOG).size;
   }
 }
 
+{
+  // P18: firstErrorStep (vm, same approach as P13/P17): earliest step in
+  // step order wins; notes/unknown land on the last step.
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const m18 = /function firstErrorStep\(errors\) \{([\s\S]*?)\n  \}\n  window\.estimateFirstErrorStep/.exec(html);
+  const stepsMatch = /var STEPS = (\[[\s\S]*?\]);/.exec(html);
+  if (!m18 || !stepsMatch) {
+    line(false, 'P18', 'firstErrorStep: earliest errored step', `found=${!!m18}/${!!stepsMatch}`);
+  } else {
+    const { default: vm } = await import('node:vm');
+    const STEPS = vm.runInNewContext('(' + stepsMatch[1] + ')', Object.create(null));
+    const fn = vm.runInNewContext('(function firstErrorStep(errors) {' + m18[1] + '\n})', { STEPS });
+    const cases = [
+      [{ service: 'x' }, 0, 'service'],
+      [{ zip: 'x', timing: 'x' }, 1, 'zip'],
+      [{ timing: 'x' }, 2, 'timing'],
+      [{ phone: 'x', service: 'x' }, 0, 'service'],
+      [{ phone: 'x' }, 3, 'phone'],
+      [{ notes: 'x' }, 3, 'notes'],
+      [{}, null, null],
+    ];
+    const bad = cases.filter(([errors, step, field]) => {
+      const r = fn(errors);
+      return step === null ? r !== null : (!r || r.step !== step || r.field !== field);
+    });
+    line(bad.length === 0, 'P18', 'firstErrorStep: earliest errored step',
+      bad.length ? 'bad: ' + JSON.stringify(bad) : `${cases.length} cases ok`);
+  }
+}
+
 /* ---------- cleanup ---------- */
 {
   await svc.from('leads').delete().like('idempotency_key', `${RUN}-%`);
