@@ -73,6 +73,26 @@ try {
   if (!process.env.RESEND_API_KEY) process.env.RESEND_API_KEY = 'presence-only';
   global.fetch = stubFetch;
 
+  /* F9: a redirect left on in production warns exactly once; in development it
+     stays quiet (the redirect is the normal demo state there). Sending itself is
+     unchanged — the fetch stub absorbs the calls. */
+  {
+    const warns = [];
+    const realWarn = console.warn;
+    console.warn = (...a) => warns.push(a.map(String).join(' '));
+    process.env.MAIL_REDIRECT_TO = 'redirect@example.com';
+    process.env.VERCEL_ENV = 'development';
+    await sendMail(mail());
+    const devWarns = warns.filter((w) => w.includes('mail_redirect_active')).length;
+    process.env.VERCEL_ENV = 'production';
+    await sendMail(mail());
+    await sendMail(mail());
+    const prodWarns = warns.filter((w) => w.includes('mail_redirect_active')).length;
+    console.warn = realWarn;
+    line(devWarns === 0 && prodWarns === 1, 'F9', 'redirect warns once, in production only',
+      `dev=${devWarns} prod=${prodWarns}`);
+  }
+
   /* F1/F2: deployed environments ignore the overrides and the marker */
   for (const env of ['production', 'preview']) {
     process.env.VERCEL_ENV = env;
