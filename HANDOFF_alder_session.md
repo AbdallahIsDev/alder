@@ -5,11 +5,20 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 ## Current state
 
 - Branch `db-backend` (never push to `main`).
-- Baseline before this bundle: `db-wall 27, lead-api 40, notify 36, webhook 36, review 20, fallback 7, brand 6, outbound 4` (all green).
+- Baseline before this bundle: `db-wall 27, lead-api 44, notify 37, webhook 42, review 21, fallback 7, brand 6, outbound 4` (all green).
 - Final full run after this bundle: see report (per-suite counts before and after).
 - Production is live; suites read the production database (see caveat below).
 
-## What changed in this bundle (bot copy / phone / review)
+## What changed in this bundle (test speed)
+
+- Before/after (warm full run): lead-api 119s→~40s, webhook 102s→~80s, review 63s→~35s, notify 33s→~20s (via dev-only 1000ms outbound timeout + 2500ms hangs), fallback unchanged 17s. Total ~352s→~200s class. One shared `vercel dev` for all suites; suites run sequentially; dev-ready poll is 60× (fetch 1500ms timeout + 1000ms sleep).
+- `lib/outbound.js` reads `OUTBOUND_TIMEOUT_MS` only when `isDev()` (integer 200–3000); `tests/run.mjs` sets 1000 for dev + suites; fake hangs 6000→2500ms. Tests F5–F7, 3× stable notify/webhook runs.
+- lead-api/review logic tests moved in-process (same IDs/assertions); real HTTP kept only for lead 10/12/12b/13/14 and review D2/D4/D8/I1 (rewrites, headers, dev log, full round trips). Mutation checks: 5/5 kill tests.
+- Runner: per-suite seconds + total always printed; `--seed-check` read-only gate; suites that need no HTTP skip `vercel dev` + canary.
+- Supabase round trip from this machine: median ~196ms (20 SELECTs: min 178, median 196, max 354). Request counts per op: lead POST success 9, 400 POST 2, /start bind 5, /leads 2, c+d callbacks 11, y: 8, r: 4.
+- Tests that stayed on real HTTP: lead-api 10 (GET 405), 12/12b (page estimateDeliver end-to-end), 13/14 (dev LOG assertions); review D2 (full GET page), D4 (404 + dev generic page), D8 (/go rewrite), I1 (rewrite variants). fallback stays fully HTTP (urlencoded platform parsing).
+
+## What changed in the previous bundle (bot copy / phone / review)
 
 - Phone for all countries: modal `00` → `+`, one trunk `0` after the calling code allowed past the cap while typing and stripped on submit; server retries once without that `0` and stores only valid E.164 (Italy zero kept). North America code `1` overridden to `[10, 10]` in `build-static.js`. Exhaustive proof: 245 regions, 490 mobile-example strings (E.164 + international), 0 digit drops, 0 phoneOk/server failures. Tests P19–P22.
 - Telegram status block now ≤26 chars (no name/email), confirm buttons "Send request"/"Mark done". `/leads` uses a shared status map + `renderLeadList` (spaced blocks, truncated names, emoji statuses). Tests S1, C32, L1.
@@ -48,6 +57,13 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - Before any test run: back up the `alder-demo` businesses row (all columns) and every `business_chats` row for it to `_debug/prod-backup.json` (gitignored). Print only differing column names and row counts, never values.
 - Reset the differing columns to the seed values (`supabase/seed.sql` / migrations) and delete only that business's `business_chats` rows. Touch nothing else.
 - After the final full test run and before the push: restore the saved rows exactly; confirm by column names and counts only.
+
+## Test workflow
+
+- `node tests/run.mjs [suites...]` — one shared `vercel dev` for the run; suites run sequentially in the listed order. Per-suite seconds and total always print. Flags: `--seed-check` runs the read-only alder-demo seed check only (no tests, exits 1 on mismatch); `--timing` is accepted (timing always prints). Suites that need no HTTP (`db-wall`, `notify`, `webhook`, `brand`, `outbound`) skip `vercel dev` and the canary.
+- During an item, run only the suites you touched. Run `--seed-check` instead of a full baseline run whenever the last recorded green HEAD equals START. Run the full suite once at the end.
+- Outbound timeout rule: production code uses 3000 ms always. In tests only, `OUTBOUND_TIMEOUT_MS=1000` is honoured when `VERCEL_ENV` is unset or `development` (integer 200–3000); fake "hang" durations must stay above it (2500 ms).
+- Biggest remaining win would be a nearby dedicated test Supabase project (median round trip here is ~196 ms); the single biggest suite cost was lead-api through `vercel dev` (~2s per POST), now mostly in-process.
 
 ## How to create a bind code
 

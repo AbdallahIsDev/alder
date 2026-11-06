@@ -332,6 +332,23 @@ The email and Telegram code reads these names (never values - do not copy
 prefix; recipients are still redirected to `MAIL_REDIRECT_TO`), `SITE_URL`,
 `DATABASE_URL` (local migrations only).
 
+## Running the tests
+
+```powershell
+node tests/run.mjs                          # all suites, one shared vercel dev
+node tests/run.mjs tests/lead-api.test.mjs  # one suite
+node tests/run.mjs --seed-check             # read-only: alder-demo == seed?
+```
+
+Suites that only call handlers in-process (`db-wall`, `notify`, `webhook`,
+`brand`, `outbound`) skip `vercel dev` entirely; suites that exercise real
+HTTP (`lead-api`, `review`, `fallback`) start one shared dev server for the
+whole run. Per-suite seconds and the total always print. Outbound HTTP uses
+a 3000 ms timeout in production; in tests only (`VERCEL_ENV` development),
+`OUTBOUND_TIMEOUT_MS=1000` shortens it (the runner sets it). The suites read
+the production database — back up and reset `alder-demo` first, and restore
+afterwards (see `HANDOFF_alder_session.md`).
+
 ## Preview gallery
 
 ```powershell
