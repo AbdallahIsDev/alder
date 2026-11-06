@@ -5,11 +5,19 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 ## Current state
 
 - Branch `db-backend` (never push to `main`).
-- Baseline before this bundle: `db-wall 27, lead-api 37, notify 36, webhook 25, review 20, fallback 7, brand 5, outbound 4` (all green).
+- Baseline before this bundle: `db-wall 27, lead-api 39, notify 36, webhook 31, review 20, fallback 7, brand 5, outbound 4` (all green).
 - Final full run after this bundle: see report (per-suite counts before and after).
 - Production is live; suites read the production database (see caveat below).
 
-## What changed in this bundle (reviewer follow-up)
+## What changed in this bundle (follow-up 2)
+
+- Corrected retry-key rule: a timeout reuses the EXACT key of the timed-out attempt, recorded in that failure's `lead_events.meta` as `{ status, key }`; any other failure gets a fresh `<leadId>:review:r<count>`. `getReviewFailureInfo` now returns `{ count, lastStatus, lastKey }` (null for legacy rows). Tests C21–C24 unchanged, C27–C30 new.
+- Post-done error handling: the post-transition part of kind `y` is wrapped so a throw logs `tg_callback_failed` and best-effort renders the error view (or the no-email done view) with no second answer. No uncaught query exists there today, so the test is static (C31).
+- Modal: server errors for earlier-step fields now navigate to that step before focusing (`firstErrorStep`, exposed as `window.estimateFirstErrorStep`; test P18); `setField` sets `aria-invalid` on textarea too. Error-clearing on edit already worked via the `input` listener + `check()` (covers notes and server-set errors). Client `phoneOk` accepts 7–9 digit bare US numbers the server rejects (report only).
+- Bundling: `vercel.json` gained `functions: { "api/*.js": { "includeFiles": "lib/brand.generated.json" } }` (headers untouched) so the logo bytes are guaranteed in the function bundle; test F6 asserts the module loads real PNG bytes.
+- `api/tg.js` try-body reindent (whitespace only, own commit; `git diff -w` empty).
+
+## What changed in the previous bundle (reviewer follow-up)
 
 - Review retry idempotency keys: first send uses `<leadId>:review`. `r:` (Try again) reads earlier `review_request_failed` events via `getReviewFailureInfo` (count + most recent `meta.status`); if the last status is `timeout` it reuses the plain key (the first request may have delivered), otherwise it uses `<leadId>:review:r<n>`. `sendReviewRequest` takes an optional `idempotencyKey`. Tests C21–C24.
 - Callback error handling: `handleCallback` (after the binding check) is wrapped in try/catch; any throw logs only `tg_callback_failed` + code and answers once with "Something went wrong. Try again." (answer-once flag). Tests C25–C26 (throw injected by wrapping fetch and failing the targeted PostgREST query).
@@ -61,3 +69,4 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 8. Domain verification in Resend and removal of `MAIL_REDIRECT_TO` before real clients.
 9. Vercel Hobby is non-commercial; Pro needed once a client pays.
 10. Double-tap Try again race: two concurrent `r:` callbacks can both pass `hasReviewSent`, record both `review_requested` and `review_request_failed`, and leave the message on the error view after an email was sent. The shared Resend idempotency key prevents a duplicate email; a re-check of `hasReviewSent` immediately before sending only shrinks the window, so it was described but not implemented.
+11. Client/server phone minimum mismatch: with no leading `+`, client `phoneOk` accepts 7, 8, 9, 10 digits (and 11 starting with 1) for US, while the server (`isValidPhoneNumber`, region US) accepts only 10 (and 11 starting with 1). A 7–9 digit bare number passes the modal, then gets a 400 field error on submit. Report only; no change made.
