@@ -5,9 +5,8 @@
 //   npm run tg:commands:info   # print only the command names
 //
 // Prints only command names (set: both commands; info: names from getMyCommands).
-// Never prints the bot token, a URL, or a response body. Env loading matches
-// scripts/make-bind-code.mjs (process env, then .env.local, then .env), and
-// `npm run` loads both files through --env-file-if-exists flags.
+// Never prints the bot token, a URL, or a response body. Env loading is lib/env.js,
+// the same loader the tests and the other scripts use.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,39 +15,13 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
 
-/** Parse one .env text. Returns a fresh object; never prints values. */
-export function parseDotEnvText(text) {
-  const out = {};
-  for (const line of String(text || '').split(/\r?\n/)) {
-    if (/^\s*#/.test(line)) continue;
-    const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (!m) continue;
-    let v = m[2];
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-    out[m[1]] = v;
-  }
-  return out;
-}
+/* Env loading is lib/env.js — one loader for scripts and tests. */
+import { loadEnv, parseDotEnvText, applyDotEnvEntries } from '../lib/env.js';
 
-export function applyDotEnvEntries(env, entries) {
-  for (const entry of entries || []) {
-    const parsed = parseDotEnvText(entry && entry.text);
-    for (const [k, v] of Object.entries(parsed)) {
-      const cur = env[k];
-      if (cur === undefined || cur === null || String(cur).length === 0) env[k] = v;
-    }
-  }
-  return env;
-}
+export { parseDotEnvText, applyDotEnvEntries };
 
 export function loadDotEnvFiles({ env = process.env, root = ROOT, files = ['.env.local', '.env'] } = {}) {
-  const entries = files.map((f) => {
-    const p = path.join(root, f);
-    let text = '';
-    try { text = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : ''; } catch { text = ''; }
-    return { file: f, text };
-  });
-  return applyDotEnvEntries(env, entries);
+  return loadEnv({ env, root, files, testEnv: false }).env;
 }
 
 export const COMMANDS = [

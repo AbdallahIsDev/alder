@@ -61,16 +61,24 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - Reset the differing columns to the seed values (`supabase/seed.sql` / migrations) and delete only that business's `business_chats` rows. Touch nothing else.
 - After the final full test run and before the push: restore the saved rows exactly; confirm by column names and counts only.
 
+## Env files and the test project
+
+- One loader, `lib/env.js`, used by the runner, every suite and every script (`bind`, `tg:commands`, `db:apply`, `live-smoke`). Precedence, highest first: **`process.env` > `.env.test` (only when `TEST_ENV=1`) > `.env.local` > `.env`**. `.env.*` is gitignored; `.env.example` carries names only and must ship.
+- `.env` is the production reference. It is never edited to point the tests elsewhere.
+- To point the suite at a separate Supabase project: create `.env.test` with `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (and `DATABASE_URL` if `npm run db:apply` should build it), then run `TEST_ENV=1 node tests/run.mjs`.
+- Guard: the runner refuses to start when the resolved `SUPABASE_URL` equals the value in `.env`. The comparison is by value and neither URL is printed. `ALLOW_PROD_TESTS=1` is the explicit opt-out and prints a warning; it exists only until `.env.test` exists.
+- `npm run db:apply` refuses a `DATABASE_URL` that came from the shell unless `TEST_ENV=1`, so a stray export cannot point a schema apply at another database.
+
 ## Test workflow
 
-- `node tests/run.mjs [suites...]` — one shared `vercel dev` for the run; suites run sequentially in the listed order. Per-suite seconds and total always print. Flags: `--seed-check` runs the read-only alder-demo seed check only (no tests, exits 1 on mismatch); `--timing` is accepted and ignored (timing always prints). The suites that need no HTTP are `db-wall`, `notify`, `webhook`, `brand`, `outbound`; `vercel dev` and the canary are skipped only when **every** selected suite is in that set, not suite by suite.
+- `node tests/run.mjs [suites...]` — one shared `vercel dev` for the run; suites run sequentially in the listed order. Per-suite seconds and total always print. Flags: `--seed-check` runs the read-only alder-demo seed check only (no tests, exits 1 on mismatch). There is no `--timing` flag — per-suite seconds always print. The suites that need no HTTP are `db-wall`, `migrations`, `notify`, `webhook`, `brand`, `outbound`; `vercel dev` and the canary are skipped only when **every** selected suite is in that set, not suite by suite. `TEST_ENV=1` switches the loader to `.env.test`; `ALLOW_PROD_TESTS=1` overrides the production guard.
 - During an item, run only the suites you touched. Run `--seed-check` instead of a full baseline run whenever the last recorded green HEAD equals START. Run the full suite once at the end.
 - Outbound timeout rule: production code uses 3000 ms always. In tests only, `OUTBOUND_TIMEOUT_MS=1000` is honoured when `VERCEL_ENV` is unset or `development` (integer 200–3000); fake "hang" durations must stay above it (2500 ms).
 - Biggest remaining win is a nearby dedicated test Supabase project. Measured per-test instrumentation (2026-11-06, not committed): lead-api makes 400 Supabase requests in 82.6 s and webhook 450 in 91.5 s; at the measured 192 ms median round trip that is 76.8 s and 86.4 s — i.e. ~93–95 % of each suite is database round-trip time, and the fake Telegram/Resend servers plus the 7 deliberate 1 s hangs account for the rest. `vercel dev` itself is no longer a suite cost: startup is ~10 s (9,972 ms measured today; the 55.8 s baseline figure was a cold `npx` cache, not a fixed cost), and only 4 lead-api tests call it (10, 12, 12b, 14) plus one reachability probe.
 
 ## How to create a bind code
 
-- `npm run bind -- <slug>` — reads `.env` + `.env.local` (process env, then `.env.local`, then `.env`). Mints a single-use code, 24 h expiry, prints the business name, code, expiry and deep link. Delete the row after a test mint.
+- `npm run bind -- <slug>` — reads the same files as everything else (`process.env`, then `.env.test` when `TEST_ENV=1`, then `.env.local`, then `.env`). Mints a single-use code, 24 h expiry, prints the business name, code, expiry and deep link. Delete the row after a test mint.
 
 ## How to register commands
 

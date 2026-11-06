@@ -3,33 +3,23 @@
 //
 //   node tests/db-wall.test.mjs
 //
-// Reads SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY from .env (or the
-// real environment). Prints PASS/FAIL per line, exits 1 if anything failed.
-// Creates a few rows, then deletes every one of them and verifies the table is clean.
+// Reads SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY through lib/env.js
+// (process.env > .env.test when TEST_ENV=1 > .env.local > .env). Prints PASS/FAIL per
+// line, exits 1 if anything failed. Creates a few rows, then deletes every one of them
+// and verifies the table is clean.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
+import { loadEnv } from '../lib/env.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RUN = Math.random().toString(36).slice(2, 8);
 const TAG = `dbtest-${RUN}`;
 
-/* ---------- .env, no dependency ---------- */
-function loadEnv(file) {
-  if (!fs.existsSync(file)) return;
-  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
-    if (/^\s*#/.test(line)) continue;
-    const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (!m) continue;
-    let v = m[2];
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-    if (!(m[1] in process.env)) process.env[m[1]] = v;
-  }
-}
-loadEnv(path.join(ROOT, '.env'));
-loadEnv(path.join(ROOT, '.env.local'));
+/* ---------- env, one shared loader ---------- */
+loadEnv();
 
 /* ---------- result printer ---------- */
 let failed = 0;
@@ -200,33 +190,77 @@ const BIND_CODE = ('DBTEST' + RUN).replace(/[^A-Z0-9]/g, '').toUpperCase().slice
   line(ok, '8', 'test rows cleaned up'.padEnd(34), `leads=${(left || []).length} rate_limits=${(rl || []).length} events=${(ev || []).length} bind=${(bc || []).length}`);
 }
 
-/* ---------- E: bind env loading (temp files, no DB) ---------- */
+/* ---------- E: env loading through the REAL loader (temp files, no DB) ----------
+   Every case below writes actual .env* files into a temp root and calls the same
+   loadEnv() the runner and the scripts use. No hand-ordered entry lists: if the
+   loader's precedence changes, these fail. */
 {
-  const { applyDotEnvEntries, loadDotEnvFiles, missingEnvNames } = await import('../scripts/make-bind-code.mjs');
-  // E1: only .env.local has the vars
-  const e1env = {};
-  applyDotEnvEntries(e1env, [{ file: '.env.local', text: 'ONLY_LOCAL=local_val\nSHARED=local_val\n' }, { file: '.env', text: 'ONLY_BASE=base_val\nSHARED=base_val\n' }]);
-  const e1ok = e1env.ONLY_LOCAL === 'local_val' && e1env.ONLY_BASE === 'base_val';
-  line(e1ok, 'E1', 'env loader: only .env.local supplies its vars', `local=${e1env.ONLY_LOCAL} base=${e1env.ONLY_BASE}`);
-  // E2: both present — .env.local wins over .env; non-empty process env wins over both
-  const e2env = { ALREADY: 'proc_val' };
-  applyDotEnvEntries(e2env, [{ file: '.env.local', text: 'SHARED=local_val\nALREADY=local_val\n' }, { file: '.env', text: 'SHARED=base_val\nALREADY=base_val\n' }]);
-  const e2ok = e2env.SHARED === 'local_val' && e2env.ALREADY === 'proc_val';
-  line(e2ok, 'E2', 'env loader: .env.local beats .env, process beats both', `shared=${e2env.SHARED} already=${e2env.ALREADY}`);
-  // E3: neither present — nothing filled, missing names listed
-  const e3env = {};
-  applyDotEnvEntries(e3env, [{ file: '.env.local', text: '' }, { file: '.env', text: '# empty\n' }]);
-  const e3ok = Object.keys(e3env).length === 0 && missingEnvNames(e3env, ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']).join(',') === 'SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY';
-  // Real temp files: same function through the filesystem (inside the repo).
-  const tmpRoot = path.join(ROOT, '_debug', 'envtest-' + RUN);
-  fs.mkdirSync(tmpRoot, { recursive: true });
-  fs.writeFileSync(path.join(tmpRoot, '.env.local'), 'TMP_LOCAL=file_local\nTMP_SHARED=file_local\n');
-  fs.writeFileSync(path.join(tmpRoot, '.env'), 'TMP_SHARED=file_base\n');
-  const tmpEnv = {};
-  loadDotEnvFiles({ env: tmpEnv, root: tmpRoot });
-  const tmpOk = tmpEnv.TMP_LOCAL === 'file_local' && tmpEnv.TMP_SHARED === 'file_local';
-  fs.rmSync(tmpRoot, { recursive: true, force: true });
-  line(e3ok && tmpOk, 'E3', 'env loader: neither present fills nothing; temp files match', `keys=${Object.keys(e3env).length} tmpShared=${tmpEnv.TMP_SHARED}`);
+  const { loadEnv, missingEnvNames, checkNotProduction } = await import('../lib/env.js');
+  const base = path.join(ROOT, '_debug', 'envtest-' + RUN);
+  const mk = (name, files) => {
+    const dir = path.join(base, name);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [f, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, f), text);
+    return dir;
+  };
+
+  // E1: only .env.local present — it supplies its own key and the shared one.
+  {
+    const dir = mk('e1', { '.env.local': 'ONLY_LOCAL=local_val\nSHARED=local_val\n', '.env': 'ONLY_BASE=base_val\n' });
+    const env = {};
+    const { sources } = loadEnv({ env, root: dir, testEnv: false });
+    const ok = env.ONLY_LOCAL === 'local_val' && env.ONLY_BASE === 'base_val'
+      && sources.ONLY_LOCAL === '.env.local' && sources.ONLY_BASE === '.env';
+    line(ok, 'E1', 'env loader: each file supplies its own keys', `local=${sources.ONLY_LOCAL} base=${sources.ONLY_BASE}`);
+  }
+
+  // E2: all three files define SHARED; TEST_ENV decides, and process.env always wins.
+  {
+    const dir = mk('e2', {
+      '.env.test': 'SHARED=test_val\nALREADY=test_val\n',
+      '.env.local': 'SHARED=local_val\nALREADY=local_val\n',
+      '.env': 'SHARED=base_val\nALREADY=base_val\n',
+    });
+    const withTest = loadEnv({ env: { ALREADY: 'proc_val' }, root: dir, testEnv: true }).env;
+    const withoutTest = loadEnv({ env: { ALREADY: 'proc_val' }, root: dir, testEnv: false }).env;
+    const ok = withTest.SHARED === 'test_val' && withoutTest.SHARED === 'local_val'
+      && withTest.ALREADY === 'proc_val' && withoutTest.ALREADY === 'proc_val';
+    line(ok, 'E2', 'precedence: process > .env.test > .env.local > .env',
+      `test=${withTest.SHARED} noTest=${withoutTest.SHARED} proc=${withTest.ALREADY}`);
+  }
+
+  // E3: nothing present — nothing filled, and the missing names are reported in order.
+  {
+    const dir = mk('e3', {});
+    const env = {};
+    const { sources } = loadEnv({ env, root: dir, testEnv: true });
+    const ok = Object.keys(env).length === 0
+      && missingEnvNames(env, ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']).join(',') === 'SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY'
+      && Object.keys(sources).length === 0;
+    line(ok, 'E3', 'no files: nothing filled, missing names listed', `keys=${Object.keys(env).length}`);
+  }
+
+  // E4: .env.test is ignored unless TEST_ENV=1 — the file must not leak into normal runs.
+  {
+    const dir = mk('e4', { '.env.test': 'ONLY_TEST=test_val\n' });
+    const off = loadEnv({ env: {}, root: dir, testEnv: false }).env;
+    const on = loadEnv({ env: {}, root: dir, testEnv: true }).env;
+    line(off.ONLY_TEST === undefined && on.ONLY_TEST === 'test_val', 'E4',
+      '.env.test ignored unless TEST_ENV=1', `off=${off.ONLY_TEST === undefined} on=${on.ONLY_TEST === 'test_val'}`);
+  }
+
+  // E5: the production guard compares values and never prints them.
+  {
+    const dir = mk('e5', { '.env': 'SUPABASE_URL=https://prod-project.example.co/\n' });
+    const same = checkNotProduction({ SUPABASE_URL: 'https://prod-project.example.co' }, dir);
+    const other = checkNotProduction({ SUPABASE_URL: 'https://test-project.example.co' }, dir);
+    const none = checkNotProduction({}, dir);
+    line(same.reason === 'same-as-env' && other.reason === 'ok' && none.reason === 'no-url', 'E5',
+      'guard: same URL refused, different allowed, missing reported',
+      `same=${same.reason} other=${other.reason} none=${none.reason}`);
+  }
+
+  fs.rmSync(base, { recursive: true, force: true });
 }
 
 console.log('');

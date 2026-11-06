@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { startFakes } from './fakes.mjs';
 import { isLoopback } from '../lib/outbound.js';
+import { loadEnv, isTestEnv, checkNotProduction } from '../lib/env.js';
 import { createClient } from '@supabase/supabase-js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -100,17 +101,33 @@ function fail(msg) {
 }
 
 /* ---------- env / values ---------- */
-const dotenv = {};
-for (const f of ['.env', '.env.local']) {
-  const p = path.join(ROOT, f);
-  if (!fs.existsSync(p)) continue;
-  for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
-    if (/^\s*#/.test(line)) continue;
-    const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (m) dotenv[m[1]] = m[2].replace(/^["']|["']$/g, '');
+// One loader for every script and suite: process.env > .env.test (TEST_ENV=1)
+// > .env.local > .env. Values are never printed — only which file supplied them.
+const { sources: envSources, files: envFiles } = loadEnv();
+out(`runner  env files: ${envFiles.join(', ')}${isTestEnv() ? '' : ' (TEST_ENV=1 would add .env.test)'}`);
+out(`runner  SUPABASE_URL from ${envSources.SUPABASE_URL || '(unset)'}`);
+
+/* Refuse to run against the project named in .env. The comparison is by value,
+   and neither URL is ever printed. ALLOW_PROD_TESTS=1 is the deliberate opt-out. */
+{
+  const check = checkNotProduction();
+  if (check.reason === 'no-url') {
+    out('FAIL  runner  SUPABASE_URL is not set — check .env or .env.test');
+    process.exit(1);
+  }
+  if (!check.ok) {
+    if (String(process.env.ALLOW_PROD_TESTS || '') !== '1') {
+      out('FAIL  runner  refusing to run against the production project');
+      out('      SUPABASE_URL matches the value in .env. Put a test project URL in');
+      out('      .env.test and run with TEST_ENV=1, or set ALLOW_PROD_TESTS=1 to run');
+      out('      against production on purpose.');
+      process.exit(1);
+    }
+    out('runner  WARNING: SUPABASE_URL is the project in .env (production), allowed by ALLOW_PROD_TESTS=1');
   }
 }
-const svc = createClient(dotenv.SUPABASE_URL, dotenv.SUPABASE_SERVICE_ROLE_KEY, {
+
+const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
@@ -139,7 +156,7 @@ if (RUN_SEED_CHECK) {
 
 try {
   /* ---------- refusals ---------- */
-  for (const f of ['.env', '.env.local']) {
+  for (const f of envFiles) {
     const found = envNames(f).filter((n) => FORBIDDEN.includes(n));
     if (found.length) throw new Error(`${f} defines ${found.join(', ')} — it would shadow the loopback override. Remove it.`);
   }

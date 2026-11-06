@@ -1,22 +1,22 @@
-// tests/env.mjs — load .env / .env.local into process.env for in-process suites.
+// tests/env.mjs — suite-side shim over lib/env.js.
+//
+// The loader itself lives in lib/env.js so scripts and tests cannot drift apart.
+// loadEnv() fills process.env in place and is safe to call twice.
+//
+// Precedence: process.env > .env.test (only when TEST_ENV=1) > .env.local > .env
 // Values are never printed.
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { loadEnv as loadEnvShared } from '../lib/env.js';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export {
+  parseDotEnvText,
+  applyDotEnvEntries,
+  envFileNames,
+  readEnvFile,
+  checkNotProduction,
+  sameSupabaseUrl,
+} from '../lib/env.js';
 
-export function loadEnv() {
-  for (const f of ['.env', '.env.local']) {
-    const p = path.join(ROOT, f);
-    if (!fs.existsSync(p)) continue;
-    for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
-      if (/^\s*#/.test(line)) continue;
-      const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-      if (!m) continue;
-      const v = m[2].replace(/^["']|["']$/g, '');
-      if (!(m[1] in process.env)) process.env[m[1]] = v;
-    }
-  }
+export function loadEnv(opts) {
+  return loadEnvShared(opts);
 }

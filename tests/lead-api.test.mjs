@@ -22,15 +22,10 @@ const ORIGIN = new URL(API).origin;
 const LOG = path.resolve(ROOT, process.env.LEAD_API_LOG || '_debug/vercel-dev.log');
 const RUN = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 
-/* ---------- .env ---------- */
-const env = {};
-if (fs.existsSync(path.join(ROOT, '.env'))) {
-  for (const line of fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split(/\r?\n/)) {
-    if (/^\s*#/.test(line)) continue;
-    const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-  }
-}
+/* ---------- env, one shared loader ---------- */
+// process.env > .env.test (TEST_ENV=1) > .env.local > .env, same as every other suite.
+import { loadEnv } from '../lib/env.js';
+loadEnv();
 const FAKE_TG_URL = process.env.FAKE_TG_URL;
 async function fakeTg(cfg) {
   if (!FAKE_TG_URL) throw new Error('FAKE_TG_URL is not set — run through tests/run.mjs');
@@ -81,7 +76,7 @@ async function post(body, opts = {}) {
 }
 
 /* ---------- db ---------- */
-const svc = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
@@ -125,10 +120,6 @@ async function postInProcess(body, opts) {
   return { status: res.code, json: res.body && typeof res.body === 'object' ? res.body : null };
 }
 
-/* In-process handler calls read process.env (e.g. IP_HASH_SALT); load it
-   the same way the other in-process suites do. */
-import { loadEnv } from './env.mjs';
-loadEnv();
 
 /* ---------- reachability ---------- */
 try {

@@ -3,10 +3,12 @@
 //
 //   npm run db:apply
 //
-// Reads DATABASE_URL from .env only (never from the ambient environment, so a stray
-// shell export cannot point this at the wrong database). Verifies TLS against the
-// system trust store — if the certificate does not verify, this stops and says so
-// rather than quietly downgrading to an unverified connection.
+// Reads DATABASE_URL through lib/env.js (process.env > .env.test when TEST_ENV=1 >
+// .env.local > .env) and prints which source supplied it. A DATABASE_URL that comes
+// from the shell is refused unless TEST_ENV=1, so a stray export cannot silently
+// point this at another database. Verifies TLS against the pinned Supabase root —
+// if the certificate does not verify, this stops and says so rather than quietly
+// downgrading to an unverified connection.
 //
 // Safety: refuses to run if public.businesses already exists. It never drops,
 // alters or truncates anything. Each file runs in its own transaction.
@@ -16,6 +18,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { APPLY_ORDER, unlistedMigrations, missingApplyFiles } from '../lib/migrations.js';
+import { loadEnv } from '../lib/env.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -42,23 +45,9 @@ const fail = (msg) => {
   out('FAIL  ' + msg);
 };
 
-/* ---------- .env only ---------- */
-function readDotEnv(file) {
-  if (!fs.existsSync(file)) return {};
-  const env = {};
-  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
-    if (/^\s*#/.test(line)) continue;
-    const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (!m) continue;
-    let v = m[2];
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-    env[m[1]] = v;
-  }
-  return env;
-}
-
-const env = readDotEnv(path.join(ROOT, '.env'));
-const DSN = env.DATABASE_URL;
+/* ---------- env, one shared loader ---------- */
+const { sources } = loadEnv();
+const DSN = process.env.DATABASE_URL;
 
 out('apply-migrations');
 out('');
@@ -74,10 +63,17 @@ if (MISSING.length) {
   process.exit(1);
 }
 out(`${pad('files', 26)}${ALL_FILES.length} in order, directory fully covered`);
+out(`${pad('env source', 26)}${sources.DATABASE_URL || '(none)'}`);
 out('');
 
+/* A shell export is the one way to reach a database nobody meant to touch. */
+if (DSN && sources.DATABASE_URL === 'process.env' && String(process.env.TEST_ENV || '') !== '1') {
+  fail('DATABASE_URL came from the shell, not from an env file. Unset it, or set TEST_ENV=1 to allow it.');
+  process.exit(1);
+}
+
 if (!DSN) {
-  fail('.env has no DATABASE_URL. Add it there (session pooler URI) — this script will not read it from anywhere else.');
+  fail('no DATABASE_URL in process.env, .env.test (TEST_ENV=1), .env.local or .env.');
   process.exit(1);
 }
 
@@ -92,7 +88,7 @@ try {
     database: decodeURIComponent(u.pathname.replace(/^\//, '')) || 'postgres',
   };
 } catch {
-  fail('DATABASE_URL in .env is not a parseable URI.');
+  fail('DATABASE_URL is not a parseable URI.');
   process.exit(1);
 }
 

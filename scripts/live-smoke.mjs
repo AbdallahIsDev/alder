@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadEnv } from '../lib/env.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 if (!process.argv.includes('--live')) {
@@ -26,15 +27,7 @@ if (process.env.TELEGRAM_API_BASE || process.env.RESEND_API_BASE) {
   process.exit(1);
 }
 
-for (const f of ['.env', '.env.local']) {
-  const p = path.join(ROOT, f);
-  if (!fs.existsSync(p)) continue;
-  for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
-    if (/^\s*#/.test(line)) continue;
-    const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-  }
-}
+loadEnv();
 
 const { sendMessageWithDescription } = await import('../lib/tg.js');
 const { sendMail } = await import('../lib/mail.js');
