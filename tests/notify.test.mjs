@@ -361,6 +361,77 @@ try {
     'A4', 'Resend 6 s hang -> ok:true, under 5 s', `${res.code} ms=${ms} meta=${JSON.stringify(fail && fail.meta)}`);
 } catch (e) { line(false, 'A4', 'Resend hang', e.message); }
 
+/* ---------- B9-B12: cross-channel owner-alert fallback ----------
+   Both channels always send. When exactly one fails the owner already has the
+   alert, so a second send would be a duplicate; only when NEITHER delivered does
+   each usable channel get one more attempt, marked { fallback: true }. */
+
+const sendMessageCount = async () => (await requests(TG)).filter((r) => r.path.includes('/sendMessage')).length;
+const emailCount = async () => (await requests(RS)).filter((r) => r.path === '/emails').length;
+const metaOf = (evs) => evs.map((e) => e.meta || {});
+
+/* B9: both up — one Telegram, one owner email plus the auto-reply, no fallback */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const fb = metaOf(evs).some((m) => m.fallback === true);
+  line(res.code === 200 && rows.length === 1 && tg === 1 && mail === 2 && !fb,
+    'B9', 'both up: one alert per channel, no fallback', `tg=${tg} mail=${mail} fallback=${fb}`);
+} catch (e) { line(false, 'B9', 'both up', e.message); }
+
+/* B10: Telegram 500 — the owner has the email, so no second Telegram attempt */
+try {
+  await clean();
+  await control(TG, { mode: '500' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  await control(TG, { mode: 'ok' });
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const failed = evs.some((e) => e.kind === 'tg_failed' && e.meta && e.meta.status === 500);
+  const fb = metaOf(evs).some((m) => m.fallback === true);
+  line(res.code === 200 && rows.length === 1 && tg === 1 && mail === 2 && failed && !fb,
+    'B10', 'telegram down: email delivered, no duplicate send', `tg=${tg} mail=${mail} failed=${failed} fallback=${fb}`);
+} catch (e) { line(false, 'B10', 'telegram down', e.message); }
+
+/* B11: Resend 500 — the owner has the Telegram alert, so no second email */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: '500' });
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  await control(RS, { mode: 'ok' });
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const failed = evs.some((e) => e.kind === 'email_owner_failed' && e.meta && e.meta.status === 500);
+  const fb = metaOf(evs).some((m) => m.fallback === true);
+  line(res.code === 200 && rows.length === 1 && tg === 1 && mail === 2 && failed && !fb,
+    'B11', 'resend down: telegram delivered, no duplicate send', `tg=${tg} mail=${mail} failed=${failed} fallback=${fb}`);
+} catch (e) { line(false, 'B11', 'resend down', e.message); }
+
+/* B12: both down — nothing reached the owner, so both channels are retried once */
+try {
+  await clean();
+  await control(TG, { mode: '500' }); await control(RS, { mode: '500' });
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const fb = metaOf(evs).filter((m) => m.fallback === true).length;
+  const failedTg = evs.filter((e) => e.kind === 'tg_failed').length;
+  line(res.code === 200 && rows.length === 1 && tg === 2 && mail === 3 && fb === 2 && failedTg === 2,
+    'B12', 'both down: lead saved, one retry per channel', `tg=${tg} mail=${mail} fallback=${fb} tgFailed=${failedTg}`);
+} catch (e) { line(false, 'B12', 'both down', e.message); }
+
 /* Redirect off + default sender -> no HTTP call */
 try {
   await clean();
