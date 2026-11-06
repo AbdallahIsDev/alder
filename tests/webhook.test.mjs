@@ -126,7 +126,9 @@ try {
   await good(msg(chatX, '/start ' + code1));
   const second = (await svc.from('bind_codes').select('used_at').eq('code', code1).single()).data;
   const secondText = (await sent()).map((x) => x.body && x.body.text).join(' ');
-  line(!!second.used_at && secondText.includes('not valid'), 'C5', 'same code cannot be used twice', secondText.slice(0, 60));
+  // Before (bot copy): 'That link is not valid. Ask for a new one.'
+  // After: "That setup link isn't valid or has expired.\n\nAsk for a new one."
+  line(!!second.used_at && secondText.includes("isn't valid or has expired"), 'C5', 'same code cannot be used twice', secondText.slice(0, 60));
 
   /* expired code */
   const expired = mkCode(12); createdCodes.push(expired);
@@ -135,7 +137,7 @@ try {
   await good(msg(chatX, '/start ' + expired));
   const expText = (await sent()).map((x) => x.body && x.body.text).join(' ');
   const expUsed = (await svc.from('bind_codes').select('used_at').eq('code', expired).single()).data;
-  line(!expUsed.used_at && expText.includes('not valid'), 'C6', 'expired code rejected, not consumed');
+  line(!expUsed.used_at && expText.includes("isn't valid or has expired"), 'C6', 'expired code rejected, not consumed');
 
   /* second business + /leads isolation */
   const code2 = mkCode(12); createdCodes.push(code2);
@@ -619,8 +621,12 @@ try {
     line(ok, 'C11c', 'button styles allowed, callback_data unchanged', `btns=${allBtns.map((b) => b.text + ':' + b.style).join(',')}`);
   }
 
-  /* C15: /help same text linked + unlinked, no lead data */
+  /* C15: /help bound vs unbound, no lead data either way.
+     Before (bot copy): identical COMMAND_HELP text for both, mentioning
+     /leads. After: bound gets BOT_HELP, unbound gets BOT_NOT_CONNECTED
+     (which deliberately does not mention /leads either). */
   {
+    const { BOT_HELP, BOT_NOT_CONNECTED } = await import('../lib/content.js');
     await reset();
     await good(msg(chatB, '/help'));
     const helpLinked = await sent();
@@ -629,20 +635,89 @@ try {
     await good(msg(chatX, '/help'));
     const helpUnlinked = await sent();
     const unlinkedText = helpUnlinked.filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text).join('\n');
-    const hasLeadsRef = linkedText.includes('/leads') && unlinkedText.includes('/leads');
     const noLeadData = !/Recent requests|Status:/.test(linkedText) && !/Recent requests|Status:/.test(unlinkedText);
-    line(linkedText === unlinkedText && linkedText.length > 0 && hasLeadsRef && noLeadData,
-      'C15', '/help same text linked + unlinked, no lead data', `linked=${linkedText.length} unlinked=${unlinkedText.length}`);
+    line(linkedText === BOT_HELP && unlinkedText === BOT_NOT_CONNECTED && noLeadData,
+      'C15', '/help bound/unbound get exact new copy, no lead data', `linked=${linkedText.length} unlinked=${unlinkedText.length}`);
   }
 
-  /* C16: /leads from unlinked still returns no lead data (assert only) */
+  /* C16: /leads from unlinked still returns no lead data (assert only).
+     Before: "This chat is not linked…". After: BOT_NOT_CONNECTED; the security
+     meaning (no business data) is unchanged. */
   {
+    const { BOT_NOT_CONNECTED } = await import('../lib/content.js');
     await reset();
     await good(msg(chatX, '/leads'));
     const leadsSent = await sent();
     const unlinkedLeads = leadsSent.filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text).join('\n');
-    line(unlinkedLeads.includes('not linked') && !/Recent requests/.test(unlinkedLeads),
-      'C16', '/leads unlinked returns no lead data', `textLen=${unlinkedLeads.length}`);
+    line(unlinkedLeads === BOT_NOT_CONNECTED && !/Recent requests/.test(unlinkedLeads),
+      'C16', '/leads unlinked returns NOT CONNECTED, no lead data', `textLen=${unlinkedLeads.length}`);
+  }
+
+  /* D: bot copy constants (exact text, no multi-tenant wording) + plain-text
+     hint flows + sticker silence. */
+  {
+    const C = await import('../lib/content.js');
+    const all = [
+      C.botLinkedText('Alder Roofing (demo)'), C.BOT_HELP, C.BOT_ALREADY_CONNECTED,
+      C.BOT_NOT_CONNECTED, C.BOT_BAD_CODE, C.BOT_PLAIN_TEXT,
+      C.BOT_DESCRIPTION, C.BOT_SHORT_DESCRIPTION,
+    ];
+    const banned = /another|other (roofer|business|compan)|roofers|administrator|provider|move it|shared|multiple/i;
+    const exactOk = C.botLinkedText('Alder Roofing (demo)') === `You're connected to Alder Roofing (demo). ✅\n\nNew estimate requests from your website will appear here the moment they come in.\n\nFor each request:\n• Tap Mark contacted after you call the customer.\n• Tap Job completed when the work is done. You can then send the customer a review request.\n\nSend /leads to see your latest requests, or /help any time.`
+      && C.BOT_HELP === `How this works\n\nNew estimate requests from your website appear here as soon as they come in.\n\nFor each request:\n• Mark contacted after you call the customer.\n• Job completed when the work is done, to send a review request.\n\nCommands:\n/leads · your latest requests\n/help · this message`
+      && C.BOT_ALREADY_CONNECTED === `You're all set. New requests will appear here.\n\nSend /help to see what I can do.`
+      && C.BOT_NOT_CONNECTED === `This chat isn't connected yet.\n\nOpen the setup link you were sent and tap Start.`
+      && C.BOT_BAD_CODE === `That setup link isn't valid or has expired.\n\nAsk for a new one.`
+      && C.BOT_PLAIN_TEXT === `I only respond to commands.\n\nSend /leads to see your latest requests, or /help.`
+      && C.BOT_DESCRIPTION === `Get your website's new estimate requests here the moment they arrive, and keep track of each one. Tap Start to connect this chat.`
+      && C.BOT_SHORT_DESCRIPTION === `New estimate requests from your website, delivered instantly.`;
+    const bannedOk = all.every((t) => !banned.test(t)) && !banned.test('Alder Roofing (demo)');
+    const lengthsOk = C.BOT_DESCRIPTION.length <= 512 && C.BOT_SHORT_DESCRIPTION.length <= 120;
+    line(exactOk && bannedOk && lengthsOk, 'D1', 'bot strings exact, no multi-tenant wording, desc lengths',
+      `exact=${exactOk} banned=${bannedOk} descLen=${C.BOT_DESCRIPTION.length}/${C.BOT_SHORT_DESCRIPTION.length}`);
+  }
+  {
+    const { BOT_NOT_CONNECTED, BOT_PLAIN_TEXT, BOT_ALREADY_CONNECTED } = await import('../lib/content.js');
+    const textOf = async () => (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text).join('\n');
+
+    // Unbound /start with no code → NOT CONNECTED.
+    await reset();
+    await good(msg(chatX, '/start'));
+    line((await textOf()) === BOT_NOT_CONNECTED, 'D2', 'unbound /start no code → NOT CONNECTED');
+
+    // Bound /start with a fresh valid code → ALREADY CONNECTED, code NOT consumed.
+    const fresh = mkCode(12); createdCodes.push(fresh);
+    await createBindCode(fresh, bizB.id, new Date(Date.now() + 3600000).toISOString());
+    await reset();
+    await good(msg(chatB, '/start ' + fresh));
+    const freshUsed = (await svc.from('bind_codes').select('used_at').eq('code', fresh).single()).data;
+    line((await textOf()) === BOT_ALREADY_CONNECTED && !freshUsed.used_at,
+      'D3', 'bound /start with code → ALREADY CONNECTED, code not consumed');
+
+    // Plain text: bound → hint (max 3/hour), then silence; unbound → NOT CONNECTED.
+    const hintCounts = [];
+    for (let i = 0; i < 4; i++) {
+      await reset();
+      await good(msg(chatB, 'hello there ' + i));
+      hintCounts.push((await textOf()).length > 0 ? 1 : 0);
+    }
+    await reset();
+    await good(msg(chatX, 'hello there'));
+    const unboundHint = await textOf();
+    await reset();
+    await good(msg(chatX, 'hello again'));
+    const unboundHint2 = await textOf();
+    line(hintCounts.join(',') === '1,1,1,0' && unboundHint === BOT_NOT_CONNECTED && unboundHint2 === BOT_NOT_CONNECTED,
+      'D4', 'plain text: bound hint x3 then silent; unbound NOT CONNECTED',
+      `bound=${hintCounts.join(',')}`);
+
+    // Sticker/photo (no text) → no reply.
+    await reset();
+    await good({ message: { message_id: 101, chat: { id: chatB, type: 'private' }, sticker: { file_id: 'x' } } });
+    await good({ message: { message_id: 102, chat: { id: chatB, type: 'private' }, photo: [{ file_id: 'y' }] } });
+    const quiet = await sent();
+    line(quiet.length === 0 && (await resendCalls()).length === 0,
+      'D5', 'sticker/photo updates get no reply', `calls=${quiet.length}`);
   }
 
   /* static check on api/tg.js and everything it imports */

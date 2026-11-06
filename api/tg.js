@@ -7,18 +7,16 @@
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import {
   getChatBinding, bindChat, claimBindCode, getBusinessById,
-  listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent,
+  listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
 } from '../lib/db.js';
 import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup } from '../lib/tg.js';
 import { sendReviewRequest } from '../lib/notify.js';
-import { renderAlert, renderLeadList, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard } from '../lib/content.js';
+import {
+  renderAlert, renderLeadList, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard,
+  botLinkedText, BOT_HELP, BOT_ALREADY_CONNECTED, BOT_NOT_CONNECTED, BOT_BAD_CODE, BOT_PLAIN_TEXT,
+} from '../lib/content.js';
 
-const GENERIC_UNBOUND = 'This chat is not linked to a business. Ask your administrator for a link.';
-const GENERIC_BAD_CODE = 'That link is not valid. Ask for a new one.';
-const GENERIC_HELP = 'Send /start followed by the link code you were given, or use /leads to see open requests.';
 const GENERIC_NOT_FOUND = 'Not found.';
-const ALREADY_BOUND = 'This chat is already linked to a business. Contact support to move it.';
-const COMMAND_HELP = 'This bot sends new lead requests here. Use /leads to see recent requests. A new roofer links their chat with the link their provider sends, then sends /start with the code.';
 
 function secretOk(req) {
   const want = process.env.TELEGRAM_WEBHOOK_SECRET;
@@ -37,23 +35,33 @@ async function reply(chatId, text) {
 
 async function handleStart(chatId, arg) {
   const existing = await getChatBinding(chatId);
-  if (existing) return reply(chatId, ALREADY_BOUND);
-  if (!arg) return reply(chatId, GENERIC_HELP);
+  if (existing) return reply(chatId, BOT_ALREADY_CONNECTED);
+  if (!arg) return reply(chatId, BOT_NOT_CONNECTED);
 
   const businessId = await claimBindCode(arg);
-  if (!businessId) return reply(chatId, GENERIC_BAD_CODE);
+  if (!businessId) return reply(chatId, BOT_BAD_CODE);
   const business = await getBusinessById(businessId);
-  if (!business) return reply(chatId, GENERIC_BAD_CODE);
+  if (!business) return reply(chatId, BOT_BAD_CODE);
 
   await bindChat(businessId, chatId);
-  return reply(chatId, `Linked to ${business.name}. You will receive new lead alerts here.`);
+  return reply(chatId, botLinkedText(business.name));
 }
 
 async function handleLeads(chatId, binding) {
-  if (!binding) return reply(chatId, GENERIC_UNBOUND);
+  if (!binding) return reply(chatId, BOT_NOT_CONNECTED);
   const leads = await listClientLeads(binding.business_id, 10);
   if (!leads.length) return reply(chatId, 'No requests yet.');
   return reply(chatId, renderLeadList(leads));
+}
+
+/** Plain-text hint, at most 3 per chat per hour; fail closed (no reply). */
+async function handlePlainText(chatId, binding) {
+  let within;
+  try {
+    within = await hitRateLimit('tghint:' + chatId, 3600, 3);
+  } catch { return; }
+  if (!within) return;
+  await reply(chatId, binding ? BOT_PLAIN_TEXT : BOT_NOT_CONNECTED);
 }
 
 async function handleCallback(cb, binding) {
@@ -236,7 +244,9 @@ export default async function handler(req, res) {
       } else if (text.startsWith('/leads')) {
         await handleLeads(chatId, binding);
       } else if (text.startsWith('/help')) {
-        await reply(chatId, COMMAND_HELP);
+        await reply(chatId, binding ? BOT_HELP : BOT_NOT_CONNECTED);
+      } else {
+        await handlePlainText(chatId, binding);
       }
     } else if (u.callback_query) {
       await handleCallback(u.callback_query, binding);
