@@ -202,9 +202,20 @@ try {
     fs.mkdirSync(path.dirname(LOG), { recursive: true });
     const logFd = fs.openSync(LOG, 'w');
     // Pinned 48.12.1: 65.x needs Windows Developer Mode (symlink EPERM without it).
+    //
+    // The resolved DB/secret values are passed explicitly and spread LAST, so they win
+    // even if the CLI's own .env merge order ever changes. Measured 2026-11-06: a
+    // process.env value already beats the .env file inside vercel dev, so this is a
+    // guard against that changing, not a behaviour fix.
+    const PINNED = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY',
+      'IP_HASH_SALT', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_WEBHOOK_SECRET',
+      'RESEND_API_KEY', 'MAIL_FROM', 'MAIL_REDIRECT_TO', 'MAIL_REDIRECT_PREFIX', 'SITE_URL'];
+    const pinned = {};
+    for (const k of PINNED) if (process.env[k]) pinned[k] = process.env[k];
+    out(`runner  pinned into dev child: ${Object.keys(pinned).length}/${PINNED.length} keys`);
     dev = spawn('npx', ['vercel@48.12.1', 'dev', '--listen', '3000'], {
       cwd: ROOT,
-      env: { ...process.env, ...bases, VERCEL_ENV: 'development', OUTBOUND_TIMEOUT_MS: '1000' },
+      env: { ...process.env, ...bases, ...pinned, VERCEL_ENV: 'development', OUTBOUND_TIMEOUT_MS: '1000' },
       shell: true,
       stdio: ['ignore', logFd, logFd],
     });
@@ -238,7 +249,15 @@ try {
       throw new Error(`canary failed: the fake Telegram server received ${tgReqs.length} requests. `
         + 'The loopback override did not reach the function. Aborting before any real send.');
     }
-    await svc.from('leads').delete().eq('idempotency_key', canaryKey);
+    /* The canary must be in the SAME database the runner reads. If the function was
+       pointed somewhere else (a stale .env, a half-applied .env.test), the delete
+       finds nothing and every later assertion would be measuring the wrong project. */
+    const { data: removed, error: rmErr } = await svc.from('leads').delete()
+      .eq('idempotency_key', canaryKey).select('id');
+    if (rmErr || !removed || removed.length !== 1) {
+      throw new Error(`canary row not found in the runner's database (deleted ${removed ? removed.length : 0}, `
+        + `error ${rmErr ? rmErr.code : 'none'}) — the function is writing to a different project`);
+    }
     canaryKey = null;
     await fakes.tg.reset();
   } else {
