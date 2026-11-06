@@ -562,6 +562,44 @@ try {
     'B6', '400 with keyboard -> one retry without it', `calls=${reqs.length} keyboard=${!!reqs[0]?.body?.reply_markup}/${!!reqs[1]?.body?.reply_markup}`);
 } catch (e) { line(false, 'B6', 'keyboard retry', e.message); }
 
+/* L: renderLeadList exact format (unit). Before: "1. Name — service · phone
+   · age · Word" single crowded lines with numbering and an em dash.
+   After: title, blank line, three-line blocks, no numbering, no dashes. */
+{
+  const { renderLeadList } = await import('../lib/content.js');
+  const now = Date.now();
+  const at = (minAgo) => new Date(now - minAgo * 60000).toISOString();
+  const leads = [
+    { name: 'Legacy Phone', service: 'repair', phone: '5550102345', status: 'contacted', created_at: at(41) },
+    { name: 'A'.repeat(40), service: 'storm', phone: '+201005408345', status: 'done', created_at: at(1500) },
+    { name: 'Unknown Status', service: 'unsure', phone: '+15125550100', status: 'banana', created_at: at(5000) },
+  ];
+  const out = renderLeadList(leads, now);
+  const expected = [
+    'Recent requests',
+    '',
+    'Legacy Phone',
+    'Repair · +15550102345',
+    '41m ago · 🔵 Contacted',
+    '',
+    'A'.repeat(27) + '…',
+    'Storm damage · +201005408345',
+    '1d ago · ✅ Done',
+    '',
+    'Unknown Status',
+    'Not sure · +15125550100',
+    '3d ago · banana',
+  ].join('\n');
+  const maxLeads = Array.from({ length: 10 }, () => ({
+    name: 'N'.repeat(80), service: 'S'.repeat(60), phone: '+20100540834533333333333333', status: 'contacted', created_at: at(1),
+  }));
+  const maxLen = renderLeadList(maxLeads, now).length;
+  const ok = out === expected && !out.includes('—') && !/^\d+\./m.test(out)
+    && out.split('\n')[1] === '' && maxLen < 4096;
+  line(ok, 'L1', 'renderLeadList: exact spaced format, 10 max leads < 4096', `len=${out.length} maxLen=${maxLen}`);
+  if (out !== expected) console.log('NOTE       got:\n' + out);
+}
+
 /* 6 s hang */
 try {
   await clean();

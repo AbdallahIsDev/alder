@@ -11,7 +11,7 @@ import {
 } from '../lib/db.js';
 import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup } from '../lib/tg.js';
 import { sendReviewRequest } from '../lib/notify.js';
-import { renderAlert, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard } from '../lib/content.js';
+import { renderAlert, renderLeadList, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard } from '../lib/content.js';
 
 const GENERIC_UNBOUND = 'This chat is not linked to a business. Ask your administrator for a link.';
 const GENERIC_BAD_CODE = 'That link is not valid. Ask for a new one.';
@@ -28,16 +28,6 @@ function secretOk(req) {
   try {
     return timingSafeEqual(Buffer.from(got, 'utf8'), Buffer.from(want, 'utf8')) ? null : 'bad';
   } catch { return 'bad'; }
-}
-
-function relativeAge(iso) {
-  const ms = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(ms / 60000);
-  if (!Number.isFinite(m) || m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
 }
 
 async function reply(chatId, text) {
@@ -63,10 +53,7 @@ async function handleLeads(chatId, binding) {
   if (!binding) return reply(chatId, GENERIC_UNBOUND);
   const leads = await listClientLeads(binding.business_id, 10);
   if (!leads.length) return reply(chatId, 'No requests yet.');
-  const STATUS_WORD = { open: 'New', contacted: 'Contacted', quoted: 'Quoted', won: 'Won', lost: 'Lost', done: 'Done' };
-  const lines = leads.map((l, i) =>
-    `${i + 1}. ${l.name} — ${l.service} · ${l.phone} · ${relativeAge(l.created_at)} · ${STATUS_WORD[l.status] || l.status}`);
-  return reply(chatId, 'Recent requests\n' + lines.join('\n'));
+  return reply(chatId, renderLeadList(leads));
 }
 
 async function handleCallback(cb, binding) {
