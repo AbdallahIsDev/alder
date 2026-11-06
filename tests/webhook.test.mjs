@@ -339,6 +339,50 @@ try {
     line(raceEmails === 1 && raceRow.status === 'done',
       'C33', 'two r: at once -> exactly one send', `emails=${raceEmails} status=${raceRow.status}`);
 
+    // C34/C35: the retry mutex is a 10 s bucket in rate_limits. A claim left
+    // behind by an invocation that died before its finally block stops blocking
+    // as soon as the clock leaves that bucket, so a stale lock costs at most 10 s.
+    const mkFailedRetry = async (label, email) => {
+      const id = await seedLead(bizB.id, label, email);
+      await resendCtrl({ mode: '500' });
+      await good(cb(chatB, 'c:' + id));
+      await good(cb(chatB, 'd:' + id));
+      await good(cb(chatB, 'y:' + id));         // review email fails
+      await resendCtrl({ mode: 'ok' });
+      await resetResend();
+      return id;
+    };
+
+    {
+      const staleLead = await mkFailedRetry('Stale Lock', 'stalelock@example.com');
+      await svc.from('rate_limits').delete().eq('key', 'retry:' + staleLead);
+      await svc.from('rate_limits').insert({
+        key: 'retry:' + staleLead,
+        window_start: new Date(Date.now() - 60000).toISOString(),
+        count: 1,
+      });
+      await good(cb(chatB, 'r:' + staleLead));
+      const emails = (await resendCalls()).length;
+      line(emails === 1, 'C34', 'stale retry claim (older bucket) does not block', `emails=${emails}`);
+    }
+
+    {
+      const lockLead = await mkFailedRetry('Live Lock', 'livelock@example.com');
+      // Same guard as db-wall test 6: do not straddle a bucket boundary.
+      const msLeft = 10000 - (Date.now() % 10000);
+      if (msLeft < 3000) await new Promise((r) => setTimeout(r, msLeft + 50));
+      // Claim through the same RPC the handler uses, so the bucket comes from the
+      // database clock rather than this machine's (they are not the same clock,
+      // and a manual insert landed in a different bucket).
+      await svc.from('rate_limits').delete().eq('key', 'retry:' + lockLead);
+      await svc.rpc('hit_rate_limit', { p_key: 'retry:' + lockLead, p_window_seconds: 10, p_max: 1 });
+      await good(cb(chatB, 'r:' + lockLead));
+      const emails = (await resendCalls()).length;
+      const sentFlag = await svc.from('lead_events').select('id').eq('lead_id', lockLead).eq('kind', 'review_requested');
+      line(emails === 0 && (sentFlag.data || []).length === 0, 'C35',
+        'live retry claim blocks the send', `emails=${emails}`);
+    }
+
     // r: on an open lead is refused with "Nothing to retry."
     const openRetry = await seedLead(bizB.id, 'Open Retry', 'openretry@example.com');
     await resetResend();
