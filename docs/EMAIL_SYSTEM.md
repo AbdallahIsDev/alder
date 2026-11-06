@@ -348,9 +348,9 @@ default list the in-process suites run alongside it and simply do not call
 it; `vercel dev` and the canary are skipped only when every selected suite is
 in-process (e.g. `node tests/run.mjs tests/webhook.test.mjs`). Per-suite
 seconds and the total always print. Outbound HTTP uses a 3000 ms timeout in
-production; the `OUTBOUND_TIMEOUT_MS=1000` override applies only when
-`VERCEL_ENV` is unset or `development` (the runner sets it), and only an
-integer 200–3000 is honoured. The suites read the production database — back
+production; the `OUTBOUND_TIMEOUT_MS=200` override applies only when
+`VERCEL_ENV` is exactly `development` (the runner sets it), and only an
+integer 200–3000 is honoured. An unset `VERCEL_ENV` is not dev. The suites read the production database — back
 up and reset `alder-demo` first, and restore afterwards (see
 `HANDOFF_alder_session.md`).
 

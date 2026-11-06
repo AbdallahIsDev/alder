@@ -223,7 +223,7 @@ try {
     out(`runner  pinned into dev child: ${Object.keys(pinned).length}/${PINNED.length} keys`);
     dev = spawn('npx', ['vercel@48.12.1', 'dev', '--listen', '3000'], {
       cwd: ROOT,
-      env: { ...process.env, ...bases, ...pinned, VERCEL_ENV: 'development', OUTBOUND_TIMEOUT_MS: '1000' },
+      env: { ...process.env, ...bases, ...pinned, VERCEL_ENV: 'development', OUTBOUND_TIMEOUT_MS: '200' },
       shell: true,
       stdio: ['ignore', logFd, logFd],
     });
@@ -290,7 +290,7 @@ try {
           FAKE_TG_URL: fakes.tg.url,
           FAKE_RESEND_URL: fakes.resend.url,
           VERCEL_ENV: 'development',
-          OUTBOUND_TIMEOUT_MS: '1000',
+          OUTBOUND_TIMEOUT_MS: '200',
           TELEGRAM_API_BASE: fakes.tg.url,
           RESEND_API_BASE: fakes.resend.url,
         },
