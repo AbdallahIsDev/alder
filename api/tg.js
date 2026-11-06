@@ -147,23 +147,36 @@ async function handleCallback(cb, binding) {
     const token = randomBytes(24).toString('base64url');
     const result = await transitionLead(leadId, binding.business_id, 'done', token);
     if (!result.changed) { await answer('This lead is already completed.'); return; }
-    await answer('');
-    try { await addEvent(leadId, 'status_changed', { status: 'done' }); } catch (e) {
-      console.error('tg_status_event_failed', (e && e.code) || 'no_code');
-    }
-    let reviewResult = 'no_email';
-    if (result.lead && result.lead.email) {
-      const r = await sendReviewRequest({
-        leadId, business,
-        lead: { email: result.lead.email, name: result.lead.name, phone: result.lead.phone },
-        token: result.lead.review_token || token,
-      });
-      reviewResult = r && r.ok ? 'sent' : 'failed';
-    }
-    if (reviewResult === 'failed') {
-      await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
-    } else {
-      await render('done', { reply_markup: { inline_keyboard: [] } }, reviewResult);
+    // Post-transition: the lead is done, so a throw here must not leave the
+    // old Yes/Cancel buttons on screen (Yes would only say "already
+    // completed" and Try again would never be offered). Best-effort render
+    // of the error view (or the no-email done view) instead; no second answer.
+    try {
+      await answer('');
+      try { await addEvent(leadId, 'status_changed', { status: 'done' }); } catch (e) {
+        console.error('tg_status_event_failed', (e && e.code) || 'no_code');
+      }
+      let reviewResult = 'no_email';
+      if (result.lead && result.lead.email) {
+        const r = await sendReviewRequest({
+          leadId, business,
+          lead: { email: result.lead.email, name: result.lead.name, phone: result.lead.phone },
+          token: result.lead.review_token || token,
+        });
+        reviewResult = r && r.ok ? 'sent' : 'failed';
+      }
+      if (reviewResult === 'failed') {
+        await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
+      } else {
+        await render('done', { reply_markup: { inline_keyboard: [] } }, reviewResult);
+      }
+    } catch (e) {
+      console.error('tg_callback_failed', (e && e.code) || 'no_code');
+      if (result.lead && result.lead.email) {
+        await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
+      } else {
+        await render('done', { reply_markup: { inline_keyboard: [] } }, 'no_email');
+      }
     }
     return;
   }

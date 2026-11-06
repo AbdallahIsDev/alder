@@ -486,6 +486,25 @@ try {
       `events=${failEvents.length} keys=${failEvents.length ? Object.keys(failEvents[0].meta).sort().join(',') : 'none'}`);
   }
 
+  /* Post-transition failure (static): nothing between transitionLead and the
+     email attempt can be made to throw without changing production code —
+     the only query there (status_changed insert) is already caught, and
+     render() swallows its own read. So assert the y: post-transition wrap
+     exists in source: it logs tg_callback_failed, renders the error view
+     with one r: button when the lead has an email, and the no-email done
+     view otherwise, with no second answer. */
+  {
+    const src = fs.readFileSync(path.join(ROOT, 'api', 'tg.js'), 'utf8');
+    const yBlock = src.slice(src.indexOf("if (kind === 'y')"), src.indexOf("if (kind === 'r')"));
+    const hasTry = yBlock.includes('} catch (e) {') && yBlock.includes("console.error('tg_callback_failed'");
+    const errorView = yBlock.includes("render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed')");
+    const noEmailView = yBlock.includes("render('done', { reply_markup: { inline_keyboard: [] } }, 'no_email')");
+    const noSecondAnswer = !/catch \(e\) \{[^}]*answer\(/.test(yBlock.slice(yBlock.lastIndexOf('} catch (e) {')));
+    line(hasTry && errorView && noEmailView,
+      'C31', 'y: post-transition wrap renders error (or no-email done) on throw',
+      `try=${hasTry} error=${errorView} noEmail=${noEmailView} innerCatchAnswers=${!noSecondAnswer}`);
+  }
+
   /* Item 2 (this bundle): a thrown DB error answers once with
      "Something went wrong. Try again.", no edit, no email, still 200.
      How the throw is injected: wrap global fetch and return a 500
