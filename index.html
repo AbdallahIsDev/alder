@@ -3486,7 +3486,12 @@ var BIZ = {
     var digits = v.replace(/\D/g, '');
     if (v.charAt(0) === '+') {
       var cc = matchCc(digits);
-      if (cc) { var nat = digits.length - cc.length, r = PHONE_CC[cc]; return nat >= r[0] && nat <= r[1]; }
+      if (cc) {
+        var nat = digits.slice(cc.length), r = PHONE_CC[cc];
+        if (nat.length >= r[0] && nat.length <= r[1]) return true;
+        var stripped = nat.charAt(0) === '0' ? nat.slice(1) : '';
+        return stripped.length >= r[0] && stripped.length <= r[1];
+      }
       return digits.length >= 8 && digits.length <= 15;
     }
     var def = PHONE_CC && PHONE_CC[PHONE_DEFAULT_CC];
@@ -3590,6 +3595,7 @@ var BIZ = {
   E.phone.addEventListener('paste', function () { setTimeout(function () { E.phone.value = sanitizePhone(E.phone.value); }, 0); });
   function sanitizePhone(raw) {
     var v = ascii(raw).replace(/[^+()\s.\-\d]/g, '');
+    if (v.indexOf('00') === 0) v = '+' + v.slice(2);   /* "00" is the international prefix: treat as "+" */
     var plus = v.indexOf('+') === 0;
     var rest = v.replace(/\+/g, '');
     var digits = 0, out = '', soFar = '';
@@ -3599,7 +3605,13 @@ var BIZ = {
         var cap = 15;
         if (plus) {
           var cc = matchCc(soFar + ch);
-          if (cc) cap = cc.length + PHONE_CC[cc][1];
+          if (cc) {
+            cap = cc.length + PHONE_CC[cc][1];
+            /* One trunk "0" as the first national digit may exceed the cap by
+               one (e.g. "+44 (0)…"); it is removed again on submit (see
+               collect), so the last meaningful digit is never dropped. */
+            if (soFar.length > cc.length && soFar.charAt(cc.length) === '0') cap += 1;
+          }
         } else if (PHONE_CC && PHONE_CC[PHONE_DEFAULT_CC]) {
           cap = PHONE_CC[PHONE_DEFAULT_CC][1];
           if ((soFar + ch).indexOf(PHONE_DEFAULT_CC) === 0) cap = PHONE_DEFAULT_CC.length + PHONE_CC[PHONE_DEFAULT_CC][1];
@@ -3610,6 +3622,22 @@ var BIZ = {
       out += ch;
     }
     return (plus ? '+' : '') + out;
+  }
+  /* The submitted phone: "00" becomes "+", and a trunk "0" after the calling
+     code is removed — but only when it pushes the national part past the max
+     (Italy +39 keeps its zero, which is part of the number). */
+  function phoneSubmit(raw) {
+    var v = ascii(raw).trim();
+    if (v.indexOf('00') === 0) v = '+' + v.slice(2);
+    if (v.charAt(0) === '+' && PHONE_CC) {
+      var digits = v.replace(/\D/g, '');
+      var cc = matchCc(digits);
+      if (cc) {
+        var nat = digits.slice(cc.length);
+        if (nat.charAt(0) === '0' && nat.length > PHONE_CC[cc][1]) return '+' + cc + nat.slice(1);
+      }
+    }
+    return v;
   }
   E.phone.addEventListener('blur', function () { E.phone.value = ascii(E.phone.value).trim().replace(/\s+/g, ' '); });   /* tidy only: never reformat a number */
   function shake(el) { if (canAnimate() && el.animate) el.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(-3px)' }, { transform: 'none' }], { duration: 320, easing: 'ease-out' }); }
@@ -3686,7 +3714,7 @@ var BIZ = {
     body.toggleAttribute('inert', on); dots[total - 1].classList.toggle('busy', on);
     if (on) { setNext('Sending…'); dlg.focus({ preventScroll: true }); }
   }
-  function collect() { var d = {}; new FormData(form).forEach(function (v, k) { d[k] = typeof v === 'string' ? v.trim() : v; }); d.claim = !!E.claim.checked; return d; }
+  function collect() { var d = {}; new FormData(form).forEach(function (v, k) { d[k] = typeof v === 'string' ? v.trim() : v; }); d.claim = !!E.claim.checked; d.phone = phoneSubmit(d.phone || ''); return d; }
   function deliver(data) {                                                    /* UI-only: waits a moment so the loading state is visible, then succeeds. A provider can be connected by defining window.estimateDeliver(data) (return a promise; reject to show the failed state). */
     if (typeof window.estimateDeliver === 'function') return Promise.resolve(window.estimateDeliver(data));
     return new Promise(function (ok) { setTimeout(ok, 1000); });

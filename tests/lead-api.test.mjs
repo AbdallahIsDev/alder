@@ -502,7 +502,10 @@ const logOffset = fs.statSync(LOG).size;
     if (m) {
       let table = null;
       try { table = JSON.parse(m[1]); } catch {}
-      const want = { '1': [7, 10], '20': [8, 10], '44': [7, 10], '971': [5, 12] };
+      // Before (build-static): '1': [7, 10] (metadata min covered a small
+      // territory, letting 7-digit "US" numbers pass). After: NANP override
+      // to [10, 10] — North American numbers have exactly 10 national digits.
+      const want = { '1': [10, 10], '20': [8, 10], '44': [7, 10], '971': [5, 12] };
       const entriesOk = table && Object.entries(want).every(([k, v]) => JSON.stringify(table[k]) === JSON.stringify(v));
       ok = built.includes('var PHONE_CC = {') && !built.includes('/*__PHONE_CC__*/')
         && m[1].length < 6 * 1024 && entriesOk;
@@ -579,6 +582,122 @@ const logOffset = fs.statSync(LOG).size;
     line(bad.length === 0, 'P18', 'firstErrorStep: earliest errored step',
       bad.length ? 'bad: ' + JSON.stringify(bad) : `${cases.length} cases ok`);
   }
+}
+
+/* ---------- P19+: exhaustive countries, trunk/00, US strictness ---------- */
+async function loadPhoneApi() {
+  const built = fs.readFileSync(path.join(ROOT, '_debug', 'build-test', 'index.html'), 'utf8');
+  const tableMatch = /var PHONE_CC = (\{[\s\S]*?\});/.exec(built);
+  const defaultMatch = /var PHONE_DEFAULT_CC = "([^"]*)";/.exec(built);
+  const fn = (name) => {
+    const m = new RegExp('function ' + name + '\\([\\s\\S]*?\\n  \\}').exec(built);
+    if (!m) throw new Error('not found: ' + name);
+    return m[0];
+  };
+  const asciiLine = built.split('\n').find((l) => l.includes('var ascii ='));
+  const sandbox = { PHONE_CC: JSON.parse(tableMatch[1]), PHONE_DEFAULT_CC: defaultMatch[1] };
+  const { default: vm } = await import('node:vm');
+  const src = [
+    'var AR = ' + JSON.stringify('٠١٢٣٤٥٦٧٨٩') + ', FA = ' + JSON.stringify('۰۱۲۳۴۵۶۷۸۹') + ';',
+    asciiLine.trim(), fn('matchCc'), fn('phoneOk'), fn('sanitizePhone'), fn('phoneSubmit'),
+  ].join('\n');
+  vm.runInNewContext(src + '\nthis._api = { sanitizePhone, phoneOk, phoneSubmit };', sandbox);
+  return sandbox._api;
+}
+const digitsOnly = (s) => String(s).replace(/\D/g, '');
+const typeSeqOf = (api) => (s) => { let v = ''; for (const ch of s) v = api.sanitizePhone(v + ch); return v; };
+
+{
+  // P19: exhaustive — every getCountries() region, mobile examples (the only
+  // examples file shipped is examples.mobile.json), E.164 + INTERNATIONAL,
+  // typed char-by-char through the real sanitizePhone.
+  const api = await loadPhoneApi();
+  const typeSeq = typeSeqOf(api);
+  const { getCountries, getExampleNumber, isValidPhoneNumber } = await import('libphonenumber-js/max');
+  const { default: examples } = await import('libphonenumber-js/mobile/examples');
+  const regions = getCountries();
+  let tested = 0;
+  const failures = [];
+  for (const region of regions) {
+    const ex = getExampleNumber(region, examples);
+    if (!ex) continue;
+    for (const raw of [ex.number, ex.format('INTERNATIONAL')]) {
+      if (!raw) continue;
+      tested++;
+      const typed = typeSeq(raw);
+      const kept = digitsOnly(typed).length === digitsOnly(raw).length;
+      const ok = api.phoneOk(typed);
+      const server = isValidPhoneNumber(ex.number, 'US');
+      if (!kept || !ok || !server) failures.push(`${region} raw=${raw} typed=${typed} kept=${kept} ok=${ok} srv=${server}`);
+    }
+  }
+  line(failures.length === 0, 'P19', 'exhaustive: every region example, no digit dropped, valid',
+    `regions=${regions.length} tested=${tested} failures=${failures.length}` + (failures.length ? ' | ' + failures.slice(0, 8).join(' ; ') : ''));
+}
+{
+  // P20: trunk-zero and 00 cases — client (typed/submitted) + server stored E.164.
+  const api = await loadPhoneApi();
+  const typeSeq = typeSeqOf(api);
+  const cases = [
+    ['+44 (0)7911 123456', '+447911123456'],
+    ['+44 07911 123456', '+447911123456'],
+    ['+20 0100 540 8345', '+201005408345'],
+    ['+49 (0)30 123456', '+4930123456'],
+    ['+39 06 1234 5678', '+390612345678'],
+    ['0044 7911 123456', '+447911123456'],
+    ['00201005408345', '+201005408345'],
+  ];
+  const bad = [];
+  for (let i = 0; i < cases.length; i++) {
+    const [raw, want] = cases[i];
+    const typed = typeSeq(raw);
+    const intlRaw = raw.startsWith('00') ? '+' + raw.slice(2) : raw;
+    // Client submit: trunk stripped exactly when it pushes past the max
+    // (+44/+20); inside the cap (+49) the typed digits are kept and the
+    // server's retry strips the trunk. Italy's zero is kept everywhere.
+    const clientOk = digitsOnly(typed).length === digitsOnly(intlRaw).length && api.phoneOk(typed)
+      && (api.phoneSubmit(typed) === want || digitsOnly(api.phoneSubmit(typed)) === digitsOnly(typed));
+    await resetLimits();
+    const kk = `${RUN}-p20-${i}`;
+    const ss = await post(payload({ idempotencyKey: kk, phone: raw }));
+    const rr = await leadFor(kk);
+    const serverOk = ss.status === 200 && rr.length === 1 && rr[0].phone === want;
+    if (!clientOk || !serverOk) bad.push(`${raw} typed=${typed} submit=${api.phoneSubmit(typed)} client=${clientOk} ${ss.status} stored=${rr[0] && rr[0].phone}`);
+  }
+  line(bad.length === 0, 'P20', 'trunk zero + 00: no drop, stored E.164 (Italy zero kept)',
+    bad.length ? bad.join(' ; ') : `${cases.length} cases ok`);
+}
+{
+  // P21: still-invalid numbers stay 400 with no row (no loosening).
+  const badList = ['+20 0100 540 83', '+44 07911 123', '0020 100'];
+  const results = [];
+  for (let i = 0; i < badList.length; i++) {
+    await resetLimits();
+    const kk = `${RUN}-p21-${i}`;
+    const ss = await post(payload({ idempotencyKey: kk, phone: badList[i] }));
+    results.push(ss.status === 400 && (await leadFor(kk)).length === 0);
+  }
+  line(results.every(Boolean), 'P21', 'invalid trunk/00 numbers stay 400, no row', results.join(','));
+}
+{
+  // P22: US strictness — client phoneOk and server agree on each length.
+  const api = await loadPhoneApi();
+  const clientCases = [
+    ['5550142', false], ['51555014', false], ['515550142', false],
+    ['5155550142', true], ['15155550142', true],
+    ['+1515555014', false], ['+15155550142', true], ['+151555501420', false],
+  ];
+  const clientBad = clientCases.filter(([raw, want]) => api.phoneOk(raw) !== want);
+  const serverCases = [['5550142', 400], ['5155550142', 200], ['15155550142', 200], ['+1515555014', 400], ['+151555501420', 400]];
+  const serverBad = [];
+  for (let i = 0; i < serverCases.length; i++) {
+    await resetLimits();
+    const kk = `${RUN}-p22-${i}`;
+    const ss = await post(payload({ idempotencyKey: kk, phone: serverCases[i][0] }));
+    if (ss.status !== serverCases[i][1]) serverBad.push(`${serverCases[i][0]}=${ss.status}`);
+  }
+  line(clientBad.length === 0 && serverBad.length === 0, 'P22', 'US strictness: client and server agree (10 digits)',
+    `clientBad=${clientBad.map(([r]) => r).join(',')} serverBad=${serverBad.join(',')}`);
 }
 
 /* ---------- cleanup ---------- */
