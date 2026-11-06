@@ -268,6 +268,27 @@ const BIND_CODE = ('DBTEST' + RUN).replace(/[^A-Z0-9]/g, '').toUpperCase().slice
   fs.rmSync(base, { recursive: true, force: true });
 }
 
+/* ---------- E7: the IP hash refuses to exist without a salt ----------
+   An unsalted sha256 of an IPv4 address is a 2^32 lookup, so a "pseudonymous"
+   rate-limit key with no salt is really the address. hashIp returns null and the
+   callers decide; neither endpoint may fall back to an unsalted hash. */
+{
+  const { hashIp } = await import('../lib/hash.js');
+  const a = hashIp('203.0.113.9', 'salt-a');
+  const b = hashIp('203.0.113.9', 'salt-b');
+  const c = hashIp('203.0.113.9', 'salt-a');
+  const saved = process.env.IP_HASH_SALT;
+  delete process.env.IP_HASH_SALT;
+  const noSalt = hashIp('203.0.113.9');
+  process.env.IP_HASH_SALT = 'from-env';
+  const fromEnv = hashIp('203.0.113.9');
+  if (saved === undefined) delete process.env.IP_HASH_SALT; else process.env.IP_HASH_SALT = saved;
+  const ok = typeof a === 'string' && a.length === 64 && a === c && a !== b
+    && noSalt === null && fromEnv === hashIp('203.0.113.9', 'from-env');
+  line(ok, 'E7', 'IP hash: salted, salt-dependent, null without a salt',
+    `len=${a && a.length} stable=${a === c} saltMatters=${a !== b} noSalt=${noSalt === null} env=${!!fromEnv}`);
+}
+
 /* ---------- E6: the runner rejects unknown flags ----------
    `--timing` used to be dropped silently, so it looked like a working flag.
    The child is given a real suite so that, if the check regresses, it exits 0

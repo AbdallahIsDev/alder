@@ -5,7 +5,8 @@
 //
 // Nothing here logs a name, phone, email, note, raw IP, token or URL. Failures are codes only.
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { hashIp } from '../lib/hash.js';
 import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
 import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit } from '../lib/db.js';
 import { notifyAllAfterLead } from '../lib/notify.js';
@@ -38,12 +39,6 @@ function clientIp(req) {
     first(req.headers['x-forwarded-for']) ||
     String((req.socket && req.socket.remoteAddress) || '')
   );
-}
-
-function hashIp(ip) {
-  const salt = process.env.IP_HASH_SALT;
-  if (!salt) return null;                                    // no salt means a trivially reversible hash; fail closed
-  return createHash('sha256').update(ip + salt).digest('hex');
 }
 
 /* Small standalone page for the no-JS form. Inline styles only (the CSP allows them). */

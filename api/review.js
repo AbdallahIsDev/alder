@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import { hashIp } from '../lib/hash.js';
 import { getBusinessById, addEvent, hitRateLimit } from '../lib/db.js';
 import { getLeadByReviewToken, getFeedback, upsertFeedback, markGoogleClicked } from '../lib/review-db.js';
 import { reviewPage, googleUrlAllowed } from '../lib/content.js';
@@ -110,16 +110,21 @@ export default async function handler(req, res) {
       res.setHeader('Location', '/r/' + encodeURIComponent(token));
       return res.status(303).end();
     }
-    // Rate limit, fail open like the lead endpoint.
-    const salt = process.env.IP_HASH_SALT || '';
-    try {
-      const key = createHash('sha256').update(clientIp(req) + salt).digest('hex');
-      if (!(await hitRateLimit('review:' + key, 3600, 20))) {
-        res.setHeader('Location', '/r/' + encodeURIComponent(token));
-        return res.status(303).end();
+    // Rate limit, fail open like the lead endpoint. Without IP_HASH_SALT there is no
+    // pseudonymous key to store (an unsalted sha256 of an IPv4 address is reversible),
+    // so the limit is skipped and said so, rather than writing a de-anonymised key.
+    const key = hashIp(clientIp(req));
+    if (!key) {
+      console.error('review_rate_limit_salt_missing');
+    } else {
+      try {
+        if (!(await hitRateLimit('review:' + key, 3600, 20))) {
+          res.setHeader('Location', '/r/' + encodeURIComponent(token));
+          return res.status(303).end();
+        }
+      } catch (e) {
+        console.error('review_rate_limit_failed', (e && e.code) || 'no_code');
       }
-    } catch (e) {
-      console.error('review_rate_limit_failed', (e && e.code) || 'no_code');
     }
     // Read the stored rating BEFORE the upsert. The owner is alerted only when the
     // rating MOVES into the 1-2 range: no previous rating, or a previous rating of 3
