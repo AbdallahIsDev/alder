@@ -170,23 +170,30 @@ How it works:
 6. Values are embedded as JSON with `<` escaped as `\u003c`. No `comgooglemaps://`
     style app schemes — a plain https redirect lets Google hand off to the Maps
     app or the browser on its own.
+7. **Presentation:** no card — content sits directly on the page background
+    with a 24 px gutter, max width 420 px, centred horizontally and vertically
+    (`min-height:100vh` with a `100dvh` override). The title is 20 px with
+    `text-wrap: balance`. Fonts mirror the landing page: `@font-face` for
+    Geist and Inter from `/assets/fonts/` (`font-display: swap`) with a
+    `preload` for the heading font, and the same favicon links as
+    `index.html` (all same-origin; the CSP allows them).
 
 ## Telegram alerts
 
 `renderAlert()` in `lib/content.js` renders one shared plain-text format —
 one "Label: value" per line, blank lines between groups, phone kept tappable,
 Yes/No capitalised, and a trailing status block that changes per step. The
-status block is one fact per line, every line at most 40 characters for a
-sample first name "John", and the email address never appears there:
+status block is one fact per line, every line at most 26 characters, and the
+customer's name and email never appear there:
 
 - new: `🟡 Status: New`
 - contacted: `🔵 Status: Contacted`
-- confirm: `🔵 Status: Contacted` / `Send a review request to John?` /
-  `They get an email with a rating link.` (no email on file:
-  `No email on file. Can't send a request.`)
+- confirm: `🔵 Status: Contacted` / `Send a review request?` /
+  `They get a rating link.` (no email on file:
+  `No email on file.` / `Can't send a request.`)
 - done, review sent: `✅ Status: Done` / `✉️ Review request sent`
-- done, no email: `✅ Status: Done` / `ℹ️ No email on file, none was sent.`
-- error: `❌ Status: Error` / `⚠️ Review request couldn't be sent`
+- done, no email: `✅ Status: Done` / `ℹ️ No email, none sent.`
+- error: `❌ Status: Error` / `⚠️ Review email failed`
 
 `parse_mode` is never set anywhere in the Telegram path.
 
@@ -202,8 +209,9 @@ the UI):
     customer from a lead nobody has called yet.
 2. `c:` — alert re-renders `🔵 Status: Contacted` from the database (via the
     roofer-facing view only), one button **Job completed** (`d:`, style `primary`).
-3. `d:` — asks: re-render with the confirm lines, two buttons **Yes, send review
-    request** (`y:`, style `success`) and **Cancel** (`n:`, style `danger`). On an open lead it is refused: "Mark
+3. `d:` — asks: re-render with the confirm lines, two buttons **Send request**
+    (`y:`, style `success`, or **Mark done** when the lead has no email) and
+    **Cancel** (`n:`, style `danger`). On an open lead it is refused: "Mark
     this lead as contacted first."
 4. `y:` — `contacted|quoted|won` to `done` in one conditional UPDATE (token filled
     only if null), one review email attempt, message ends with the outcome.
@@ -234,6 +242,41 @@ Telegram clients ignore the field.
 Tenancy always comes from the chat binding. Forged callbacks from another
 business change nothing; malformed `callback_data` is answered and ignored.
 
+## Telegram bot copy and /leads format
+
+**No multi-tenant wording:** every roofer-facing message reads as if this bot
+belongs to this one business. The strings never say "another", "other roofer /
+business", "roofers", "administrator", "provider", "move it", "shared" or
+"multiple" (asserted in tests).
+
+Copy (exact texts live in `lib/content.js`): after linking, the chat gets
+"You\'re connected to {name}. ✅ …" with short instructions; `/help` shows
+"How this works …" with the two commands; an already-connected chat sending
+`/start` (with or without a code; the code is not consumed) gets "You\'re all
+set. …"; anything from an unconnected chat (except a valid code) gets "This
+chat isn\'t connected yet. …"; a bad/expired code gets "That setup link
+isn\'t valid or has expired. …". Plain (non-command) text from a connected
+chat gets "I only respond to commands. …", at most 3 per chat per hour
+(`hitRateLimit('tghint:' + chatId, 3600, 3)`, fail closed: a limiter error
+sends nothing; the text is never logged or stored). Stickers, photos, voice,
+edited messages, `my_chat_member` and group/channel updates get no reply.
+
+**/leads format** (`renderLeadList` in `lib/content.js`): plain text, one
+title line "Recent requests", a blank line, then one three-line block per
+lead with a blank line between leads (none after the last): name truncated to
+28 chars, then "`Service label` · `phone`", then "`age` · `status`". No
+numbering, no "—" character anywhere; " · " only as separators. Status uses
+one shared map (`open 🟡 New`, `contacted 🔵 Contacted`, `quoted 🟣 Quoted`,
+`won 🏆 Won`, `lost ⚪ Lost`, `done ✅ Done`; unknown statuses show the raw
+word). Phones go through `displayPhone`.
+
+**Bot profile descriptions:** `npm run tg:commands` (run once by the owner
+after deploy) sets the two menu commands (`leads`, `help`) plus the bot
+description (≤512 chars) and short description (≤120 chars) via
+`setMyDescription` / `setMyShortDescription` in `lib/tg.js`;
+`npm run tg:commands:info` prints the command names. The profile photo is
+set manually in BotFather with `/setuserpic`.
+
 ## Telegram menu commands
 
 The bot menu has exactly two entries (names only):
@@ -262,9 +305,15 @@ network failures and 5xx.
 Client (`index.html` modal): `build-static.js` derives, from the max
 metadata, for each calling code the min/max national length across its
 countries and inlines it as a compact JSON constant (`PHONE_CC`, ~2.5 KB
-for 206 codes). After a leading `+`, the code is matched (1, then 2, then
+for 206 codes). North America (code `1`) is overridden to exactly `[10, 10]`.
+After a leading `+`, the code is matched (1, then 2, then
 3 digits; codes are prefix-free) and typing stops at calling-code digits
-plus the max national length (so +20 allows at most 10 more digits).
+plus the max national length (so +20 allows at most 10 more digits). A
+leading `00` is treated as `+`; one trunk `0` immediately after the calling
+code may exceed the cap by one digit while typing and is removed again on
+submit — the server retries once without that `0` when the number is not
+valid as given, and stores only a valid E.164 (numbers where the `0` is
+part of the number, like Italy, are valid as given and never stripped).
 Without `+`, the business country is the default (US; `businesses` has no
 country column). On submit, the national length must be between min and
 max for a recognised code, else 8–15 digits. Sanitisation is unchanged:
@@ -294,9 +343,9 @@ No env, no network (except the loopback server), no DB. The gallery shows the
 owner email for the CLEAN, MINIMAL and STRESS leads at 640 px and 375 px widths
 (with the logo visible: `cid:brand-logo` is rewritten to a data URI here only),
 the auto-reply, the one-button review email ("Share your feedback"), the
-rating pages (s1, s5, go, and the unavailable state), and the six Telegram
-states (new, contacted, confirm, done-sent, done-no-email, error), each with
-a caption. A
+rating pages (s1, s5, go, and the unavailable state), the six Telegram
+states (new, contacted, confirm, done-sent, done-no-email, error), the
+/leads list sample, and the bot copy messages, each with a caption. A
 "Simulate dark mode" checkbox applies `invert(1) hue-rotate(180deg)` to the
 iframes - a rough approximation of mail-app dark-mode inversion, not a real
 dark mode.
