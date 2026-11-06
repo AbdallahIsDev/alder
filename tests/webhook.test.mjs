@@ -136,7 +136,11 @@ try {
   await reset();
   await good(msg(chatB, '/start ' + code2));
   // Seeds are order-independent (unique idempotency keys per lead).
-  const [aLead1] = await Promise.all([
+  // Promise.all keeps the input order in its result, but the pushes into
+  // createdLeads happen in completion order — so createdLeads[3] is a bizA lead
+  // about half the time and C9's c: from chatB is then correctly refused.
+  // Use the returned ids, which are deterministic.
+  const [aLead1, , bLead1] = await Promise.all([
     seedLead(bizA.id, 'Alpha Only', 'alpha@example.com'),
     seedLead(bizA.id, 'Alpha Two', 'alpha2@example.com'),
     seedLead(bizB.id, 'Beta Only', 'beta@example.com'),
@@ -174,7 +178,7 @@ try {
 
   /* NEW FLOW (item 3): d: now only asks for confirmation; it never emails or changes status */
   await resetResend();
-  const askLead = createdLeads[3];
+  const askLead = bLead1;   // a bizB lead: chatB is bound to bizB
   await reset();
   await good(cb(chatB, 'c:' + askLead));
   await reset();
