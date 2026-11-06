@@ -93,6 +93,17 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - `MAIL_REDIRECT_TO`: when set, every email recipient is redirected there and the subject gets a `[TEST for ...]` prefix.
 - `MAIL_REDIRECT_PREFIX`: value `off` removes the `[TEST for ...]` subject prefix; recipients are still redirected.
 
+## Security posture (audit 2026-11-06)
+
+- **Secrets:** 116 commits scanned for key-shaped strings (Resend `re_`, JWTs, Telegram tokens, `postgres://user:pass@`, GitHub/AWS/Slack, private-key blocks) — **zero hits**. Only `.env.example` was ever committed and it carries names with empty values. `dist/` and `index.html` contain no key-shaped string; no anon key or service key reaches the browser.
+- **Database:** anon gets `42501` on every table and on `v_client_leads`, on INSERT, and on `hit_rate_limit`; the `private` schema answers `PGRST106`. `authenticated` holds no table privileges and no USAGE on `private`. The view is `security_invoker=on`. No policies exist and none are needed (RLS on + revoke-all is deny-by-default).
+- **Latent DB risk:** the revoke covers objects created by `postgres` only. Default ACLs for objects created by `supabase_admin` still grant `anon` everything, so a table created outside the migration runner would be world-readable until the next `db:apply` sweep catches it. Create tables only through `supabase/migrations/`.
+- **Webhook:** constant-time secret compare, 503 when the secret is unset, 401 on mismatch, tenancy always derived from the chat id (a bound chat cannot act on another business's lead), `callback_data` regex-anchored, chat type must be `private`.
+- **Review tokens:** 192-bit, regex-anchored, `no-store`, GET never writes, `/go` redirects to a relative path only, the Google URL is https + host-allowlisted.
+- **Headers:** HSTS preload, `nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, `frame-ancestors 'none'`, Permissions-Policy, noindex. CSP needs `'unsafe-inline'` because the page and the review page use inline scripts — there is no known injection point, but that removes the backstop.
+- **Logging:** every `console.*` in `api/` and `lib/` prints a fixed event name plus an error code. No PII, token, URL or message body.
+- Open items are tracked in the list below (#14-#18).
+
 ## Known issues / next
 
 1. The suites run against the production database and should move to a separate Supabase project.
@@ -108,3 +119,8 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 11. ~~Client/server phone minimum mismatch~~ Resolved: North America is `[10, 10]` on both sides now (see follow-up bundle above).
 12. Owner bot plan: a second bot could reuse `lib/tg.js` by threading a per-call token (today it reads `TELEGRAM_BOT_TOKEN` from env in `call()`). Not implemented.
 13. Live chat idea needs planning (no design yet).
+14. `MAIL_REDIRECT_TO` in a production environment silently sends **every** customer email (auto-reply, review request) to the redirect address, with no error anywhere. Nothing in the code refuses it when `VERCEL_ENV=production`. Check the Vercel production env before the next client.
+15. No retention or deletion path. `leads.business_id` has no `on delete cascade`, so removing a business needs its leads deleted first; `lead_events`, `review_feedback` and `private.lead_financials` cascade from `leads`. A customer deletion request is manual SQL today.
+16. The per-business cap is 200 leads/hour. At two emails per lead that exhausts a Resend free-plan daily quota (100/day) in about 15 minutes, after which owner emails and auto-replies stop while Telegram keeps working.
+17. `sharp` 0.34.5 carries libvips/libheif/librsvg advisories (`npm audit`: 1 high). Dev-only image pipeline, fed only local trusted files; the fix is sharp 0.35.5, a breaking change.
+18. No observability: a failed alert is one `*_failed` row in `lead_events` and nothing surfaces it. No health endpoint, no counter, no digest.
