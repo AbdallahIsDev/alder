@@ -489,9 +489,21 @@ try {
   await clean();
   await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
   await reset(TG); await reset(RS);
-  const dupEmail = nextEmail();
-  const mixed = await post({ email: dupEmail.toUpperCase() });
-  const lower = await post({ email: dupEmail });
+  // The lookup returns the OLDEST match for the business, so this test needs a
+  // phone AND an email that no earlier lead uses — otherwise duplicate_of can
+  // point at that older row. Check the database, do not hope.
+  let dupEmail = '';
+  let dupPhone = '';
+  for (let i = 0; i < 20 && !dupEmail; i++) {
+    const p = '515555' + String(1000 + Math.floor(Math.random() * 9000));
+    const e = `b15-${RUN}-${Math.random().toString(36).slice(2, 10)}@example.com`;
+    const { data: byPhone } = await svc.from('leads').select('id').eq('phone', '+1' + p).limit(1);
+    const { data: byEmail } = await svc.from('leads').select('id').eq('email', e).limit(1);
+    if (!(byPhone && byPhone.length) && !(byEmail && byEmail.length)) { dupPhone = p; dupEmail = e; }
+  }
+  if (!dupEmail) throw new Error('no unused phone/email pair');
+  const mixed = await post({ email: dupEmail.toUpperCase(), phone: dupPhone });
+  const lower = await post({ email: dupEmail, phone: dupPhone });
   const mixedRows = await leadFor(mixed.key);
   const lowerRows = await leadFor(lower.key);
   const stored = mixedRows.length ? (await svc.from('leads').select('email').eq('id', mixedRows[0].id).single()).data.email : null;
