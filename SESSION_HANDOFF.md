@@ -8,6 +8,24 @@
 
 ## 1. How we work (read first)
 
+### Review artefact rule (set 2026-11-07)
+
+Exactly ONE review file per task: `_debug/patches/ops-audience-review.diff` =
+`git diff origin/main...ops-audience` (every commit from main to the branch head,
+combined). No `.patch`, no last-N, no per-area splits for this task; old files may
+stay, do not add more. Report its size, line count, `git apply --check` result
+against a fresh `origin/main` worktree, and a secret scan (counts only).
+
+### Backup/restore rule (set 2026-11-07)
+
+The backup, reset and restore touch ONLY the `businesses` columns of `alder-demo`.
+`business_chats` is never read for a restore, never deleted, never re-inserted:
+a phone can be connected at any moment. `seed-check` reports the chat count and
+does not require it to be zero. The runner fails a run that adds or removes a
+chat or leaks a test-shaped lead.
+
+
+
 ### Roles
 | Role | Who | Does |
 |---|---|---|
@@ -261,3 +279,50 @@ git checkout main
   changes it.
 - Not done in this bundle: notify order-dependence, digest failure split by kind,
   `/code` as two messages, debris sweep.
+
+## 8. Operator / owner / recovery (current state, 2026-11-07)
+
+- **Two roles, never mixed.** Operator chat = `OPERATOR_CHAT_ID` (falls back to
+  `TELEGRAM_CHAT_ID`); `OPERATOR_EMAIL` is the alarm fallback. Operator-only
+  content — redirect warning, aggregates, slugs, "no phone connected" — goes only
+  there. `status=demo` is a lifecycle state, not an audience.
+- **Owner phone = the oldest connected phone**, ordered by `created_at` then `id`
+  (deterministic). Only it may `/invite` or remove a phone; every phone keeps
+  alerts, buttons and `/leads`.
+- **Recovery**: an unbound chat can paste a code (case/spaces/hyphens ignored,
+  one generic failure answer, 10 tries/hour per chat). `/leads` is newest 8 with
+  Open buttons and Older paging. A stale tap answers "Already updated." and
+  refreshes the card to its current state.
+- **Blocked bot**: 403 on the only phone, or `my_chat_member` kicked, sends the
+  operator one notice per business per day.
+- **Commands**: `/code`, `/phones`, `/businesses`, `/operator` (operator chat
+  only); `/id` everywhere and unlisted. Menus via `npm run tg:commands`.
+- **Ops messages**: owner digest "Your lead summary" and owner alert check per
+  business, own counts only; one aggregated operator alarm that stays quiet when
+  nothing is wrong.
+
+## 9. Change log — 2026-11-07 (review fix, data hygiene, run trust)
+
+- Review page was broken in production: `google_review_url` began `ttps://`.
+  Repaired in code (both gates) and in the data; `/api/health` now reports
+  `review_links_invalid`.
+- 21 leads left by a killed webhook run were deleted after classification
+  (`_debug/sweep-yw55whku-20261107T163054Z.json`). alder-demo is back to 3 leads /
+  2 review_feedback, all three with tokens. second-demo has 0.
+- Suites now sweep their own test-shaped leftovers at start and in `finally`; the
+  runner fails a run that leaks one, and fails if it cannot read `business_chats`.
+- `notify` is scoped to its fixture chat and the live business name (two real
+  phones are bound: tails 6109, 6852).
+
+### Remaining work
+
+1. `notify` B14/B15 are red: `duplicate_of` is missing from the `created` event.
+   `findRecentDuplicate` works when called directly, so the defect is in the
+   endpoint path (`api/lead.js` around the dupPromise/leadId discard).
+2. Three full runs (twice, plus reversed order) not done.
+3. `/code` as two messages (operator line + forwardable block) not done.
+4. Pasted-code global ceiling 200 -> 600 with `bind_ceiling_hit`, and the
+   claim-then-bindChat failure path, not done.
+5. `/start@botname` suffix, `/leads` keyset paging, hostile-reviewer pass: not done.
+6. `listBusinessChatsDetailed` tiebreak has a source-text test (R14), not a
+   two-rows-same-timestamp DB test.
