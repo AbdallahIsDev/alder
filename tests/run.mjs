@@ -141,6 +141,22 @@ async function debrisSnapshot(businessIds) {
   }
 }
 
+/**
+ * Live unused bind codes for the real businesses. A suite may mint one to test a
+ * bind, but it must delete it by exact code; a leak here is what filled the
+ * owner's /invite cap (INVITES_MAX counts live unused rows). The owner must not
+ * mint a code while a run is in progress, or this looks like a leak.
+ */
+async function unusedCodeCount(businessIds) {
+  const { count, error } = await svc.from('bind_codes')
+    .select('code', { count: 'exact', head: true })
+    .in('business_id', businessIds)
+    .is('used_at', null)
+    .gt('expires_at', new Date().toISOString());
+  if (error) return { ok: false, code: error.code, n: 0 };
+  return { ok: true, code: null, n: count || 0 };
+}
+
 async function chatSnapshot() {
   const { data, error } = await svc
     .from('business_chats').select('tg_chat_id').order('tg_chat_id');
@@ -373,6 +389,7 @@ try {
     process.exit(1);
   }
   const debrisBefore = await debrisSnapshot(businessIds);
+  const codesBefore = await unusedCodeCount(businessIds);
   const tail = (ids) => ids.map((x) => x.slice(-4)).join(',') || '(none)';
 
   /* ---------- suites ---------- */
@@ -421,6 +438,23 @@ try {
       process.exitCode = 1;
     } else {
       out(`runner  business_chats unchanged (${chatsBefore.ids.length}: ${tail(chatsBefore.ids)})`);
+    }
+  }
+
+  {
+    const codesAfter = await unusedCodeCount(businessIds);
+    if (!codesBefore.ok || !codesAfter.ok) {
+      out('FAIL  runner  could not count unused bind codes');
+      out(`      before=${codesBefore.ok ? 'ok' : codesBefore.code} after=${codesAfter.ok ? 'ok' : codesAfter.code}`);
+      process.exitCode = 1;
+    } else if (codesAfter.n > codesBefore.n) {
+      out('FAIL  runner  unused bind codes grew during the run');
+      out(`      before ${codesBefore.n}, after ${codesAfter.n}`);
+      out('      a suite minted a code on a real business and did not delete it;');
+      out('      the owner /invite cap counts exactly these rows');
+      process.exitCode = 1;
+    } else {
+      out(`runner  unused bind codes unchanged (${codesBefore.n})`);
     }
   }
 

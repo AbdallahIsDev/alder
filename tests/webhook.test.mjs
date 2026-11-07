@@ -65,13 +65,30 @@ const cb = (chatId, data, messageId = 100, text = 'Original alert') => ({
 const ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const mkCode = (n) => { let s = ''; for (let i = 0; i < n; i++) s += ALPHA[Math.floor(Math.random() * ALPHA.length)]; return s; };
 
-const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
-const { data: bizB } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
+const RUN_STARTED = new Date().toISOString();
 const chatA = FIXTURE_CHATS.webhookA, chatB = FIXTURE_CHATS.webhookB, chatX = FIXTURE_CHATS.webhookX;
 // Every fixture id this suite may bind, for the start-of-suite and finally sweeps.
 const WEBHOOK_CHATS = [chatA, chatB, chatX, FIXTURE_CHATS.webhookA2, FIXTURE_CHATS.webhookA3,
   FIXTURE_CHATS.webhookOpA, FIXTURE_CHATS.webhookOpB, FIXTURE_CHATS.webhookOperator];
-const RUN_STARTED = new Date().toISOString();
+
+const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
+const { data: bizB } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
+
+// A throwaway business for every /code mint. Real businesses must never carry
+// a suite-minted code: the owner's /invite cap counts live unused rows, and a
+// killed run would leave ten of them behind. status must be demo/active because
+// /code resolves through getActiveBusinessBySlug; it is deleted in the finally.
+const CODE_SLUG = `zz-test-${RUN}`;
+let codeBiz = null;
+// Clear throwaways a killed run left behind (never a live one: the runner is
+// sequential, and the predicate is the reserved slug prefix).
+await svc.from('businesses').delete().like('slug', 'zz-test-%').lt('created_at', RUN_STARTED);
+({ data: codeBiz } = await svc.from('businesses').insert({
+  slug: CODE_SLUG, name: 'ZZ Code Fixture', owner_email: 'code@zz-test.invalid',
+  google_review_url: 'https://g.page/r/zz-code', timezone: 'America/Chicago', status: 'demo',
+}).select('id, slug, name').single());
+if (!codeBiz) throw new Error('could not create the zz-test business');
+
 const createdLeads = [];
 const createdCodes = [];
 
@@ -881,7 +898,7 @@ try {
       // OP2: exactly TWO messages. The first names the slug; the second is the
       // only forwardable text and must not name the business.
       await reset();
-      await good(msg(OP, '/code second-demo'));
+      await good(msg(OP, `/code ${CODE_SLUG}`));
       const pair = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
       const opLine = pair[0] || '';
       const forward = pair[1] || '';
@@ -889,20 +906,22 @@ try {
       // row order is not guaranteed, so picking "the last row" proved nothing.
       const theCode = (forward.match(/\?start=([A-Z2-9]{12})/) || [])[1] || '';
       const stored = theCode
-        ? (await svc.from('bind_codes').select('code, used_at').eq('code', theCode).eq('business_id', bizB.id)).data
+        ? (await svc.from('bind_codes').select('code, used_at').eq('code', theCode).eq('business_id', codeBiz.id)).data
         : [];
       line(pair.length === 2 && !!theCode && stored.length === 1 && stored[0].used_at === null
-        && opLine.includes('second-demo') && /expires in 24 hours/i.test(opLine)
+        && opLine.includes(CODE_SLUG) && /expires in 24 hours/i.test(opLine)
         && !opLine.includes('?start=') && forward.includes('send it this code')
-        && !forward.includes('second-demo') && !forward.includes('send me'),
+        && !forward.includes(CODE_SLUG) && !forward.includes('send me'),
         'OP2', 'operator /code: two messages, slug only in the first',
         `messages=${pair.length} code=${theCode.slice(0, 4)}… stored=${stored.length}`);
 
-      // OP3: cap per slug, fail closed at 10/hour.
+      // OP3: cap per slug, fail closed at 10/hour. OP2 already used one slot,
+      // so clear the bucket to measure the cap itself.
+      await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
       let okCount = 0, capped = false;
       for (let i = 0; i < 11; i++) {
         await reset();
-        await good(msg(OP, '/code alder-demo'));
+        await good(msg(OP, `/code ${CODE_SLUG}`));
         const t = await allText();
         if (t === C.OPERATOR_CAPPED) capped = true; else okCount++;
       }
@@ -911,8 +930,9 @@ try {
       // OP14: the second message fails. The code is still valid, so the
       // operator must be told the forward text did not send and get it again.
       await reset();
+      await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
       await control({ mode: 'fail_nth', nth: 2 });
-      await good(msg(OP, '/code second-demo'));
+      await good(msg(OP, `/code ${CODE_SLUG}`));
       const afterFail = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
       await control({ mode: 'ok' });
       const resend = afterFail[2] || '';
@@ -933,10 +953,11 @@ try {
         `codes ${codesBeforeBad}->${codesAfterBad}`);
 
       // OP16: two /code taps mint two different, valid codes (the cap is the
-      // only limit, and second-demo is far below it here).
+      // only limit, and the bucket was cleared above).
       await reset();
-      await good(msg(OP, '/code second-demo'));
-      await good(msg(OP, '/code second-demo'));
+      await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
+      await good(msg(OP, `/code ${CODE_SLUG}`));
+      await good(msg(OP, `/code ${CODE_SLUG}`));
       const two = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
       const codes = two.map((t) => (t.match(/\?start=([A-Z2-9]{12})/) || [])[1]).filter(Boolean);
       line(codes.length === 2 && codes[0] !== codes[1] && two.length === 4,
@@ -1076,6 +1097,8 @@ try {
   await sweepTestLeads(svc, [bizA.id, bizB.id], new Date().toISOString()).catch(() => 0);
   await svc.from('business_chats').delete().in('tg_chat_id', WEBHOOK_CHATS);
   if (createdCodes.length) await svc.from('bind_codes').delete().in('code', createdCodes);
+  // The throwaway and every code minted on it go together (ON DELETE CASCADE).
+  if (codeBiz) await svc.from('businesses').delete().eq('id', codeBiz.id);
   await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
 }
 
