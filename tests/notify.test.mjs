@@ -61,8 +61,10 @@ async function clean() {
    show buttons whose every tap answers "Not found.". So the suite binds a real
    row first and removes it in the cleanup at the end. */
 const FIXTURE_CHAT = 770001;
+let SEED_NAME = '';
 {
-  const { data: seedBiz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
+  const { data: seedBiz } = await svc.from('businesses').select('id, name').eq('slug', ALDER_DEMO).single();
+  SEED_NAME = (seedBiz && seedBiz.name) || '';
   await svc.from('business_chats').upsert(
     { business_id: seedBiz.id, tg_chat_id: FIXTURE_CHAT }, { onConflict: 'tg_chat_id' },
   );
@@ -387,7 +389,10 @@ try {
    alert, so a second send would be a duplicate; only when NEITHER delivered does
    each usable channel get one more attempt, marked { fallback: true }. */
 
-const sendMessageCount = async () => (await requests(TG)).filter((r) => r.path.includes('/sendMessage')).length;
+// Count only the suite's own fixture chat: real phones may be bound to the same
+// business, and their alerts are correct, not noise.
+const sendMessageCount = async () => (await requests(TG))
+  .filter((r) => r.path.includes('/sendMessage') && String(r.body.chat_id) === String(FIXTURE_CHAT)).length;
 const emailCount = async () => (await requests(RS)).filter((r) => r.path === '/emails').length;
 const metaOf = (evs) => evs.map((e) => e.meta || {});
 
@@ -552,14 +557,14 @@ try {
   await reset(TG); await reset(RS);
   const { res, key, body: sentBody } = await post({ notes: 'A note that should be capped' });
   const tgReq = (await requests(TG)).filter((x) => x.method === 'POST' && x.path.includes('/sendMessage'));
-  const t = tgReq[0] && tgReq[0].body;
+  const t = tgReq.map((x) => x.body).find((b) => String(b.chat_id) === String(FIXTURE_CHAT));
   // NEW (item 2): one "Label: value" per line, blank lines between groups, title
   // carries the only "·", phone keeps the +1 tappable form.
   // Before (item 3): the status block ended with the plain line 'Status: New'.
   // After (item 3, deliberate change): emoji status lines, one fact per line,
   // and the email never appears in the status block.
   const expectedText = [
-    'New lead · Alder Roofing (demo)',
+    `New lead · ${SEED_NAME}`,
     '',
     'Name: Notify Tester',
     `Phone: +1${sentBody.phone}`,
@@ -595,7 +600,7 @@ try {
   const minReq = (await requests(TG)).filter((x) => x.method === 'POST' && x.path.includes('/sendMessage'));
   const minText = minReq[0] && minReq[0].body && minReq[0].body.text;
   const minExpected = [
-    'New lead · Alder Roofing (demo)',
+    `New lead · ${SEED_NAME}`,
     '',
     'Name: Notify Tester',
     `Phone: +1${noContact.body.phone}`,
@@ -702,11 +707,18 @@ let boundId = null, activeId = null;
 try {
   await clean();
   const chat = FIXTURE_CHAT;
+  const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
   await reset(TG);
   await post({});
   const tgReq = (await requests(TG)).filter((x) => x.path.includes('/sendMessage'));
-  line(tgReq.length === 1 && String(tgReq[0].body.chat_id) === String(chat),
-    'B3', 'bound business -> its chat only', `calls=${tgReq.length} chat=${tgReq[0] && tgReq[0].body.chat_id}`);
+  // Every chat bound to this business gets one alert, and nobody else does.
+  // Real phones may be bound alongside the fixture.
+  const boundA = (await svc.from('business_chats').select('tg_chat_id').eq('business_id', bizA.id)).data
+    .map((r) => String(r.tg_chat_id)).sort();
+  const gotA = tgReq.map((x) => String(x.body.chat_id)).sort();
+  line(JSON.stringify(gotA) === JSON.stringify(boundA) && gotA.includes(String(chat)),
+    'B3', 'every bound chat gets one alert, nobody else',
+    `calls=${tgReq.length} bound=${boundA.length}`);
 
   /* Second business -> its own chat */
   const { data: biz2 } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
@@ -715,8 +727,12 @@ try {
   await reset(TG);
   await post({ slug: 'second-demo' });
   const req2 = (await requests(TG)).filter((x) => x.path.includes('/sendMessage'));
-  line(req2.length === 1 && String(req2[0].body.chat_id) === String(chat2),
-    'B4', 'second business -> its own chat only', `chat=${req2[0] && req2[0].body.chat_id}`);
+  const boundB = (await svc.from('business_chats').select('tg_chat_id').eq('business_id', biz2.id)).data
+    .map((r) => String(r.tg_chat_id)).sort();
+  const gotB = req2.map((x) => String(x.body.chat_id)).sort();
+  line(JSON.stringify(gotB) === JSON.stringify(boundB) && gotB.includes(String(chat2)),
+    'B4', 'second business: its own chats only, never the first business\'s',
+    `calls=${req2.length} bound=${boundB.length}`);
 
   /* Active business with no chat -> no call, tg_failed no_chat */
   const { data: made } = await svc.from('businesses').insert({
@@ -745,7 +761,10 @@ try {
   await clean();
   await control(TG, { mode: '400_if_keyboard' }); await reset(TG);
   const { res } = await post({});
-  const reqs = (await requests(TG)).filter((x) => x.path.includes('/sendMessage'));
+  // One chat may retry twice; real phones bound to the same business get their
+  // own attempt each, so count only the fixture's.
+  const reqs = (await requests(TG)).filter((x) => x.path.includes('/sendMessage')
+    && String(x.body.chat_id) === String(FIXTURE_CHAT));
   await control(TG, { mode: 'ok' });
   line(res.code === 200 && reqs.length === 2 && !!reqs[0].body.reply_markup && !reqs[1].body.reply_markup,
     'B6', '400 with keyboard -> one retry without it', `calls=${reqs.length} keyboard=${!!reqs[0]?.body?.reply_markup}/${!!reqs[1]?.body?.reply_markup}`);
