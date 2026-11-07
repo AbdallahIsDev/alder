@@ -1243,7 +1243,10 @@
     .dbg { z-index: 300 }
     .est { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 16px; visibility: hidden; transition: visibility 0s .45s; color-scheme: dark;
       --bg: rgb(28 31 36/.74); --fg: #f7f4ef; --mut: #b9bdc3; --line: rgb(255 255 255/.18); --card: rgb(255 255 255/.07); --card-h: rgb(255 255 255/.12); --field: rgb(255 255 255/.07); --sel: var(--accent); --err: #ff8a7a;
-      --ctl-line: var(--line); --ctl-focus: var(--sel); --ctl-err: var(--err);
+      /* Form-control borders only (WCAG 1.4.11): >=3:1 against the field fill and
+         the dialog ground in the worst case (a white section behind the scrim).
+         --line stays for cards and decorative edges. */
+      --ctl-line: #9aa0a8; --ctl-focus: #fff; --ctl-err: #ffb3a6;
       --sb-track: transparent; --sb-thumb: rgb(255 255 255/.28); --sb-hover: var(--accent) }
     .est.open { visibility: visible; transition-delay: 0s }
     .est-scrim { position: absolute; inset: 0; background: rgb(28 31 36/.5); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); opacity: 0; transition: opacity .35s }
