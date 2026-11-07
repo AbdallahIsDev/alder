@@ -60,6 +60,7 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - Before any test run: back up the `alder-demo` businesses row (all columns) and every `business_chats` row for it to `_debug/prod-backup.json` (gitignored). Print only differing column names and row counts, never values.
 - Reset the differing columns to the seed values (`supabase/seed.sql` / migrations) and delete only that business's `business_chats` rows. Touch nothing else.
 - After the final full test run and before the push: restore the saved rows exactly; confirm by column names and counts only.
+- **Back up once per session, before the first reset — never again after it.** `_debug/prod-backup.mjs` writes a single fixed path, so running it a second time captures the *reset* state and overwrites the only copy of the real one. That happened on 2026-11-07 and was recovered from `_debug/businesses-backup.json` and `_debug/business_chats-backup.json` (2026-11-05 snapshots). If a run needs a fresh backup, move the existing file aside first.
 
 ## Env files and the test project
 
