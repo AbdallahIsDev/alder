@@ -111,9 +111,13 @@ try {
     const allDaily = shapes.length === 2 && shapes.every((x) => x.daily && x.resolves);
     const distinct = new Set(shapes.map((x) => x.hour)).size === shapes.length;
     const paths = shapes.map((x) => x.path).sort().join(',');
-    line(allDaily && distinct && paths === '/api/digest,/api/selfcheck', 'H6',
-      'crons: two daily jobs, both resolve, different hours',
-      `n=${crons.length} hours=${shapes.map((x) => x.hour).join('/')} daily=${allDaily} distinct=${distinct} paths=${paths}`);
+    // Exact hours, so moving a cron is a deliberate edit with a failing test
+    // rather than something that quietly changes when the owner is messaged.
+    const hours = crons.map((c) => c.schedule).sort().join(',');
+    const pinned = hours === '0 13 * * *,0 9 * * *';
+    line(allDaily && distinct && pinned && paths === '/api/digest,/api/selfcheck', 'H6',
+      'crons: two daily jobs, both resolve, pinned hours',
+      `n=${crons.length} hours=${shapes.map((x) => x.hour).join('/')} daily=${allDaily} distinct=${distinct} pinned=${pinned} paths=${paths}`);
   }
 
   /* ---------- self-check ---------- */
