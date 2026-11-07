@@ -29,7 +29,9 @@ const line = (ok, id, what, d) => {
 };
 
 const { default: handler } = await import('../api/health.js');
-const { default: selfcheck, shouldAlert, selfCheckText, alertTargets, deliverSelfCheck, selfCheckEmail } = await import('../api/selfcheck.js');
+const { default: selfcheck, alertTargets, deliverSelfCheck, alertBodyFor } = await import('../api/selfcheck.js');
+const { selfCheckText, shouldAlertBusiness, failedTotal } = await import('../lib/ops-copy.js');
+const { selfCheckEmail } = await import('../lib/email-builders.js');
 
 const KINDS = ['created', 'tg_sent', 'tg_failed', 'email_owner_sent', 'email_owner_failed', 'autoreply_failed', 'review_request_failed'];
 const TOP = ['last_24h', 'last_hour', 'mail_redirect_active', 'ok', 'salt_set', 'webhook_secret_set'];
@@ -154,18 +156,28 @@ try {
 
   /* S3: the rule and the message text, without a database */
   {
-    const ruleOk = shouldAlert({ failedTotal: 0, redirectActive: false }) === false
-      && shouldAlert({ failedTotal: 1, redirectActive: false }) === true
-      && shouldAlert({ failedTotal: 0, redirectActive: true }) === true;
+    const ruleOk = shouldAlertBusiness({ status: 'demo', failed: 0, redirectActive: true }) === true
+      && shouldAlertBusiness({ status: 'demo', failed: 0, redirectActive: false }) === false
+      && shouldAlertBusiness({ status: 'demo', failed: 2, redirectActive: false }) === true
+      && shouldAlertBusiness({ status: 'active', failed: 2, redirectActive: false }) === true
+      && shouldAlertBusiness({ status: 'active', failed: 0, redirectActive: true }) === false
+      && shouldAlertBusiness({ status: 'paused', failed: 2, redirectActive: true }) === false;
     const zero = Object.fromEntries(KINDS.map((k) => [k, 0]));
-    const text = selfCheckText({ ...zero, tg_failed: 2 }, { redirectActive: true });
-    const countsOnly = !text.includes('@') && !/alder/i.test(text) && !text.includes('+1')
-      && text.includes('tg_failed 2') && text.includes('2 alerts did not go out')
-      && text.includes('Email redirect is ON');
-    const clean = selfCheckText(zero, { redirectActive: false });
-    const silent = !clean.includes('did not go out') && !clean.includes('redirect');
-    line(ruleOk && countsOnly && silent, 'S3', 'selfcheck: rule and counts-only text',
-      `rule=${ruleOk} counts=${countsOnly} silent=${silent}`);
+    const text = selfCheckText({ ...zero, tg_failed: 2, created: 3 }, { redirectActive: true, operator: true });
+    const own = text.includes('New requests: 3') && text.includes('2 alerts could not be delivered');
+    const warn = text.includes('Test mode is on') && text.includes('Setting: MAIL_REDIRECT_TO');
+    const problemsFirst = text.indexOf('Needs attention') < text.indexOf('New requests');
+    // A client never sees operator text, and never sees an underscore or an
+    // internal event name in the copy it does see.
+    const client = selfCheckText({ ...zero, tg_failed: 1 }, { redirectActive: true, operator: false });
+    const noOperator = !client.includes('Test mode') && !client.includes('MAIL_REDIRECT_TO')
+      && !client.includes('_') && !/\btg\b/i.test(client);
+    const clean = selfCheckText(zero, { redirectActive: false, operator: true });
+    const silent = !clean.includes('Needs attention') && !clean.includes('Test mode');
+    const totals = failedTotal({ ...zero, tg_failed: 2, autoreply_failed: 1 }) === 3;
+    line(ruleOk && own && warn && problemsFirst && noOperator && silent && totals, 'S3',
+      'selfcheck: per-business rule, plain copy, operator block is demo-only',
+      `rule=${ruleOk} own=${own} warn=${warn} first=${problemsFirst} client=${noOperator} silent=${silent}`);
   }
 
   /* S6-S9: delivery — Telegram first, email only when Telegram did not land.
@@ -227,9 +239,14 @@ try {
   /* S10: the email body carries the counts and nothing else */
   {
     const zero = Object.fromEntries(KINDS.map((k) => [k, 0]));
-    const body = selfCheckEmail(selfCheckText({ ...zero, tg_failed: 1 }, { redirectActive: false }), '2026-11-07');
-    const clean = !body.subject.includes('@') && !body.html.includes('@') && !/alder/i.test(body.text + body.html)
-      && body.text.includes('tg_failed 1') && body.html.includes('tg_failed 1');
+    const body = selfCheckEmail({ ...zero, tg_failed: 1 }, '2026-11-07', { redirectActive: false, operator: true });
+    // The shell's <style> block contains "@media", so the address check is a
+    // real address shape, not a bare "@".
+    const clean = !body.subject.includes('@') && !/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(body.html)
+      // The layout marker is data-alder-layout, so the check is the business
+      // name and an address, not the bare word.
+      && !/alder roofing|owner@|example\.com/i.test(body.text + body.html)
+      && body.text.includes('1 alert could not be delivered') && body.html.includes('1 alert could not be delivered');
     line(clean && body.subject.includes('2026-11-07'), 'S10', 'email fallback body: counts only',
       `subject=${body.subject.length} chars html=${body.html.length}`);
   }
@@ -320,7 +337,7 @@ try {
       // "owner" is part of the event kind names (email_owner_sent), so the PII
       // check looks for the business name and an address, not that word.
       const countsOnly = m1.body && typeof m1.body.text === 'string'
-        && m1.body.text.includes('tg_failed 2') && !m1.body.text.includes('@')
+        && m1.body.text.includes('1 alert could not be delivered') && !m1.body.text.includes('@')
         && !/alder roofing|owner@|example\.com/i.test(m1.body.text);
 
       // MAIL_REDIRECT_TO still wins over owner_email, as everywhere else.
@@ -410,15 +427,142 @@ try {
     }
   }
 
-  /* S5: who gets told — everyone under a redirect, only the affected businesses otherwise */
+  /* S14/S15: per-business counts and recipient de-duplication, through the real
+     handler with a faked PostgREST. Two businesses with different counts: a demo
+     one (the operator's) and an active client. */
   {
-    const fails = new Map([['biz-a', { tg_failed: 2 }], ['biz-b', { email_owner_failed: 1 }]]);
-    const all = ['biz-a', 'biz-b', 'biz-c'];
-    const redirect = alertTargets({ redirectActive: true, failedByBusiness: fails, allBusinessIds: all });
-    const partial = alertTargets({ redirectActive: false, failedByBusiness: fails, allBusinessIds: all });
-    const ok = redirect.length === 3 && partial.length === 2
-      && partial.includes('biz-a') && partial.includes('biz-b') && !partial.includes('biz-c');
-    line(ok, 'S5', 'selfcheck: redirect tells everyone, else only affected', `redirect=${redirect.length} partial=${partial.length}`);
+    const TG = process.env.FAKE_TG_URL, RS = process.env.FAKE_RESEND_URL;
+    const DEMO = '33333333-3333-3333-3333-333333333333';
+    const ACT = '44444444-4444-4444-4444-444444444444';
+    const B1 = '55555555-5555-5555-5555-555555555555';
+    const B2 = '66666666-6666-6666-6666-666666666666';
+    const SB = process.env.SUPABASE_URL;
+    const realFetch3 = globalThis.fetch;
+    const savedEnv = {
+      VERCEL_ENV: process.env.VERCEL_ENV, TELEGRAM_API_BASE: process.env.TELEGRAM_API_BASE,
+      RESEND_API_BASE: process.env.RESEND_API_BASE, MAIL_REDIRECT_TO: process.env.MAIL_REDIRECT_TO,
+      MAIL_FROM: process.env.MAIL_FROM,
+    };
+    const ctl = (base, body) => realFetch3(base + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const reset = (base) => realFetch3(base + '/__reset', { method: 'POST' });
+    const reqs = async (base) => (await (await realFetch3(base + '/__requests')).json()).requests;
+    const install = (data) => {
+      globalThis.fetch = async (input, init = {}) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (!url.startsWith(SB)) return realFetch3(input, init);
+        const u = new URL(url);
+        const table = u.pathname.replace('/rest/v1/', '');
+        const json = (b) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+        if (table === 'businesses') return json(data.businesses || []);
+        // PostgREST filters; so does this. Without the business_id filter the
+        // chat lookup would hand every business the same chat and the test
+        // would pass for the wrong reason.
+        if (table === 'business_chats') {
+          const bid = (u.searchParams.get('business_id') || '').replace('eq.', '');
+          return json((data.chats || []).filter((c) => !bid || c.business_id === bid));
+        }
+        if (table === 'lead_events') return json(data.events || []);
+        if (table === 'leads') return json(data.leads || []);
+        return json([]);
+      };
+    };
+    const call = async () => {
+      const res = fakeRes();
+      await selfcheck({ method: 'GET', headers: { 'x-health-secret': 'health-test-secret-value' } }, res);
+      return res;
+    };
+    try {
+      // Development, so the loopback overrides are honoured and the interlock
+      // still blocks anything that is not the fake. Never "production" here:
+      // that would switch every guard off to test a flag.
+      process.env.VERCEL_ENV = 'development';
+      delete process.env.MAIL_REDIRECT_TO;
+      process.env.MAIL_FROM = 'alerts@example.com';
+      process.env.TELEGRAM_API_BASE = TG;
+      process.env.RESEND_API_BASE = RS;
+      await ctl(TG, { mode: 'ok' }); await ctl(RS, { mode: 'ok' });
+      await reset(TG); await reset(RS);
+
+      // Demo: one failed alert, a bound chat. Active: two failed owner emails,
+      // no chat. Each message must carry its own number and only its own.
+      install({
+        businesses: [
+          { id: DEMO, slug: 'd', name: 'D', owner_email: 'demo@example.com', status: 'demo' },
+          { id: ACT, slug: 'a', name: 'A', owner_email: 'client@example.com', status: 'active' },
+        ],
+        chats: [{ business_id: DEMO, tg_chat_id: 'chat-demo' }],
+        events: [
+          { lead_id: 'l-demo', kind: 'tg_failed' },
+          { lead_id: 'l-act', kind: 'email_owner_failed' },
+          { lead_id: 'l-act', kind: 'email_owner_failed' },
+        ],
+        leads: [{ id: 'l-demo', business_id: DEMO }, { id: 'l-act', business_id: ACT }],
+      });
+      const r = await call();
+      const tg = (await reqs(TG)).filter((x) => x.path.includes('/sendMessage'));
+      const mail = (await reqs(RS)).filter((x) => x.path === '/emails');
+      const demoText = (tg[0] && tg[0].body && tg[0].body.text) || '';
+      const clientText = (mail[0] && mail[0].body && mail[0].body.text) || '';
+      const split = r.code === 200 && r.body.sent === 1 && r.body.emailed === 1 && r.body.failed === 3
+        && tg.length === 1 && mail.length === 1
+        && /1 alert could not be delivered/.test(demoText) && !/2 alert emails/.test(demoText)
+        && /2 alert emails to you did not go out/.test(clientText) && !/1 alert could not/.test(clientText)
+        && !/MAIL_REDIRECT_TO/.test(clientText) && !/Test mode/.test(clientText);
+      line(split, 'S14', 'selfcheck: each business is told only its own counts',
+        `sent=${r.body.sent} emailed=${r.body.emailed} failed=${r.body.failed}`);
+
+      // The operator block is chosen by status, not by the caller's guess.
+      const demoBody = alertBodyFor({ status: 'demo' }, { tg_failed: 1 }, true);
+      const clientBody = alertBodyFor({ status: 'active' }, { tg_failed: 1 }, true);
+      line(/Test mode is on/.test(demoBody) && !/Test mode/.test(clientBody) && !/_/.test(clientBody), 'S16',
+        'selfcheck: the redirect warning is demo-only', 'demo=on client=off');
+    } catch (e) {
+      line(false, 'S14', 'selfcheck: per-business counts', e.message);
+    }
+
+    // Two active businesses, one shared inbox, one failure each: one email.
+    try {
+      await reset(TG); await reset(RS);
+      install({
+        businesses: [
+          { id: B1, slug: 'b1', name: 'B1', owner_email: 'shared@example.com', status: 'active' },
+          { id: B2, slug: 'b2', name: 'B2', owner_email: 'shared@example.com', status: 'active' },
+        ],
+        chats: [],
+        events: [{ lead_id: 'l-1', kind: 'tg_failed' }, { lead_id: 'l-2', kind: 'tg_failed' }],
+        leads: [{ id: 'l-1', business_id: B1 }, { id: 'l-2', business_id: B2 }],
+      });
+      const r = await call();
+      const mail = (await reqs(RS)).filter((x) => x.path === '/emails');
+      line(r.code === 200 && r.body.emailed === 1 && r.body.deduped === 1 && mail.length === 1, 'S15',
+        'selfcheck: two businesses sharing one inbox get one message',
+        `emailed=${r.body.emailed} deduped=${r.body.deduped} mail=${mail.length}`);
+    } catch (e) {
+      line(false, 'S15', 'selfcheck: duplicate recipients', e.message);
+    } finally {
+      globalThis.fetch = realFetch3;
+      for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+      await ctl(TG, { mode: 'ok' }).catch(() => {});
+      await ctl(RS, { mode: 'ok' }).catch(() => {});
+    }
+  }
+
+  /* S5: who gets told — a demo business on a redirect, only the affected ones otherwise */
+  {
+    const businesses = [
+      { id: 'biz-a', status: 'demo' }, { id: 'biz-b', status: 'active' },
+      { id: 'biz-c', status: 'active' }, { id: 'biz-d', status: 'demo' },
+    ];
+    const counts = new Map([['biz-a', { tg_failed: 2 }], ['biz-b', { email_owner_failed: 1 }]]);
+    const redirect = alertTargets({ businesses, counts, redirectActive: true });
+    const partial = alertTargets({ businesses, counts, redirectActive: false });
+    const ok = redirect.length === 3 && redirect.includes('biz-d')
+      && partial.length === 2 && partial.includes('biz-a') && partial.includes('biz-b')
+      && !partial.includes('biz-c') && !partial.includes('biz-d');
+    line(ok, 'S5', 'selfcheck: redirect reaches demo only, failures reach their own business',
+      `redirect=${redirect.length} partial=${partial.length}`);
   }
 
   /* S4: authorised call — shape only; `sent` depends on live data and is not asserted */
@@ -428,7 +572,7 @@ try {
     const shapeOk = r.code === 200 && b.ok === true
       && typeof b.sent === 'number' && typeof b.failed === 'number'
       && typeof b.redirect_active === 'boolean'
-      && JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['emailed', 'failed', 'ok', 'redirect_active', 'sent']);
+      && JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['deduped', 'emailed', 'failed', 'ok', 'redirect_active', 'sent']);
     line(shapeOk, 'S4', 'selfcheck: authorised call returns counts only', `code=${r.code} sent=${b.sent} failed=${b.failed}`);
   }
 

@@ -21,7 +21,12 @@ import { hitRateLimit, clearRateLimit } from '../lib/db.js';
 import { digestCounts, digestTargets } from '../lib/digest-db.js';
 import { deliverToBusinesses } from '../lib/ops-delivery.js';
 import { sendMessage } from '../lib/tg.js';
-import { sendMail, escHtml } from '../lib/mail.js';
+import { sendMail } from '../lib/mail.js';
+import { digestEmail } from '../lib/email-builders.js';
+import { digestText } from '../lib/ops-copy.js';
+
+// Re-exported so the preview script and the tests keep one import site.
+export { digestText };
 
 const HEADER = 'x-health-secret';
 const DAY = 24 * 3600 * 1000;
@@ -44,29 +49,6 @@ export function digestEnabled() {
 /** A business with nothing to report gets no message at all. */
 export function digestHasSomething(day) {
   return day.newLeads > 0 || day.untouched > 0 || day.failed > 0;
-}
-
-/** The message. Counts only, so the same text is safe by email. */
-export function digestText(day, dateKey) {
-  return [
-    `Daily digest — ${dateKey} (UTC)`,
-    '',
-    `New leads ${day.newLeads}`,
-    `Possible repeats ${day.repeats}`,
-    `Untouched over 24 h ${day.untouched}`,
-    `Failed alerts ${day.failed}`,
-    '',
-    'Open /leads in the bot to see them.',
-  ].join('\n');
-}
-
-/** The email body: same text, wrapped so it survives plain-text clients. */
-export function digestEmail(text, dateKey) {
-  return {
-    subject: `Daily digest — ${dateKey}`,
-    text,
-    html: `<pre style="font:13px/1.5 ui-monospace,monospace;white-space:pre-wrap">${escHtml(text)}</pre>`,
-  };
 }
 
 function authorised(req, healthSecret, cronSecret) {
@@ -119,21 +101,22 @@ export default async function handler(req, res) {
     }
 
     if (!due.length) {
-      return res.status(200).json({ ok: true, enabled: true, businesses: 0, sent: 0, emailed: 0, skipped });
+      return res.status(200).json({ ok: true, enabled: true, businesses: 0, sent: 0, emailed: 0, deduped: 0, skipped });
     }
 
     const byId = new Map(targets.map((t) => [t.id, t]));
-    const { sent, emailed, perTarget } = await deliverToBusinesses({
+    const { sent, emailed, deduped, perTarget } = await deliverToBusinesses({
       targets: due,
       // Per business: the counts differ, even though no count identifies anyone.
-      textFor: (id) => digestText(counts.get(id), dateKey),
+      textFor: (id) => digestText(counts.get(id)),
       chatsFor: (id) => chatMap.get(id) || [],
       sendTg: (chat, body) => sendMessage(chat, body),
-      sendMailFor: async (id, body) => {
+      mailKeyFor: (id) => (byId.get(id) || {}).ownerEmail || null,
+      sendMailFor: async (id) => {
         const owner = byId.get(id) && byId.get(id).ownerEmail;
         if (!owner) return { ok: false, status: 'no_owner_email' };
         return sendMail({
-          to: owner, fromName: 'Lead Alerts', ...digestEmail(body, dateKey),
+          to: owner, fromName: 'Lead Alerts', ...digestEmail(counts.get(id), dateKey),
           idempotencyKey: `digest:${id}:${dateKey}`,
         });
       },
@@ -149,7 +132,7 @@ export default async function handler(req, res) {
       try { await clearRateLimit('digest:' + id); released++; } catch { /* the day's slot stays taken */ }
     }
 
-    return res.status(200).json({ ok: true, enabled: true, businesses: due.length, sent, emailed, released, skipped });
+    return res.status(200).json({ ok: true, enabled: true, businesses: due.length, sent, emailed, deduped, released, skipped });
   } catch (e) {
     console.error('digest_failed', (e && e.code) || 'no_code');
     return res.status(500).json({ ok: false });
