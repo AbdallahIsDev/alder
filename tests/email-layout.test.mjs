@@ -48,8 +48,9 @@ const FIXTURES = {
   ownerEmail: [{ business, lead }],
   autoReply: [{ business, lead }],
   reviewEmail: [{ business, token: 'test-token', siteUrl: 'http://127.0.0.1:3000' }],
-  selfCheckEmail: [opsDay, '2026-11-07', { redirectActive: true, operator: true }],
+  selfCheckEmail: [opsDay, '2026-11-07'],
   digestEmail: [digestDay, '2026-11-07'],
+  operatorAlarmEmail: ['⚠️ Needs attention\nalder-demo: 1 alert could not be delivered', '2026-11-07'],
 };
 
 /* L1: every registered builder, and only registered ones, produces shell HTML. */

@@ -56,6 +56,18 @@ async function clean() {
 }
 
 
+/* One bound phone for alder-demo, for the whole suite.
+   Alerts no longer fall back to TELEGRAM_CHAT_ID: a chat with no binding would
+   show buttons whose every tap answers "Not found.". So the suite binds a real
+   row first and removes it in the cleanup at the end. */
+const FIXTURE_CHAT = 770001;
+{
+  const { data: seedBiz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
+  await svc.from('business_chats').upsert(
+    { business_id: seedBiz.id, tg_chat_id: FIXTURE_CHAT }, { onConflict: 'tg_chat_id' },
+  );
+}
+
 let ip = 40;
 /* One phone per post. The suite must not collide with rows already in the
    database (duplicate detection would add a line to the alert and break the
@@ -570,8 +582,8 @@ try {
   const kb = t && t.reply_markup && t.reply_markup.inline_keyboard;
   const oneBtn = Array.isArray(kb) && kb.length === 1 && kb[0].length === 1
     && kb[0][0].text === 'Mark contacted' && /^c:[0-9a-f-]{36}$/.test(kb[0][0].callback_data || '');
-  line(res.code === 200 && textOk && noJoin && noParse && oneBtn && t.chat_id === process.env.TELEGRAM_CHAT_ID,
-    'B1', 'exact plain text, no parse_mode, demo fallback chat', `chat=${t && t.chat_id} keys=${t && Object.keys(t).join(',')}`);
+  line(res.code === 200 && textOk && noJoin && noParse && oneBtn && String(t.chat_id) === String(FIXTURE_CHAT),
+    'B1', 'exact plain text, no parse_mode, bound chat', `chat=${t && t.chat_id} keys=${t && Object.keys(t).join(',')}`);
   const rows = await leadFor(key);
   const evs = rows.length ? await events(rows[0].id) : [];
   line(evs.some((e) => e.kind === 'tg_sent'), 'B2', 'tg_sent event recorded');
@@ -689,9 +701,7 @@ try {
 let boundId = null, activeId = null;
 try {
   await clean();
-  const { data: biz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
-  const chat = 770001;
-  await svc.from('business_chats').upsert({ business_id: biz.id, tg_chat_id: chat }, { onConflict: 'tg_chat_id' });
+  const chat = FIXTURE_CHAT;
   await reset(TG);
   await post({});
   const tgReq = (await requests(TG)).filter((x) => x.path.includes('/sendMessage'));
@@ -720,8 +730,14 @@ try {
   const rows = await leadFor(key);
   const evs = rows.length ? await events(rows[0].id) : [];
   const f = evs.find((e) => e.kind === 'tg_failed');
-  line(res.code === 200 && reqA.length === 0 && !!f && f.meta.status === 'no_chat',
-    'B5', 'active + no chat -> no call, tg_failed no_chat', `calls=${reqA.length} meta=${JSON.stringify(f && f.meta)}`);
+  // No bound chat: no alert with buttons (every tap would answer "Not found.").
+  // The operator gets ONE plain notice instead, and the event says no_chat.
+  const op = process.env.OPERATOR_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+  line(res.code === 200 && reqA.length === 1 && String(reqA[0].body.chat_id) === String(op)
+    && !reqA[0].body.reply_markup && /no phone is connected/.test(reqA[0].body.text)
+    && !!f && f.meta.status === 'no_chat',
+    'B5', 'no chat -> one operator notice, no buttons, tg_failed no_chat',
+    `calls=${reqA.length} buttons=${!!reqA[0]?.body?.reply_markup} meta=${JSON.stringify(f && f.meta)}`);
 } catch (e) { line(false, 'B3', 'chat routing', e.message); }
 
 /* 400-with-keyboard retries once without it */

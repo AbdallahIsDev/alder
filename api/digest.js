@@ -101,17 +101,16 @@ export default async function handler(req, res) {
     }
 
     if (!due.length) {
-      return res.status(200).json({ ok: true, enabled: true, businesses: 0, sent: 0, emailed: 0, deduped: 0, skipped });
+      return res.status(200).json({ ok: true, enabled: true, businesses: 0, sent: 0, emailed: 0, skipped });
     }
 
     const byId = new Map(targets.map((t) => [t.id, t]));
-    const { sent, emailed, deduped, perTarget } = await deliverToBusinesses({
+    const { sent, emailed, perTarget } = await deliverToBusinesses({
       targets: due,
       // Per business: the counts differ, even though no count identifies anyone.
       textFor: (id) => digestText(counts.get(id)),
       chatsFor: (id) => chatMap.get(id) || [],
       sendTg: (chat, body) => sendMessage(chat, body),
-      mailKeyFor: (id) => (byId.get(id) || {}).ownerEmail || null,
       sendMailFor: async (id) => {
         const owner = byId.get(id) && byId.get(id).ownerEmail;
         if (!owner) return { ok: false, status: 'no_owner_email' };
@@ -132,7 +131,7 @@ export default async function handler(req, res) {
       try { await clearRateLimit('digest:' + id); released++; } catch { /* the day's slot stays taken */ }
     }
 
-    return res.status(200).json({ ok: true, enabled: true, businesses: due.length, sent, emailed, deduped, released, skipped });
+    return res.status(200).json({ ok: true, enabled: true, businesses: due.length, sent, emailed, released, skipped });
   } catch (e) {
     console.error('digest_failed', (e && e.code) || 'no_code');
     return res.status(500).json({ ok: false });

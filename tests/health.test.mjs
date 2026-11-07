@@ -29,12 +29,12 @@ const line = (ok, id, what, d) => {
 };
 
 const { default: handler } = await import('../api/health.js');
-const { default: selfcheck, alertTargets, deliverSelfCheck, alertBodyFor } = await import('../api/selfcheck.js');
-const { selfCheckText, shouldAlertBusiness, failedTotal } = await import('../lib/ops-copy.js');
+const { default: selfcheck, alertTargets, deliverSelfCheck, operatorAlarm } = await import('../api/selfcheck.js');
+const { selfCheckText, shouldAlertBusiness, failedTotal, operatorAlarmText } = await import('../lib/ops-copy.js');
 const { selfCheckEmail } = await import('../lib/email-builders.js');
 
 const KINDS = ['created', 'tg_sent', 'tg_failed', 'email_owner_sent', 'email_owner_failed', 'autoreply_failed', 'review_request_failed'];
-const TOP = ['last_24h', 'last_hour', 'mail_redirect_active', 'ok', 'salt_set', 'webhook_secret_set'];
+const TOP = ['last_24h', 'last_hour', 'mail_redirect_active', 'ok', 'operator_chat_set', 'operator_email_set', 'operator_reachable', 'salt_set', 'webhook_secret_set'];
 
 const call = async ({ method = 'GET', secret } = {}) => {
   const res = fakeRes();
@@ -154,30 +154,27 @@ try {
       `${wrongHeader.code}/${wrongBearer.code}/${healthAsBearer.code}/${cronInHeader.code}`);
   }
 
-  /* S3: the rule and the message text, without a database */
+  /* S3: the owner copy and the operator alarm, without a database */
   {
-    const ruleOk = shouldAlertBusiness({ status: 'demo', failed: 0, redirectActive: true }) === true
-      && shouldAlertBusiness({ status: 'demo', failed: 0, redirectActive: false }) === false
-      && shouldAlertBusiness({ status: 'demo', failed: 2, redirectActive: false }) === true
-      && shouldAlertBusiness({ status: 'active', failed: 2, redirectActive: false }) === true
-      && shouldAlertBusiness({ status: 'active', failed: 0, redirectActive: true }) === false
-      && shouldAlertBusiness({ status: 'paused', failed: 2, redirectActive: true }) === false;
+    const ruleOk = shouldAlertBusiness({ status: 'demo', failed: 0 }) === false
+      && shouldAlertBusiness({ status: 'demo', failed: 2 }) === true
+      && shouldAlertBusiness({ status: 'active', failed: 0 }) === false
+      && shouldAlertBusiness({ status: 'active', failed: 2 }) === true
+      && shouldAlertBusiness({ status: 'paused', failed: 2 }) === false;
     const zero = Object.fromEntries(KINDS.map((k) => [k, 0]));
-    const text = selfCheckText({ ...zero, tg_failed: 2, created: 3 }, { redirectActive: true, operator: true });
-    const own = text.includes('New requests: 3') && text.includes('2 alerts could not be delivered');
-    const warn = text.includes('Test mode is on') && text.includes('Setting: MAIL_REDIRECT_TO');
-    const problemsFirst = text.indexOf('Needs attention') < text.indexOf('New requests');
-    // A client never sees operator text, and never sees an underscore or an
-    // internal event name in the copy it does see.
-    const client = selfCheckText({ ...zero, tg_failed: 1 }, { redirectActive: true, operator: false });
-    const noOperator = !client.includes('Test mode') && !client.includes('MAIL_REDIRECT_TO')
-      && !client.includes('_') && !/\btg\b/i.test(client);
-    const clean = selfCheckText(zero, { redirectActive: false, operator: true });
-    const silent = !clean.includes('Needs attention') && !clean.includes('Test mode');
+    const owner = selfCheckText({ ...zero, tg_failed: 2, created: 3 });
+    const own = owner.includes('New requests: 3') && owner.includes('2 alerts could not be delivered');
+    const noOperator = !/Test mode|MAIL_REDIRECT_TO|alder-demo|second-demo/.test(owner);
+    const alarm = operatorAlarmText({ rows: [{ slug: 'alder-demo', day: { tg_failed: 2 } }], redirectActive: true, noPhoneSlugs: ['second-demo'] });
+    const alarmOk = alarm.includes('alder-demo: 2 alerts could not be delivered')
+      && alarm.includes('No phone connected: second-demo')
+      && alarm.includes('Test mode is on')
+      && alarm.indexOf('Needs attention') < alarm.indexOf('Test mode');
+    const silent = operatorAlarmText({ rows: [], redirectActive: false, noPhoneSlugs: [] }) === null;
     const totals = failedTotal({ ...zero, tg_failed: 2, autoreply_failed: 1 }) === 3;
-    line(ruleOk && own && warn && problemsFirst && noOperator && silent && totals, 'S3',
-      'selfcheck: per-business rule, plain copy, operator block is demo-only',
-      `rule=${ruleOk} own=${own} warn=${warn} first=${problemsFirst} client=${noOperator} silent=${silent}`);
+    line(ruleOk && own && noOperator && alarmOk && silent && totals, 'S3',
+      'owner copy has no operator text; one alarm names every business',
+      `rule=${ruleOk} own=${own} clean=${noOperator} alarm=${alarmOk} silent=${silent}`);
   }
 
   /* S6-S9: delivery — Telegram first, email only when Telegram did not land.
@@ -239,7 +236,7 @@ try {
   /* S10: the email body carries the counts and nothing else */
   {
     const zero = Object.fromEntries(KINDS.map((k) => [k, 0]));
-    const body = selfCheckEmail({ ...zero, tg_failed: 1 }, '2026-11-07', { redirectActive: false, operator: true });
+    const body = selfCheckEmail({ ...zero, tg_failed: 1 }, '2026-11-07');
     // The shell's <style> block contains "@media", so the address check is a
     // real address shape, not a bare "@".
     const clean = !body.subject.includes('@') && !/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(body.html)
@@ -275,7 +272,8 @@ try {
     const saved = {
       VERCEL_ENV: process.env.VERCEL_ENV, TELEGRAM_API_BASE: process.env.TELEGRAM_API_BASE,
       RESEND_API_BASE: process.env.RESEND_API_BASE, MAIL_REDIRECT_TO: process.env.MAIL_REDIRECT_TO,
-      MAIL_FROM: process.env.MAIL_FROM,
+      MAIL_FROM: process.env.MAIL_FROM, OPERATOR_CHAT_ID: process.env.OPERATOR_CHAT_ID,
+      OPERATOR_EMAIL: process.env.OPERATOR_EMAIL,
     };
     const realFetch = globalThis.fetch;
     const ctl = (base, body) => realFetch(base + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -288,6 +286,8 @@ try {
       process.env.TELEGRAM_API_BASE = TG;
       process.env.RESEND_API_BASE = RS;
       process.env.MAIL_FROM = 'alerts@example.com';
+      process.env.OPERATOR_CHAT_ID = 'op-chat';
+      process.env.OPERATOR_EMAIL = 'ops@example.com';
       delete process.env.MAIL_REDIRECT_TO;
       await ctl(TG, { mode: '500' }); await ctl(RS, { mode: 'ok' });
       await reset(TG); await reset(RS);
@@ -345,13 +345,23 @@ try {
       process.env.MAIL_REDIRECT_TO = 'inbox@example.com';
       const r2 = await call();
       const mail2 = (await reqs(RS)).filter((x) => x.path === '/emails');
-      const toRedirect = mail2[0] && JSON.stringify(mail2[0].body.to) === JSON.stringify(['inbox@example.com']);
+      // The redirect rewrites EVERY recipient, so both the owner and the
+      // operator email land in the test inbox.
+      const toRedirect = mail2.length === 2
+        && mail2.every((x) => JSON.stringify(x.body.to) === JSON.stringify(['inbox@example.com']));
 
+      // Two Telegram attempts: the owner chat (mode 500) and the operator alarm.
+      const opTg = tg1.find((x) => String(x.body.chat_id) === 'op-chat');
+      // Telegram is in 500 mode for everyone, so the operator alarm falls back
+      // to OPERATOR_EMAIL: two emails, one owner and one operator.
+      const opMail = mail1.find((x) => JSON.stringify(x.body.to) === JSON.stringify(['ops@example.com']));
       const ok = r1.code === 200 && r1.body.emailed === 1 && r1.body.sent === 0
-        && mail1.length === 1 && tg1.length === 1 && toOwner && keyOk && countsOnly
-        && r2.code === 200 && mail2.length === 1 && toRedirect;
+        && r1.body.operator === 'email'
+        && mail1.length === 2 && !!opMail && tg1.length === 2 && !!opTg && toOwner && keyOk && countsOnly
+        && /alder-demo: 1 alert could not be delivered/.test(opTg.body.text)
+        && r2.code === 200 && mail2.length === 2 && toRedirect;
       line(ok, 'S12', 'selfcheck: telegram down -> owner email, redirect wins',
-        `r1=${r1.code} emailed=${r1.body.emailed} mail=${mail1.length} tg=${tg1.length} toOwner=${!!toOwner} key=${!!keyOk} counts=${!!countsOnly} redirect=${!!toRedirect}`);
+        `r1=${r1.code} emailed=${r1.body.emailed} tg=${tg1.length} op=${!!opTg} key=${!!keyOk} counts=${!!countsOnly} redirect=${!!toRedirect}`);
     } catch (e) {
       line(false, 'S12', 'selfcheck: telegram down -> owner email, redirect wins', e.message);
     } finally {
@@ -427,9 +437,7 @@ try {
     }
   }
 
-  /* S14/S15: per-business counts and recipient de-duplication, through the real
-     handler with a faked PostgREST. Two businesses with different counts: a demo
-     one (the operator's) and an active client. */
+  /* S14/S15/S16: per-business owner counts, no de-duplication, one alarm. */
   {
     const TG = process.env.FAKE_TG_URL, RS = process.env.FAKE_RESEND_URL;
     const DEMO = '33333333-3333-3333-3333-333333333333';
@@ -441,7 +449,7 @@ try {
     const savedEnv = {
       VERCEL_ENV: process.env.VERCEL_ENV, TELEGRAM_API_BASE: process.env.TELEGRAM_API_BASE,
       RESEND_API_BASE: process.env.RESEND_API_BASE, MAIL_REDIRECT_TO: process.env.MAIL_REDIRECT_TO,
-      MAIL_FROM: process.env.MAIL_FROM,
+      MAIL_FROM: process.env.MAIL_FROM, OPERATOR_CHAT_ID: process.env.OPERATOR_CHAT_ID,
     };
     const ctl = (base, body) => realFetch3(base + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const reset = (base) => realFetch3(base + '/__reset', { method: 'POST' });
@@ -455,8 +463,7 @@ try {
         const json = (b) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
         if (table === 'businesses') return json(data.businesses || []);
         // PostgREST filters; so does this. Without the business_id filter the
-        // chat lookup would hand every business the same chat and the test
-        // would pass for the wrong reason.
+        // chat lookup would hand every business the same chat.
         if (table === 'business_chats') {
           const bid = (u.searchParams.get('business_id') || '').replace('eq.', '');
           return json((data.chats || []).filter((c) => !bid || c.business_id === bid));
@@ -472,23 +479,22 @@ try {
       return res;
     };
     try {
-      // Development, so the loopback overrides are honoured and the interlock
-      // still blocks anything that is not the fake. Never "production" here:
-      // that would switch every guard off to test a flag.
       process.env.VERCEL_ENV = 'development';
       delete process.env.MAIL_REDIRECT_TO;
       process.env.MAIL_FROM = 'alerts@example.com';
       process.env.TELEGRAM_API_BASE = TG;
       process.env.RESEND_API_BASE = RS;
+      process.env.OPERATOR_CHAT_ID = 'op-chat';
       await ctl(TG, { mode: 'ok' }); await ctl(RS, { mode: 'ok' });
       await reset(TG); await reset(RS);
 
       // Demo: one failed alert, a bound chat. Active: two failed owner emails,
-      // no chat. Each message must carry its own number and only its own.
+      // no chat. Each owner message carries its own number and only its own; the
+      // operator gets ONE alarm naming both.
       install({
         businesses: [
-          { id: DEMO, slug: 'd', name: 'D', owner_email: 'demo@example.com', status: 'demo' },
-          { id: ACT, slug: 'a', name: 'A', owner_email: 'client@example.com', status: 'active' },
+          { id: DEMO, slug: 'alder-demo', name: 'D', owner_email: 'demo@example.com', status: 'demo' },
+          { id: ACT, slug: 'second-demo', name: 'A', owner_email: 'client@example.com', status: 'active' },
         ],
         chats: [{ business_id: DEMO, tg_chat_id: 'chat-demo' }],
         events: [
@@ -501,27 +507,26 @@ try {
       const r = await call();
       const tg = (await reqs(TG)).filter((x) => x.path.includes('/sendMessage'));
       const mail = (await reqs(RS)).filter((x) => x.path === '/emails');
-      const demoText = (tg[0] && tg[0].body && tg[0].body.text) || '';
+      const ownerTg = tg.find((x) => String(x.body.chat_id) === 'chat-demo');
+      const opTg = tg.find((x) => String(x.body.chat_id) === 'op-chat');
       const clientText = (mail[0] && mail[0].body && mail[0].body.text) || '';
       const split = r.code === 200 && r.body.sent === 1 && r.body.emailed === 1 && r.body.failed === 3
-        && tg.length === 1 && mail.length === 1
-        && /1 alert could not be delivered/.test(demoText) && !/2 alert emails/.test(demoText)
+        && tg.length === 2 && mail.length === 1
+        && /1 alert could not be delivered/.test(ownerTg.body.text) && !/2 alert emails/.test(ownerTg.body.text)
         && /2 alert emails to you did not go out/.test(clientText) && !/1 alert could not/.test(clientText)
-        && !/MAIL_REDIRECT_TO/.test(clientText) && !/Test mode/.test(clientText);
-      line(split, 'S14', 'selfcheck: each business is told only its own counts',
-        `sent=${r.body.sent} emailed=${r.body.emailed} failed=${r.body.failed}`);
+        && !/MAIL_REDIRECT_TO|alder-demo|second-demo/.test(clientText);
+      line(split, 'S14', 'each owner message carries only its own counts',
+        `sent=${r.body.sent} emailed=${r.body.emailed} tg=${tg.length} failed=${r.body.failed}`);
 
-      // The operator block is chosen by status, not by the caller's guess.
-      const demoBody = alertBodyFor({ status: 'demo' }, { tg_failed: 1 }, true);
-      const clientBody = alertBodyFor({ status: 'active' }, { tg_failed: 1 }, true);
-      line(/Test mode is on/.test(demoBody) && !/Test mode/.test(clientBody) && !/_/.test(clientBody), 'S16',
-        'selfcheck: the redirect warning is demo-only', 'demo=on client=off');
-    } catch (e) {
-      line(false, 'S14', 'selfcheck: per-business counts', e.message);
-    }
+      const alarmOk = !!opTg
+        && /alder-demo: 1 alert could not be delivered/.test(opTg.body.text)
+        && /second-demo: 2 alert emails to the owner did not go out/.test(opTg.body.text)
+        && /No phone connected: second-demo/.test(opTg.body.text);
+      line(alarmOk, 'S15', 'the operator gets one alarm naming every affected business',
+        `op=${!!opTg} slugs=${alarmOk}`);
 
-    // Two active businesses, one shared inbox, one failure each: one email.
-    try {
+      // Two active businesses, one shared inbox, one failure each: two messages,
+      // because each carries that business's own numbers (decision: never drop).
       await reset(TG); await reset(RS);
       install({
         businesses: [
@@ -532,13 +537,13 @@ try {
         events: [{ lead_id: 'l-1', kind: 'tg_failed' }, { lead_id: 'l-2', kind: 'tg_failed' }],
         leads: [{ id: 'l-1', business_id: B1 }, { id: 'l-2', business_id: B2 }],
       });
-      const r = await call();
-      const mail = (await reqs(RS)).filter((x) => x.path === '/emails');
-      line(r.code === 200 && r.body.emailed === 1 && r.body.deduped === 1 && mail.length === 1, 'S15',
-        'selfcheck: two businesses sharing one inbox get one message',
-        `emailed=${r.body.emailed} deduped=${r.body.deduped} mail=${mail.length}`);
+      const r2 = await call();
+      const mail2 = (await reqs(RS)).filter((x) => x.path === '/emails');
+      line(r2.code === 200 && r2.body.emailed === 2 && mail2.length === 2, 'S16',
+        'a shared inbox gets two messages, one per business',
+        `emailed=${r2.body.emailed} mail=${mail2.length}`);
     } catch (e) {
-      line(false, 'S15', 'selfcheck: duplicate recipients', e.message);
+      line(false, 'S14', 'selfcheck: per-business counts', e.message);
     } finally {
       globalThis.fetch = realFetch3;
       for (const [k, v] of Object.entries(savedEnv)) {
@@ -549,20 +554,26 @@ try {
     }
   }
 
-  /* S5: who gets told — a demo business on a redirect, only the affected ones otherwise */
+  /* S5: who gets an owner message — only the business with its own failures */
   {
     const businesses = [
-      { id: 'biz-a', status: 'demo' }, { id: 'biz-b', status: 'active' },
-      { id: 'biz-c', status: 'active' }, { id: 'biz-d', status: 'demo' },
+      { id: 'biz-a', slug: 'biz-a', status: 'demo' }, { id: 'biz-b', slug: 'biz-b', status: 'active' },
+      { id: 'biz-c', slug: 'biz-c', status: 'active' }, { id: 'biz-d', slug: 'biz-d', status: 'demo' },
     ];
     const counts = new Map([['biz-a', { tg_failed: 2 }], ['biz-b', { email_owner_failed: 1 }]]);
-    const redirect = alertTargets({ businesses, counts, redirectActive: true });
-    const partial = alertTargets({ businesses, counts, redirectActive: false });
-    const ok = redirect.length === 3 && redirect.includes('biz-d')
-      && partial.length === 2 && partial.includes('biz-a') && partial.includes('biz-b')
-      && !partial.includes('biz-c') && !partial.includes('biz-d');
-    line(ok, 'S5', 'selfcheck: redirect reaches demo only, failures reach their own business',
-      `redirect=${redirect.length} partial=${partial.length}`);
+    const targets = alertTargets({ businesses, counts });
+    const ok = targets.length === 2 && targets.includes('biz-a') && targets.includes('biz-b')
+      && !targets.includes('biz-c') && !targets.includes('biz-d');
+    // The alarm, by contrast, is one message that names both.
+    const alarm = operatorAlarm({
+      businesses, counts,
+      chatsByBusiness: new Map([['biz-a', ['c']], ['biz-b', []], ['biz-c', ['c']], ['biz-d', []]]),
+      redirectActive: false,
+    });
+    const alarmOk = !!alarm && alarm.body.includes('biz-a: 2 alerts') && alarm.body.includes('biz-b: 1 alert email')
+      && alarm.body.includes('No phone connected: biz-b, biz-d');
+    line(ok && alarmOk, 'S5', 'owner targets are per business; the alarm aggregates',
+      `targets=${targets.length} alarm=${alarmOk}`);
   }
 
   /* S4: authorised call — shape only; `sent` depends on live data and is not asserted */
@@ -572,7 +583,7 @@ try {
     const shapeOk = r.code === 200 && b.ok === true
       && typeof b.sent === 'number' && typeof b.failed === 'number'
       && typeof b.redirect_active === 'boolean'
-      && JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['deduped', 'emailed', 'failed', 'ok', 'redirect_active', 'sent']);
+      && JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['emailed', 'failed', 'ok', 'operator', 'operator_reachable', 'redirect_active', 'sent']);
     line(shapeOk, 'S4', 'selfcheck: authorised call returns counts only', `code=${r.code} sent=${b.sent} failed=${b.failed}`);
   }
 

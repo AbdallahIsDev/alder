@@ -11,6 +11,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { secretMatches } from '../lib/request.js';
+import { operatorChatId, operatorEmail, operatorReachable } from '../lib/operator.js';
 
 const HEADER = 'x-health-secret';
 const KINDS = [
@@ -78,6 +79,12 @@ export default async function handler(req, res) {
       mail_redirect_active: !!process.env.MAIL_REDIRECT_TO,
       webhook_secret_set: !!process.env.TELEGRAM_WEBHOOK_SECRET,
       salt_set: !!process.env.IP_HASH_SALT,
+      // The operator alarm has nowhere to go when both are unset, which is the
+      // one failure mode that would otherwise be silent (the log line is
+      // operator_alarm_undelivered; this is the durable flag).
+      operator_chat_set: !!operatorChatId(),
+      operator_email_set: !!operatorEmail(),
+      operator_reachable: operatorReachable(),
     });
   } catch (e) {
     console.error('health_query_failed', (e && e.code) || 'no_code');
