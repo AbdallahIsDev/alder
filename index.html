@@ -958,8 +958,11 @@
     .hws .label { justify-content: center }
     .hws h2 { font-size: clamp(32px, 3.6vw, 44px); font-weight: 450; letter-spacing: -.035em; line-height: 1.05; color: var(--ink); max-width: 14em }
     .steps { list-style: none; padding: 0; position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--g) }
-    .line { position: absolute; z-index: 0; left: calc((100% - 2*var(--g))/6); top: 27px; width: calc(66.6667% + .6667*var(--g)); height: 2px; background: var(--cream) }
-    .line i { display: block; width: 100%; height: 100%; background: var(--accent); transform: scaleX(var(--p, 1)); transform-origin: left }
+    /* The connector is a pseudo-element, not a child: a <ol> may only contain <li>,
+       and the span made the list invalid (Lighthouse 'list'). Same box, same paint
+       order — ::before is the track, ::after the accent fill that reads --p. */
+    .steps::before { content: ""; position: absolute; z-index: 0; left: calc((100% - 2*var(--g))/6); top: 27px; width: calc(66.6667% + .6667*var(--g)); height: 2px; background: var(--cream) }
+    .steps::after { content: ""; display: block; position: absolute; z-index: 0; left: calc((100% - 2*var(--g))/6); top: 27px; width: calc(66.6667% + .6667*var(--g)); height: 2px; background: var(--accent); transform: scaleX(var(--p, 1)); transform-origin: left }
     .step { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 28px }
     .steps { --sq: 56px }   /* size of the numbered square; the stacked layout reads it for the column and the line */
     .step .n { display: grid; place-items: center; width: var(--sq); height: var(--sq); background: var(--cream); color: var(--ink); font-size: 22px; font-weight: 500; border: 1px solid #0000001a; transition: background .45s ease, color .45s ease, border-color .45s ease }
@@ -969,8 +972,8 @@
     .step p { color: #4a4e56; max-width: 34ch }
     @media (max-width: 900px) {
       .steps { grid-template-columns: 1fr; gap: 36px }
-      .line { left: calc(var(--sq) / 2 - 1px); top: calc(var(--sq) / 2); bottom: calc(var(--last, var(--sq) / 2) - var(--sq) / 2); width: 2px; height: auto }   /* --last = height of step 3, set by script: the line stops at the centre of its square */
-      .line i { transform: scaleY(var(--p, 1)); transform-origin: top }
+      .steps::before, .steps::after { left: calc(var(--sq) / 2 - 1px); top: calc(var(--sq) / 2); bottom: calc(var(--last, var(--sq) / 2) - var(--sq) / 2); width: 2px; height: auto }   /* --last = height of step 3, set by script: the line stops at the centre of its square */
+      .steps::after { transform: scaleY(var(--p, 1)); transform-origin: top }
       .step { display: grid; grid-template-columns: var(--sq) 1fr; gap: 20px; align-items: start; text-align: left }
       .step div { width: auto; align-items: flex-start }
     }
@@ -2374,7 +2377,7 @@
           <p class="label" data-page-node-id="P9GiFw73v8imCJG4Kj7DTf">How we work</p>
           <h2 data-page-node-id="sVRaxEtalmsmjA1PzsCT3q">From first call to <span class="hl">final shingle</span></h2>
         </div>
-        <ol class="steps" data-page-node-id="hO6yw9lXVWAVdvOCpbMJhT"><span class="line" data-page-node-id="Fis054S0ryAMX9IL0ccAp2"><i data-page-node-id="boCdOCPE8w4RFlZnWkG6Xe"></i></span>
+        <ol class="steps" data-page-node-id="hO6yw9lXVWAVdvOCpbMJhT">
         <li class="step" data-page-node-id="Mq1nnCwreKeYfDxVaOgA27"><span class="n" data-page-node-id="dvkdB862GwIj8vYinwHIx3">1</span><div data-page-node-id="7ZL7nY8UFGVzKZ6SZUCwJF"><h3 data-page-node-id="cqPrR0YhkRtTfqnmYMlZhd">We inspect and quote</h3><p data-page-node-id="MkcTGXbVSl8VK8HdG4Sdld">We look at your roof in person, take photos, and send a written price within {{reply}}.</p></div></li>
         <li class="step" data-page-node-id="9bF8CJiW6fGlW32niSjnUu"><span class="n" data-page-node-id="gvpsuGnRp4G1A1XF5IZCtq">2</span><div data-page-node-id="OniHe4cfkrKFoAEJhRRTA0"><h3 data-page-node-id="EZTwS9TjhkiCuQnL5qC1EB">We plan the job</h3><p data-page-node-id="OgMsYj7bJAymVgbJgMVbyM">You choose the materials and the start date. We handle the permits and order everything before day one.</p></div></li>
         <li class="step" data-page-node-id="LSHtCheu6mGgaBjONFoZVe"><span class="n" data-page-node-id="pTc2GT4aGf1q0hCtB5iesy">3</span><div data-page-node-id="ZAKEBN7fUiQNzTs81ZbGMq"><h3 data-page-node-id="do45mgAPDPiQUZ6VDGEClG">We build it and walk it with you</h3><p data-page-node-id="NuXmQRxlPDe2JkNYLD6lxq">Our own crew does the work, with photos at every stage. You get a final walkthrough and a written warranty.</p></div></li>
