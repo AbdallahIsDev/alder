@@ -79,7 +79,11 @@ let contactSeq = 0;
 const nextPhone = () => '515555' + String(2000 + (parseInt(RUN, 36) % 6000) + contactSeq++).slice(-4);
 /* The email has to be unique per post too: duplicate detection matches phone OR
    email, and earlier runs left leads on alder-demo with the old fixed address. */
-const nextEmail = () => `notify${parseInt(RUN, 36) % 100000}-${contactSeq}@example.com`;
+// The duplicate lookup returns the OLDEST match for the business. A RUN-derived
+// address can collide with a lead an earlier run left behind, which would make
+// duplicate_of point at that row instead of this run's first post. A random
+// suffix makes a cross-run collision impossible.
+const nextEmail = () => `notify${parseInt(RUN, 36) % 100000}-${contactSeq}-${Math.random().toString(36).slice(2, 6)}@example.com`;
 async function post(over, extra) {
   const body = {
     service: 'replacement', home: 'house', timing: 'asap', age: '10 to 20 years',
@@ -522,7 +526,11 @@ try {
   const evsThird = ids[2] ? await events(ids[2]) : [];
   const createdSecond = evsSecond.find((e) => e.kind === 'created');
   const createdThird = evsThird.find((e) => e.kind === 'created');
-  const alerts = (await requests(TG)).filter((r) => r.path.includes('/sendMessage')).map((r) => r.body.text || '');
+  // One alert per post from the suite's own chat. Real phones bound to the same
+  // business receive their own copy, which would shift every index below.
+  const alerts = (await requests(TG))
+    .filter((r) => r.path.includes('/sendMessage') && String(r.body.chat_id) === String(FIXTURE_CHAT))
+    .map((r) => r.body.text || '');
   const flagged = alerts[1] && alerts[1].includes('Possible repeat of an earlier request');
   const notFlagged = alerts[0] && !alerts[0].includes('Possible repeat')
     && alerts[2] && !alerts[2].includes('Possible repeat');
