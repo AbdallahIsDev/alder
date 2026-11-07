@@ -206,7 +206,7 @@ try {
     const textB = (mail[0] && mail[0].body && mail[0].body.text) || '';
     const aOk = textA.includes('New requests: 3') && textA.includes('Possible repeat requests: 1')
       && textA.includes('Waiting for you over a day: 1')
-      && textA.includes('Needs attention') && textA.includes('1 alert not delivered')
+      && textA.includes('Needs attention') && textA.includes('1 lead alert to your phone could not be delivered')
       && textA.includes('Open /leads to see them.');
     // B had no failure, so it must have no Needs attention section at all.
     const bOk = textB.includes('New requests: 1') && textB.includes('Waiting for you over a day: 0')
@@ -386,10 +386,10 @@ try {
     const { digestBody } = await import('../lib/ops-copy.js');
     const one = digestBody({ newLeads: 0, repeats: 0, untouched: 0, failed: 2, failures: { tg_failed: 1, autoreply_failed: 1 } });
     const none = digestBody({ newLeads: 0, repeats: 0, untouched: 0, failed: 1, failures: { tg_failed: 1, review_request_failed: 0 } });
-    const ok = one.includes('1 alert not delivered')
+    const ok = one.includes('1 lead alert to your phone could not be delivered')
       && one.includes('1 confirmation email to a customer failed')
       && !one.includes('review request')
-      && none.includes('1 alert not delivered') && !none.includes('review request');
+      && none.includes('1 lead alert to your phone could not be delivered') && !none.includes('review request');
     line(ok, 'D3b', 'digest failures named by kind; a zero kind is not shown', `one=${one.length} none=${none.length}`);
   }
 

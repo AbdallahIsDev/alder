@@ -73,7 +73,10 @@ export function operatorAlarm({ businesses, counts, chatsByBusiness, recentLeadB
     if (chats === null || chats === undefined) return false;   // unknown, not "no phone"
     if (chats.length) return false;
     if (b.status === 'active') return true;
-    return !!(recentLeadBusinesses && recentLeadBusinesses.has(b.id));
+    // Unknown (null) counts as "might have had a lead": say so rather than
+    // assuming the business is parked.
+    if (recentLeadBusinesses === null) return true;
+    return recentLeadBusinesses.has(b.id);
   }).map((b) => b.slug);
 
   const body = operatorAlarmBody({ rows, redirectActive, noPhoneSlugs });
@@ -141,10 +144,15 @@ export default async function handler(req, res) {
     }
     // A demo business with no chat is only worth mentioning if it actually got a
     // lead in the last week.
-    const recent = await eventCountsByBusiness({
-      sinceIso: new Date(Date.now() - 7 * DAY).toISOString(), kinds: ['created'],
-    }).catch(() => new Map());
-    const recentLeadBusinesses = new Set([...recent.keys()]);
+    // null means "could not tell", which is not the same as "no recent lead":
+    // a demo row with no chat is then reported rather than silently excused.
+    let recentLeadBusinesses = null;
+    try {
+      const recent = await eventCountsByBusiness({
+        sinceIso: new Date(Date.now() - 7 * DAY).toISOString(), kinds: ['created'],
+      });
+      recentLeadBusinesses = new Set([...recent.keys()]);
+    } catch { console.error('operator_recent_unknown'); }
 
     const dateKey = new Date().toISOString().slice(0, 10);
     const byId = new Map(active.map((b) => [b.id, b]));

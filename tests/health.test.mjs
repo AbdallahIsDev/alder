@@ -628,6 +628,13 @@ try {
       chatsByBusiness: new Map([['a1', null]]), recentLeadBusinesses: new Set(), redirectActive: false,
     });
     line(unknown === null, 'S20', 'a chat lookup that failed is unknown, not "no phone"', `alarm=${!!unknown}`);
+
+    const noRecent = operatorAlarm({
+      businesses: [demo], counts: none,
+      chatsByBusiness: new Map([['d1', []]]), recentLeadBusinesses: null, redirectActive: false,
+    });
+    line(!!noRecent && noRecent.body.includes('No phone connected: second-demo'), 'S21',
+      'a failed recent-lead query reports the demo row instead of excusing it', `alarm=${!!noRecent}`);
   }
 
   /* S4: authorised call — shape only; `sent` depends on live data and is not asserted */
