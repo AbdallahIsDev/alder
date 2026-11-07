@@ -138,6 +138,13 @@ try {
       seen.push(url);
       const table = u.pathname.replace('/rest/v1/', '');
       const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      // PostgREST caps a response at 1,000 rows. supabase-js turns .range(a, b)
+      // into offset/limit query params, so the fake pages the same way — without
+      // this a missing range() in the client would look correct.
+      const rFrom = Number(u.searchParams.get('offset') || 0);
+      const rLimit = u.searchParams.get('limit');
+      const rTo = rLimit ? rFrom + Number(rLimit) - 1 : 1e9;
+      const page = (rows) => rows.slice(rFrom, rTo + 1);
       if (table === 'rpc/hit_rate_limit') {
         const body = JSON.parse(init.body || '{}');
         const key = body.p_key;
@@ -146,15 +153,21 @@ try {
         return json(fx.claim);
       }
       if (table === 'leads') {
-        if (u.searchParams.get('status') === 'eq.open') return json(fx.openOld);
-        if (u.searchParams.get('id')) return json([]);
-        return json(fx.leadsFresh);
+        if (u.searchParams.get('status') === 'eq.open') return json(page(fx.openOld));
+        if (u.searchParams.get('id')) return json(page([]));
+        return json(page(fx.leadsFresh));
       }
       if (table === 'lead_events') {
         const kind = u.searchParams.get('kind') || '';
-        if (kind === 'eq.created') return json(fx.createdEvents);
-        if (kind === 'eq.contacted') return json(fx.contacted);
-        return json(fx.failedEvents);
+        const inList = u.searchParams.get('lead_id') || '';
+        if (kind === 'eq.created') return json(page(fx.createdEvents));
+        if (kind === 'eq.contacted') {
+          // Honour the in.(...) list, so a missing chunk shows up as missing rows.
+          const wanted = inList.startsWith('in.(') ? inList.slice(4, -1).split(',') : null;
+          const rows = wanted ? fx.contacted.filter((c) => wanted.includes(c.lead_id)) : fx.contacted;
+          return json(page(rows));
+        }
+        return json(page(fx.failedEvents));
       }
       if (table === 'businesses') {
         const st = u.searchParams.get('status');
@@ -252,6 +265,37 @@ try {
       `floorDays=${Number.isFinite(days) ? days.toFixed(2) : 'none'} url=${openUrl.length} chars`);
   } catch (e) {
     line(false, 'D12', 'untouched query is bounded to the 14-day lookback', e.message);
+  } finally { if (installed) installed(); }
+
+  /* ---------- D13: 250 open leads and 1,200 events, exact and short ---------- */
+  try {
+    // UUID-shaped ids, like the real column: 250 short strings would not show
+    // the URL problem at all.
+    const bigLeads = Array.from({ length: 250 }, (_, i) => ({
+      id: `aaaaaaaa-0000-0000-0000-${String(i).padStart(12, '0')}`, business_id: A,
+    }));
+    const contactedEvents = [];
+    for (let i = 0; i < 150; i++) contactedEvents.push({ lead_id: bigLeads[i].id });
+    while (contactedEvents.length < 1200) contactedEvents.push({ lead_id: bigLeads[0].id });
+    install({
+      ...fixture,
+      businesses: [fixture.businesses[0]],
+      chats: [{ business_id: A, tg_chat_id: 'chat-a' }],
+      leadsFresh: [], createdEvents: [], openOld: bigLeads, contacted: contactedEvents, failedEvents: [],
+    });
+    const { r, tg } = await run();
+    const text = (tg[0] && tg[0].body && tg[0].body.text) || '';
+    const maxUrl = lastUrls.reduce((a, u) => Math.max(a, u.length), 0);
+    const contactedCalls = lastUrls.filter((u) => u.includes('lead_id=in.')).length;
+    // Four chunks (250 / 80) plus a second page for the chunk that holds the lead
+    // with 1,050 duplicate events — so >= 4 proves chunking and <= 6 proves the
+    // loop is not spinning.
+    const ok = r.code === 200 && text.includes('Untouched over 24 h 100')
+      && maxUrl < 4000 && contactedCalls >= 4 && contactedCalls <= 6;
+    line(ok, 'D13', '250 leads / 1200 events: exact, chunked, short URLs',
+      `untouched=${(text.match(/Untouched over 24 h (\d+)/) || [])[1]} maxUrl=${maxUrl} chunks=${contactedCalls}`);
+  } catch (e) {
+    line(false, 'D13', '250 leads / 1200 events: exact, chunked, short URLs', e.message);
   } finally { if (installed) installed(); }
 
   /* ---------- D5: Telegram down -> email ---------- */
