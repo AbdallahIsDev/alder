@@ -30,6 +30,7 @@ const API = 'http://localhost:3000/api/lead';
 const DEFAULT_SUITES = [
   { file: 'tests/network-guard.test.mjs', needsHttp: false },
   { file: 'tests/fixture-safety.test.mjs', needsHttp: false },
+  { file: 'tests/housekeeping.test.mjs', needsHttp: false },
   { file: 'tests/bot-text.test.mjs', needsHttp: false },
   { file: 'tests/db-wall.test.mjs', needsHttp: false },
   { file: 'tests/migrations.test.mjs', needsHttp: false },

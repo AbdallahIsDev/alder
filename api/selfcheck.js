@@ -20,7 +20,7 @@
 // accepted in the other's place. 503 when HEALTH_SECRET is unset.
 
 import { secretMatches } from '../lib/request.js';
-import { listBusinessChats, listActiveBusinesses } from '../lib/db.js';
+import { listBusinessChats, listActiveBusinesses, sweepExpired } from '../lib/db.js';
 import { sendMessage } from '../lib/tg.js';
 import { sendMail } from '../lib/mail.js';
 import { deliverToBusinesses } from '../lib/ops-delivery.js';
@@ -186,6 +186,12 @@ export default async function handler(req, res) {
     const alarm = operatorAlarm({ businesses: active, counts, chatsByBusiness, recentLeadBusinesses, redirectActive });
     let operator = 'none';
     if (alarm) operator = await deliverOperatorAlarm({ body: alarm.body, text: alarm.text, dateKey });
+
+    // Housekeeping last, and never able to fail the run: bounded, counts only.
+    // A sweep error is a number in the log, not a 500 on the daily check.
+    let swept = { codes: 0, limits: 0, failed: 0 };
+    try { swept = await sweepExpired(); } catch { swept.failed++; }
+    console.error('housekeeping_swept', swept.codes, swept.limits, swept.failed);
 
     return res.status(200).json({
       ok: true, sent, emailed, failed, redirect_active: redirectActive,
