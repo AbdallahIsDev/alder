@@ -105,6 +105,21 @@ line(isFixtureLead(marked) === true
     bad.length ? bad.join(' ') : `${files.length} files clean`);
 }
 
+/* F8 — no suite mints a bind code for a real business. Source scan: the code a
+   test leaves behind is what /invite's cap counts, and a killed run leaves it. */
+{
+  const files = fs.readdirSync(path.join(ROOT, 'tests'))
+    .filter((f) => f.endsWith('.test.mjs') && f !== 'fixture-safety.test.mjs');
+  const bad = [];
+  const mint = /(?:createBindCode|mintBindCode)\([^\n]*?\b(?:bizA|bizB)\.id/g;
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(ROOT, 'tests', f), 'utf8');
+    if (mint.test(src)) bad.push(f);
+  }
+  line(bad.length === 0, 'F8', 'no suite mints a code on a real business',
+    bad.length ? bad.join(' ') : `${files.length} files clean`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);

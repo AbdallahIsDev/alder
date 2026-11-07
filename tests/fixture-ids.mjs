@@ -29,6 +29,11 @@ export const FIXTURE_CHATS = Object.freeze({
   webhookOpA: fixtureId(25),      // webhook: operator fixture business, owner
   webhookOpB: fixtureId(26),      // webhook: operator fixture business, second
   webhookOperator: fixtureId(27), // webhook: the operator's own chat
+  webhookBindA: fixtureId(28),    // webhook: redeems the first bind code
+  webhookBindB: fixtureId(29),    // webhook: bound elsewhere, redeems nothing
+  webhookBindX: fixtureId(30),    // webhook: pastes a code (unbound)
+  webhookInvOwner: fixtureId(31), // webhook: owner of the invite throwaway
+  webhookInvStaff: fixtureId(32), // webhook: staff phone on the invite throwaway
   recipientsA: fixtureId(40),     // recipients: in-memory store only
   recipientsA2: fixtureId(41),
   recipientsB: fixtureId(42),

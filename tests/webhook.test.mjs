@@ -17,7 +17,7 @@ const TG = process.env.FAKE_TG_URL;
 if (!TG) { console.log('FAIL  pre  run through tests/run.mjs'); process.exit(1); }
 
 const { default: tgHandler } = await import('../api/tg.js');
-const { createBindCode } = await import('../lib/db.js');
+const { createBindCode, claimBindCode, restoreBindCode, expireLiveBindCodes } = await import('../lib/db.js');
 const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
@@ -67,8 +67,10 @@ const mkCode = (n) => { let s = ''; for (let i = 0; i < n; i++) s += ALPHA[Math.
 
 const RUN_STARTED = new Date().toISOString();
 const chatA = FIXTURE_CHATS.webhookA, chatB = FIXTURE_CHATS.webhookB, chatX = FIXTURE_CHATS.webhookX;
+const bindA = FIXTURE_CHATS.webhookBindA, bindB = FIXTURE_CHATS.webhookBindB, bindX = FIXTURE_CHATS.webhookBindX;
 // Every fixture id this suite may bind, for the start-of-suite and finally sweeps.
-const WEBHOOK_CHATS = [chatA, chatB, chatX, FIXTURE_CHATS.webhookA2, FIXTURE_CHATS.webhookA3,
+const WEBHOOK_CHATS = [chatA, chatB, chatX, bindA, bindB, bindX,
+  FIXTURE_CHATS.webhookA2, FIXTURE_CHATS.webhookA3,
   FIXTURE_CHATS.webhookOpA, FIXTURE_CHATS.webhookOpB, FIXTURE_CHATS.webhookOperator];
 
 const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
@@ -80,6 +82,12 @@ const { data: bizB } = await svc.from('businesses').select('id').eq('slug', 'sec
 // /code resolves through getActiveBusinessBySlug; it is deleted in the finally.
 const CODE_SLUG = `zz-test-${RUN}`;
 let codeBiz = null;
+// A second throwaway for every bind test. No suite may mint a code on a real
+// business: the code is what /invite's cap counts, and a killed run leaves it.
+const BIND_SLUG = `zz-test-bind-${RUN}`;
+let bindBiz = null;
+const INV_SLUG = `zz-test-inv-${RUN}`;
+let invBiz = null;
 // Clear throwaways a killed run left behind (never a live one: the runner is
 // sequential, and the predicate is the reserved slug prefix).
 await svc.from('businesses').delete().like('slug', 'zz-test-%').lt('created_at', RUN_STARTED);
@@ -88,6 +96,11 @@ await svc.from('businesses').delete().like('slug', 'zz-test-%').lt('created_at',
   google_review_url: 'https://g.page/r/zz-code', timezone: 'America/Chicago', status: 'demo',
 }).select('id, slug, name').single());
 if (!codeBiz) throw new Error('could not create the zz-test business');
+({ data: bindBiz } = await svc.from('businesses').insert({
+  slug: BIND_SLUG, name: 'ZZ Bind Fixture', owner_email: 'bind@zz-test.invalid',
+  google_review_url: 'https://g.page/r/zz-bind', timezone: 'America/Chicago', status: 'demo',
+}).select('id, slug, name').single());
+if (!bindBiz) throw new Error('could not create the zz-test bind business');
 
 const createdLeads = [];
 const createdCodes = [];
@@ -112,6 +125,16 @@ try {
   try { await svc.from('business_chats').delete().in('tg_chat_id', WEBHOOK_CHATS); } catch { /* best effort */ }
   await control({ mode: 'ok' }); await reset(); await resetResend();
 
+  // chatA and chatB are bound up front: the bind tests below use their own
+  // throwaway chats and business, so nothing here depends on a minted code.
+  {
+    const t0 = Date.now();
+    await svc.from('business_chats').insert([
+      { business_id: bizA.id, tg_chat_id: chatA, created_at: new Date(t0 - 5000).toISOString() },
+      { business_id: bizB.id, tg_chat_id: chatB, created_at: new Date(t0 - 4000).toISOString() },
+    ]);
+  }
+
   /* auth */
   const before = (await svc.from('business_chats').select('*').eq('tg_chat_id', chatX)).data.length;
   const noSecret = await call(msg(chatX, '/start'), undefined);
@@ -134,16 +157,16 @@ try {
 
   /* bind once */
   const code1 = mkCode(12); createdCodes.push(code1);
-  await createBindCode(code1, bizA.id, new Date(Date.now() + 3600000).toISOString());
+  await createBindCode(code1, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
   await reset();
-  await good(msg(chatA, '/start ' + code1));
-  const bound1 = (await svc.from('business_chats').select('business_id').eq('tg_chat_id', chatA).maybeSingle()).data;
+  await good(msg(bindA, '/start ' + code1));
+  const bound1 = (await svc.from('business_chats').select('business_id').eq('tg_chat_id', bindA).maybeSingle()).data;
   const confirmation = (await sent()).map((x) => x.body && x.body.text).join(' ');
-  line(group.code === 200 && !!bound1 && bound1.business_id === bizA.id && confirmation.includes('Alder Roofing'),
+  line(group.code === 200 && !!bound1 && bound1.business_id === bindBiz.id && confirmation.includes('ZZ Bind Fixture'),
     'C4', 'valid /start CODE binds once and names business', `bound=${!!bound1}`);
 
   await reset();
-  await good(msg(chatX, '/start ' + code1));
+  await good(msg(bindX, '/start ' + code1));
   const second = (await svc.from('bind_codes').select('used_at').eq('code', code1).single()).data;
   const secondText = (await sent()).map((x) => x.body && x.body.text).join(' ');
   // Before (bot copy): 'That link is not valid. Ask for a new one.'
@@ -152,18 +175,18 @@ try {
 
   /* expired code */
   const expired = mkCode(12); createdCodes.push(expired);
-  await createBindCode(expired, bizA.id, new Date(Date.now() - 60000).toISOString());
+  await createBindCode(expired, bindBiz.id, new Date(Date.now() - 60000).toISOString());
   await reset();
-  await good(msg(chatX, '/start ' + expired));
+  await good(msg(bindX, '/start ' + expired));
   const expText = (await sent()).map((x) => x.body && x.body.text).join(' ');
   const expUsed = (await svc.from('bind_codes').select('used_at').eq('code', expired).single()).data;
   line(!expUsed.used_at && expText.includes("isn't valid or has expired"), 'C6', 'expired code rejected, not consumed');
 
   /* second business + /leads isolation */
   const code2 = mkCode(12); createdCodes.push(code2);
-  await createBindCode(code2, bizB.id, new Date(Date.now() + 3600000).toISOString());
+  await createBindCode(code2, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
   await reset();
-  await good(msg(chatB, '/start ' + code2));
+  await good(msg(bindB, '/start ' + code2));
   // Seeds are order-independent (unique idempotency keys per lead).
   // Promise.all keeps the input order in its result, but the pushes into
   // createdLeads happen in completion order — so createdLeads[3] is a bizA lead
@@ -807,9 +830,9 @@ try {
 
     // Bound /start with a fresh valid code → ALREADY CONNECTED, code NOT consumed.
     const fresh = mkCode(12); createdCodes.push(fresh);
-    await createBindCode(fresh, bizB.id, new Date(Date.now() + 3600000).toISOString());
+    await createBindCode(fresh, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
     await reset();
-    await good(msg(chatB, '/start ' + fresh));
+    await good(msg(bindB, '/start ' + fresh));
     const freshUsed = (await svc.from('bind_codes').select('used_at').eq('code', fresh).single()).data;
     line((await textOf()) === BOT_ALREADY_CONNECTED_CODE && !freshUsed.used_at,
       'D3', 'bound /start with code → already connected, code not consumed');
@@ -878,11 +901,16 @@ try {
     const answersNow = async () => (await sent()).filter((x) => x.path.includes('/answerCallbackQuery'))
       .map((x) => (x.body && x.body.text) || '').join('|');
     try {
-      for (const chat of [chatA, chatA2, chatA3]) {
-        await svc.from('business_chats').delete().eq('tg_chat_id', chat);
-        const c = mkCode(12); createdCodes.push(c);
-        await createBindCode(c, bizA.id, new Date(Date.now() + 3600000).toISOString());
-        await good(msg(chat, '/start ' + c));
+      // Ownership order, without minting a code on a real business. Explicit,
+      // distinct created_at: one INSERT gives every row the same timestamp.
+      await svc.from('business_chats').delete().in('tg_chat_id', [chatA, chatA2, chatA3]);
+      {
+        const t0 = Date.now();
+        await svc.from('business_chats').insert([
+          { business_id: bizA.id, tg_chat_id: chatA, created_at: new Date(t0 - 3000).toISOString() },
+          { business_id: bizA.id, tg_chat_id: chatA2, created_at: new Date(t0 - 2000).toISOString() },
+          { business_id: bizA.id, tg_chat_id: chatA3, created_at: new Date(t0 - 1000).toISOString() },
+        ]);
       }
       const C = await import('../lib/content.js');
 
@@ -964,6 +992,83 @@ try {
         'OP16', 'two /code taps: two distinct codes, two messages each',
         `codes=${codes.length} unique=${new Set(codes).size} messages=${two.length}`);
 
+      // OP17-OP20 run against real rows on a throwaway business: the cancel
+      // flow and the claim restore are SQL, and the in-memory fake cannot
+      // prove the predicates.
+      const invOwner = FIXTURE_CHATS.webhookInvOwner, invStaff = FIXTURE_CHATS.webhookInvStaff;
+      await svc.from('business_chats').delete().in('tg_chat_id', [invOwner, invStaff]);
+      if (!invBiz) {
+        ({ data: invBiz } = await svc.from('businesses').insert({
+          slug: INV_SLUG, name: 'ZZ Invite Fixture', owner_email: 'inv@zz-test.invalid',
+          google_review_url: 'https://g.page/r/zz-inv', timezone: 'America/Chicago', status: 'demo',
+        }).select('id').single());
+        if (!invBiz) throw new Error('could not create the zz-test invite business');
+      }
+      {
+        const t0 = Date.now();
+        await svc.from('business_chats').insert([
+          { business_id: invBiz.id, tg_chat_id: invOwner, created_at: new Date(t0 - 2000).toISOString() },
+          { business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date(t0 - 1000).toISOString() },
+        ]);
+      }
+      const liveInvites = async () => (await svc.from('bind_codes')
+        .select('code, used_at, expires_at').eq('business_id', invBiz.id).is('used_at', null)
+        .gt('expires_at', new Date().toISOString())).data || [];
+      const soonIso = (h) => new Date(Date.now() + h * 3600000).toISOString();
+      const invCodes = ['INVAA' + mkCode(7), 'INVBB' + mkCode(7), 'INVCC' + mkCode(7)];
+      for (let i = 0; i < invCodes.length; i++) {
+        createdCodes.push(invCodes[i]);
+        await createBindCode(invCodes[i], invBiz.id, soonIso(5 + i * 6));
+      }
+
+      // OP17: cap lists three, the tap expires them and mints exactly one.
+      await reset();
+      await good(msg(invOwner, '/invite'));
+      const capSend = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
+      const capText = (capSend && capSend.body.text) || '';
+      const capBtn = (capSend && capSend.body.reply_markup && capSend.body.reply_markup.inline_keyboard[0][0]) || {};
+      const cappedLive = (await liveInvites()).length;
+      await reset();
+      await good(cb(invOwner, 'i:c'));
+      const afterTap = await liveInvites();
+      const oldExpired = (await svc.from('bind_codes').select('code, expires_at')
+        .in('code', invCodes)).data.every((r) => new Date(r.expires_at).getTime() <= Date.now() + 1000);
+      line(cappedLive === 3 && /3 unused invites/.test(capText) && capBtn.callback_data === 'i:c'
+        && afterTap.length === 1 && oldExpired,
+        'OP17', 'real DB: cap lists three, tap expires them, one new code',
+        `live=${cappedLive}->${afterTap.length} oldExpired=${oldExpired}`);
+
+      // OP18: a second tap inside the mutex mints nothing.
+      await reset();
+      await good(cb(invOwner, 'i:c'));
+      const afterSecond = await liveInvites();
+      line(afterSecond.length === 1, 'OP18', 'real DB: double tap mints no second code',
+        `live=${afterSecond.length}`);
+
+      // OP19: the expire predicate itself, on real rows. A used code keeps its
+      // expiry; only the live one is pushed past now. (The tap's use of this
+      // helper is OP17; this pins the WHERE clause against the real database.)
+      const usedCode = 'INVDD' + mkCode(7); createdCodes.push(usedCode);
+      await createBindCode(usedCode, invBiz.id, soonIso(8));
+      const usedBefore = (await svc.from('bind_codes').select('expires_at').eq('code', usedCode).single()).data;
+      await reset();
+      await good(msg(chatX, '/start ' + usedCode));
+      await expireLiveBindCodes(invBiz.id);
+      const usedAfter = (await svc.from('bind_codes').select('used_at, expires_at').eq('code', usedCode).single()).data;
+      line(!!usedAfter.used_at && usedAfter.expires_at === usedBefore.expires_at && (await liveInvites()).length === 0,
+        'OP19', 'real DB: expire leaves a used code and its expiry alone',
+        `used=${!!usedAfter.used_at} live=${(await liveInvites()).length}`);
+
+      // OP20: restore after a failed bind. Claim, restore, claim again.
+      const restoreCode = 'INVEE' + mkCode(7); createdCodes.push(restoreCode);
+      await createBindCode(restoreCode, invBiz.id, soonIso(9));
+      const claimed = await claimBindCode(restoreCode);
+      const restored = await restoreBindCode(restoreCode, invBiz.id);
+      const reclaimed = await claimBindCode(restoreCode);
+      line(claimed === invBiz.id && restored === 1 && reclaimed === invBiz.id,
+        'OP20', 'real DB: a claim can be restored and claimed again',
+        `claimed=${claimed === invBiz.id} restored=${restored}`);
+
       // OP4: /phones marks the owner (oldest) and lists the others.
       await reset();
       await good(msg(OP, '/phones alder-demo'));
@@ -1008,13 +1113,13 @@ try {
       // OP9: paste the code instead of /start; then a bad code from an unbound
       // chat gets one generic answer.
       const pasteCode = mkCode(12); createdCodes.push(pasteCode);
-      await createBindCode(pasteCode, bizB.id, new Date(Date.now() + 3600000).toISOString());
+      await createBindCode(pasteCode, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
       await reset();
-      await good(msg(chatX, '  ' + pasteCode.slice(0, 4).toLowerCase() + '-' + pasteCode.slice(4).toLowerCase() + ' '));
-      const bound = (await svc.from('business_chats').select('business_id').eq('tg_chat_id', chatX).maybeSingle()).data;
+      await good(msg(bindX, '  ' + pasteCode.slice(0, 4).toLowerCase() + '-' + pasteCode.slice(4).toLowerCase() + ' '));
+      const bound = (await svc.from('business_chats').select('business_id').eq('tg_chat_id', bindX).maybeSingle()).data;
       await reset();
       await good(msg(chatA3, mkCode(12)));
-      line(!!bound && bound.business_id === bizB.id && (await allText()) === C.BOT_CODE_BAD, 'OP9',
+      line(!!bound && bound.business_id === bindBiz.id && (await allText()) === C.BOT_CODE_BAD, 'OP9',
         'pasted code binds (case/space/hyphen); a bad one gets one generic answer',
         `bound=${!!bound}`);
 
@@ -1097,8 +1202,10 @@ try {
   await sweepTestLeads(svc, [bizA.id, bizB.id], new Date().toISOString()).catch(() => 0);
   await svc.from('business_chats').delete().in('tg_chat_id', WEBHOOK_CHATS);
   if (createdCodes.length) await svc.from('bind_codes').delete().in('code', createdCodes);
-  // The throwaway and every code minted on it go together (ON DELETE CASCADE).
+  // The throwaways and every code minted on them go together (ON DELETE CASCADE).
   if (codeBiz) await svc.from('businesses').delete().eq('id', codeBiz.id);
+  if (bindBiz) await svc.from('businesses').delete().eq('id', bindBiz.id);
+  if (invBiz) await svc.from('businesses').delete().eq('id', invBiz.id);
   await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
 }
 
