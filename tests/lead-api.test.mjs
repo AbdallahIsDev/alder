@@ -710,6 +710,67 @@ const typeSeqOf = (api) => (s) => { let v = ''; for (const ch of s) v = api.sani
     `clientBad=${clientBad.map(([r]) => r).join(',')} serverBad=${serverBad.join(',')}`);
 }
 
+/* ---------- P23: the modal's error wiring, on the real markup ---------- */
+{
+  // The wiring runs once at init: every .err gets an id and the field's control
+  // points at it with aria-describedby. The snippet is extracted from the page and
+  // executed against the real DOM, so a change to the selector or to the loop is
+  // caught here rather than only in a browser.
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const start = html.indexOf('  function fieldControl(f) {');
+  const end = html.indexOf("  form.addEventListener('input'", start);
+  const snippet = start > 0 && end > start ? html.slice(start, end) : '';
+  const dom = new JSDOM(html);
+  const { document } = dom.window;
+  const form = document.querySelector('.est-form');
+  let api = null;
+  let err = '';
+  try {
+    const { default: vm } = await import('node:vm');
+    const factory = vm.runInNewContext(
+      `(function (form, R) {\n${snippet}\nreturn { check: check, fieldControl: fieldControl };\n})`,
+      Object.create(null),
+    );
+    api = factory(form, { phone: () => 'Enter a valid phone number.', zip: () => '' });
+  } catch (e) { err = e.message; }
+
+  const alerts = form.querySelectorAll('.err[role="alert"]').length;
+  const generic = form.querySelectorAll('.est-alert[role="alert"]').length;
+  const groups = [].slice.call(form.querySelectorAll('[data-f]'));
+  const unlinked = [];
+  for (const f of groups) {
+    const p = f.querySelector('.err');
+    const c = api && api.fieldControl(f);
+    if (!p || !p.id || !c || c.getAttribute('aria-describedby') !== p.id || document.getElementById(p.id) !== p) {
+      unlinked.push(f.dataset.f);
+    }
+  }
+  const linkedAll = groups.length === 9 && unlinked.length === 0;
+  const roleOnlyOnPanel = alerts === 0 && generic === 1;
+
+  // The inline validator writes into the element the control points at, and marks
+  // that same control invalid.
+  let writesRight = false;
+  let detail = '';
+  if (api) {
+    api.check('phone');
+    const input = form.querySelector('#e-phone');
+    const id = input.getAttribute('aria-describedby');
+    const target = id ? document.getElementById(id) : null;
+    writesRight = !!target && target.textContent === 'Enter a valid phone number.'
+      && input.getAttribute('aria-invalid') === 'true';
+    detail = `target=${!!target} text=${target ? JSON.stringify(target.textContent) : 'none'} invalid=${input.getAttribute('aria-invalid')}`;
+  }
+
+  // The submit path must use the same helper, or a server-side error would land on
+  // a different element than the inline one.
+  const submitUsesHelper = /f\.querySelector\('\.err'\)\.textContent = msg;[\s\S]{0,200}var c = fieldControl\(f\);/.test(html);
+
+  line(roleOnlyOnPanel && linkedAll && writesRight && submitUsesHelper && !err, 'P23',
+    'modal errors: one live region, every field linked, message lands in it',
+    err || `alerts=${alerts} generic=${generic} groups=${groups.length} unlinked=${unlinked.join(',') || 'none'} write=${writesRight} submit=${submitUsesHelper} ${detail}`);
+}
+
 /* ---------- cleanup ---------- */
 {
   await svc.from('leads').delete().like('idempotency_key', `${RUN}-%`);
