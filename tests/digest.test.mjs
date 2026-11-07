@@ -55,7 +55,7 @@ try {
   delete process.env.DIGEST_ENABLED;
 
   const {
-    default: handler, digestText, digestHasSomething, digestEnabled,
+    default: handler, digestText, digestHasSomething, digestEnabled, digestUntouchedDays,
   } = await import('../api/digest.js');
 
   const call = async ({ method = 'GET', secret, bearer } = {}) => {
@@ -125,13 +125,17 @@ try {
   };
 
   let installed = null;
+  let lastUrls = [];
   const install = (fx) => {
     const SB = process.env.SUPABASE_URL;
     const claimed = new Set();
+    const seen = [];
+    lastUrls = seen;
     globalThis.fetch = async (input, init = {}) => {
       const url = typeof input === 'string' ? input : input.url;
       if (!url.startsWith(SB)) return realFetch(input, init);
       const u = new URL(url);
+      seen.push(url);
       const table = u.pathname.replace('/rest/v1/', '');
       const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
       if (table === 'rpc/hit_rate_limit') {
@@ -220,6 +224,34 @@ try {
       `code=${r.code} businesses=${r.body.businesses} tg=${tg.length} mail=${mail.length}`);
   } catch (e) {
     line(false, 'D10', 'paused business with a chat and an owner gets nothing', e.message);
+  } finally { if (installed) installed(); }
+
+  /* ---------- D11/D12: the untouched lookback ---------- */
+  {
+    const savedDays = process.env.DIGEST_UNTOUCHED_DAYS;
+    delete process.env.DIGEST_UNTOUCHED_DAYS;
+    const def = digestUntouchedDays();
+    process.env.DIGEST_UNTOUCHED_DAYS = '7';
+    const seven = digestUntouchedDays();
+    const bad = ['0', '-2', 'abc', ''].every((v) => { process.env.DIGEST_UNTOUCHED_DAYS = v; return digestUntouchedDays() === 14; });
+    if (savedDays === undefined) delete process.env.DIGEST_UNTOUCHED_DAYS; else process.env.DIGEST_UNTOUCHED_DAYS = savedDays;
+    line(def === 14 && seven === 7 && bad, 'D11', 'untouched lookback: default 14, invalid falls back',
+      `default=${def} explicit=${seven} invalid=${bad}`);
+  }
+
+  try {
+    install(fixture);
+    const before = Date.now();
+    await run();
+    const openUrl = lastUrls.find((u) => u.includes('status=eq.open')) || '';
+    const m = /created_at=gte\.([^&]+)/.exec(openUrl);
+    const floor = m ? Date.parse(decodeURIComponent(m[1])) : NaN;
+    const days = m ? (before - floor) / 86400000 : NaN;
+    const bounded = Number.isFinite(days) && days > 13.9 && days < 14.1;
+    line(bounded, 'D12', 'untouched query is bounded to the 14-day lookback',
+      `floorDays=${Number.isFinite(days) ? days.toFixed(2) : 'none'} url=${openUrl.length} chars`);
+  } catch (e) {
+    line(false, 'D12', 'untouched query is bounded to the 14-day lookback', e.message);
   } finally { if (installed) installed(); }
 
   /* ---------- D5: Telegram down -> email ---------- */

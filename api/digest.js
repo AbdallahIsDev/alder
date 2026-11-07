@@ -25,6 +25,15 @@ import { sendMail, escHtml } from '../lib/mail.js';
 
 const HEADER = 'x-health-secret';
 const DAY = 24 * 3600 * 1000;
+const UNTOUCHED_DEFAULT_DAYS = 14;
+
+/** How far back "untouched" looks. A lead older than this is left alone: it is
+ *  either dead or deliberately parked, and a daily nag about it is noise.
+ *  Same fallback shape as AUTOREPLY_DAILY_CAP: anything invalid means the default. */
+export function digestUntouchedDays() {
+  const n = Number(process.env.DIGEST_UNTOUCHED_DAYS || UNTOUCHED_DEFAULT_DAYS);
+  return Number.isInteger(n) && n > 0 ? n : UNTOUCHED_DEFAULT_DAYS;
+}
 
 /** Off unless explicitly switched on. A cron that fires into a disabled
  *  deployment must be a no-op, not a stream of empty digests. */
@@ -88,7 +97,8 @@ export default async function handler(req, res) {
     const now = Date.now();
     const since = new Date(now - DAY).toISOString();
     const cutoff = new Date(now - DAY).toISOString();
-    const counts = await digestCounts({ sinceIso: since, cutoffIso: cutoff });
+    const floor = new Date(now - digestUntouchedDays() * DAY).toISOString();
+    const counts = await digestCounts({ sinceIso: since, cutoffIso: cutoff, floorIso: floor });
     const targets = await digestTargets();
     const dateKey = new Date(now).toISOString().slice(0, 10);
 
