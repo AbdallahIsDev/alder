@@ -79,14 +79,16 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 ## How to create a bind code
 
 - `npm run bind -- <slug>` — reads the same files as everything else (`process.env`, then `.env.test` when `TEST_ENV=1`, then `.env.local`, then `.env`). Mints a single-use code, 24 h expiry, prints the business name, code, expiry and deep link. Delete the row after a test mint.
+- The minting lives in `lib/bind-codes.js` (`mintBindCode`), shared with the bot's `/invite`: one alphabet (31 unambiguous characters), 12 characters, 24 h. Two minters would drift.
 
 ## How to register commands
 
 - `npm run tg:commands` (set), `npm run tg:commands:info` (list names). Never run `scripts/tg-commands.mjs` directly in tests; test mode blocks real calls.
+- Registered commands: `/leads`, `/invite`, `/recipients`, `/help` (the `COMMANDS` array in `scripts/tg-commands.mjs` is the source).
 
 ## Env var names in use
 
-`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX`, `SITE_URL`, `DATABASE_URL`, `RESEND_API_BASE`, `TELEGRAM_API_BASE`, `VERCEL_ENV`, `HEALTH_SECRET`, `CRON_SECRET`, `AUTOREPLY_DAILY_CAP` (optional, default 40), `DIGEST_ENABLED` (optional, unset = digest off), `DIGEST_UNTOUCHED_DAYS` (optional, default 14) (test-only: `TEST_ENV`, `ALLOW_PROD_TESTS`).
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX`, `SITE_URL`, `DATABASE_URL`, `RESEND_API_BASE`, `TELEGRAM_API_BASE`, `VERCEL_ENV`, `HEALTH_SECRET`, `CRON_SECRET`, `AUTOREPLY_DAILY_CAP` (optional, default 40), `DIGEST_ENABLED` (optional, unset = digest off), `DIGEST_UNTOUCHED_DAYS` (optional, default 14), `RECIPIENTS_MAX` (optional, default 5), `INVITES_MAX` (optional, default 3) (test-only: `TEST_ENV`, `ALLOW_PROD_TESTS`).
 
 - `VERCEL_ENV`: read in `lib/outbound.js` only (`api/review.js` imports `isDev()` from it). Vercel sets it (`production`/`preview`/`development`). Two predicates with opposite polarity, on purpose: `isDev()` is `=== 'development'` and gates everything that WEAKENS a guard (shorter timeout, loopback host) — fail-closed; `testModeActive()` is `!isDeployed() && marker` and decides whether to BLOCK a real send — fail-safe. An unset `VERCEL_ENV` therefore gets production timeouts, real hosts, and still blocks when the marker is present.
 
@@ -116,6 +118,15 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - `vercel.json` also schedules `/api/digest` daily at `0 13 * * *` (selfcheck is `0 9 * * *`; H6 pins both schedules exactly, both daily, both resolving, different hours).
 - **Future upgrade path (not implemented):** on Vercel Pro the cron can run hourly. The digest would then send only when a business's *local* hour equals its chosen digest hour, using `businesses.timezone` (already stored and already used for the review page). That needs one `digest_hour` column on `businesses` (schema change, proposal only) and a `digest:<id>` claim that is still one per UTC day, so the hourly job cannot double-send.
 - Neither ops endpoint is linked from the site and all three set `Cache-Control: no-store`.
+
+## Multiple recipients (2026-11-07 bundle)
+
+- **Commands.** `/invite` mints one single-use code for the caller's own business — tenancy comes from `business_chats`, never from message text or callback data. `/recipients` lists every phone with one Remove button each.
+- **Caps.** 5 bound chats per business (`RECIPIENTS_MAX`) and 3 unused live invites per business (`INVITES_MAX`). `/invite` is also limited to 5 per chat per hour, failing closed (no reply) like the plain-text hint. Over a cap the bot answers with a short plain message.
+- **Removal.** Ask once (`x:`), confirm (`X:`), cancel (`v:`). The delete is scoped by business AND row id, so a forged callback from another business finds nothing; the last remaining phone cannot be removed; a second confirm says "already removed" instead of throwing.
+- **Labels.** `business_chats.label` is shown when set; otherwise "Recipient N" by bind order (oldest first). Nothing in the list is PII.
+- **Binding.** `bindChat` still upserts on `tg_chat_id`: a chat already bound elsewhere gets the existing "you're all set" reply and the code stays unused. One chat belongs to one business, always.
+- **Callback grammar.** `x:`/`X:`/`v:` join `c:`/`d:`/`y:`/`n:`/`r:`; all are `<kind>:<uuid>` and the regex rejects anything else before a query runs.
 
 ## Alerting behaviour (2026-11-06 bundle)
 
