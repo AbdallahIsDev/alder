@@ -767,8 +767,22 @@ export default async function handler(req, res) {
 
     if (u.message && typeof u.message.text === 'string') {
       const text = u.message.text.trim();
-      const first = text.split(/\s+/)[0].toLowerCase();
-      const arg = text.slice(first.length).trim();
+      const token = text.split(/\s+/)[0];
+      let first = token.toLowerCase();
+      // /command@botname is how a command arrives from a client that appends the
+      // bot. Only this bot's own username is stripped; another bot's suffix is
+      // not a command at all, and falls through to the plain-text path.
+      const at = first.indexOf('@');
+      if (at > 0) {
+        const suffix = first.slice(at + 1);
+        const own = (await botUsername()) || String(process.env.TELEGRAM_BOT_USERNAME || '').toLowerCase();
+        if (!own || suffix !== String(own).toLowerCase()) {
+          await handlePlainText(chatId, binding, text);
+          return res.status(200).json({ ok: true });
+        }
+        first = first.slice(0, at);
+      }
+      const arg = text.slice(token.length).trim();
       if (first === '/start') {
         await handleStart(chatId, arg);
       } else if (first === '/leads') {

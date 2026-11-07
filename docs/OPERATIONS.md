@@ -174,6 +174,20 @@ Check the token: `node scripts/tg-webhook.mjs info` prints `ok`, `status` and th
 webhook **host** only. If Telegram rejects the token, create a new one in BotFather
 (`/revoke`), then follow §6 for `TELEGRAM_BOT_TOKEN` and re-register the webhook.
 
+**Webhook registration: `set` vs `info`.**
+`node scripts/tg-webhook.mjs set https://<host>/api/tg` registers the URL, the
+`TELEGRAM_WEBHOOK_SECRET` header, and `allowed_updates` = `message`,
+`callback_query`, `my_chat_member`. It also sends `drop_pending_updates: true`:
+Telegram discards everything it queued while the old registration was in place, so
+a tap or a message sent during the switch is lost by design. Do not run it while
+someone is mid-flow, and do not expect `/start` sent a minute earlier to arrive
+afterwards. `delete` drops pending updates too.
+`node scripts/tg-webhook.mjs info` prints the registered host, `status`,
+`pending_update_count`, the last error Telegram saw, and the allowed updates it
+actually has. If `my_chat_member` is missing from that list, the blocked-bot
+notice never arrives; re-run `set`. Neither command is called by the tests: the
+suite uses a loopback fake.
+
 **Resend quota hit.**
 Symptom: `email_owner_failed` / `autoreply_failed`, and Resend returns 429.
 The free plan allows 100 emails a day. Each lead costs up to two: one owner alert
@@ -250,6 +264,11 @@ set, so it cannot be pointed at a fake by accident.
 3. **Run `npm run tg:commands`** after the first deploy that adds a command. The menu
    is `/leads`, `/invite`, `/recipients`, `/help`; the script also sets the bot
    description and short description. `npm run tg:commands:info` lists what is live.
+3b. **Re-register the webhook** if this deploy adds an update type the bot has never
+   received: `node scripts/tg-webhook.mjs set https://<host>/api/tg`, then
+   `node scripts/tg-webhook.mjs info`. The `set` call drops updates Telegram queued
+   while the old registration was live, and `info` must show `my_chat_member` in
+   `allowed_updates` or the blocked-bot notice is silently never sent.
 4. **Enable the digest** with `DIGEST_ENABLED=1` (it is off by default), redeploy, then
    `curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/digest` → the body
    has `"enabled": true`. The first message goes out at the next 13:00 UTC run; until

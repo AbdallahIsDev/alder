@@ -820,7 +820,7 @@ try {
       `exact=${exactOk} banned=${bannedOk} descLen=${C.BOT_DESCRIPTION.length}/${C.BOT_SHORT_DESCRIPTION.length}`);
   }
   {
-    const { BOT_NOT_CONNECTED, BOT_PLAIN_TEXT, BOT_ALREADY_CONNECTED_CODE } = await import('../lib/content.js');
+    const { BOT_NOT_CONNECTED, BOT_PLAIN_TEXT, BOT_ALREADY_CONNECTED_CODE, BOT_HELP } = await import('../lib/content.js');
     const textOf = async () => (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text).join('\n');
 
     // Unbound /start with no code → NOT CONNECTED.
@@ -836,6 +836,26 @@ try {
     const freshUsed = (await svc.from('bind_codes').select('used_at').eq('code', fresh).single()).data;
     line((await textOf()) === BOT_ALREADY_CONNECTED_CODE && !freshUsed.used_at,
       'D3', 'bound /start with code → already connected, code not consumed');
+
+    // C37: /command@botname. Only this bot's username is stripped; another
+    // bot's suffix is not a command and gets the plain-text answer.
+    {
+      const savedUser = process.env.TELEGRAM_BOT_USERNAME;
+      process.env.TELEGRAM_BOT_USERNAME = 'alder_test_bot';
+      await reset();
+      await good(msg(chatA, '/help@alder_test_bot'));
+      const own = await textOf();
+      await reset();
+      await good(msg(chatA, '/help@other_bot'));
+      const foreign = await textOf();
+      await reset();
+      await good(msg(chatX, '/help@alder_test_bot'));
+      const unbound = await textOf();
+      process.env.TELEGRAM_BOT_USERNAME = savedUser;
+      line(own === BOT_HELP && foreign === BOT_PLAIN_TEXT && unbound === BOT_NOT_CONNECTED,
+        'C37', '@botname: own suffix runs, another bot is plain text',
+        `own=${own === BOT_HELP} foreign=${foreign === BOT_PLAIN_TEXT}`);
+    }
 
     // Plain text: bound → hint (max 3/hour), then silence; unbound → NOT CONNECTED.
     const hintCounts = [];
