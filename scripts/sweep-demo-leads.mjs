@@ -15,6 +15,7 @@
 //      customer may hold that link
 //   4. the idempotency key has a test shape:
 //        canary-%            the runner's canary row, always safe
+//        manual-test-%       scripts/send-test-lead.mjs, always safe
 //        ^[0-9a-z]{8}-…      suite runs; needs --include-suite
 //        form-%              server-minted no-JS key; needs --include-nojs,
 //                            because a real no-JS visitor gets the same shape
@@ -48,7 +49,9 @@ if (!found.rows.length) {
 }
 const biz = found.rows[0].id;
 
-const shapes = ["idempotency_key like 'canary-%'"];
+// 'manual-test-' is the prefix scripts/send-test-lead.mjs mints. A page-minted
+// key is a UUID, so this shape can only come from that script: always included.
+const shapes = ["idempotency_key like 'canary-%'", "idempotency_key like 'manual-test-%'"];
 // Suite runs mint '<8 base36>-<rest>'; 'measure-' is a one-off manual probe that
 // has the same character. Both are opt-in because neither is a page-minted key.
 if (includeSuite) shapes.push("(idempotency_key ~ '^[0-9a-z]{8}-' and idempotency_key !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-') or idempotency_key like 'measure-%'");
@@ -63,7 +66,7 @@ out(`${NAME}`);
 out(`${pad('target', 24)}${isProd ? 'PRODUCTION' : 'non-production'} database`);
 out(`${pad('slug', 24)}${slug}`);
 out(`${pad('before', 24)}${before}`);
-out(`${pad('shapes', 24)}canary${includeSuite ? ' + suite' : ''}${includeNojs ? ' + no-js' : ''}`);
+out(`${pad('shapes', 24)}canary + manual-test${includeSuite ? ' + suite' : ''}${includeNojs ? ' + no-js' : ''}`);
 out('');
 
 const candidates = await client.query(
@@ -74,8 +77,9 @@ const ids = candidates.rows.map((r) => r.id);
 const byShape = {};
 for (const r of candidates.rows) {
   const s = /^canary-/.test(r.idempotency_key) ? 'canary'
-    : /^form-/.test(r.idempotency_key) ? 'no-js'
-      : 'suite';
+    : /^manual-test-/.test(r.idempotency_key) ? 'manual-test'
+      : /^form-/.test(r.idempotency_key) ? 'no-js'
+        : 'suite';
   byShape[s] = (byShape[s] || 0) + 1;
 }
 

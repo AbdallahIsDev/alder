@@ -107,6 +107,15 @@ try {
       `exit=${r.status} gone=${gone} before=${before.length} after=${after.length}`);
     if (other) await svc.from('businesses').delete().eq('id', other);
   }
+  /* X5: the debris predicate still recognises both always-safe shapes. A
+     page-minted key is a UUID, so neither prefix can be a real submission. */
+  {
+    const src = fs.readFileSync(path.resolve('scripts', 'sweep-demo-leads.mjs'), 'utf8');
+    const ok = /idempotency_key like 'canary-%'/.test(src)
+      && /idempotency_key like 'manual-test-%'/.test(src);
+    line(ok, 'X5', 'sweep counts canary- and manual-test- rows as debris', `ok=${ok}`);
+  }
+
 } catch (e) {
   line(false, 'X0', 'delete-scripts suite threw', e.message);
 } finally {
