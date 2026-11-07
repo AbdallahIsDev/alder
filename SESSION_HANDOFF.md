@@ -326,3 +326,24 @@ git checkout main
 5. `/start@botname` suffix, `/leads` keyset paging, hostile-reviewer pass: not done.
 6. `listBusinessChatsDetailed` tiebreak has a source-text test (R14), not a
    two-rows-same-timestamp DB test.
+
+## 10. Change log — 2026-11-07 (evening): B14/B15, sweep safety, three full runs
+
+- **B14/B15 were test bugs, not a duplicate-detection defect.** B14 indexed the
+  raw send list (two real phones => two sends per post); B15 could match a lead
+  an earlier run left behind. Both fixed without touching product code.
+- **Sweeps are narrow:** `isTestKey()` accepts only `<8 alnum>-` and `canary-`,
+  and excludes UUIDs (a UUID's first segment is 8 hex chars). `manual-test-`,
+  `form-` and `measure-` are never swept or counted.
+- **Three full runs green:** 385.2 s, 384.4 s, and 385.6 s with the order
+  reversed (outbound kept last by design). `business_chats unchanged
+  (2: 6109,6852)`, `test-shaped leads unchanged` after each.
+- **Pre-launch:** no suite may run against production once a real client is
+  onboarded; `.env.test` is a hard requirement (OPERATIONS §9).
+
+### Remaining work
+
+1. `/code` as two messages (operator line + forwardable block) — not done.
+2. Pasted-code ceiling 200 -> 600 with `bind_ceiling_hit`; claim-then-`bindChat`
+   failure path — not done.
+3. `/start@botname` suffix; `/leads` keyset paging; hostile-reviewer pass — not done.

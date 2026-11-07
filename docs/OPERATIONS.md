@@ -299,3 +299,12 @@ back" silently unbinds a client. That is exactly how the second phone was lost o
 
 The runner now fails a run that adds or removes a `business_chats` row, so a
 leak is loud instead of silent.
+
+### Test runs against production are a pre-launch blocker
+
+While the suites run against production, each suite binds fixture chats to
+`alder-demo` for a few minutes. A real lead arriving in that window is alerted to
+those fixture chats as well as the real phones, and a bug in a suite can touch
+real rows. **No suite may run against production once a real client is onboarded.**
+A separate test project (`docs/TEST_PROJECT.md`, `.env.test`) is a hard
+pre-launch requirement, not a nice-to-have.
