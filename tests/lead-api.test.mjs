@@ -92,8 +92,10 @@ const RUN_STARTED = new Date().toISOString();
    chat (770010) for the duration. Never the real chat id: a cleanup that deletes
    by that id removes a real binding. */
 const ALERT_CHAT = 770010;   // fixture id, never the real operator chat
+let SEED_BIZ = null;
 {
   const { data: seedBiz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
+  SEED_BIZ = seedBiz ? seedBiz.id : null;
   if (seedBiz && ALERT_CHAT) {
     await svc.from('business_chats').upsert(
       { business_id: seedBiz.id, tg_chat_id: ALERT_CHAT }, { onConflict: 'tg_chat_id' },
@@ -791,16 +793,23 @@ const typeSeqOf = (api) => (s) => { let v = ''; for (const ch of s) v = api.sani
     err || `alerts=${alerts} generic=${generic} groups=${groups.length} unlinked=${unlinked.join(',') || 'none'} write=${writesRight} submit=${submitUsesHelper} ${detail}`);
 }
 
-/* ---------- cleanup ---------- */
+/* ---------- cleanup ----------
+   The fixture chat is removed in a finally: a throw in any delete above must not
+   leave a binding behind (the runner would fail the next run for it). */
 {
-  await svc.from('leads').delete().like('idempotency_key', `${RUN}-%`);
-  await sweepTestLeads(svc, [ALERT_CHAT ? (await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single()).data.id : ''], new Date().toISOString()).catch(() => 0);
-  await svc.from('leads').delete().like('notes', `${NOTES}%`);          // rows the page created with its own uuid key
-  const { data: leftovers } = await svc.from('leads').select('id').or(`idempotency_key.like.${RUN}-%,notes.like.${NOTES}%`);
-  await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
-  await svc.from('business_chats').delete().eq('tg_chat_id', ALERT_CHAT);
-  console.log('');
-  console.log(`cleanup: leads left = ${(leftovers || []).length}, rate_limits cleared`);
+  let leftovers = 0;
+  try {
+    await svc.from('leads').delete().like('idempotency_key', `${RUN}-%`);
+    if (SEED_BIZ) await sweepTestLeads(svc, [SEED_BIZ], new Date().toISOString()).catch(() => 0);
+    await svc.from('leads').delete().like('notes', `${NOTES}%`);   // page-created uuid rows
+    const { data } = await svc.from('leads').select('id').or(`idempotency_key.like.${RUN}-%,notes.like.${NOTES}%`);
+    leftovers = (data || []).length;
+    await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
+  } finally {
+    try { await svc.from('business_chats').delete().eq('tg_chat_id', ALERT_CHAT); } catch { /* the guard will report it */ }
+    console.log('');
+    console.log(`cleanup: leads left = ${leftovers}, rate_limits cleared, fixture chat removed`);
+  }
 }
 
 console.log('');

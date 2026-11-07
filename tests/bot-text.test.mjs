@@ -18,6 +18,7 @@
 import { loadEnv } from './env.mjs';
 import { sampleTelegramTexts } from '../lib/sample-texts.js';
 import * as C from '../lib/content.js';
+import { isTestKey } from './helpers.mjs';
 
 loadEnv();
 
@@ -89,6 +90,16 @@ const samples = sampleTelegramTexts();
   const missing = exported.filter((k) => !covered.has(k));
   line(missing.length === 0, 'T4', 'every exported user-facing constant is sampled',
     `exported=${exported.length} missing=${missing.join(',') || 'none'}`);
+}
+
+/* T5: the sweep predicate is narrow. A UUID's first segment is 8 hex chars, so
+   the UUID exclusion is what stops a sweep deleting a real page-minted lead. */
+{
+  const ok = isTestKey('a1b2c3d4-x') && isTestKey('canary-abc')
+    && !isTestKey('manual-test-1700000000000-ab12')
+    && !isTestKey('form-abc') && !isTestKey('measure-abc')
+    && !isTestKey('550e8400-e29b-41d4-a716-446655440000');
+  line(ok, 'T5', 'sweep keys: suite and canary only, never manual-test or a UUID', `ok=${ok}`);
 }
 
 console.log('');

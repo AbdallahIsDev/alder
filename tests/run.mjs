@@ -16,7 +16,7 @@ import { startFakes } from './fakes.mjs';
 import { isLoopback } from '../lib/outbound.js';
 import { loadEnv, isTestEnv, checkNotProduction } from '../lib/env.js';
 import { createClient } from '@supabase/supabase-js';
-import { ALDER_DEMO, UUID_KEY } from './helpers.mjs';
+import { ALDER_DEMO, isTestKey } from './helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MARKER = path.join(ROOT, '.test-mode');
@@ -104,7 +104,9 @@ function killTree(child) {
 async function debrisSnapshot() {
   const { data, error } = await svc.from('leads').select('id, idempotency_key');
   if (error) return { ok: false, code: error.code, n: 0, events: 0, feedback: 0 };
-  const ids = (data || []).filter((r) => r.idempotency_key && !UUID_KEY.test(r.idempotency_key)).map((r) => r.id);
+  // Suite-shaped keys only: a manual-test- lead the owner submits mid-run is
+  // not debris and must not fail the run.
+  const ids = (data || []).filter((r) => isTestKey(r.idempotency_key)).map((r) => r.id);
   if (!ids.length) return { ok: true, n: 0, events: 0, feedback: 0 };
   const [ev, fb] = await Promise.all([
     svc.from('lead_events').select('id', { count: 'exact', head: true }).in('lead_id', ids),
@@ -296,7 +298,10 @@ try {
     });
     const tgReqs = await fakes.tg.requests();
     out(`runner  canary: POST ${r.status}, fake telegram requests = ${tgReqs.length}`);
-    if (r.status !== 200 || tgReqs.length !== 1) {
+    // One request per bound chat. A real business may have several phones
+    // connected, so the point is "the fake received the traffic", not "exactly
+    // one": zero means the loopback override never reached the function.
+    if (r.status !== 200 || tgReqs.length < 1) {
       throw new Error(`canary failed: the fake Telegram server received ${tgReqs.length} requests. `
         + 'The loopback override did not reach the function. Aborting before any real send.');
     }
@@ -380,16 +385,24 @@ try {
 
   {
     const debrisAfter = await debrisSnapshot();
-    const same = debrisBefore.ok && debrisAfter.ok
+    // A leak is an INCREASE. A decrease is a suite's start sweep clearing what a
+    // killed run left behind, which is the behaviour we asked for.
+    const grew = debrisAfter.n > debrisBefore.n
+      || debrisAfter.events > debrisBefore.events
+      || debrisAfter.feedback > debrisBefore.feedback;
+    const shrank = debrisAfter.n < debrisBefore.n;
+    const same = debrisBefore.ok && debrisAfter.ok && !grew && !shrank
       && debrisBefore.n === debrisAfter.n
       && debrisBefore.events === debrisAfter.events
       && debrisBefore.feedback === debrisAfter.feedback;
-    if (!same) {
+    if (!debrisBefore.ok || !debrisAfter.ok || grew) {
       out('FAIL  runner  test-shaped leads changed during the run');
       out(`      before leads=${debrisBefore.n} events=${debrisBefore.events} feedback=${debrisBefore.feedback}`);
       out(`      after  leads=${debrisAfter.n} events=${debrisAfter.events} feedback=${debrisAfter.feedback}`);
       out('      a suite leaked a row (or could not be counted); clean it and fix the suite');
       process.exitCode = 1;
+    } else if (shrank) {
+      out(`runner  test-shaped leads cleaned (${debrisBefore.n} -> ${debrisAfter.n} leads)`);
     } else {
       out(`runner  test-shaped leads unchanged (${debrisBefore.n} leads, ${debrisBefore.events} events, ${debrisBefore.feedback} feedback)`);
     }
