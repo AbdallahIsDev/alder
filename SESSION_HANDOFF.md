@@ -162,10 +162,11 @@ Per-business self-check counts, audience rule, shared branded email layout, plai
 ### Open
 | Severity | Issue |
 |---|---|
-| **High (ops)** | `bind_codes` still holds ~215 live unused rows from suite runs before the throwaway fix. `INVITES_MAX` counts them, so `/invite` stays blocked until they expire or are purged. A one-off purge script is proposed (ADD-ON 2 A5), not run. |
-| Medium | Claim-then-`bindChat` can burn a code and tell the operator the wrong business (unique `tg_chat_id` makes the upsert a silent no-op). Not fixed. |
-| Medium | Pasted-code global ceiling is still 200/h and there is no `bind_ceiling_hit` log. |
+| **High (ops) — RESOLVED** | The owner deleted every unused code in production (217). `/invite` is unblocked. One live unused code exists again at the time of writing; it is the owner's, not a suite's. The runner now fails a run that grows that number. |
+| **RESOLVED** | Claim-then-bind now reads the binding back; on a mismatch or a throw it restores the claim and says so. Global bind ceiling raised to 600/hour with `bind_ceiling_hit`. |
+| **RESOLVED** | Ceiling 600/h, `bind_ceiling_hit` logged. |
 | Medium | `leads.business_id` has no `ON DELETE` action; offboarding must delete leads first. |
+| **RESOLVED** | `/invite` at the cap offers one button that expires the old invites and mints a fresh one (owner only, 60 s mutex, budget checked before expiring). `/recipients` states the pending count. |
 | Low | `/businesses` shows 0 phones for paused/churned clients (it re-fetches through `getBusinessActiveBySlug`). |
 | Low | `public.rls_auto_enable()` is SECURITY DEFINER with EXECUTE to `anon`/`authenticated` (event-trigger function, not directly callable). |
 | Resolved | `/invite` message bug: PR #7 is merged (GitHub state observed 2026-11-07). |
@@ -188,7 +189,8 @@ Last full run before this bundle: 385.2 s / 384.4 s / 385.6 s, all green. This b
 6. Prompt queue, unsent: README rewrite + CI without secrets + preview check + fresh-eyes review of `main` + test-quality audit.
 7. Telegram command menus: after merge, `npm run tg:commands`, then `tg-webhook set` and `info` (the `my_chat_member` handler only arrives if `allowed_updates` is re-registered).
 8. Known minor: stale handoff lines, `sharp` bump deferred, 13 images without width/height (CLS 0), `--timing` flag.
-9. Not done from ADD-ON 2: A3 (cancel pending invites), A4 (selfcheck purge), A5 (purge script), A6 verification of tails (done: 6109 → alder-demo, 6852 → second-demo).
+9. Not done from ADD-ON 2: A5 (`scripts/purge-expired.mjs`, dry-run default). A2 completion: six bind tests still mint on real businesses (source guard is a ratchet, not yet a ban).
+10. Proposals only, not implemented: `robots.txt` and `sitemap.xml` hard-coded to `alderroof.com` (pre-launch item); one brand per deployment; `/clients` and `/stats <slug>` on `v_client_leads`; retention predicates; `npm run new-client`.
 
 ---
 
@@ -251,8 +253,8 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 |---|---|---|
 | 1 | ~~Merge PR #7~~ | **MERGED** (observed) |
 | 2 | Review `ops-audience` from the single `.diff` | Waiting for the artefact |
-| 3 | ADD-ON 2 A3: `/invite` cancel-pending-invites button (unblocks the owner without waiting 24 h) | Not started |
-| 4 | ADD-ON 2 A4/A5: selfcheck purge + `scripts/purge-expired.mjs` | Not started |
+| 3 | ~~A3 cancel pending invites~~ | **Done** (R15-R21) |
+| 4 | A4 selfcheck purge **done**; A5 `scripts/purge-expired.mjs` | A5 not started |
 | 5 | GROUP 3: pasted-code ceiling 600 + `bind_ceiling_hit`; claim-then-bind recovery; `/start@botname`; keyset paging report; `tg-webhook` docs | Not started |
 | 6 | GROUP 5: hostile-reviewer pass over the branch diff | Not started |
 | 7 | Owner runs the manual checks in Section 9 and reports | Owner |
@@ -266,7 +268,7 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 ## 12. Git state (as of this report)
 
 - `main` = `e981e0c` (deploys to production).
-- `ops-audience` (PR #6): 30 commits ahead of `main`, head `fb1eb8e`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
+- `ops-audience` (PR #6): 32 commits ahead of `main`, head `b953c88`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
 - Review artefact: `_debug/patches/ops-audience-review.diff` (gitignored), single file.
 - Remote: `origin https://github.com/AbdallahIsDev/alder.git`. Never push to `main`, never force, no tags.
@@ -286,3 +288,5 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 | 2026-11-07 | `ops-audience` | `6198e67` | `/code` two messages, bot-directed wording, no customer name in ops notice | OP2/OP14/OP15/OP16, T6/T7 |
 | 2026-11-07 | `ops-audience` | `e11877b` | `/code` fixtures on `zz-test-<run>`; unused-code leak guard | Owner cap root cause |
 | 2026-11-07 | `ops-audience` | (docs) | This handoff rewritten as one coherent document; drifted §8/§9/§10 blocks folded in; corrected the "two real phones on alder-demo" claim | Docs only |
+| 2026-11-07 | `ops-audience` | `c8d45bf` | Bounded housekeeping in the daily selfcheck (codes 7 d, rate limits 2 d, 1000/run, used codes never) | K1-K7 |
+| 2026-11-07 | `ops-audience` | `b953c88` | `/invite` cancel button; bind read-back + claim restore; 600/h ceiling; health requires a review identifier | R4/R5, R15-R24, H1b |
