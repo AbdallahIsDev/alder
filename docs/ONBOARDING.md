@@ -53,16 +53,20 @@ Send the roofer the deep link (or the code itself). They open the link and send
 once — one update, one `business_chats` row — and the roofer's chat is bound to
 that business. An expired or reused code binds nothing and says so in the chat.
 
-Codes are minted only by this local script. No public endpoint creates them.
+Codes are minted in two places only: this local script, and `/invite` inside a chat
+that is already bound (the bot then mints a code for **that** business). No public
+endpoint creates them.
 
 ## Telegram menu and buttons
 
-The bot menu has exactly two entries (names only, no secrets):
+The bot menu has four entries (names only, no secrets):
 
 - `leads` — Your latest requests
-- `help` — How this bot works
+- `invite` — Connect a second phone
+- `recipients` — Who receives alerts
+- `help` — How this works
 
-After deploy, run `npm run tg:commands` once: it sets the two commands plus
+After deploy, run `npm run tg:commands` once: it sets the four commands plus
 the bot description and short description (`setMyDescription` /
 `setMyShortDescription`); print the names afterwards with
 `npm run tg:commands:info`. The profile photo is set manually in BotFather

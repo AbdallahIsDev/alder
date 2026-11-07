@@ -11,16 +11,13 @@
 // before any rating and after every rating, and is never hidden, delayed, disabled or
 // de-emphasised. A rating is never required for the link to work.
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import { hashIp } from '../lib/hash.js';
+import { clientIp } from '../lib/request.js';
 import { getBusinessById, addEvent, hitRateLimit } from '../lib/db.js';
 import { getLeadByReviewToken, getFeedback, upsertFeedback, markGoogleClicked } from '../lib/review-db.js';
 import { reviewPage, googleUrlAllowed } from '../lib/content.js';
 import { sendLowRatingAlert } from '../lib/notify.js';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NOT_FOUND = '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not found</title></head><body><p>Not found.</p></body></html>';
 
 function notFound(res) {
@@ -41,18 +38,6 @@ function usableGoogleUrl(v) {
   return typeof v === 'string' && /^https:\/\//.test(v) && v !== '#' ? v : null;
 }
 
-function clientIp(req) {
-  const first = (v) => String(v || '').split(',')[0].trim();
-  return first(req.headers['x-real-ip']) || first(req.headers['x-vercel-forwarded-for'])
-    || first(req.headers['x-forwarded-for']) || String((req.socket && req.socket.remoteAddress) || '');
-}
-
-/* A test-only hook, guarded by the .test-mode marker. It lets Gate D prove that a
-   failed click write cannot stop the redirect. It never exists in a deployment. */
-function forceWriteFailure(req) {
-  const dev = !process.env.VERCEL_ENV || process.env.VERCEL_ENV === 'development';
-  return dev && fs.existsSync(path.join(ROOT, '.test-mode')) && req.headers['x-review-force-fail'] === '1';
-}
 
 export default async function handler(req, res) {
   const token = tokenFrom(req);
@@ -110,16 +95,21 @@ export default async function handler(req, res) {
       res.setHeader('Location', '/r/' + encodeURIComponent(token));
       return res.status(303).end();
     }
-    // Rate limit, fail open like the lead endpoint.
-    const salt = process.env.IP_HASH_SALT || '';
-    try {
-      const key = createHash('sha256').update(clientIp(req) + salt).digest('hex');
-      if (!(await hitRateLimit('review:' + key, 3600, 20))) {
-        res.setHeader('Location', '/r/' + encodeURIComponent(token));
-        return res.status(303).end();
+    // Rate limit, fail open like the lead endpoint. Without IP_HASH_SALT there is no
+    // pseudonymous key to store (an unsalted sha256 of an IPv4 address is reversible),
+    // so the limit is skipped and said so, rather than writing a de-anonymised key.
+    const key = hashIp(clientIp(req));
+    if (!key) {
+      console.error('review_rate_limit_salt_missing');
+    } else {
+      try {
+        if (!(await hitRateLimit('review:' + key, 3600, 20))) {
+          res.setHeader('Location', '/r/' + encodeURIComponent(token));
+          return res.status(303).end();
+        }
+      } catch (e) {
+        console.error('review_rate_limit_failed', (e && e.code) || 'no_code');
       }
-    } catch (e) {
-      console.error('review_rate_limit_failed', (e && e.code) || 'no_code');
     }
     // Read the stored rating BEFORE the upsert. The owner is alerted only when the
     // rating MOVES into the 1-2 range: no previous rating, or a previous rating of 3

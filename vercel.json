@@ -16,6 +16,16 @@
       "destination": "/api/review?token=:token"
     }
   ],
+  "crons": [
+    {
+      "path": "/api/selfcheck",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/digest",
+      "schedule": "0 13 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/site.webmanifest",

@@ -7,8 +7,6 @@ Typographic Style, light mode, GSAP + ScrollTrigger + Lenis.
 Roofing-2/
 ├── index.html            ← everything: markup, SEO meta, JSON-LD, image alt prompts
 ├── assets/
-│   ├── css/style.css     ← design system + all component/section styles
-│   ├── js/main.js        ← GSAP motion layer, UI wiring, form validation
 │   └── img/*.svg         ← solid-colour placeholder mockups (replace these)
 ├── site.webmanifest
 ├── robots.txt
@@ -129,8 +127,8 @@ in `index.html` with the contents of `.preview/versions/<id>.svg`.
 
 ## Motion
 
-`assets/js/main.js`. All animation is progressive enhancement — initial hidden
-states are applied at runtime via `gsap.set()`, never in CSS, so if the CDN is
+All animation is progressive enhancement — initial hidden
+states are applied at runtime via `gsap.set()`, never in CSS, so if the scripts are
 blocked or `prefers-reduced-motion` is set the page renders fully readable.
 
 | Feature | Implementation |

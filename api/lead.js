@@ -5,9 +5,12 @@
 //
 // Nothing here logs a name, phone, email, note, raw IP, token or URL. Failures are codes only.
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { hashIp } from '../lib/hash.js';
+import { clientIp } from '../lib/request.js';
 import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
 import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit } from '../lib/db.js';
+import { findRecentDuplicate } from '../lib/lead-intake.js';
 import { notifyAllAfterLead } from '../lib/notify.js';
 
 const SERVICES = ['replacement', 'storm', 'repair', 'unsure'];
@@ -22,29 +25,13 @@ const ALLOWED = new Set([
 ]);
 
 const MAX_BODY = 10 * 1024;
+/* Duplicate detection window. Advisory only — the lead is always stored. */
+const DUPLICATE_WINDOW_DAYS = 30;
 const IP_LIMIT = { window: 3600, max: 10 };
 const BIZ_LIMIT = { window: 3600, max: 200 };
 
 const str = (v) => (typeof v === 'string' ? v.trim() : '');
 const clean = (v) => String(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');   // strip control characters, keep \n and \t
-
-/* Vercel's edge sets x-real-ip and x-vercel-forwarded-for; x-forwarded-for is the last resort
-   (and the only one a client can influence, which is why it is not first). */
-function clientIp(req) {
-  const first = (v) => String(v || '').split(',')[0].trim();
-  return (
-    first(req.headers['x-real-ip']) ||
-    first(req.headers['x-vercel-forwarded-for']) ||
-    first(req.headers['x-forwarded-for']) ||
-    String((req.socket && req.socket.remoteAddress) || '')
-  );
-}
-
-function hashIp(ip) {
-  const salt = process.env.IP_HASH_SALT;
-  if (!salt) return null;                                    // no salt means a trivially reversible hash; fail closed
-  return createHash('sha256').update(ip + salt).digest('hex');
-}
 
 /* Small standalone page for the no-JS form. Inline styles only (the CSP allows them). */
 function htmlPage(title, message, businessName) {
@@ -138,7 +125,12 @@ export default async function handler(req, res) {
   // 'US': lib/db.js getActiveBusinessBySlug does not select a country column
   // (the businesses table has none), so business.country is never present.
   const service = str(b.service), home = str(b.home), timing = str(b.timing), age = str(b.age);
-  const zip = str(b.zip), phone = clean(str(b.phone)), name = clean(str(b.name)), email = clean(str(b.email)), notes = clean(str(b.notes));
+  const zip = str(b.zip), phone = clean(str(b.phone)), name = clean(str(b.name)), notes = clean(str(b.notes));
+  // Lowercased once, at the boundary: storage, the auto-reply recipient and the
+  // duplicate lookup all use this value, so 'A@b.com' and 'a@b.com' are the same
+  // address everywhere. Rows written before this change keep their original case
+  // and will not match a lowercased address in the duplicate check.
+  const email = clean(str(b.email)).toLowerCase();
 
   const slug = str(b.slug);
   if (!/^[a-z0-9-]{2,60}$/.test(slug)) return isForm ? badForm(null) : res.status(400).json({ ok: false });
@@ -218,6 +210,16 @@ export default async function handler(req, res) {
     console.error('lead_rate_limit_failed', (e && e.code) || 'no_code');
   }
 
+  // Start the duplicate lookup before the insert and collect it after: the two
+  // overlap instead of queueing, so the customer waits for max(insert, lookup)
+  // rather than for the sum.
+  const dupSince = new Date(Date.now() - DUPLICATE_WINDOW_DAYS * 86400 * 1000).toISOString();
+  const dupPromise = findRecentDuplicate(business.id, phoneE164, email || null, dupSince)
+    .catch((e) => {
+      console.error('lead_duplicate_check_failed', (e && e.code) || 'no_code');
+      return null;
+    });
+
   let leadId;
   try {
     leadId = await insertLead({
@@ -236,15 +238,27 @@ export default async function handler(req, res) {
     return isForm ? htmlReply(200, 'Request received', 'We received your request.', business.name) : res.status(200).json({ ok: true });
   }
 
+  // Advisory: is this the same phone or email as a recent request for this
+  // business? The lead is stored either way; the answer only adds one line to the
+  // owner alert and one meta field on the created event. The earlier lead's
+  // details are never read out, only its id. A lookup that matched this very row
+  // (it started before the insert committed) is not a duplicate of anything.
+  let duplicateOf = await dupPromise;
+  if (duplicateOf === leadId) duplicateOf = null;
+
   try {
-    await addEvent(leadId, 'created', { source: isForm ? 'form-nojs' : 'form', slug: business.slug });
+    await addEvent(leadId, 'created', {
+      source: isForm ? 'form-nojs' : 'form',
+      slug: business.slug,
+      ...(duplicateOf ? { duplicate_of: duplicateOf } : {}),
+    });
   } catch (e) {
     console.error('lead_event_created_failed', (e && e.code) || 'no_code');
   }
 
   // Save first, notify second. Nothing below can change the response.
   await notifyAllAfterLead({
-    leadId, business,
+    leadId, business, duplicate: !!duplicateOf,
     lead: { name, phone: phoneE164, email, zip, service, home, timing, roof_age: age, insurance_claim: b.claim === true, notes },
   });
 

@@ -332,6 +332,28 @@ The email and Telegram code reads these names (never values - do not copy
 prefix; recipients are still redirected to `MAIL_REDIRECT_TO`), `SITE_URL`,
 `DATABASE_URL` (local migrations only).
 
+## Running the tests
+
+```powershell
+node tests/run.mjs                          # all suites, one shared vercel dev
+node tests/run.mjs tests/lead-api.test.mjs  # one suite
+node tests/run.mjs --seed-check             # read-only: alder-demo == seed?
+```
+
+Suites that only call handlers in-process (`db-wall`, `notify`, `webhook`,
+`brand`, `outbound`) never talk to `vercel dev`; suites that exercise real
+HTTP (`lead-api`, `review`, `fallback`) need it. The runner starts **one**
+dev server for the whole run when any selected suite needs HTTP, so with the
+default list the in-process suites run alongside it and simply do not call
+it; `vercel dev` and the canary are skipped only when every selected suite is
+in-process (e.g. `node tests/run.mjs tests/webhook.test.mjs`). Per-suite
+seconds and the total always print. Outbound HTTP uses a 3000 ms timeout in
+production; the `OUTBOUND_TIMEOUT_MS=200` override applies only when
+`VERCEL_ENV` is exactly `development` (the runner sets it), and only an
+integer 200–3000 is honoured. An unset `VERCEL_ENV` is not dev. The suites read the production database — back
+up and reset `alder-demo` first, and restore afterwards (see
+`HANDOFF_alder_session.md`).
+
 ## Preview gallery
 
 ```powershell

@@ -958,8 +958,11 @@
     .hws .label { justify-content: center }
     .hws h2 { font-size: clamp(32px, 3.6vw, 44px); font-weight: 450; letter-spacing: -.035em; line-height: 1.05; color: var(--ink); max-width: 14em }
     .steps { list-style: none; padding: 0; position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--g) }
-    .line { position: absolute; z-index: 0; left: calc((100% - 2*var(--g))/6); top: 27px; width: calc(66.6667% + .6667*var(--g)); height: 2px; background: var(--cream) }
-    .line i { display: block; width: 100%; height: 100%; background: var(--accent); transform: scaleX(var(--p, 1)); transform-origin: left }
+    /* The connector is a pseudo-element, not a child: a <ol> may only contain <li>,
+       and the span made the list invalid (Lighthouse 'list'). Same box, same paint
+       order — ::before is the track, ::after the accent fill that reads --p. */
+    .steps::before { content: ""; position: absolute; z-index: 0; left: calc((100% - 2*var(--g))/6); top: 27px; width: calc(66.6667% + .6667*var(--g)); height: 2px; background: var(--cream) }
+    .steps::after { content: ""; display: block; position: absolute; z-index: 0; left: calc((100% - 2*var(--g))/6); top: 27px; width: calc(66.6667% + .6667*var(--g)); height: 2px; background: var(--accent); transform: scaleX(var(--p, 1)); transform-origin: left }
     .step { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 28px }
     .steps { --sq: 56px }   /* size of the numbered square; the stacked layout reads it for the column and the line */
     .step .n { display: grid; place-items: center; width: var(--sq); height: var(--sq); background: var(--cream); color: var(--ink); font-size: 22px; font-weight: 500; border: 1px solid #0000001a; transition: background .45s ease, color .45s ease, border-color .45s ease }
@@ -969,8 +972,8 @@
     .step p { color: #4a4e56; max-width: 34ch }
     @media (max-width: 900px) {
       .steps { grid-template-columns: 1fr; gap: 36px }
-      .line { left: calc(var(--sq) / 2 - 1px); top: calc(var(--sq) / 2); bottom: calc(var(--last, var(--sq) / 2) - var(--sq) / 2); width: 2px; height: auto }   /* --last = height of step 3, set by script: the line stops at the centre of its square */
-      .line i { transform: scaleY(var(--p, 1)); transform-origin: top }
+      .steps::before, .steps::after { left: calc(var(--sq) / 2 - 1px); top: calc(var(--sq) / 2); bottom: calc(var(--last, var(--sq) / 2) - var(--sq) / 2); width: 2px; height: auto }   /* --last = height of step 3, set by script: the line stops at the centre of its square */
+      .steps::after { transform: scaleY(var(--p, 1)); transform-origin: top }
       .step { display: grid; grid-template-columns: var(--sq) 1fr; gap: 20px; align-items: start; text-align: left }
       .step div { width: auto; align-items: flex-start }
     }
@@ -1243,6 +1246,10 @@
     .dbg { z-index: 300 }
     .est { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 16px; visibility: hidden; transition: visibility 0s .45s; color-scheme: dark;
       --bg: rgb(28 31 36/.74); --fg: #f7f4ef; --mut: #b9bdc3; --line: rgb(255 255 255/.18); --card: rgb(255 255 255/.07); --card-h: rgb(255 255 255/.12); --field: rgb(255 255 255/.07); --sel: var(--accent); --err: #ff8a7a;
+      /* Form-control borders only (WCAG 1.4.11): >=3:1 against the field fill and
+         the dialog ground in the worst case (a white section behind the scrim).
+         --line stays for cards and decorative edges. */
+      --ctl-line: #9aa0a8; --ctl-focus: #fff; --ctl-err: #ffb3a6;
       --sb-track: transparent; --sb-thumb: rgb(255 255 255/.28); --sb-hover: var(--accent) }
     .est.open { visibility: visible; transition-delay: 0s }
     .est-scrim { position: absolute; inset: 0; background: rgb(28 31 36/.5); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); opacity: 0; transition: opacity .35s }
@@ -1289,13 +1296,13 @@
 
     /* fields */
     .f { display: flex; flex-direction: column; gap: 8px; min-width: 0 } .f > label, .f > .lab { font-weight: 500; font-size: var(--fs) }
-    .f input[type="text"], .f input[type="tel"], .f input[type="email"] { height: 52px; padding: 0 14px; border: 1px solid var(--line); background: var(--field); color: var(--fg); font: 400 var(--fs) var(--f); border-radius: 0; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box }
+    .f input[type="text"], .f input[type="tel"], .f input[type="email"] { height: 52px; padding: 0 14px; border: 1px solid var(--ctl-line); background: var(--field); color: var(--fg); font: 400 var(--fs) var(--f); border-radius: 0; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box }
     /* themed dropdown (replaces the browser's native select list) */
     .sel { position: relative } .sel-native { display: none }
-    .sel-btn { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; height: 52px; padding: 0 14px; border: 1px solid var(--line); background: var(--field); color: var(--fg); font: 400 var(--fs) var(--f); text-align: left; cursor: pointer; border-radius: 0; transition: border-color .2s, background .2s }
+    .sel-btn { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; height: 52px; padding: 0 14px; border: 1px solid var(--ctl-line); background: var(--field); color: var(--fg); font: 400 var(--fs) var(--f); text-align: left; cursor: pointer; border-radius: 0; transition: border-color .2s, background .2s }
     .sel-btn:hover { background: var(--card-h) } .sel-btn.empty .sel-val { color: rgb(255 255 255/.55) }
     .sel-btn svg { width: 16px; height: 16px; flex: none; transition: transform .25s cubic-bezier(.2, .7, .2, 1) }
-    .sel.open .sel-btn { border-color: var(--sel) } .sel.open .sel-btn svg { transform: rotate(180deg) }
+    .sel.open .sel-btn { border-color: var(--ctl-focus) } .sel.open .sel-btn svg { transform: rotate(180deg) }
     .sel-list { position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 5; margin: 0; padding: 6px; list-style: none; max-height: 260px; overflow-y: auto; background: rgb(32 35 41/.96); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); border: 1px solid var(--line); box-shadow: 0 18px 40px rgb(0 0 0/.45); transform-origin: top; animation: estMenu .18s cubic-bezier(.2, .7, .2, 1) both }
     .sel-list[hidden] { display: none } .sel.up .sel-list { top: auto; bottom: calc(100% + 6px); transform-origin: bottom; animation-name: estMenuUp }
     @keyframes estMenu { from { opacity: 0; transform: translateY(-6px) scale(.98) } } @keyframes estMenuUp { from { opacity: 0; transform: translateY(6px) scale(.98) } }
@@ -1308,11 +1315,11 @@
     .sel-list li[aria-selected="true"] { font-weight: 600; box-shadow: inset 3px 0 0 var(--accent) }
     .sel-list li[aria-selected="true"]::after { content: ""; position: absolute; right: 14px; top: 50%; width: 16px; height: 16px; margin-top: -8px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18' fill='none' stroke='%23f7f4ef' stroke-width='2'%3E%3Cpath d='M4.5 9.5l3 3 6-7'/%3E%3C/svg%3E") center / 100% no-repeat }
     .sel-list::-webkit-scrollbar { width: 10px } .sel-list::-webkit-scrollbar-thumb { border: 2px solid transparent }
-    .f textarea { min-height: 96px; padding: 12px 14px; border: 1px solid var(--line); background: var(--field); color: var(--fg); font: 400 var(--fs) var(--f); resize: vertical; border-radius: 0 }
-    .f input:focus, .f textarea:focus { border-color: var(--sel) }
+    .f textarea { min-height: 96px; padding: 12px 14px; border: 1px solid var(--ctl-line); background: var(--field); color: var(--fg); font: 400 var(--fs) var(--f); resize: vertical; border-radius: 0 }
+    .f input:focus, .f textarea:focus { border-color: var(--ctl-focus) }
     .f ::placeholder { color: rgb(255 255 255/.55) }
     .f input:-webkit-autofill { -webkit-text-fill-color: var(--fg); caret-color: var(--fg); box-shadow: 0 0 0 100px #2a2d33 inset }
-    .f [aria-invalid="true"] { border-color: var(--err) } .f.grp.bad .opt { border-color: rgb(255 138 122/.55) }
+    .f [aria-invalid="true"] { border-color: var(--ctl-err) } .f.grp.bad .opt { border-color: rgb(255 138 122/.55) }
     .err { color: var(--err); font-size: var(--fs) } .err:empty { display: none } .err:not(:empty) { animation: estFade .28s ease both }
     @keyframes estFade { from { opacity: 0; transform: translateY(-4px) } }
     .row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px }
@@ -2370,7 +2377,7 @@
           <p class="label" data-page-node-id="P9GiFw73v8imCJG4Kj7DTf">How we work</p>
           <h2 data-page-node-id="sVRaxEtalmsmjA1PzsCT3q">From first call to <span class="hl">final shingle</span></h2>
         </div>
-        <ol class="steps" data-page-node-id="hO6yw9lXVWAVdvOCpbMJhT"><span class="line" data-page-node-id="Fis054S0ryAMX9IL0ccAp2"><i data-page-node-id="boCdOCPE8w4RFlZnWkG6Xe"></i></span>
+        <ol class="steps" data-page-node-id="hO6yw9lXVWAVdvOCpbMJhT">
         <li class="step" data-page-node-id="Mq1nnCwreKeYfDxVaOgA27"><span class="n" data-page-node-id="dvkdB862GwIj8vYinwHIx3">1</span><div data-page-node-id="7ZL7nY8UFGVzKZ6SZUCwJF"><h3 data-page-node-id="cqPrR0YhkRtTfqnmYMlZhd">We inspect and quote</h3><p data-page-node-id="MkcTGXbVSl8VK8HdG4Sdld">We look at your roof in person, take photos, and send a written price within {{reply}}.</p></div></li>
         <li class="step" data-page-node-id="9bF8CJiW6fGlW32niSjnUu"><span class="n" data-page-node-id="gvpsuGnRp4G1A1XF5IZCtq">2</span><div data-page-node-id="OniHe4cfkrKFoAEJhRRTA0"><h3 data-page-node-id="EZTwS9TjhkiCuQnL5qC1EB">We plan the job</h3><p data-page-node-id="OgMsYj7bJAymVgbJgMVbyM">You choose the materials and the start date. We handle the permits and order everything before day one.</p></div></li>
         <li class="step" data-page-node-id="LSHtCheu6mGgaBjONFoZVe"><span class="n" data-page-node-id="pTc2GT4aGf1q0hCtB5iesy">3</span><div data-page-node-id="ZAKEBN7fUiQNzTs81ZbGMq"><h3 data-page-node-id="do45mgAPDPiQUZ6VDGEClG">We build it and walk it with you</h3><p data-page-node-id="NuXmQRxlPDe2JkNYLD6lxq">Our own crew does the work, with photos at every stage. You get a final walkthrough and a written warranty.</p></div></li>
@@ -2552,19 +2559,19 @@
             <label class="opt" data-page-node-id="GOEIBBkXka6OA5FMaZtD4f"><input type="radio" name="service" value="storm" data-page-node-id="dtAgDcguZLXE8v14hQynyN"><b data-page-node-id="gMGHl5HDQbmX82EsT27WoF">Storm or hail damage</b><small data-page-node-id="iWAyd8b1KkdLVO6DowQQ0k">Inspection and insurance help</small></label>
             <label class="opt" data-page-node-id="50vQtA2Fn8FA8auJFCehXr"><input type="radio" name="service" value="repair" data-page-node-id="eX0BsESg5FSyukHNSX1m1p"><b data-page-node-id="m3oATeB80Lqa1PtcKZiEYN">Repair or leak</b><small data-page-node-id="oq1PNDz9VmNqa0EagT2tNd">Find and fix a specific problem</small></label>
             <label class="opt" data-page-node-id="uJI1Bjxh8Lu0pjYAeKH3AE"><input type="radio" name="service" value="unsure" data-page-node-id="OZIwRQxS1lzCejhzqS4b4K"><b data-page-node-id="9NmhtPw2AXUcGYW08GAGCq">Not sure yet</b><small data-page-node-id="3oGbSNtrLap5KH8URfXort">A free inspection will tell us</small></label>
-          </div><p class="err" role="alert" data-page-node-id="EHvTiHBQNBcWS7bz3CCn3t"></p></div>
+          </div><p class="err" data-page-node-id="EHvTiHBQNBcWS7bz3CCn3t"></p></div>
         </section>
 
         <section class="est-pane" data-step="2" hidden data-page-node-id="xXoe2WVxcOfwG1mXpoPcbZ">
           <div class="est-head" data-page-node-id="IW6NC9mtC3Z3kHAi6OKOqO"><h3 data-page-node-id="bMZIWxSuTNblvisKVTudQu">Tell us about the property</h3></div>
-          <div class="f" data-f="zip" data-page-node-id="8KThi1BAINmgu25swBmI0w"><label for="e-zip" data-page-node-id="vWN4wC6CdQKqlPF9R6nAjK">ZIP code</label><input id="e-zip" name="zip" type="text" inputmode="numeric" autocomplete="postal-code" enterkeyhint="next" maxlength="5" placeholder="5 digits" data-page-node-id="DtQfC52wSpBS9MI0rUftRc"><p class="err" role="alert" data-page-node-id="G1nSjTL2SqbQimy9oOCRR3"></p></div>
+          <div class="f" data-f="zip" data-page-node-id="8KThi1BAINmgu25swBmI0w"><label for="e-zip" data-page-node-id="vWN4wC6CdQKqlPF9R6nAjK">ZIP code</label><input id="e-zip" name="zip" type="text" inputmode="numeric" autocomplete="postal-code" enterkeyhint="next" maxlength="5" placeholder="5 digits" data-page-node-id="DtQfC52wSpBS9MI0rUftRc"><p class="err" data-page-node-id="G1nSjTL2SqbQimy9oOCRR3"></p></div>
           <div class="f grp" data-f="home" data-page-node-id="LkP6yqwKPQ6JXpC6XGwHey"><span class="lab" id="e-home-l" data-page-node-id="d1yQPrwcIrVZH96GH9FLKA">Property type</span><div class="opts" role="radiogroup" aria-labelledby="e-home-l" data-page-node-id="8jsz78iJILGLY24vEYAPMm">
             <label class="opt" data-page-node-id="NBv9r1KRfSwq8hM4utp7Ws"><input type="radio" name="home" value="house" data-page-node-id="9XChZLeBDCtowiCQmmD99U"><b data-page-node-id="ugXTl6g26aH4E3K38MCV9v">Single-family home</b></label>
             <label class="opt" data-page-node-id="MsjjGCJmIKuRnESADDqUew"><input type="radio" name="home" value="multi" data-page-node-id="P4keoRQViCzIUBBjx805yO"><b data-page-node-id="Rw6DplOhPl0ZJs2RAlCjsV">Townhome or duplex</b></label>
             <label class="opt" data-page-node-id="gxVo4ipOs3yfdn1JQgHfbc"><input type="radio" name="home" value="commercial" data-page-node-id="5LigOLTCB1KoCJrXmErEm8"><b data-page-node-id="kDDe1oUSfauSGC4dhGVRBH">Commercial building</b></label>
             <label class="opt" data-page-node-id="2ST8iqfB7jl0uVRvApbslh"><input type="radio" name="home" value="other" data-page-node-id="LAzrxSMEuPQMV1rVZ27ED8"><b data-page-node-id="EWSCcQpSwkAs59VI8ogiZR">Something else</b></label>
-          </div><p class="err" role="alert" data-page-node-id="eJ4fgHlUPffdDDdkgHkFpf"></p></div>
-          <div class="f" data-f="age" data-page-node-id="6D5vKhWvBBPrs5pmOCQjY3"><label for="e-age" id="e-age-lab" data-page-node-id="NiRDz1WGhJuOASYxrmb2Rv">How old is the roof?</label><select id="e-age" name="age" data-page-node-id="DhegmzErPJp2AwIR6sfrIT"><option value="" data-page-node-id="Kb5nuAUS1nkz5incEkk13M">Choose one</option><option data-page-node-id="CxYnFtv6EKATTw9YlO7Uv5">Under 10 years</option><option data-page-node-id="xRDmkMrDDu4sQq5i6866GZ">10 to 20 years</option><option data-page-node-id="vV5djTI8tF2TTP0KcMZDr1">Over 20 years</option><option selected data-page-node-id="6caNCRMEK8Kn4WzU4p7kGI">Not sure</option></select><p class="err" role="alert" data-page-node-id="v2nyGlF1u5NryTDFNt6Zcn"></p></div>
+          </div><p class="err" data-page-node-id="eJ4fgHlUPffdDDdkgHkFpf"></p></div>
+          <div class="f" data-f="age" data-page-node-id="6D5vKhWvBBPrs5pmOCQjY3"><label for="e-age" id="e-age-lab" data-page-node-id="NiRDz1WGhJuOASYxrmb2Rv">How old is the roof?</label><select id="e-age" name="age" data-page-node-id="DhegmzErPJp2AwIR6sfrIT"><option value="" data-page-node-id="Kb5nuAUS1nkz5incEkk13M">Choose one</option><option data-page-node-id="CxYnFtv6EKATTw9YlO7Uv5">Under 10 years</option><option data-page-node-id="xRDmkMrDDu4sQq5i6866GZ">10 to 20 years</option><option data-page-node-id="vV5djTI8tF2TTP0KcMZDr1">Over 20 years</option><option selected data-page-node-id="6caNCRMEK8Kn4WzU4p7kGI">Not sure</option></select><p class="err" data-page-node-id="v2nyGlF1u5NryTDFNt6Zcn"></p></div>
         </section>
 
         <section class="est-pane" data-step="3" hidden data-page-node-id="ff47aa6QQQ2dXFuNzQrqk3">
@@ -2574,18 +2581,18 @@
             <label class="opt" data-page-node-id="5jdPWwYjDO4hcq26RR4y6R"><input type="radio" name="timing" value="month" data-page-node-id="32iAdFoxB9oSd2jwIcHKMQ"><b data-page-node-id="XiX8l3oGZPk3o3D9CjsXnF">Within a month</b></label>
             <label class="opt" data-page-node-id="yaE398wG6Pnvf4GtydX1Yn"><input type="radio" name="timing" value="quarter" data-page-node-id="kPQt0qd4GqL8AcrHXzmeqQ"><b data-page-node-id="TSiLIMCEEyxcBIocywe4jz">In 1 to 3 months</b></label>
             <label class="opt" data-page-node-id="EpjC6RC9tHWTVTe5WOlGh7"><input type="radio" name="timing" value="planning" data-page-node-id="lIlrSRLqgY2ExdOJGjApJu"><b data-page-node-id="kKtnwyiNEijnOBrrRSOeDD">Just planning ahead</b></label>
-          </div><p class="err" role="alert" data-page-node-id="gqICsqdXNFf88uiCWrE9in"></p></div>
+          </div><p class="err" data-page-node-id="gqICsqdXNFf88uiCWrE9in"></p></div>
           <label class="chk" data-page-node-id="RuKeUFzTwWOGvKXb9tvLSs"><input type="checkbox" name="claim" data-page-node-id="lK4hRHmfbg934qLfuZXAeH"><span data-page-node-id="rui6zHma1XGRGqTsF2SFHc">This may involve an insurance claim</span></label>
         </section>
 
         <section class="est-pane" data-step="4" hidden data-page-node-id="rCrYD8H8fotOBsWhIBCQMe">
           <div class="est-head" data-page-node-id="4Q4U141jvUywAjhfKeVOaF"><h3 data-page-node-id="eosuZSVyEpqsGfIkYeJT1S">Where should we send your estimate?</h3></div>
-          <div class="f" data-f="name" data-page-node-id="Gn4ErDIjJSOP6w2YlYkb8y"><label for="e-name" data-page-node-id="H3eVR3yTjKClXslTjF2NPU">Your name</label><input id="e-name" name="name" type="text" autocomplete="name" enterkeyhint="next" maxlength="80" data-page-node-id="ELXVmZKUs9uljJuMtgXDzU"><p class="err" role="alert" data-page-node-id="UdCEaxWcBUjQXjTsAvCbGH"></p></div>
+          <div class="f" data-f="name" data-page-node-id="Gn4ErDIjJSOP6w2YlYkb8y"><label for="e-name" data-page-node-id="H3eVR3yTjKClXslTjF2NPU">Your name</label><input id="e-name" name="name" type="text" autocomplete="name" enterkeyhint="next" maxlength="80" data-page-node-id="ELXVmZKUs9uljJuMtgXDzU"><p class="err" data-page-node-id="UdCEaxWcBUjQXjTsAvCbGH"></p></div>
           <div class="row2" data-page-node-id="A7XuJNFptI6EFCgAXevfjo">
-            <div class="f" data-f="phone" data-page-node-id="NtWgZLB4FosSGjd7YJ4Jk9"><label for="e-phone" data-page-node-id="JSG77Qb247YiSpVlXMaJLX">Phone</label><input id="e-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" enterkeyhint="next" maxlength="20" data-page-node-id="CWg0Pqsjqi71zUbxgnrNK4"><p class="err" role="alert" data-page-node-id="eA9LBPWnJBheDe07dfkn4x"></p></div>
-            <div class="f" data-f="email" data-page-node-id="6AmpmIrMm9TiMQk0n4sBDK"><label for="e-mail" data-page-node-id="051o6UMyk4OXNMuUsxf2GV">Email (optional)</label><input id="e-mail" name="email" type="email" inputmode="email" autocomplete="email" enterkeyhint="done" maxlength="254" data-page-node-id="ESnq4TUvsqhCx3oEnm1gTU"><p class="err" role="alert" data-page-node-id="wkSVFFGqQBZ9DdD8uhjcdR"></p></div>
+            <div class="f" data-f="phone" data-page-node-id="NtWgZLB4FosSGjd7YJ4Jk9"><label for="e-phone" data-page-node-id="JSG77Qb247YiSpVlXMaJLX">Phone</label><input id="e-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" enterkeyhint="next" maxlength="20" data-page-node-id="CWg0Pqsjqi71zUbxgnrNK4"><p class="err" data-page-node-id="eA9LBPWnJBheDe07dfkn4x"></p></div>
+            <div class="f" data-f="email" data-page-node-id="6AmpmIrMm9TiMQk0n4sBDK"><label for="e-mail" data-page-node-id="051o6UMyk4OXNMuUsxf2GV">Email (optional)</label><input id="e-mail" name="email" type="email" inputmode="email" autocomplete="email" enterkeyhint="done" maxlength="254" data-page-node-id="ESnq4TUvsqhCx3oEnm1gTU"><p class="err" data-page-node-id="wkSVFFGqQBZ9DdD8uhjcdR"></p></div>
           </div>
-          <div class="f" data-f="notes" data-page-node-id="zSSixugw6ixwuOPfzKG8it"><label for="e-notes" data-page-node-id="tShePoY9XeOGZkulbhPsub">Anything we should know? (optional)</label><textarea id="e-notes" name="notes" maxlength="2000"></textarea><p class="err" role="alert" data-page-node-id="notesErr"></p></div>
+          <div class="f" data-f="notes" data-page-node-id="zSSixugw6ixwuOPfzKG8it"><label for="e-notes" data-page-node-id="tShePoY9XeOGZkulbhPsub">Anything we should know? (optional)</label><textarea id="e-notes" name="notes" maxlength="2000"></textarea><p class="err" data-page-node-id="notesErr"></p></div>
           <!-- honeypot: invisible to people (off-screen, skipped by Tab and screen readers); bots fill it. Must stay empty. -->
           <div class="hp" aria-hidden="true"><input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"></div>
           <p class="fine" data-page-node-id="4pVebfApdTCCJJIw75qS4H">By sending this, you agree to be contacted about your estimate. We only use these details to contact you about your estimate. We reply within {{reply}}.</p>
@@ -3576,15 +3583,21 @@ var BIZ = {
   }
   [].forEach.call(form.querySelectorAll('select'), enhanceSelect);
 
+  /* The node a message belongs to: the text control, the themed select's button,
+     or the radiogroup container. One selector for both attributes, so
+     aria-describedby and aria-invalid can never land on different elements
+     (a radio group has no single input to carry them). */
+  function fieldControl(f) {
+    return f.querySelector('input[type=text],input[type=tel],input[type=email],textarea,select,.sel-btn,[role=radiogroup]');
+  }
   [].forEach.call(form.querySelectorAll('[data-f]'), function (f) {            /* link each message to its field for screen readers */
-    var k = f.dataset.f, err = f.querySelector('.err'), c = f.querySelector('input[type=text],input[type=tel],input[type=email],textarea,.sel-btn,[role=radiogroup]');
+    var k = f.dataset.f, err = f.querySelector('.err'), c = fieldControl(f);
     err.id = 'err-' + k; if (c) c.setAttribute('aria-describedby', err.id);
   });
   function check(k) {
-    var m = R[k](), f = form.querySelector('[data-f="' + k + '"]'), c = f.querySelector('input[type=text],input[type=tel],input[type=email],textarea,select');
+    var m = R[k](), f = form.querySelector('[data-f="' + k + '"]'), c = fieldControl(f);
     f.querySelector('.err').textContent = m; f.classList.toggle('bad', !!m);
     if (c) { if (m) c.setAttribute('aria-invalid', 'true'); else c.removeAttribute('aria-invalid'); }
-    var sb = f.querySelector('.sel-btn'); if (sb) { if (m) sb.setAttribute('aria-invalid', 'true'); else sb.removeAttribute('aria-invalid'); }
     return m;
   }
   form.addEventListener('input', function (e) {
@@ -3780,7 +3793,7 @@ var BIZ = {
         var f = form.querySelector('[data-f="' + k + '"]');
         if (!f) return;
         f.querySelector('.err').textContent = msg; f.classList.add('bad');
-        var c = f.querySelector('input[type=text],input[type=tel],input[type=email],textarea,select');
+        var c = fieldControl(f);
         if (c) c.setAttribute('aria-invalid', 'true');
       },
       focusField: function (k) {

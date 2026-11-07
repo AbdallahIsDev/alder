@@ -22,15 +22,11 @@ const ORIGIN = new URL(API).origin;
 const LOG = path.resolve(ROOT, process.env.LEAD_API_LOG || '_debug/vercel-dev.log');
 const RUN = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 
-/* ---------- .env ---------- */
-const env = {};
-if (fs.existsSync(path.join(ROOT, '.env'))) {
-  for (const line of fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split(/\r?\n/)) {
-    if (/^\s*#/.test(line)) continue;
-    const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, '');
-  }
-}
+/* ---------- env, one shared loader ---------- */
+// process.env > .env.test (TEST_ENV=1) > .env.local > .env, same as every other suite.
+import { loadEnv } from '../lib/env.js';
+import { fakeRes, ALDER_DEMO } from './helpers.mjs';
+loadEnv();
 const FAKE_TG_URL = process.env.FAKE_TG_URL;
 async function fakeTg(cfg) {
   if (!FAKE_TG_URL) throw new Error('FAKE_TG_URL is not set — run through tests/run.mjs');
@@ -62,13 +58,14 @@ function payload(over) {
     service: 'replacement', home: 'house', timing: 'asap', age: '10 to 20 years',
     zip: '50265', phone: PHONE, name: NAME, email: EMAIL, notes: NOTES,
     claim: false, website: '', elapsed: 5000,
-    slug: 'alder-demo', idempotencyKey: `${RUN}-base`,
+    slug: ALDER_DEMO, idempotencyKey: `${RUN}-base`,
     ...over,
   };
 }
 
 let ipSeq = 10;
 async function post(body, opts = {}) {
+  if (!opts.http) return postInProcess(body, opts);
   const res = await fetch(opts.url || API, {
     method: opts.method || 'POST',
     headers: { 'Content-Type': 'application/json', 'x-real-ip': opts.ip || `203.0.113.${ipSeq++}` },
@@ -80,7 +77,7 @@ async function post(body, opts = {}) {
 }
 
 /* ---------- db ---------- */
-const svc = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
@@ -95,6 +92,25 @@ async function eventsFor(leadId) {
   const { data } = await svc.from('lead_events').select('kind, meta').eq('lead_id', leadId);
   return data || [];
 }
+
+/* ---------- in-process handler (most tests) vs real HTTP (kept tests) ----
+   Moved from real HTTP through vercel dev: tests 1-9, 11, 15, M*, P* prove
+   handler logic only (validation, phone, errors, limits, idempotency,
+   events, notifications against the fake servers). Kept on real HTTP:
+   test 10 (405 method), 12/12b (page estimateDeliver end-to-end), 13/14
+   (dev-server LOG file assertions). 413/415 have no tests in this suite. */
+const { default: leadHandler } = await import('../api/lead.js');
+async function postInProcess(body, opts) {
+  const res = fakeRes();
+  await leadHandler({
+    method: opts.method || 'POST',
+    headers: { 'content-type': 'application/json', 'x-real-ip': opts.ip || `203.0.113.${ipSeq++}` },
+    body: body === null || body === undefined ? body : { ...body },
+    socket: {},
+  }, res);
+  return { status: res.code, json: res.body && typeof res.body === 'object' ? res.body : null };
+}
+
 
 /* ---------- reachability ---------- */
 try {
@@ -275,7 +291,7 @@ const logOffset = fs.statSync(LOG).size;
   const key = `${RUN}-t14`;
   const count = () => (fs.readFileSync(LOG, 'utf8').slice(logOffset).match(/lead_dropped_honeypot/g) || []).length;
   const before = count();
-  const { status } = await post(payload({ idempotencyKey: key, website: 'http://spam.example' }));
+  const { status } = await post(payload({ idempotencyKey: key, website: 'http://spam.example' }), { http: true });
   let after = before;
   for (let i = 0; i < 24 && after <= before; i++) {
     await new Promise((r) => setTimeout(r, 125));
@@ -290,16 +306,10 @@ const logOffset = fs.statSync(LOG).size;
 {
   await resetLimits();
   const key = `${RUN}-t15`;
-  const res = await fetch(API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-real-ip': `203.0.113.${ipSeq++}` },
-    body: JSON.stringify(payload({ idempotencyKey: key })),
-  });
-  let body = null;
-  try { body = await res.json(); } catch {}
-  const exact = res.status === 200 && body && Object.keys(body).length === 1 && body.ok === true;
+  const { status, json: body } = await post(payload({ idempotencyKey: key }));
+  const exact = status === 200 && body && Object.keys(body).length === 1 && body.ok === true;
   line(exact, '15', 'POST /api/lead body is exactly {ok:true}',
-    `${res.status} ${JSON.stringify(body)}`);
+    `${status} ${JSON.stringify(body)}`);
 }
 
 /* ---------- 16-18. modal static checks (index.html text only) ---------- */
@@ -698,6 +708,67 @@ const typeSeqOf = (api) => (s) => { let v = ''; for (const ch of s) v = api.sani
   }
   line(clientBad.length === 0 && serverBad.length === 0, 'P22', 'US strictness: client and server agree (10 digits)',
     `clientBad=${clientBad.map(([r]) => r).join(',')} serverBad=${serverBad.join(',')}`);
+}
+
+/* ---------- P23: the modal's error wiring, on the real markup ---------- */
+{
+  // The wiring runs once at init: every .err gets an id and the field's control
+  // points at it with aria-describedby. The snippet is extracted from the page and
+  // executed against the real DOM, so a change to the selector or to the loop is
+  // caught here rather than only in a browser.
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const start = html.indexOf('  function fieldControl(f) {');
+  const end = html.indexOf("  form.addEventListener('input'", start);
+  const snippet = start > 0 && end > start ? html.slice(start, end) : '';
+  const dom = new JSDOM(html);
+  const { document } = dom.window;
+  const form = document.querySelector('.est-form');
+  let api = null;
+  let err = '';
+  try {
+    const { default: vm } = await import('node:vm');
+    const factory = vm.runInNewContext(
+      `(function (form, R) {\n${snippet}\nreturn { check: check, fieldControl: fieldControl };\n})`,
+      Object.create(null),
+    );
+    api = factory(form, { phone: () => 'Enter a valid phone number.', zip: () => '' });
+  } catch (e) { err = e.message; }
+
+  const alerts = form.querySelectorAll('.err[role="alert"]').length;
+  const generic = form.querySelectorAll('.est-alert[role="alert"]').length;
+  const groups = [].slice.call(form.querySelectorAll('[data-f]'));
+  const unlinked = [];
+  for (const f of groups) {
+    const p = f.querySelector('.err');
+    const c = api && api.fieldControl(f);
+    if (!p || !p.id || !c || c.getAttribute('aria-describedby') !== p.id || document.getElementById(p.id) !== p) {
+      unlinked.push(f.dataset.f);
+    }
+  }
+  const linkedAll = groups.length === 9 && unlinked.length === 0;
+  const roleOnlyOnPanel = alerts === 0 && generic === 1;
+
+  // The inline validator writes into the element the control points at, and marks
+  // that same control invalid.
+  let writesRight = false;
+  let detail = '';
+  if (api) {
+    api.check('phone');
+    const input = form.querySelector('#e-phone');
+    const id = input.getAttribute('aria-describedby');
+    const target = id ? document.getElementById(id) : null;
+    writesRight = !!target && target.textContent === 'Enter a valid phone number.'
+      && input.getAttribute('aria-invalid') === 'true';
+    detail = `target=${!!target} text=${target ? JSON.stringify(target.textContent) : 'none'} invalid=${input.getAttribute('aria-invalid')}`;
+  }
+
+  // The submit path must use the same helper, or a server-side error would land on
+  // a different element than the inline one.
+  const submitUsesHelper = /f\.querySelector\('\.err'\)\.textContent = msg;[\s\S]{0,200}var c = fieldControl\(f\);/.test(html);
+
+  line(roleOnlyOnPanel && linkedAll && writesRight && submitUsesHelper && !err, 'P23',
+    'modal errors: one live region, every field linked, message lands in it',
+    err || `alerts=${alerts} generic=${generic} groups=${groups.length} unlinked=${unlinked.join(',') || 'none'} write=${writesRight} submit=${submitUsesHelper} ${detail}`);
 }
 
 /* ---------- cleanup ---------- */

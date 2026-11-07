@@ -3,33 +3,24 @@
 //
 //   node tests/db-wall.test.mjs
 //
-// Reads SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY from .env (or the
-// real environment). Prints PASS/FAIL per line, exits 1 if anything failed.
-// Creates a few rows, then deletes every one of them and verifies the table is clean.
+// Reads SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY through lib/env.js
+// (process.env > .env.test when TEST_ENV=1 > .env.local > .env). Prints PASS/FAIL per
+// line, exits 1 if anything failed. Creates a few rows, then deletes every one of them
+// and verifies the table is clean.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
+import { loadEnv } from '../lib/env.js';
+import { ALDER_DEMO } from './helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RUN = Math.random().toString(36).slice(2, 8);
 const TAG = `dbtest-${RUN}`;
 
-/* ---------- .env, no dependency ---------- */
-function loadEnv(file) {
-  if (!fs.existsSync(file)) return;
-  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
-    if (/^\s*#/.test(line)) continue;
-    const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (!m) continue;
-    let v = m[2];
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-    if (!(m[1] in process.env)) process.env[m[1]] = v;
-  }
-}
-loadEnv(path.join(ROOT, '.env'));
-loadEnv(path.join(ROOT, '.env.local'));
+/* ---------- env, one shared loader ---------- */
+loadEnv();
 
 /* ---------- result printer ---------- */
 let failed = 0;
@@ -96,7 +87,7 @@ for (const t of PUBLIC_TABLES) {
 }
 
 /* ---------- business row ---------- */
-const { data: biz, error: bizErr } = await svc.from('businesses').select('id,slug,status').eq('slug', 'alder-demo').maybeSingle();
+const { data: biz, error: bizErr } = await svc.from('businesses').select('id,slug,status').eq('slug', ALDER_DEMO).maybeSingle();
 if (bizErr || !biz) {
   console.log(`FAIL  seed  'alder-demo' business missing — run supabase/seed.sql  (${bizErr?.message || 'no row'})`);
   process.exit(1);
@@ -152,6 +143,11 @@ for (const [label, over] of bad) {
 /* ---------- 6. hit_rate_limit ---------- */
 {
   await svc.from('rate_limits').delete().eq('key', 'test');
+  // hit_rate_limit buckets by floor(epoch / p_window_seconds). Four calls that
+  // straddle a minute boundary start a fresh counter, so the 4th would be allowed
+  // and the test would fail at random. Wait out a boundary that is too close.
+  const msLeft = 60000 - (Date.now() % 60000);
+  if (msLeft < 3000) await new Promise((r) => setTimeout(r, msLeft + 50));
   const seq = [];
   for (let i = 0; i < 4; i++) {
     const { data, error } = await svc.rpc('hit_rate_limit', { p_key: 'test', p_window_seconds: 60, p_max: 3 });
@@ -200,33 +196,159 @@ const BIND_CODE = ('DBTEST' + RUN).replace(/[^A-Z0-9]/g, '').toUpperCase().slice
   line(ok, '8', 'test rows cleaned up'.padEnd(34), `leads=${(left || []).length} rate_limits=${(rl || []).length} events=${(ev || []).length} bind=${(bc || []).length}`);
 }
 
-/* ---------- E: bind env loading (temp files, no DB) ---------- */
+/* ---------- E: env loading through the REAL loader (temp files, no DB) ----------
+   Every case below writes actual .env* files into a temp root and calls the same
+   loadEnv() the runner and the scripts use. No hand-ordered entry lists: if the
+   loader's precedence changes, these fail. */
 {
-  const { applyDotEnvEntries, loadDotEnvFiles, missingEnvNames } = await import('../scripts/make-bind-code.mjs');
-  // E1: only .env.local has the vars
-  const e1env = {};
-  applyDotEnvEntries(e1env, [{ file: '.env.local', text: 'ONLY_LOCAL=local_val\nSHARED=local_val\n' }, { file: '.env', text: 'ONLY_BASE=base_val\nSHARED=base_val\n' }]);
-  const e1ok = e1env.ONLY_LOCAL === 'local_val' && e1env.ONLY_BASE === 'base_val';
-  line(e1ok, 'E1', 'env loader: only .env.local supplies its vars', `local=${e1env.ONLY_LOCAL} base=${e1env.ONLY_BASE}`);
-  // E2: both present — .env.local wins over .env; non-empty process env wins over both
-  const e2env = { ALREADY: 'proc_val' };
-  applyDotEnvEntries(e2env, [{ file: '.env.local', text: 'SHARED=local_val\nALREADY=local_val\n' }, { file: '.env', text: 'SHARED=base_val\nALREADY=base_val\n' }]);
-  const e2ok = e2env.SHARED === 'local_val' && e2env.ALREADY === 'proc_val';
-  line(e2ok, 'E2', 'env loader: .env.local beats .env, process beats both', `shared=${e2env.SHARED} already=${e2env.ALREADY}`);
-  // E3: neither present — nothing filled, missing names listed
-  const e3env = {};
-  applyDotEnvEntries(e3env, [{ file: '.env.local', text: '' }, { file: '.env', text: '# empty\n' }]);
-  const e3ok = Object.keys(e3env).length === 0 && missingEnvNames(e3env, ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']).join(',') === 'SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY';
-  // Real temp files: same function through the filesystem (inside the repo).
-  const tmpRoot = path.join(ROOT, '_debug', 'envtest-' + RUN);
-  fs.mkdirSync(tmpRoot, { recursive: true });
-  fs.writeFileSync(path.join(tmpRoot, '.env.local'), 'TMP_LOCAL=file_local\nTMP_SHARED=file_local\n');
-  fs.writeFileSync(path.join(tmpRoot, '.env'), 'TMP_SHARED=file_base\n');
-  const tmpEnv = {};
-  loadDotEnvFiles({ env: tmpEnv, root: tmpRoot });
-  const tmpOk = tmpEnv.TMP_LOCAL === 'file_local' && tmpEnv.TMP_SHARED === 'file_local';
-  fs.rmSync(tmpRoot, { recursive: true, force: true });
-  line(e3ok && tmpOk, 'E3', 'env loader: neither present fills nothing; temp files match', `keys=${Object.keys(e3env).length} tmpShared=${tmpEnv.TMP_SHARED}`);
+  const { loadEnv, missingEnvNames, checkNotProduction } = await import('../lib/env.js');
+  const base = path.join(ROOT, '_debug', 'envtest-' + RUN);
+  const mk = (name, files) => {
+    const dir = path.join(base, name);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [f, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, f), text);
+    return dir;
+  };
+
+  // E1: only .env.local present — it supplies its own key and the shared one.
+  {
+    const dir = mk('e1', { '.env.local': 'ONLY_LOCAL=local_val\nSHARED=local_val\n', '.env': 'ONLY_BASE=base_val\n' });
+    const env = {};
+    const { sources } = loadEnv({ env, root: dir, testEnv: false });
+    const ok = env.ONLY_LOCAL === 'local_val' && env.ONLY_BASE === 'base_val'
+      && sources.ONLY_LOCAL === '.env.local' && sources.ONLY_BASE === '.env';
+    line(ok, 'E1', 'env loader: each file supplies its own keys', `local=${sources.ONLY_LOCAL} base=${sources.ONLY_BASE}`);
+  }
+
+  // E2: all three files define SHARED; TEST_ENV decides, and process.env always wins.
+  {
+    const dir = mk('e2', {
+      '.env.test': 'SHARED=test_val\nALREADY=test_val\n',
+      '.env.local': 'SHARED=local_val\nALREADY=local_val\n',
+      '.env': 'SHARED=base_val\nALREADY=base_val\n',
+    });
+    const withTest = loadEnv({ env: { ALREADY: 'proc_val' }, root: dir, testEnv: true }).env;
+    const withoutTest = loadEnv({ env: { ALREADY: 'proc_val' }, root: dir, testEnv: false }).env;
+    const ok = withTest.SHARED === 'test_val' && withoutTest.SHARED === 'local_val'
+      && withTest.ALREADY === 'proc_val' && withoutTest.ALREADY === 'proc_val';
+    line(ok, 'E2', 'precedence: process > .env.test > .env.local > .env',
+      `test=${withTest.SHARED} noTest=${withoutTest.SHARED} proc=${withTest.ALREADY}`);
+  }
+
+  // E3: nothing present — nothing filled, and the missing names are reported in order.
+  {
+    const dir = mk('e3', {});
+    const env = {};
+    const { sources } = loadEnv({ env, root: dir, testEnv: true });
+    const ok = Object.keys(env).length === 0
+      && missingEnvNames(env, ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']).join(',') === 'SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY'
+      && Object.keys(sources).length === 0;
+    line(ok, 'E3', 'no files: nothing filled, missing names listed', `keys=${Object.keys(env).length}`);
+  }
+
+  // E4: .env.test is ignored unless TEST_ENV=1 — the file must not leak into normal runs.
+  {
+    const dir = mk('e4', { '.env.test': 'ONLY_TEST=test_val\n' });
+    const off = loadEnv({ env: {}, root: dir, testEnv: false }).env;
+    const on = loadEnv({ env: {}, root: dir, testEnv: true }).env;
+    line(off.ONLY_TEST === undefined && on.ONLY_TEST === 'test_val', 'E4',
+      '.env.test ignored unless TEST_ENV=1', `off=${off.ONLY_TEST === undefined} on=${on.ONLY_TEST === 'test_val'}`);
+  }
+
+  // E5: the production guard compares values and never prints them.
+  {
+    const dir = mk('e5', { '.env': 'SUPABASE_URL=https://prod-project.example.co/\n' });
+    const same = checkNotProduction({ SUPABASE_URL: 'https://prod-project.example.co' }, dir);
+    const other = checkNotProduction({ SUPABASE_URL: 'https://test-project.example.co' }, dir);
+    const none = checkNotProduction({}, dir);
+    line(same.reason === 'same-as-env' && other.reason === 'ok' && none.reason === 'no-url', 'E5',
+      'guard: same URL refused, different allowed, missing reported',
+      `same=${same.reason} other=${other.reason} none=${none.reason}`);
+  }
+
+  fs.rmSync(base, { recursive: true, force: true });
+}
+
+/* ---------- E7: the IP hash refuses to exist without a salt ----------
+   An unsalted sha256 of an IPv4 address is a 2^32 lookup, so a "pseudonymous"
+   rate-limit key with no salt is really the address. hashIp returns null and the
+   callers decide; neither endpoint may fall back to an unsalted hash. */
+{
+  const { hashIp } = await import('../lib/hash.js');
+  const a = hashIp('203.0.113.9', 'salt-a');
+  const b = hashIp('203.0.113.9', 'salt-b');
+  const c = hashIp('203.0.113.9', 'salt-a');
+  const saved = process.env.IP_HASH_SALT;
+  delete process.env.IP_HASH_SALT;
+  const noSalt = hashIp('203.0.113.9');
+  process.env.IP_HASH_SALT = 'from-env';
+  const fromEnv = hashIp('203.0.113.9');
+  if (saved === undefined) delete process.env.IP_HASH_SALT; else process.env.IP_HASH_SALT = saved;
+  const ok = typeof a === 'string' && a.length === 64 && a === c && a !== b
+    && noSalt === null && fromEnv === hashIp('203.0.113.9', 'from-env');
+  line(ok, 'E7', 'IP hash: salted, salt-dependent, null without a salt',
+    `len=${a && a.length} stable=${a === c} saltMatters=${a !== b} noSalt=${noSalt === null} env=${!!fromEnv}`);
+}
+
+/* ---------- E10: the auto-reply cap default and its parsing ----------
+   40 is sized against Resend's free plan: 100 emails/day, and a capped lead can
+   still cost one uncapped owner email, so the cap must stay under half of it. */
+{
+  const { autoReplyCap } = await import('../lib/notify.js');
+  const saved = process.env.AUTOREPLY_DAILY_CAP;
+  delete process.env.AUTOREPLY_DAILY_CAP;
+  const def = autoReplyCap();
+  process.env.AUTOREPLY_DAILY_CAP = '7';
+  const seven = autoReplyCap();
+  const bad = ['0', '-3', 'abc', ''].every((v) => { process.env.AUTOREPLY_DAILY_CAP = v; return autoReplyCap() === 40; });
+  if (saved === undefined) delete process.env.AUTOREPLY_DAILY_CAP; else process.env.AUTOREPLY_DAILY_CAP = saved;
+  line(def === 40 && seven === 7 && bad, 'E10', 'auto-reply cap: default 40, invalid falls back',
+    `default=${def} explicit=${seven} invalid=${bad}`);
+}
+
+/* ---------- E9: clientIp trusts the Vercel headers before x-forwarded-for ----------
+   On Vercel the edge sets x-real-ip and x-vercel-forwarded-for; x-forwarded-for's
+   left-most entry is whatever the client sent. If the order ever flips, a caller
+   can rotate that header and walk past the per-IP rate limit. */
+{
+  const { clientIp } = await import('../lib/request.js');
+  const h = (o) => ({ headers: o });
+  const realWins = clientIp(h({ 'x-real-ip': '1.1.1.1', 'x-forwarded-for': '9.9.9.9' })) === '1.1.1.1';
+  const vercelWins = clientIp(h({ 'x-vercel-forwarded-for': '2.2.2.2', 'x-forwarded-for': '9.9.9.9' })) === '2.2.2.2';
+  const firstOfList = clientIp(h({ 'x-forwarded-for': '3.3.3.3, 4.4.4.4' })) === '3.3.3.3';
+  const socketFallback = clientIp({ headers: {}, socket: { remoteAddress: '5.5.5.5' } }) === '5.5.5.5';
+  const empty = clientIp({ headers: {} }) === '';
+  line(realWins && vercelWins && firstOfList && socketFallback && empty, 'E9',
+    'clientIp: real-ip, then vercel, then xff, then socket',
+    `real=${realWins} vercel=${vercelWins} xff=${firstOfList} socket=${socketFallback} empty=${empty}`);
+}
+
+/* ---------- E8: --seed-check is read-only and exempt from the production guard ----------
+   The guard protects suites. --seed-check runs two SELECTs and exits, and it is the
+   command the handoff recommends instead of a full run, so refusing it would make
+   the documented workflow unusable against production. Exit code is not asserted:
+   it is 0 when the row matches seed and 1 when it does not, and both are fine here. */
+{
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'tests', 'run.mjs'), '--seed-check'], {
+    cwd: ROOT, encoding: 'utf8', timeout: 60000, env: { ...process.env, ALLOW_PROD_TESTS: '' },
+  });
+  const refused = /refusing to run/.test(r.stdout || '');
+  const ran = /seed-check\s+(OK|FAIL|differing-columns)/.test(r.stdout || '');
+  line(!refused && ran, 'E8', 'seed-check runs without ALLOW_PROD_TESTS', `refused=${refused} ran=${ran} exit=${r.status}`);
+}
+
+/* ---------- E6: the runner rejects unknown flags ----------
+   `--timing` used to be dropped silently, so it looked like a working flag.
+   The child is given a real suite so that, if the check regresses, it exits 0
+   after a 0.1 s run instead of starting the whole default suite. */
+{
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'tests', 'run.mjs'), '--timing', 'tests/migrations.test.mjs'], {
+    cwd: ROOT, encoding: 'utf8', timeout: 60000,
+  });
+  const ok = r.status === 1 && /unknown flag\(s\): --timing/.test(r.stdout || '');
+  line(ok, 'E6', 'runner rejects an unknown flag', `exit=${r.status} msg=${ok}`);
 }
 
 console.log('');

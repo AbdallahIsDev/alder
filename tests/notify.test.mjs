@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
+import { fakeRes, ALDER_DEMO } from './helpers.mjs';
 
 loadEnv();
 const TG = process.env.FAKE_TG_URL;
@@ -54,25 +55,23 @@ async function clean() {
   await resetLimits();
 }
 
-function fakeRes() {
-  const r = {
-    code: 0, body: null, headers: {},
-    setHeader(k, v) { this.headers[k] = v; },
-    status(c) { this.code = c; return this; },
-    json(o) { this.body = o; return this; },
-    send(s) { this.body = s; return this; },
-    end() { return this; },
-  };
-  return r;
-}
 
 let ip = 40;
+/* One phone per post. The suite must not collide with rows already in the
+   database (duplicate detection would add a line to the alert and break the
+   exact-text assertions), and posts must not collide with each other. 515-555 is
+   a valid US exchange; the 2xxx block is not used by the seed or by prod data. */
+let contactSeq = 0;
+const nextPhone = () => '515555' + String(2000 + (parseInt(RUN, 36) % 6000) + contactSeq++).slice(-4);
+/* The email has to be unique per post too: duplicate detection matches phone OR
+   email, and earlier runs left leads on alder-demo with the old fixed address. */
+const nextEmail = () => `notify${parseInt(RUN, 36) % 100000}-${contactSeq}@example.com`;
 async function post(over, extra) {
   const body = {
     service: 'replacement', home: 'house', timing: 'asap', age: '10 to 20 years',
-    zip: '50265', phone: '5155550142', name: 'Notify Tester', email: 'notify@example.com',
+    zip: '50265', phone: nextPhone(), name: 'Notify Tester', email: nextEmail(),
     notes: 'plain note', claim: false, website: '', elapsed: 5000,
-    slug: 'alder-demo', idempotencyKey: `${RUN}-${Math.random().toString(36).slice(2, 10)}`,
+    slug: ALDER_DEMO, idempotencyKey: `${RUN}-${Math.random().toString(36).slice(2, 10)}`,
     ...over,
   };
   const res = fakeRes();
@@ -97,14 +96,14 @@ try {
   await clean();
   await reset(TG); await reset(RS);
   const special = { name: 'Bob" <x@y>', notes: '<script>alert(1)</script>\r\nsecond line' };
-  const { res, key } = await post(special);
+  const { res, key, body: specialBody } = await post(special);
   const rows = await leadFor(key);
   const rreq = (await requests(RS)).filter((x) => x.method === 'POST' && x.path === '/emails');
   const owner = rreq.find((x) => x.body && x.body.subject && x.body.subject.startsWith('New lead:')) || rreq[0];
   const b = owner && owner.body;
   const okFrom = b && b.from && b.from.startsWith('Lead Alerts <');
   const okTo = b && Array.isArray(b.to) && b.to[0] === process.env.MAIL_REDIRECT_TO;
-  const okReply = b && b.reply_to === 'notify@example.com';
+  const okReply = b && b.reply_to === specialBody.email;
   const okPrefix = b && b.subject.startsWith('[TEST for ');
   const escaped = b && b.html.includes('&lt;script&gt;') && b.html.includes('Bob&quot; &lt;x@y&gt;');
   const bothParts = b && typeof b.html === 'string' && typeof b.text === 'string';
@@ -130,7 +129,7 @@ try {
     const urls = b.html.match(/https?:\/\/[^"\s]+/g) || [];
     badUrls = urls.filter((u) => {
       const clean = u.replace(/['")]+$/, '');
-      return !(brandPrefix.some((p) => clean.startsWith(p)) || clean.startsWith('https://g.page') || clean.includes('alder-demo'));
+      return !(brandPrefix.some((p) => clean.startsWith(p)) || clean.startsWith('https://g.page') || clean.includes(ALDER_DEMO));
     });
   }
   const noExternalOk = !!b && !/<script/.test(b.html) && badUrls.length === 0;
@@ -280,6 +279,33 @@ try {
   line(g11Ok && singleAccent, 'G11', 'Call=accent/accentText, Email=bg/onBg; no-email lead gets one accent button',
     `call=${callBtn && callBtn[1]} mail=${mailBtn && mailBtn[1]} single=${singleAccent}`);
 
+  /* G13: a name carrying CR/LF cannot forge a line in the plain-text alert.
+     The alert is line-structured ("Name:", "Phone:", "Status:"), so a newline in
+     a customer-supplied field would let the sender add a fake status line.
+     Same value with the newline already collapsed must render identically. */
+  {
+    const { telegramAlertText: textNew, renderLeadList: listNew } = await import('../lib/content.js');
+    const mk = (name) => ({
+      business: { name: 'Alder Roofing' },
+      lead: {
+        name, phone: '+201005408345', email: '', service: 'repair', timing: 'asap',
+        home: 'house', roof_age: 'Not sure', insurance_claim: false, zip: '50265', notes: '',
+      },
+    });
+    const evil = textNew(mk('John\n\n🔵 Status: Contacted'));
+    const flat = textNew(mk('John 🔵 Status: Contacted'));
+    const normal = textNew(mk('John'));
+    const sameLines = evil.split('\n').length === normal.split('\n').length;
+    const nameLine = evil.split('\n').find((l) => l.startsWith('Name:')) || '';
+    const oneStatus = evil.split('\n').filter((l) => /^\S+ Status: /.test(l)).length;
+    const oneList = listNew([{ name: 'Ann', service: 'repair', phone: '+201005408345', status: 'open', created_at: new Date().toISOString() }]);
+    const evilList = listNew([{ name: 'Ann\n🔵 Status: Done', service: 'repair', phone: '+201005408345', status: 'open', created_at: new Date().toISOString() }]);
+    const listOk = evilList.split('\n').length === oneList.split('\n').length;
+    line(evil === flat && sameLines && nameLine === 'Name: John 🔵 Status: Contacted' && oneStatus === 1 && listOk,
+      'G13', 'newline in a name cannot forge an alert line',
+      `same=${evil === flat} lines=${evil.split('\n').length}/${normal.split('\n').length} status=${oneStatus} list=${listOk}`);
+  }
+
   /* H: review-request email (unit-level) */
   const { reviewEmail: reviewEmailNew, autoReply: autoReplyNew } = await import('../lib/content.js');
   const site = 'https://reviews.example';
@@ -334,7 +360,7 @@ try {
 /* Resend 6 s hang */
 try {
   await clean();
-  await control(RS, { mode: 'hang_once', hangMs: 6000 }); await reset(RS);
+  await control(RS, { mode: 'hang_once', hangMs: 2500 }); await reset(RS);
   const { res, key, ms } = await post({});
   await control(RS, { mode: 'ok' }); await reset(RS);
   const rows = await leadFor(key);
@@ -343,6 +369,153 @@ try {
   line(res.code === 200 && rows.length === 1 && !!fail && ms < 5000,
     'A4', 'Resend 6 s hang -> ok:true, under 5 s', `${res.code} ms=${ms} meta=${JSON.stringify(fail && fail.meta)}`);
 } catch (e) { line(false, 'A4', 'Resend hang', e.message); }
+
+/* ---------- B9-B12: cross-channel owner-alert fallback ----------
+   Both channels always send. When exactly one fails the owner already has the
+   alert, so a second send would be a duplicate; only when NEITHER delivered does
+   each usable channel get one more attempt, marked { fallback: true }. */
+
+const sendMessageCount = async () => (await requests(TG)).filter((r) => r.path.includes('/sendMessage')).length;
+const emailCount = async () => (await requests(RS)).filter((r) => r.path === '/emails').length;
+const metaOf = (evs) => evs.map((e) => e.meta || {});
+
+/* B9: both up — one Telegram, one owner email plus the auto-reply, no fallback */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const fb = metaOf(evs).some((m) => m.fallback === true);
+  line(res.code === 200 && rows.length === 1 && tg === 1 && mail === 2 && !fb,
+    'B9', 'both up: one alert per channel, no fallback', `tg=${tg} mail=${mail} fallback=${fb}`);
+} catch (e) { line(false, 'B9', 'both up', e.message); }
+
+/* B10: Telegram 500 — the owner has the email, so no second Telegram attempt */
+try {
+  await clean();
+  await control(TG, { mode: '500' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  await control(TG, { mode: 'ok' });
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const failed = evs.some((e) => e.kind === 'tg_failed' && e.meta && e.meta.status === 500);
+  const fb = metaOf(evs).some((m) => m.fallback === true);
+  line(res.code === 200 && rows.length === 1 && tg === 1 && mail === 2 && failed && !fb,
+    'B10', 'telegram down: email delivered, no duplicate send', `tg=${tg} mail=${mail} failed=${failed} fallback=${fb}`);
+} catch (e) { line(false, 'B10', 'telegram down', e.message); }
+
+/* B11: Resend 500 — the owner has the Telegram alert, so no second email */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: '500' });
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  await control(RS, { mode: 'ok' });
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const failed = evs.some((e) => e.kind === 'email_owner_failed' && e.meta && e.meta.status === 500);
+  const fb = metaOf(evs).some((m) => m.fallback === true);
+  line(res.code === 200 && rows.length === 1 && tg === 1 && mail === 2 && failed && !fb,
+    'B11', 'resend down: telegram delivered, no duplicate send', `tg=${tg} mail=${mail} failed=${failed} fallback=${fb}`);
+} catch (e) { line(false, 'B11', 'resend down', e.message); }
+
+/* B12: both down — nothing reached the owner, so both channels are retried once */
+try {
+  await clean();
+  await control(TG, { mode: '500' }); await control(RS, { mode: '500' });
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const fb = metaOf(evs).filter((m) => m.fallback === true).length;
+  const failedTg = evs.filter((e) => e.kind === 'tg_failed').length;
+  line(res.code === 200 && rows.length === 1 && tg === 2 && mail === 3 && fb === 2 && failedTg === 2,
+    'B12', 'both down: lead saved, one retry per channel', `tg=${tg} mail=${mail} fallback=${fb} tgFailed=${failedTg}`);
+} catch (e) { line(false, 'B12', 'both down', e.message); }
+
+/* B13: the per-business daily cap applies to the customer auto-reply only.
+   Two leads, cap of 1: the second auto-reply is skipped, but its lead is saved
+   and the owner still gets both the email and the Telegram alert. */
+try {
+  await clean();
+  const savedCap = process.env.AUTOREPLY_DAILY_CAP;
+  process.env.AUTOREPLY_DAILY_CAP = '1';
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const first = await post({ idempotencyKey: `${RUN}-cap1` });
+  const second = await post({ idempotencyKey: `${RUN}-cap2` });
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const rows = (await leadFor(`${RUN}-cap1`)).length + (await leadFor(`${RUN}-cap2`)).length;
+  const capped = logs.some((l) => l.includes('autoreply_capped'));
+  if (savedCap === undefined) delete process.env.AUTOREPLY_DAILY_CAP; else process.env.AUTOREPLY_DAILY_CAP = savedCap;
+  // 2 owner emails + 1 auto-reply (the second is capped); 2 Telegram alerts.
+  line(first.res.code === 200 && second.res.code === 200 && rows === 2 && tg === 2 && mail === 3 && capped,
+    'B13', 'daily cap: auto-reply skipped, lead and alerts kept',
+    `rows=${rows} tg=${tg} mail=${mail} capped=${capped}`);
+} catch (e) { line(false, 'B13', 'auto-reply cap', e.message); }
+
+/* B15: the email is lowercased at the boundary, so a differently-cased address
+   is the same address for storage AND for duplicate detection. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const dupEmail = nextEmail();
+  const mixed = await post({ email: dupEmail.toUpperCase() });
+  const lower = await post({ email: dupEmail });
+  const mixedRows = await leadFor(mixed.key);
+  const lowerRows = await leadFor(lower.key);
+  const stored = mixedRows.length ? (await svc.from('leads').select('email').eq('id', mixedRows[0].id).single()).data.email : null;
+  const evs = lowerRows.length ? await events(lowerRows[0].id) : [];
+  const created = evs.find((e) => e.kind === 'created');
+  const flagged = created && created.meta && created.meta.duplicate_of === (mixedRows[0] && mixedRows[0].id);
+  line(stored === dupEmail && flagged, 'B15',
+    'email lowercased at insert and matched by the duplicate check',
+    `stored=${stored === dupEmail} flagged=${!!flagged}`);
+} catch (e) { line(false, 'B15', 'lowercase email', e.message); }
+
+/* B14: a repeat phone or email is flagged in the alert and on the created event.
+   The lead is always stored — nothing is blocked or merged — and the alert never
+   carries any detail of the earlier request. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  // Unique per run: a hardcoded phone can collide with a lead an earlier run left
+  // behind, and then duplicate_of points at that older row instead of the one this
+  // test created.
+  const dupPhone = nextPhone();
+  const first = await post({ phone: dupPhone, email: nextEmail() });
+  const second = await post({ phone: dupPhone, email: nextEmail() });
+  const third = await post({ phone: nextPhone(), email: nextEmail() });
+  const ids = [];
+  for (const k of [first.key, second.key, third.key]) {
+    const rows = await leadFor(k);
+    ids.push(rows.length ? rows[0].id : null);
+  }
+  const evsSecond = ids[1] ? await events(ids[1]) : [];
+  const evsThird = ids[2] ? await events(ids[2]) : [];
+  const createdSecond = evsSecond.find((e) => e.kind === 'created');
+  const createdThird = evsThird.find((e) => e.kind === 'created');
+  const alerts = (await requests(TG)).filter((r) => r.path.includes('/sendMessage')).map((r) => r.body.text || '');
+  const flagged = alerts[1] && alerts[1].includes('Possible repeat of an earlier request');
+  const notFlagged = alerts[0] && !alerts[0].includes('Possible repeat')
+    && alerts[2] && !alerts[2].includes('Possible repeat');
+  const metaOk = createdSecond && createdSecond.meta && createdSecond.meta.duplicate_of === ids[0]
+    && createdThird && !(createdThird.meta && createdThird.meta.duplicate_of);
+  const allSaved = ids.every(Boolean) && alerts.length === 3;
+  line(allSaved && flagged && notFlagged && metaOk, 'B14',
+    'repeat phone flagged, lead still saved, no earlier details',
+    `alerts=${alerts.length} flagged=${!!flagged} meta=${!!metaOk} saved=${allSaved}`);
+} catch (e) { line(false, 'B14', 'duplicate detection', e.message); }
 
 /* Redirect off + default sender -> no HTTP call */
 try {
@@ -365,7 +538,7 @@ try {
 try {
   await clean();
   await reset(TG); await reset(RS);
-  const { res, key } = await post({ notes: 'A note that should be capped' });
+  const { res, key, body: sentBody } = await post({ notes: 'A note that should be capped' });
   const tgReq = (await requests(TG)).filter((x) => x.method === 'POST' && x.path.includes('/sendMessage'));
   const t = tgReq[0] && tgReq[0].body;
   // NEW (item 2): one "Label: value" per line, blank lines between groups, title
@@ -377,8 +550,8 @@ try {
     'New lead · Alder Roofing (demo)',
     '',
     'Name: Notify Tester',
-    'Phone: +15155550142',
-    'Email: notify@example.com',
+    `Phone: +1${sentBody.phone}`,
+    `Email: ${sentBody.email}`,
     '',
     'Service: Roof replacement',
     'Timing: As soon as possible',
@@ -413,7 +586,7 @@ try {
     'New lead · Alder Roofing (demo)',
     '',
     'Name: Notify Tester',
-    'Phone: +15155550142',
+    `Phone: +1${noContact.body.phone}`,
     '',
     'Service: Roof replacement',
     'Timing: As soon as possible',
@@ -516,7 +689,7 @@ try {
 let boundId = null, activeId = null;
 try {
   await clean();
-  const { data: biz } = await svc.from('businesses').select('id').eq('slug', 'alder-demo').single();
+  const { data: biz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
   const chat = 770001;
   await svc.from('business_chats').upsert({ business_id: biz.id, tg_chat_id: chat }, { onConflict: 'tg_chat_id' });
   await reset(TG);
@@ -603,7 +776,7 @@ try {
 /* 6 s hang */
 try {
   await clean();
-  await control(TG, { mode: 'hang_once', hangMs: 6000 }); await reset(TG);
+  await control(TG, { mode: 'hang_once', hangMs: 2500 }); await reset(TG);
   const { res, key, ms } = await post({});
   await control(TG, { mode: 'ok' }); await reset(TG);
   const rows = await leadFor(key);

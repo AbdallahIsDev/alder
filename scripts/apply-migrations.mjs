@@ -3,10 +3,12 @@
 //
 //   npm run db:apply
 //
-// Reads DATABASE_URL from .env only (never from the ambient environment, so a stray
-// shell export cannot point this at the wrong database). Verifies TLS against the
-// system trust store — if the certificate does not verify, this stops and says so
-// rather than quietly downgrading to an unverified connection.
+// Reads DATABASE_URL through lib/env.js (process.env > .env.test when TEST_ENV=1 >
+// .env.local > .env) and prints which source supplied it. A DATABASE_URL that comes
+// from the shell is refused unless TEST_ENV=1, so a stray export cannot silently
+// point this at another database. Verifies TLS against the pinned Supabase root —
+// if the certificate does not verify, this stops and says so rather than quietly
+// downgrading to an unverified connection.
 //
 // Safety: refuses to run if public.businesses already exists. It never drops,
 // alters or truncates anything. Each file runs in its own transaction.
@@ -15,14 +17,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import { APPLY_ORDER, unlistedMigrations, missingApplyFiles } from '../lib/migrations.js';
+import { loadEnv } from '../lib/env.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const ALL_FILES = [
-  'supabase/migrations/0001_init.sql',
-  'supabase/seed.sql',
-  'supabase/migrations/0002_default_privileges.sql',
-  'supabase/migrations/0003_service_role_grants.sql',
-];
+
+/* The list lives in lib/migrations.js so a test can prove it covers the directory.
+   Checked here too, before connecting: a new .sql file that nobody listed is a
+   silent schema gap on a fresh database. */
+const UNLISTED = unlistedMigrations(ROOT);
+const MISSING = missingApplyFiles(ROOT);
+const ALL_FILES = APPLY_ORDER;
 
 /* --only <path> applies a single later migration against an already-installed database.
    The "businesses must be absent" guard is deliberately skipped in that mode; nothing
@@ -40,29 +45,35 @@ const fail = (msg) => {
   out('FAIL  ' + msg);
 };
 
-/* ---------- .env only ---------- */
-function readDotEnv(file) {
-  if (!fs.existsSync(file)) return {};
-  const env = {};
-  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
-    if (/^\s*#/.test(line)) continue;
-    const m = /^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
-    if (!m) continue;
-    let v = m[2];
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-    env[m[1]] = v;
-  }
-  return env;
-}
-
-const env = readDotEnv(path.join(ROOT, '.env'));
-const DSN = env.DATABASE_URL;
+/* ---------- env, one shared loader ---------- */
+const { sources } = loadEnv();
+const DSN = process.env.DATABASE_URL;
 
 out('apply-migrations');
 out('');
 
+/* ---------- list integrity (no database needed) ---------- */
+if (UNLISTED.length) {
+  fail(`these migration files are not in lib/migrations.js APPLY_ORDER: ${UNLISTED.join(', ')}`);
+  out('      A fresh database would be built without them. Add each one in order.');
+  process.exit(1);
+}
+if (MISSING.length) {
+  fail(`APPLY_ORDER lists files that do not exist: ${MISSING.join(', ')}`);
+  process.exit(1);
+}
+out(`${pad('files', 26)}${ALL_FILES.length} in order, directory fully covered`);
+out(`${pad('env source', 26)}${sources.DATABASE_URL || '(none)'}`);
+out('');
+
+/* A shell export is the one way to reach a database nobody meant to touch. */
+if (DSN && sources.DATABASE_URL === 'process.env' && String(process.env.TEST_ENV || '') !== '1') {
+  fail('DATABASE_URL came from the shell, not from an env file. Unset it, or set TEST_ENV=1 to allow it.');
+  process.exit(1);
+}
+
 if (!DSN) {
-  fail('.env has no DATABASE_URL. Add it there (session pooler URI) — this script will not read it from anywhere else.');
+  fail('no DATABASE_URL in process.env, .env.test (TEST_ENV=1), .env.local or .env.');
   process.exit(1);
 }
 
@@ -77,7 +88,7 @@ try {
     database: decodeURIComponent(u.pathname.replace(/^\//, '')) || 'postgres',
   };
 } catch {
-  fail('DATABASE_URL in .env is not a parseable URI.');
+  fail('DATABASE_URL is not a parseable URI.');
   process.exit(1);
 }
 
@@ -207,10 +218,17 @@ for (const rel of FILES) {
   }
 }
 
-/* ---------- post-checks ---------- */
-if (!failed) {
+/* ---------- post-checks ----------
+   One function per check. The SQL and the printed lines are unchanged from the
+   single block these were cut out of; only the nesting changed, so a failure
+   names the check that produced it and each query is readable on its own. */
+
+async function checkConstraintAfter() {
   await showConstraint('constraint after');
   out('');
+}
+
+async function checkRoleTableGrants() {
   out('--- grants held by anon / authenticated (must be empty) ---');
   try {
     const { rows } = await client.query(`
@@ -228,9 +246,11 @@ if (!failed) {
   } catch (e) {
     fail(`grant check failed: ${e.message}`);
   }
+}
 
-  // Independent sweep: role_table_grants only shows grants where the grantor or grantee
-  // is a currently-enabled role, so it can under-report. has_table_privilege cannot.
+/* role_table_grants only shows grants where the grantor or grantee is a currently
+   enabled role, so it can under-report. has_table_privilege cannot. */
+async function checkPrivilegeSweep() {
   out('');
   out('--- independent sweep: has_table_privilege(anon|authenticated) ---');
   try {
@@ -250,6 +270,14 @@ if (!failed) {
       for (const r of leaks) out(`  ${r.schema}.${r.name}  anon(sel=${r.anon_sel},ins=${r.anon_ins})  auth(sel=${r.auth_sel},ins=${r.auth_ins})`);
       fail('the independent sweep found reachable objects the information_schema query did not.');
     }
+  } catch (e) {
+    fail(`sweep failed: ${e.message}`);
+  }
+}
+
+/* The schema-level half of the same wall: no USAGE on private for either role. */
+async function checkPrivateSchemaUsage() {
+  try {
     const { rows: sch } = await client.query(`
       select has_schema_privilege('anon','private','USAGE') as anon_usage,
              has_schema_privilege('authenticated','private','USAGE') as auth_usage`);
@@ -259,7 +287,9 @@ if (!failed) {
   } catch (e) {
     fail(`sweep failed: ${e.message}`);
   }
+}
 
+async function checkBusinessCount() {
   out('');
   out('--- state ---');
   try {
@@ -270,7 +300,9 @@ if (!failed) {
   } catch (e) {
     fail(`count failed: ${e.message}`);
   }
+}
 
+async function checkTableInventory() {
   try {
     const { rows } = await client.query(`
       select table_schema, table_name, table_type
@@ -286,6 +318,15 @@ if (!failed) {
   } catch (e) {
     fail(`table list failed: ${e.message}`);
   }
+}
+
+if (!failed) {
+  await checkConstraintAfter();
+  await checkRoleTableGrants();
+  await checkPrivilegeSweep();
+  await checkPrivateSchemaUsage();
+  await checkBusinessCount();
+  await checkTableInventory();
 }
 
 await client.end();

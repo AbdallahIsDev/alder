@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
+import { fakeRes, ALDER_DEMO } from './helpers.mjs';
 
 loadEnv();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -44,16 +45,6 @@ async function resendCalls() {
 }
 async function resetResend() { await fetch(process.env.FAKE_RESEND_URL + '/__reset', { method: 'POST' }); }
 
-function fakeRes() {
-  return {
-    code: 0, body: null, headers: {},
-    setHeader(k, v) { this.headers[k] = v; },
-    status(c) { this.code = c; return this; },
-    json(o) { this.body = o; return this; },
-    send(s) { this.body = s; return this; },
-    end() { return this; },
-  };
-}
 async function call(update, secret) {
   const res = fakeRes();
   await tgHandler({
@@ -73,7 +64,7 @@ const cb = (chatId, data, messageId = 100, text = 'Original alert') => ({
 const ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const mkCode = (n) => { let s = ''; for (let i = 0; i < n; i++) s += ALPHA[Math.floor(Math.random() * ALPHA.length)]; return s; };
 
-const { data: bizA } = await svc.from('businesses').select('id').eq('slug', 'alder-demo').single();
+const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
 const { data: bizB } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
 const chatA = 880001, chatB = 880002, chatX = 880003;
 const createdLeads = [];
@@ -144,10 +135,17 @@ try {
   await createBindCode(code2, bizB.id, new Date(Date.now() + 3600000).toISOString());
   await reset();
   await good(msg(chatB, '/start ' + code2));
-  const aLead1 = await seedLead(bizA.id, 'Alpha Only', 'alpha@example.com');
-  await seedLead(bizA.id, 'Alpha Two', 'alpha2@example.com');
-  await seedLead(bizB.id, 'Beta Only', 'beta@example.com');
-  await seedLead(bizB.id, 'Beta Two', 'beta2@example.com');
+  // Seeds are order-independent (unique idempotency keys per lead).
+  // Promise.all keeps the input order in its result, but the pushes into
+  // createdLeads happen in completion order — so createdLeads[3] is a bizA lead
+  // about half the time and C9's c: from chatB is then correctly refused.
+  // Use the returned ids, which are deterministic.
+  const [aLead1, , bLead1] = await Promise.all([
+    seedLead(bizA.id, 'Alpha Only', 'alpha@example.com'),
+    seedLead(bizA.id, 'Alpha Two', 'alpha2@example.com'),
+    seedLead(bizB.id, 'Beta Only', 'beta@example.com'),
+    seedLead(bizB.id, 'Beta Two', 'beta2@example.com'),
+  ]);
 
   await reset();
   await good(msg(chatA, '/leads'));
@@ -170,7 +168,9 @@ try {
 
   /* malformed callback_data is ignored (never triggers a transition) */
   await reset();
-  for (const bad of ['x:' + aLead1, 'c:not-a-uuid', 'r:not-a-uuid', 'cd:00000000-0000-0000-0000-000000000000', 'c:' + aLead1 + 'extra']) {
+  // 'q:' stands in for an unknown kind: 'x:' became a real recipient callback
+  // when /recipients landed, so it is no longer a malformed example.
+  for (const bad of ['q:' + aLead1, 'c:not-a-uuid', 'r:not-a-uuid', 'cd:00000000-0000-0000-0000-000000000000', 'c:' + aLead1 + 'extra']) {
     await good(cb(chatB, bad));
   }
   const malformedStatus = (await svc.from('leads').select('status').eq('id', aLead1).single()).data.status;
@@ -180,7 +180,7 @@ try {
 
   /* NEW FLOW (item 3): d: now only asks for confirmation; it never emails or changes status */
   await resetResend();
-  const askLead = createdLeads[3];
+  const askLead = bLead1;   // a bizB lead: chatB is bound to bizB
   await reset();
   await good(cb(chatB, 'c:' + askLead));
   await reset();
@@ -324,6 +324,67 @@ try {
     line(againEmails === 0 && againEdits === 0 && againRow.status === 'done',
       'C19', 'second r: after success sends nothing, changes nothing', `emails=${againEmails} edits=${againEdits}`);
 
+    // C33: two r: callbacks fired at the same time send exactly one email.
+    // Both pass the "done and nothing sent yet" checks before either writes, so
+    // without a compare-and-set both would send. rate_limits is the CAS.
+    const raceLead = await seedLead(bizB.id, 'Race Retry', 'raceretry@example.com');
+    await resendCtrl({ mode: '500' });
+    await good(cb(chatB, 'c:' + raceLead));
+    await good(cb(chatB, 'd:' + raceLead));
+    await good(cb(chatB, 'y:' + raceLead));            // email fails -> error view
+    await resendCtrl({ mode: 'ok' });
+    await resetResend();
+    await svc.from('rate_limits').delete().eq('key', 'retry:' + raceLead);
+    await Promise.all([good(cb(chatB, 'r:' + raceLead)), good(cb(chatB, 'r:' + raceLead))]);
+    const raceEmails = (await resendCalls()).length;
+    const raceRow = (await svc.from('leads').select('status').eq('id', raceLead).single()).data;
+    line(raceEmails === 1 && raceRow.status === 'done',
+      'C33', 'two r: at once -> exactly one send', `emails=${raceEmails} status=${raceRow.status}`);
+
+    // C34/C35: the retry mutex is a 10 s bucket in rate_limits. A claim left
+    // behind by an invocation that died before its finally block stops blocking
+    // as soon as the clock leaves that bucket, so a stale lock costs at most 10 s.
+    const mkFailedRetry = async (label, email) => {
+      const id = await seedLead(bizB.id, label, email);
+      await resendCtrl({ mode: '500' });
+      await good(cb(chatB, 'c:' + id));
+      await good(cb(chatB, 'd:' + id));
+      await good(cb(chatB, 'y:' + id));         // review email fails
+      await resendCtrl({ mode: 'ok' });
+      await resetResend();
+      return id;
+    };
+
+    {
+      const staleLead = await mkFailedRetry('Stale Lock', 'stalelock@example.com');
+      await svc.from('rate_limits').delete().eq('key', 'retry:' + staleLead);
+      await svc.from('rate_limits').insert({
+        key: 'retry:' + staleLead,
+        window_start: new Date(Date.now() - 60000).toISOString(),
+        count: 1,
+      });
+      await good(cb(chatB, 'r:' + staleLead));
+      const emails = (await resendCalls()).length;
+      line(emails === 1, 'C34', 'stale retry claim (older bucket) does not block', `emails=${emails}`);
+    }
+
+    {
+      const lockLead = await mkFailedRetry('Live Lock', 'livelock@example.com');
+      // Same guard as db-wall test 6: do not straddle a bucket boundary.
+      const msLeft = 10000 - (Date.now() % 10000);
+      if (msLeft < 3000) await new Promise((r) => setTimeout(r, msLeft + 50));
+      // Claim through the same RPC the handler uses, so the bucket comes from the
+      // database clock rather than this machine's (they are not the same clock,
+      // and a manual insert landed in a different bucket).
+      await svc.from('rate_limits').delete().eq('key', 'retry:' + lockLead);
+      await svc.rpc('hit_rate_limit', { p_key: 'retry:' + lockLead, p_window_seconds: 10, p_max: 1 });
+      await good(cb(chatB, 'r:' + lockLead));
+      const emails = (await resendCalls()).length;
+      const sentFlag = await svc.from('lead_events').select('id').eq('lead_id', lockLead).eq('kind', 'review_requested');
+      line(emails === 0 && (sentFlag.data || []).length === 0, 'C35',
+        'live retry claim blocks the send', `emails=${emails}`);
+    }
+
     // r: on an open lead is refused with "Nothing to retry."
     const openRetry = await seedLead(bizB.id, 'Open Retry', 'openretry@example.com');
     await resetResend();
@@ -380,7 +441,7 @@ try {
     const slowLead = await seedLead(bizB.id, 'Key Slow', 'keyslow@example.com');
     await resendCtrl({ mode: 'ok' });
     await toContacted(slowLead);
-    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resendCtrl({ mode: 'hang_once', hangMs: 2500 });
     await resetResend();
     await good(cb(chatB, 'y:' + slowLead));
     await resendCtrl({ mode: 'ok' });
@@ -429,7 +490,7 @@ try {
     await resendCtrl({ mode: '500' });
     await resetResend();
     await good(cb(chatB, 'y:' + aLead));
-    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resendCtrl({ mode: 'hang_once', hangMs: 2500 });
     await resetResend();
     await good(cb(chatB, 'r:' + aLead));
     const aSecond = await keyOf();
@@ -445,11 +506,11 @@ try {
     const bLead = await seedLead(bizB.id, 'Key Seq B', 'keyseqb@example.com');
     await resendCtrl({ mode: 'ok' });
     await toContacted(bLead);
-    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resendCtrl({ mode: 'hang_once', hangMs: 2500 });
     await resetResend();
     await good(cb(chatB, 'y:' + bLead));
     const bFirst = await keyOf();
-    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resendCtrl({ mode: 'hang_once', hangMs: 2500 });
     await resetResend();
     await good(cb(chatB, 'r:' + bLead));
     const bSecond = await keyOf();
@@ -465,7 +526,7 @@ try {
     const cLead = await seedLead(bizB.id, 'Key Seq C', 'keyseqc@example.com');
     await resendCtrl({ mode: 'ok' });
     await toContacted(cLead);
-    await resendCtrl({ mode: 'hang_once', hangMs: 6000 });
+    await resendCtrl({ mode: 'hang_once', hangMs: 2500 });
     await resetResend();
     await good(cb(chatB, 'y:' + cLead));
     await resendCtrl({ mode: '500' });
@@ -502,14 +563,36 @@ try {
      view otherwise, with no second answer. */
   {
     const src = fs.readFileSync(path.join(ROOT, 'api', 'tg.js'), 'utf8');
-    const yBlock = src.slice(src.indexOf("if (kind === 'y')"), src.indexOf("if (kind === 'r')"));
+    // Anchors are the handler boundaries, not the old inline `if (kind === 'y')`
+    // branches: the y: body now lives in onConfirm, the r: body in onRetry.
+    const yBlock = src.slice(src.indexOf('async function onConfirm'), src.indexOf('async function onRetry'));
     const hasTry = yBlock.includes('} catch (e) {') && yBlock.includes("console.error('tg_callback_failed'");
     const errorView = yBlock.includes("render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed')");
     const noEmailView = yBlock.includes("render('done', { reply_markup: { inline_keyboard: [] } }, 'no_email')");
-    const noSecondAnswer = !/catch \(e\) \{[^}]*answer\(/.test(yBlock.slice(yBlock.lastIndexOf('} catch (e) {')));
-    line(hasTry && errorView && noEmailView,
+    // Slice the catch body itself: a regex bounded by [^}] would stop at the first
+    // inner brace and miss an answer() that sits after it.
+    const noSecondAnswer = !yBlock.slice(yBlock.lastIndexOf('} catch (e) {')).includes('answer(');
+    line(hasTry && errorView && noEmailView && noSecondAnswer,
       'C31', 'y: post-transition wrap renders error (or no-email done) on throw',
       `try=${hasTry} error=${errorView} noEmail=${noEmailView} innerCatchAnswers=${!noSecondAnswer}`);
+  }
+
+  /* C36: the answer-once guard, behaviourally. A callback whose handler would
+     answer twice (a branch that answers, then an error path that answers again)
+     must reach Telegram exactly once, and with the FIRST text. Exercised through
+     the real answerCallbackQuery -> lib/tg.js -> fake server path, so removing
+     the guard shows up as two requests, not as a source-text mismatch. */
+  {
+    const { createAnswerOnce } = await import('../api/tg.js');
+    await reset();
+    const answer = createAnswerOnce('cb-guard-' + Math.random().toString(36).slice(2, 8));
+    await answer('');
+    await answer('Something went wrong. Try again.');
+    await answer('third');
+    const calls = (await sent()).filter((r) => r.path.includes('/answerCallbackQuery'));
+    const firstOnly = calls.length === 1 && calls[0].body && calls[0].body.callback_query_id.startsWith('cb-guard-');
+    line(firstOnly, 'C36', 'answer-once: two answers reach Telegram once',
+      `calls=${calls.length} first=${calls[0] && calls[0].body ? 'yes' : 'no'}`);
   }
 
   /* Item 2 (this bundle): a thrown DB error answers once with
@@ -664,7 +747,7 @@ try {
     ];
     const banned = /another|other (roofer|business|compan)|roofers|administrator|provider|move it|shared|multiple/i;
     const exactOk = C.botLinkedText('Alder Roofing (demo)') === `You're connected to Alder Roofing (demo). ✅\n\nNew estimate requests from your website will appear here the moment they come in.\n\nFor each request:\n• Tap Mark contacted after you call the customer.\n• Tap Job completed when the work is done. You can then send the customer a review request.\n\nSend /leads to see your latest requests, or /help any time.`
-      && C.BOT_HELP === `How this works\n\nNew estimate requests from your website appear here as soon as they come in.\n\nFor each request:\n• Mark contacted after you call the customer.\n• Job completed when the work is done, to send a review request.\n\nCommands:\n/leads · your latest requests\n/help · this message`
+      && C.BOT_HELP === `How this works\n\nNew estimate requests from your website appear here as soon as they come in.\n\nFor each request:\n• Mark contacted after you call the customer.\n• Job completed when the work is done, to send a review request.\n\nCommands:\n/leads · your latest requests\n/invite · connect a second phone\n/recipients · who receives alerts\n/help · this message`
       && C.BOT_ALREADY_CONNECTED === `You're all set. New requests will appear here.\n\nSend /help to see what I can do.`
       && C.BOT_NOT_CONNECTED === `This chat isn't connected yet.\n\nOpen the setup link you were sent and tap Start.`
       && C.BOT_BAD_CODE === `That setup link isn't valid or has expired.\n\nAsk for a new one.`

@@ -94,6 +94,72 @@ await checkLogo();
     `len=${bytes.length} png=${isPng}`);
 }
 
+/* F7: form-control borders meet WCAG 1.4.11 (3:1) on the modal's own ground.
+   The field fill is white at 7% over the dialog, the dialog is the ink at 74%
+   over the scrim, and the scrim is the ink at 50% over the page — so the worst
+   case is a white section behind the modal, which is what this models. The three
+   tokens are read from index.html; only the composite chain is hardcoded. */
+{
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  // The .est token block spans a few lines (--ctl-* sits on its own), so take the
+  // line that carries --field plus the three that follow it.
+  const lines = html.split('\n');
+  const at = lines.findIndex((l) => l.includes('--field:') && l.includes('--line:'));
+  const tokenScope = at < 0 ? '' : lines.slice(at, at + 8).join('\n');
+  const token = (name) => {
+    const m = new RegExp('--' + name + ':\\s*([^;]+);').exec(tokenScope);
+    return m ? m[1].trim() : null;
+  };
+  const scrimBlock = /\.est-scrim \{[^}]*background: ([^;]+);/.exec(html);
+  const scrimSpec = scrimBlock ? scrimBlock[1].trim() : null;
+
+  const parse = (v) => {
+    if (!v) return null;
+    let m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(v.trim());
+    if (m) {
+      const h = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
+      return { rgb: h.match(/../g).map((x) => parseInt(x, 16)), a: 1 };
+    }
+    m = /^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)\s*(?:[/,]\s*([\d.]+))?\s*\)$/.exec(v.trim());
+    if (!m) return null;
+    return { rgb: [+m[1], +m[2], +m[3]], a: m[4] === undefined ? 1 : +m[4] };
+  };
+  const over = (fg, bg) => fg.rgb.map((c, i) => c * fg.a + bg[i] * (1 - fg.a));
+  const lin = (c) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  const lum = (rgb) => 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
+  const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+
+  const bg = parse(token('bg')), fieldSpec = parse(token('field')), scrim = parse(scrimSpec);
+  const ctlLine = parse(token('ctl-line')), ctlFocus = parse(token('ctl-focus')), ctlErr = parse(token('ctl-err'));
+  let detail = 'tokens missing';
+  let ok = false;
+  if (bg && fieldSpec && scrim && ctlLine && ctlFocus && ctlErr) {
+    const page = [255, 255, 255];
+    const dialog = over(bg, over(scrim, page));
+    const field = over(fieldSpec, dialog);
+    // A border is painted over what is behind it, so a translucent value is
+    // composited before it is measured — otherwise rgb(255 255 255/.18) would be
+    // scored as opaque white and a regression would look like an improvement.
+    const lineOnField = over(ctlLine, field);
+    const lineOnDialog = over(ctlLine, dialog);
+    const focusOnField = over(ctlFocus, field);
+    const errOnField = over(ctlErr, field);
+    const rLineField = ratio(lineOnField, field);
+    const rLineDialog = ratio(lineOnDialog, dialog);
+    const rFocus = ratio(focusOnField, field);
+    const rFocusStep = ratio(focusOnField, lineOnField);
+    const rErr = ratio(errOnField, field);
+    const rErrStep = ratio(errOnField, lineOnField);
+    const errIsRed = ctlErr.rgb[0] > ctlErr.rgb[1] + 20 && ctlErr.rgb[0] > ctlErr.rgb[2] + 20;
+    ok = rLineField >= 3 && rLineDialog >= 3
+      && rFocus >= 3 && rFocusStep >= 1.4
+      && rErr >= 3 && rErrStep >= 1.4 && errIsRed;
+    detail = `resting ${rLineField.toFixed(2)}/${rLineDialog.toFixed(2)} focus ${rFocus.toFixed(2)} step ${rFocusStep.toFixed(2)} `
+      + `err ${rErr.toFixed(2)} step ${rErrStep.toFixed(2)} red=${errIsRed}`;
+  }
+  line(ok, 'F7', 'form-control borders >=3:1, states distinguishable', detail);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
