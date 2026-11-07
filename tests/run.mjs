@@ -16,7 +16,8 @@ import { startFakes } from './fakes.mjs';
 import { isLoopback } from '../lib/outbound.js';
 import { loadEnv, isTestEnv, checkNotProduction } from '../lib/env.js';
 import { createClient } from '@supabase/supabase-js';
-import { ALDER_DEMO, isTestKey } from './helpers.mjs';
+import { ALDER_DEMO, isFixtureLead, fetchAllRows } from './helpers.mjs';
+import { FIXTURE_ID_BASE } from './fixture-ids.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MARKER = path.join(ROOT, '.test-mode');
@@ -28,6 +29,7 @@ const API = 'http://localhost:3000/api/lead';
    behaviour). In-process-only suites skip starting the dev server entirely. */
 const DEFAULT_SUITES = [
   { file: 'tests/network-guard.test.mjs', needsHttp: false },
+  { file: 'tests/fixture-safety.test.mjs', needsHttp: false },
   { file: 'tests/bot-text.test.mjs', needsHttp: false },
   { file: 'tests/db-wall.test.mjs', needsHttp: false },
   { file: 'tests/migrations.test.mjs', needsHttp: false },
@@ -101,18 +103,42 @@ function killTree(child) {
  * UUID key, so a customer arriving mid-run does not move these numbers; a suite
  * that leaks a row does.
  */
-async function debrisSnapshot() {
-  const { data, error } = await svc.from('leads').select('id, idempotency_key');
-  if (error) return { ok: false, code: error.code, n: 0, events: 0, feedback: 0 };
-  // Suite-shaped keys only: a manual-test- lead the owner submits mid-run is
-  // not debris and must not fail the run.
-  const ids = (data || []).filter((r) => isTestKey(r.idempotency_key)).map((r) => r.id);
+async function debrisSnapshot(businessIds) {
+  let rows;
+  try {
+    // Scoped to this deployment's businesses and paged: an unbounded select
+    // stops at 1000 rows without saying so, and a global scan would count a
+    // fixture in another project.
+    rows = await fetchAllRows(() => svc.from('leads')
+      .select('id, idempotency_key, email').in('business_id', businessIds));
+  } catch (e) {
+    return { ok: false, code: e.code || 'no_code', n: 0, events: 0, feedback: 0 };
+  }
+  // Both signals: the suite key shape AND the reserved fixture email marker.
+  // A manual-test- lead the owner submits mid-run has neither.
+  const ids = rows.filter(isFixtureLead).map((r) => r.id);
   if (!ids.length) return { ok: true, n: 0, events: 0, feedback: 0 };
-  const [ev, fb] = await Promise.all([
-    svc.from('lead_events').select('id', { count: 'exact', head: true }).in('lead_id', ids),
-    svc.from('review_feedback').select('lead_id', { count: 'exact', head: true }).in('lead_id', ids),
-  ]);
-  return { ok: true, n: ids.length, events: ev.count || 0, feedback: fb.count || 0 };
+  const CHUNK = 80;
+  const countIn = async (table, column) => {
+    let total = 0;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK);
+      const { count, error } = await svc.from(table)
+        .select(column, { count: 'exact', head: true }).in(column, slice);
+      if (error) throw error;
+      total += count || 0;
+    }
+    return total;
+  };
+  try {
+    const [events, feedback] = await Promise.all([
+      countIn('lead_events', 'lead_id'),
+      countIn('review_feedback', 'lead_id'),
+    ]);
+    return { ok: true, n: ids.length, events, feedback };
+  } catch (e) {
+    return { ok: false, code: e.code || 'no_code', n: 0, events: 0, feedback: 0 };
+  }
 }
 
 async function chatSnapshot() {
@@ -325,13 +351,28 @@ try {
      tg_chat_id (the real operator chat) would silently unbind a client, so the
      runner takes a snapshot before the suites and refuses the run if it moved.
      Tails only: the full id is never printed. */
+  /* A killed run can leave a fixture binding behind. Every fixture id is at or
+     above FIXTURE_ID_BASE, a range no real Telegram chat can occupy, so this
+     delete can never touch a customer. It runs BEFORE the snapshot, so the run
+     starts from a clean, known state instead of failing on the last run's row. */
+  {
+    const { data: stale, error } = await svc.from('business_chats')
+      .delete().gte('tg_chat_id', FIXTURE_ID_BASE).select('tg_chat_id');
+    if (error) {
+      out(`FAIL  runner  could not pre-clean fixture chats (${error.code || 'no_code'})`);
+      process.exit(1);
+    }
+    if ((stale || []).length) out(`runner  pre-clean: removed ${stale.length} leftover fixture chat(s)`);
+  }
+
+  const businessIds = (await fetchAllRows(() => svc.from('businesses').select('id'))).map((r) => r.id);
   const chatsBefore = await chatSnapshot();
   if (!chatsBefore.ok) {
     // A guard that cannot read the table before the run proves nothing after it.
     out(`FAIL  runner  could not read business_chats before the run (${chatsBefore.code})`);
     process.exit(1);
   }
-  const debrisBefore = await debrisSnapshot();
+  const debrisBefore = await debrisSnapshot(businessIds);
   const tail = (ids) => ids.map((x) => x.slice(-4)).join(',') || '(none)';
 
   /* ---------- suites ---------- */
@@ -384,7 +425,7 @@ try {
   }
 
   {
-    const debrisAfter = await debrisSnapshot();
+    const debrisAfter = await debrisSnapshot(businessIds);
     // A leak is an INCREASE. A decrease is a suite's start sweep clearing what a
     // killed run left behind, which is the behaviour we asked for.
     const grew = debrisAfter.n > debrisBefore.n

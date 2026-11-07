@@ -8,7 +8,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
-import { fakeRes, ALDER_DEMO, sweepTestLeads } from './helpers.mjs';
+import { fakeRes, ALDER_DEMO, sweepTestLeads, fixtureEmail } from './helpers.mjs';
+import { FIXTURE_CHATS } from './fixture-ids.mjs';
 
 loadEnv();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -66,14 +67,20 @@ const mkCode = (n) => { let s = ''; for (let i = 0; i < n; i++) s += ALPHA[Math.
 
 const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
 const { data: bizB } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
-const chatA = 880001, chatB = 880002, chatX = 880003;
+const chatA = FIXTURE_CHATS.webhookA, chatB = FIXTURE_CHATS.webhookB, chatX = FIXTURE_CHATS.webhookX;
+// Every fixture id this suite may bind, for the start-of-suite and finally sweeps.
+const WEBHOOK_CHATS = [chatA, chatB, chatX, FIXTURE_CHATS.webhookA2, FIXTURE_CHATS.webhookA3,
+  FIXTURE_CHATS.webhookOpA, FIXTURE_CHATS.webhookOpB, FIXTURE_CHATS.webhookOperator];
 const RUN_STARTED = new Date().toISOString();
 const createdLeads = [];
 const createdCodes = [];
 
 async function seedLead(businessId, name, email) {
+  // Every seeded lead carries the reserved fixture marker, so a sweep needs two
+  // signals before deleting it. The empty-email case is deleted by exact key.
+  const marked = email ? String(email).replace(/@example\.com$/, '@fixture.invalid') : email;
   const { data } = await svc.from('leads').insert({
-    business_id: businessId, name, phone: '5155550100', email, zip: '50265',
+    business_id: businessId, name, phone: '5155550100', email: marked, zip: '50265',
     service: 'repair', home: 'house', timing: 'asap', roof_age: 'Not sure',
     insurance_claim: false, notes: null, idempotency_key: `${RUN}-${mkCode(8)}`,
   }).select('id').single();
@@ -84,6 +91,8 @@ async function seedLead(businessId, name, email) {
 try {
   // Clear what a killed run left behind, before adding anything of our own.
   await sweepTestLeads(svc, [bizA.id, bizB.id], RUN_STARTED).catch(() => 0);
+  // Clear anything a killed run left bound, before this run binds its own.
+  try { await svc.from('business_chats').delete().in('tg_chat_id', WEBHOOK_CHATS); } catch { /* best effort */ }
   await control({ mode: 'ok' }); await reset(); await resetResend();
 
   /* auth */
@@ -837,9 +846,9 @@ try {
     `files=${seen.size} forbidden=${forbidden} directSelect=${directLeadSelect}`);
   /* ---------- operator commands, owner role, lead recovery ---------- */
   {
-    const OP = 880009;
-    const chatA2 = 880004;   // second phone on bizA
-    const chatA3 = 880005;   // third phone, removed by the operator
+    const OP = FIXTURE_CHATS.webhookOperator;
+    const chatA2 = FIXTURE_CHATS.webhookA2;   // second phone on bizA
+    const chatA3 = FIXTURE_CHATS.webhookA3;   // third phone, removed by the operator
     const savedOp = process.env.OPERATOR_CHAT_ID;
     const savedUser = process.env.TELEGRAM_BOT_USERNAME;
     process.env.OPERATOR_CHAT_ID = String(OP);
@@ -956,7 +965,7 @@ try {
         slug: OP_SLUG, name: 'OP Fixture', owner_email: 'op@example.com',
         google_review_url: 'https://g.page/r/op', timezone: 'America/Chicago', status: 'demo',
       }).select('id').single();
-      const opChatA = 880006, opChatB = 880007;
+      const opChatA = FIXTURE_CHATS.webhookOpA, opChatB = FIXTURE_CHATS.webhookOpB;
       // Explicit, distinct created_at: one INSERT gives both rows the same
       // now(), and the id tiebreak would then decide who the main phone is.
       const t0 = Date.now();
@@ -1024,7 +1033,7 @@ try {
 } finally {
   await svc.from('leads').delete().in('id', createdLeads);
   await sweepTestLeads(svc, [bizA.id, bizB.id], new Date().toISOString()).catch(() => 0);
-  await svc.from('business_chats').delete().in('tg_chat_id', [chatA, chatB, chatX, 880004, 880005]);
+  await svc.from('business_chats').delete().in('tg_chat_id', WEBHOOK_CHATS);
   if (createdCodes.length) await svc.from('bind_codes').delete().in('code', createdCodes);
   await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
 }

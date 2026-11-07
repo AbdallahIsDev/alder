@@ -44,17 +44,50 @@ export const TEST_KEY = /^([a-z0-9]{8}|canary)-/;
 export const isTestKey = (k) => typeof k === 'string' && !UUID_KEY.test(k) && TEST_KEY.test(k);
 
 /**
+ * The reserved marker every suite-seeded lead carries: an address at the
+ * RFC 2606 `.invalid` TLD, which can never receive mail. A test-shaped key is
+ * already impossible for a real submission (the page mints UUIDs), but a sweep
+ * should need two independent signals before deleting a row from a production
+ * table. This is the second one.
+ */
+export const FIXTURE_EMAIL_DOMAIN = 'fixture.invalid';
+export const fixtureEmail = (local) => `${local}@${FIXTURE_EMAIL_DOMAIN}`;
+export const hasFixtureMarker = (row) =>
+  typeof (row && row.email) === 'string'
+  && row.email.toLowerCase().endsWith('@' + FIXTURE_EMAIL_DOMAIN);
+
+/** Both signals: the suite key shape AND the reserved email marker. */
+export const isFixtureLead = (row) => isTestKey(row && row.idempotency_key) && hasFixtureMarker(row);
+
+/**
+ * PostgREST returns at most 1000 rows per request and says nothing when it
+ * truncates. A sweep that reads only the first page leaves the rest behind
+ * forever, so every unbounded select goes through this.
+ */
+export async function fetchAllRows(build, pageSize = 1000) {
+  const out = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await build().range(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = data || [];
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
+
+/**
  * Delete test-shaped leads older than `beforeIso` for the given businesses.
  *
  * A suite calls this at start AND in its finally: a run killed mid-way (a shell
  * timeout, a crash) never reaches the finally, so the next run must clear what
  * the last one left. Real submissions always carry a UUID key, so they are never
- * matched.
+ * matched; the reserved email marker is the second, independent condition.
  */
 export async function sweepTestLeads(svc, businessIds, beforeIso) {
-  const { data } = await svc.from('leads')
-    .select('id, idempotency_key').in('business_id', businessIds).lt('created_at', beforeIso);
-  const ids = (data || []).filter((r) => isTestKey(r.idempotency_key)).map((r) => r.id);
+  const rows = await fetchAllRows(() => svc.from('leads')
+    .select('id, idempotency_key, email').in('business_id', businessIds).lt('created_at', beforeIso));
+  const ids = rows.filter(isFixtureLead).map((r) => r.id);
   if (!ids.length) return 0;
   const { data: gone, error } = await svc.from('leads').delete().in('id', ids).select('id');
   if (error) {

@@ -32,9 +32,10 @@ const line = (ok, id, what, d) => {
 const SECRET = 'recipients-test-secret';
 const BIZ_A = 'aaaaaaaa-0000-0000-0000-00000000000a';
 const BIZ_B = 'bbbbbbbb-0000-0000-0000-00000000000b';
-const CHAT_A = 900001;
-const CHAT_A2 = 900002;
-const CHAT_B = 900003;
+import { FIXTURE_CHATS } from './fixture-ids.mjs';
+const CHAT_A = FIXTURE_CHATS.recipientsA;
+const CHAT_A2 = FIXTURE_CHATS.recipientsA2;
+const CHAT_B = FIXTURE_CHATS.recipientsB;
 
 const saved = {
   TELEGRAM_WEBHOOK_SECRET: process.env.TELEGRAM_WEBHOOK_SECRET,
@@ -263,7 +264,7 @@ try {
   store.chats.push(
     { id: uuid(1), business_id: BIZ_A, tg_chat_id: CHAT_A, label: null, created_at: '2026-11-01T10:00:00Z' },
     { id: uuid(2), business_id: BIZ_A, tg_chat_id: CHAT_A2, label: null, created_at: '2026-11-02T10:00:00Z' },
-    { id: uuid(3), business_id: BIZ_A, tg_chat_id: 900009, label: 'Office', created_at: '2026-11-03T10:00:00Z' },
+    { id: uuid(3), business_id: BIZ_A, tg_chat_id: FIXTURE_CHATS.recipientsOffice, label: 'Office', created_at: '2026-11-03T10:00:00Z' },
   );
   await tgReset();
   await call(msg(CHAT_A, '/recipients'));

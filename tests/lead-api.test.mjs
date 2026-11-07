@@ -25,7 +25,8 @@ const RUN = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 /* ---------- env, one shared loader ---------- */
 // process.env > .env.test (TEST_ENV=1) > .env.local > .env, same as every other suite.
 import { loadEnv } from '../lib/env.js';
-import { fakeRes, ALDER_DEMO, sweepTestLeads } from './helpers.mjs';
+import { fakeRes, ALDER_DEMO, sweepTestLeads, fixtureEmail } from './helpers.mjs';
+import { FIXTURE_CHATS } from './fixture-ids.mjs';
 loadEnv();
 const FAKE_TG_URL = process.env.FAKE_TG_URL;
 async function fakeTg(cfg) {
@@ -50,7 +51,7 @@ function note(text) { console.log(`NOTE  ${' '.repeat(4)}${text}`); }
 /* ---------- fixtures ---------- */
 const NAME = 'Zzq Api Tester';
 const PHONE = '5155550142';
-const EMAIL = 'zzq.api@example.com';
+const EMAIL = fixtureEmail('zzq.api');
 const NOTES = 'zzq note marker';
 
 function payload(over) {
@@ -89,14 +90,16 @@ const RUN_STARTED = new Date().toISOString();
 
 /* The alert path no longer falls back to TELEGRAM_CHAT_ID: an unbound chat gets
    no alert with buttons. This suite asserts delivery, so it binds its OWN fixture
-   chat (770010) for the duration. Never the real chat id: a cleanup that deletes
+   chat (a reserved fixture id) for the duration. Never a real chat id: a cleanup that deletes
    by that id removes a real binding. */
-const ALERT_CHAT = 770010;   // fixture id, never the real operator chat
+const ALERT_CHAT = FIXTURE_CHATS.leadApiAlert;   // reserved fixture range, never a real chat
 let SEED_BIZ = null;
 {
   const { data: seedBiz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
   SEED_BIZ = seedBiz ? seedBiz.id : null;
   if (seedBiz && ALERT_CHAT) {
+    // A killed run leaves the row behind; clear it before binding.
+    await svc.from('business_chats').delete().eq('tg_chat_id', ALERT_CHAT);
     await svc.from('business_chats').upsert(
       { business_id: seedBiz.id, tg_chat_id: ALERT_CHAT }, { onConflict: 'tg_chat_id' },
     );

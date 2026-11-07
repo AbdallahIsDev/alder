@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
-import { fakeRes, ALDER_DEMO } from './helpers.mjs';
+import { fakeRes, ALDER_DEMO, fixtureEmail } from './helpers.mjs';
+import { FIXTURE_CHATS } from './fixture-ids.mjs';
 
 loadEnv();
 const TG = process.env.FAKE_TG_URL;
@@ -60,11 +61,13 @@ async function clean() {
    Alerts no longer fall back to TELEGRAM_CHAT_ID: a chat with no binding would
    show buttons whose every tap answers "Not found.". So the suite binds a real
    row first and removes it in the cleanup at the end. */
-const FIXTURE_CHAT = 770001;
+const FIXTURE_CHAT = FIXTURE_CHATS.notifyOwner;
 let SEED_NAME = '';
 {
   const { data: seedBiz } = await svc.from('businesses').select('id, name').eq('slug', ALDER_DEMO).single();
   SEED_NAME = (seedBiz && seedBiz.name) || '';
+  // A killed run leaves the row behind; clear both fixture ids before binding.
+  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond]);
   await svc.from('business_chats').upsert(
     { business_id: seedBiz.id, tg_chat_id: FIXTURE_CHAT }, { onConflict: 'tg_chat_id' },
   );
@@ -83,7 +86,7 @@ const nextPhone = () => '515555' + String(2000 + (parseInt(RUN, 36) % 6000) + co
 // address can collide with a lead an earlier run left behind, which would make
 // duplicate_of point at that row instead of this run's first post. A random
 // suffix makes a cross-run collision impossible.
-const nextEmail = () => `notify${parseInt(RUN, 36) % 100000}-${contactSeq}-${Math.random().toString(36).slice(2, 6)}@example.com`;
+const nextEmail = () => fixtureEmail(`notify${parseInt(RUN, 36) % 100000}-${contactSeq}-${Math.random().toString(36).slice(2, 6)}`);
 async function post(over, extra) {
   const body = {
     service: 'replacement', home: 'house', timing: 'asap', age: '10 to 20 years',
@@ -742,7 +745,7 @@ try {
 
   /* Second business -> its own chat */
   const { data: biz2 } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
-  const chat2 = 770002;
+  const chat2 = FIXTURE_CHATS.notifySecond;
   await svc.from('business_chats').upsert({ business_id: biz2.id, tg_chat_id: chat2 }, { onConflict: 'tg_chat_id' });
   await reset(TG);
   await post({ slug: 'second-demo' });
@@ -847,13 +850,13 @@ try {
   const key = process.env.RESEND_API_KEY || '';
   const logText = logs.join('\n');
   const tokenLeak = (token && logText.includes(token)) || /bot\d+:/.test(logText) || (key && logText.includes(key));
-  const piiLeak = /notify@example\.com|5155550142|Notify Tester|<script>/.test(logText);
+  const piiLeak = /@fixture\.invalid|5155550142|Notify Tester|<script>/.test(logText);
   line(!tokenLeak && !piiLeak, 'B8', 'logs contain no token, key, URL or PII', `${logs.length} log lines`);
 } catch (e) { line(false, 'B8', 'log scan', e.message); }
 
 /* cleanup */
 try {
-  await svc.from('business_chats').delete().in('tg_chat_id', [770001, 770002]);
+  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond]);
   if (activeId) {
     await svc.from('leads').delete().eq('business_id', activeId);
     await svc.from('businesses').delete().eq('id', activeId);
