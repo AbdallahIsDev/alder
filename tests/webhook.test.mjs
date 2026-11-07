@@ -666,9 +666,15 @@ try {
   const guardSent = await sent();
   const guardEdits = guardSent.filter((x) => x.path.includes('/editMessageText'));
   const guardAnswered = guardSent.some((x) => x.path.includes('/answerCallbackQuery'));
+  // The tap is refused (no DB change) but the card is refreshed in place and
+  // the toast says "Already updated." instead of "Not found.".
+  const guardToast = guardSent.filter((x) => x.path.includes('/answerCallbackQuery'))
+    .map((x) => (x.body && x.body.text) || '').join('|');
   line(doneAfter.status === 'done' && doneAfter.review_token === doneBefore.review_token
-    && eventsAfter === eventsBefore && guardEdits.length === 0 && guardAnswered,
-    'C13b', 'Contacted on done lead -> no DB change, answers', `status=${doneAfter.status} edits=${guardEdits.length} answered=${guardAnswered}`);
+    && eventsAfter === eventsBefore && guardEdits.length === 1 && guardAnswered
+    && guardToast.includes('Already updated'),
+    'C13b', 'Contacted on done lead -> no DB change, refreshed, Already updated',
+    `status=${doneAfter.status} edits=${guardEdits.length} toast=${guardToast}`);
 
   /* C14: double tap Contacted -> one transition, one edit, still answers twice */
   const ccLead = await seedLead(bizB.id, 'Double Tap C', 'doublec@example.com');
@@ -680,8 +686,10 @@ try {
   const ccSent = await sent();
   const ccEdits = ccSent.filter((x) => x.path.includes('/editMessageText'));
   const ccAnswers = ccSent.filter((x) => x.path.includes('/answerCallbackQuery'));
-  line(ccRow.status === 'contacted' && ccEvents === 1 && ccEdits.length === 1 && ccAnswers.length === 2,
-    'C14', 'double tap Contacted -> one change, answers twice', `status=${ccRow.status} events=${ccEvents} edits=${ccEdits.length} answers=${ccAnswers.length}`);
+  // Second tap: one transition, and the stale card is refreshed to the current
+  // state (one edit per tap), so both taps leave the same card on screen.
+  line(ccRow.status === 'contacted' && ccEvents === 1 && ccEdits.length === 2 && ccAnswers.length === 2,
+    'C14', 'double tap Contacted -> one change, both cards refreshed', `status=${ccRow.status} events=${ccEvents} edits=${ccEdits.length} answers=${ccAnswers.length}`);
 
   /* C11c: every button style is allowed and callback_data is unchanged */
   {
@@ -749,10 +757,10 @@ try {
     const exactOk = C.botLinkedText('Alder Roofing (demo)') === `You're connected to Alder Roofing (demo). ✅\n\nNew estimate requests from your website will appear here the moment they come in.\n\nFor each request:\n• Tap Mark contacted after you call the customer.\n• Tap Job completed when the work is done. You can then send the customer a review request.\n\nSend /leads to see your latest requests, or /help any time.`
       && C.BOT_HELP === `How this works\n\nNew estimate requests from your website appear here as soon as they come in.\n\nFor each request:\n• Mark contacted after you call the customer.\n• Job completed when the work is done, to send a review request.\n\nCommands:\n/leads · your latest requests\n/invite · connect a second phone\n/recipients · who receives alerts\n/help · this message`
       && C.BOT_ALREADY_CONNECTED === `You're all set. New requests will appear here.\n\nSend /help to see what I can do.`
-      && C.BOT_NOT_CONNECTED === `This chat isn't connected yet.\n\nOpen the setup link you were sent and tap Start.`
+      && C.BOT_NOT_CONNECTED === `This chat isn't connected yet.\n\nIf you were sent a setup link, tap it and press Start. If you have a setup code, send it to me here.\n\nNo link or code? Ask the person who set up your lead alerts for a new one.`
       && C.BOT_BAD_CODE === `That setup link isn't valid or has expired.\n\nAsk for a new one.`
       && C.BOT_PLAIN_TEXT === `I only respond to commands.\n\nSend /leads to see your latest requests, or /help.`
-      && C.BOT_DESCRIPTION === `Get your website's new estimate requests here the moment they arrive, and keep track of each one. Tap Start to connect this chat.`
+      && C.BOT_DESCRIPTION === `Get your website's new estimate requests here the moment they arrive. To connect, open the setup link you were given.`
       && C.BOT_SHORT_DESCRIPTION === `New estimate requests from your website, delivered instantly.`;
     const bannedOk = all.every((t) => !banned.test(t)) && !banned.test('Alder Roofing (demo)');
     const lengthsOk = C.BOT_DESCRIPTION.length <= 512 && C.BOT_SHORT_DESCRIPTION.length <= 120;
@@ -760,7 +768,7 @@ try {
       `exact=${exactOk} banned=${bannedOk} descLen=${C.BOT_DESCRIPTION.length}/${C.BOT_SHORT_DESCRIPTION.length}`);
   }
   {
-    const { BOT_NOT_CONNECTED, BOT_PLAIN_TEXT, BOT_ALREADY_CONNECTED } = await import('../lib/content.js');
+    const { BOT_NOT_CONNECTED, BOT_PLAIN_TEXT, BOT_ALREADY_CONNECTED_CODE } = await import('../lib/content.js');
     const textOf = async () => (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text).join('\n');
 
     // Unbound /start with no code → NOT CONNECTED.
@@ -774,8 +782,8 @@ try {
     await reset();
     await good(msg(chatB, '/start ' + fresh));
     const freshUsed = (await svc.from('bind_codes').select('used_at').eq('code', fresh).single()).data;
-    line((await textOf()) === BOT_ALREADY_CONNECTED && !freshUsed.used_at,
-      'D3', 'bound /start with code → ALREADY CONNECTED, code not consumed');
+    line((await textOf()) === BOT_ALREADY_CONNECTED_CODE && !freshUsed.used_at,
+      'D3', 'bound /start with code → already connected, code not consumed');
 
     // Plain text: bound → hint (max 3/hour), then silence; unbound → NOT CONNECTED.
     const hintCounts = [];
@@ -824,11 +832,176 @@ try {
   const directLeadSelect = /\.from\(['"]leads['"]\)\s*\.select\s*\(/.test(all);
   line(!forbidden && !directLeadSelect, 'C10', 'no private schema, no direct lead SELECT',
     `files=${seen.size} forbidden=${forbidden} directSelect=${directLeadSelect}`);
+  /* ---------- operator commands, owner role, lead recovery ---------- */
+  {
+    const OP = 880009;
+    const chatA2 = 880004;   // second phone on bizA
+    const chatA3 = 880005;   // third phone, removed by the operator
+    const savedOp = process.env.OPERATOR_CHAT_ID;
+    const savedUser = process.env.TELEGRAM_BOT_USERNAME;
+    process.env.OPERATOR_CHAT_ID = String(OP);
+    process.env.TELEGRAM_BOT_USERNAME = 'alder_test_bot';
+    // Edits matter as much as new messages here: the confirm screen and the
+    // refreshed card are edits.
+    const allText = async () => (await sent())
+      .filter((x) => x.path.includes('/sendMessage') || x.path.includes('/editMessageText'))
+      .map((x) => x.body.text).join('\n');
+    const answersNow = async () => (await sent()).filter((x) => x.path.includes('/answerCallbackQuery'))
+      .map((x) => (x.body && x.body.text) || '').join('|');
+    try {
+      for (const chat of [chatA, chatA2, chatA3]) {
+        await svc.from('business_chats').delete().eq('tg_chat_id', chat);
+        const c = mkCode(12); createdCodes.push(c);
+        await createBindCode(c, bizA.id, new Date(Date.now() + 3600000).toISOString());
+        await good(msg(chat, '/start ' + c));
+      }
+      const C = await import('../lib/content.js');
+
+      // OP1: a non-operator gets exactly the unknown-text reply, and no code.
+      await reset();
+      const codesBefore = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      await good(msg(chatA, '/code alder-demo'));
+      const codesAfter = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      line((await allText()) === C.BOT_PLAIN_TEXT && codesAfter === codesBefore, 'OP1',
+        'non-operator /code gets the plain-text hint, mints nothing',
+        `codes ${codesBefore}->${codesAfter}`);
+
+      // OP2: the operator gets a forwardable message with a real deep link.
+      await reset();
+      await good(msg(OP, '/code second-demo'));
+      const opText = await allText();
+      // Take the code from the reply, then prove the database really has it:
+      // row order is not guaranteed, so picking "the last row" proved nothing.
+      const theCode = (opText.match(/\?start=([A-Z2-9]{12})/) || [])[1] || '';
+      const stored = theCode
+        ? (await svc.from('bind_codes').select('code, used_at').eq('code', theCode).eq('business_id', bizB.id)).data
+        : [];
+      line(!!theCode && stored.length === 1 && stored[0].used_at === null
+        && opText.includes('Expires:') && !opText.includes('//n'),
+        'OP2', 'operator /code: deep link, plain code, expiry', `code=${theCode.slice(0, 4)}… stored=${stored.length}`);
+
+      // OP3: cap per slug, fail closed at 10/hour.
+      let okCount = 0, capped = false;
+      for (let i = 0; i < 11; i++) {
+        await reset();
+        await good(msg(OP, '/code alder-demo'));
+        const t = await allText();
+        if (t === C.OPERATOR_CAPPED) capped = true; else okCount++;
+      }
+      line(okCount === 10 && capped, 'OP3', 'operator /code capped at 10 per slug per hour', `ok=${okCount} capped=${capped}`);
+
+      // OP4: /phones marks the owner (oldest) and lists the others.
+      await reset();
+      await good(msg(OP, '/phones alder-demo'));
+      const phonesText = await allText();
+      line(/Phone 1 · main phone/.test(phonesText) && /Phone 3/.test(phonesText), 'OP4',
+        '/phones: owner marked, other phones listed', `lines=${phonesText.split('\n').length}`);
+
+      // OP6: a forged p: from a client changes nothing.
+      const rows = (await svc.from('business_chats').select('id, tg_chat_id').eq('business_id', bizA.id).order('created_at')).data;
+      const thirdRow = rows[rows.length - 1].id;
+      await reset();
+      await good(cb(chatA2, 'p:' + thirdRow));
+      const stillThere = (await svc.from('business_chats').select('id').eq('id', thirdRow)).data.length;
+      line((await answersNow()).includes('Not found') && stillThere === 1, 'OP6',
+        'forged operator callback from a client: Not found, nothing removed', `rows=${stillThere}`);
+
+      // OP5: the operator asks, then removes.
+      await reset();
+      await good(cb(OP, 'p:' + thirdRow));
+      const confirmText = await allText();
+      await reset();
+      await good(cb(OP, 'P:' + thirdRow));
+      const gone = (await svc.from('business_chats').select('id').eq('id', thirdRow)).data.length;
+      line(/Remove it\?/.test(confirmText) && gone === 0, 'OP5',
+        'operator remove: confirm, then the row is gone', `confirm=${/Remove it/.test(confirmText)} gone=${gone}`);
+
+      // OP7: /businesses lists both slugs with a phone count.
+      await reset();
+      await good(msg(OP, '/businesses'));
+      const bizText = await allText();
+      line(bizText.includes('alder-demo · demo ·') && bizText.includes('second-demo · demo ·'), 'OP7',
+        '/businesses: slug, status, phone count', `len=${bizText.length}`);
+
+      // OP8: /id works unbound and says nothing else.
+      await svc.from('business_chats').delete().eq('tg_chat_id', chatX);
+      await reset();
+      await good(msg(chatX, '/id'));
+      const idText = await allText();
+      line(idText.includes(String(chatX)) && idText.includes('OPERATOR_CHAT_ID') && !idText.includes('alder'), 'OP8',
+        '/id: this chat id, unbound, nothing else', `len=${idText.length}`);
+
+      // OP9: paste the code instead of /start; then a bad code from an unbound
+      // chat gets one generic answer.
+      const pasteCode = mkCode(12); createdCodes.push(pasteCode);
+      await createBindCode(pasteCode, bizB.id, new Date(Date.now() + 3600000).toISOString());
+      await reset();
+      await good(msg(chatX, '  ' + pasteCode.slice(0, 4).toLowerCase() + '-' + pasteCode.slice(4).toLowerCase() + ' '));
+      const bound = (await svc.from('business_chats').select('business_id').eq('tg_chat_id', chatX).maybeSingle()).data;
+      await reset();
+      await good(msg(chatA3, mkCode(12)));
+      line(!!bound && bound.business_id === bizB.id && (await allText()) === C.BOT_CODE_BAD, 'OP9',
+        'pasted code binds (case/space/hyphen); a bad one gets one generic answer',
+        `bound=${!!bound}`);
+
+      // OP10: the second phone cannot invite or list recipients.
+      await reset();
+      await good(msg(chatA2, '/invite'));
+      const t1 = await allText();
+      await reset();
+      await good(msg(chatA2, '/recipients'));
+      const t2 = await allText();
+      line(t1 === C.BOT_OWNER_ONLY && t2 === C.BOT_OWNER_ONLY, 'OP10',
+        'second phone: /invite and /recipients are owner-only', `invite=${t1.length} recipients=${t2.length}`);
+
+      // OP11: the owner removes itself; the oldest remaining phone becomes owner.
+      await reset();
+      await good(msg(chatA, '/recipients'));
+      const ownerRows = (await svc.from('business_chats').select('id').eq('business_id', bizA.id).order('created_at')).data;
+      await good(cb(chatA, 'x:' + ownerRows[0].id));
+      await good(cb(chatA, 'X:' + ownerRows[0].id));
+      await reset();
+      await good(msg(chatA2, '/invite'));
+      const nowOwner = (await allText()) !== C.BOT_OWNER_ONLY;
+      line(nowOwner, 'OP11', 'ownership moves to the oldest remaining phone', `owner=${nowOwner}`);
+
+      // OP12: /leads has Open buttons; o: sends the current card; another
+      // business's lead is "Not found.".
+      const leadA = await seedLead(bizA.id, 'Open Me', 'open@example.com');
+      await reset();
+      await good(msg(chatA2, '/leads'));
+      const listSent = (await sent()).filter((x) => x.path.includes('/sendMessage'));
+      const kb = listSent.length ? JSON.stringify(listSent[listSent.length - 1].body.reply_markup || {}) : '';
+      await reset();
+      await good(cb(chatA2, 'o:' + leadA));
+      const card = await allText();
+      const foreign = await seedLead(bizB.id, 'Foreign', 'foreign@example.com');
+      await reset();
+      await good(cb(chatA2, 'o:' + foreign));
+      const foreignAnswer = await answersNow();
+      line(kb.includes('o:' + leadA) && card.includes('Open Me') && foreignAnswer.includes('Not found'), 'OP12',
+        '/leads Open button -> current card; another business\'s lead is Not found',
+        `kb=${kb.includes('o:')} card=${card.includes('Open Me')}`);
+
+      // OP13: my_chat_member (blocked) reaches the operator.
+      await svc.from('rate_limits').delete().like('key', 'ops:blocked:%');
+      await reset();
+      await good({ my_chat_member: { chat: { id: chatA2, type: 'private' }, new_chat_member: { status: 'kicked' } } });
+      const blockedText = await allText();
+      line(/blocked/.test(blockedText) && blockedText.includes('alder-demo'), 'OP13',
+        'blocked bot: one operator notice naming the business', `len=${blockedText.length}`);
+    } finally {
+      if (savedOp === undefined) delete process.env.OPERATOR_CHAT_ID; else process.env.OPERATOR_CHAT_ID = savedOp;
+      if (savedUser === undefined) delete process.env.TELEGRAM_BOT_USERNAME; else process.env.TELEGRAM_BOT_USERNAME = savedUser;
+      await svc.from('business_chats').delete().in('tg_chat_id', [chatA, chatA2, chatA3]);
+    }
+  }
+
 } catch (e) {
   line(false, 'C0', 'webhook suite threw', e.message);
 } finally {
   await svc.from('leads').delete().in('id', createdLeads);
-  await svc.from('business_chats').delete().in('tg_chat_id', [chatA, chatB, chatX]);
+  await svc.from('business_chats').delete().in('tg_chat_id', [chatA, chatB, chatX, 880004, 880005]);
   if (createdCodes.length) await svc.from('bind_codes').delete().in('code', createdCodes);
   await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
 }
