@@ -102,9 +102,10 @@ try {
   const C = 'cccccccc-0000-0000-0000-000000000003';
   const fixture = {
     businesses: [
-      { id: A, slug: 'alder-demo', name: 'Alder Roofing', owner_email: 'owner@example.com' },
-      { id: B, slug: 'beta', name: 'Beta Roofing', owner_email: 'beta@example.com' },
-      { id: C, slug: 'quiet', name: 'Quiet Roofing', owner_email: 'quiet@example.com' },
+      { id: A, slug: 'alder-demo', name: 'Alder Roofing', owner_email: 'owner@example.com', status: 'demo' },
+      { id: B, slug: 'beta', name: 'Beta Roofing', owner_email: 'beta@example.com', status: 'active' },
+      { id: C, slug: 'quiet', name: 'Quiet Roofing', owner_email: 'quiet@example.com', status: 'demo' },
+      { id: 'pppppppp-0000-0000-0000-000000000004', slug: 'paused', name: 'Paused Roofing', owner_email: 'paused@example.com', status: 'paused' },
     ],
     chats: [{ business_id: A, tg_chat_id: 'chat-a' }],
     // A: three fresh leads, one flagged as a repeat, two old open ones, one failed alert.
@@ -151,7 +152,14 @@ try {
         if (kind === 'eq.contacted') return json(fx.contacted);
         return json(fx.failedEvents);
       }
-      if (table === 'businesses') return json(fx.businesses);
+      if (table === 'businesses') {
+        const st = u.searchParams.get('status');
+        if (st && st.startsWith('in.(')) {
+          const allowed = st.slice(4, -1).split(',');
+          return json(fx.businesses.filter((b) => allowed.includes(b.status)));
+        }
+        return json(fx.businesses);
+      }
       if (table === 'business_chats') return json(fx.chats);
       return json([]);
     };
@@ -194,6 +202,24 @@ try {
       'D4', 'quiet business: no message at all', `code=${r.code} businesses=${r.body.businesses} tg=${tg.length} mail=${mail.length}`);
   } catch (e) {
     line(false, 'D4', 'quiet business: no message at all', e.message);
+  } finally { if (installed) installed(); }
+
+  /* ---------- D10: a paused business is never a target ---------- */
+  try {
+    const P = 'pppppppp-0000-0000-0000-000000000004';
+    install({
+      ...fixture,
+      businesses: [{ id: P, slug: 'paused', name: 'Paused Roofing', owner_email: 'paused@example.com', status: 'paused' }],
+      chats: [{ business_id: P, tg_chat_id: 'chat-p' }],
+      leadsFresh: [{ id: 'p1', business_id: P }],
+      createdEvents: [], openOld: [], contacted: [], failedEvents: [],
+    });
+    const { r, tg, mail } = await run();
+    line(r.code === 200 && r.body.businesses === 0 && tg.length === 0 && mail.length === 0,
+      'D10', 'paused business with a chat and an owner gets nothing',
+      `code=${r.code} businesses=${r.body.businesses} tg=${tg.length} mail=${mail.length}`);
+  } catch (e) {
+    line(false, 'D10', 'paused business with a chat and an owner gets nothing', e.message);
   } finally { if (installed) installed(); }
 
   /* ---------- D5: Telegram down -> email ---------- */

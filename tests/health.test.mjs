@@ -289,8 +289,12 @@ try {
         if (table === 'leads') return json([{ id: 'lead-1', business_id: BIZ }]);
         if (table === 'business_chats') return json([{ tg_chat_id: 'chat-1' }]);
         if (table === 'businesses') {
-          if (select === 'id') return json([{ id: BIZ }]);
-          return json({ id: BIZ, slug: 'alder-demo', name: 'Alder Roofing', status: 'demo', timezone: 'America/Chicago', owner_email: 'owner@example.com', google_review_url: 'https://g.page/r/x' });
+          // id=eq.<uuid> is getBusinessById (one row); anything else is the list
+          // listActiveBusinesses asks for, which filters on status like PostgREST.
+          if (u.searchParams.get('id')) {
+            return json({ id: BIZ, slug: 'alder-demo', name: 'Alder Roofing', status: 'demo', timezone: 'America/Chicago', owner_email: 'owner@example.com', google_review_url: 'https://g.page/r/x' });
+          }
+          return json([{ id: BIZ, slug: 'alder-demo', name: 'Alder Roofing', owner_email: 'owner@example.com', status: 'demo' }]);
         }
         return json([]);
       };
@@ -336,6 +340,69 @@ try {
       }
       await ctl(TG, { mode: 'ok' }).catch(() => {});
       await ctl(RS, { mode: 'ok' }).catch(() => {});
+    }
+  }
+
+  /* S13: a paused business is never told anything, even when a failed event
+     belongs to it. The failure path derives targets from lead_events, so this is
+     the one route where an offboarded business could otherwise still be emailed. */
+  {
+    const PAUSED = '22222222-2222-2222-2222-222222222222';
+    const realFetch2 = globalThis.fetch;
+    const SB = process.env.SUPABASE_URL;
+    const savedEnv = {
+      VERCEL_ENV: process.env.VERCEL_ENV, TELEGRAM_API_BASE: process.env.TELEGRAM_API_BASE,
+      RESEND_API_BASE: process.env.RESEND_API_BASE, MAIL_REDIRECT_TO: process.env.MAIL_REDIRECT_TO,
+    };
+    try {
+      process.env.VERCEL_ENV = 'development';
+      process.env.TELEGRAM_API_BASE = process.env.FAKE_TG_URL;
+      process.env.RESEND_API_BASE = process.env.FAKE_RESEND_URL;
+      delete process.env.MAIL_REDIRECT_TO;
+      for (const base of [process.env.FAKE_TG_URL, process.env.FAKE_RESEND_URL]) {
+        await realFetch2(base + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"mode":"ok"}' });
+        await realFetch2(base + '/__reset', { method: 'POST' });
+      }
+      globalThis.fetch = async (input, init = {}) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (!url.startsWith(SB)) return realFetch2(input, init);
+        const u = new URL(url);
+        const table = u.pathname.replace('/rest/v1/', '');
+        const json = (b) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+        if (table === 'lead_events' && (u.searchParams.get('select') === 'id')) {
+          const kind = (u.searchParams.get('kind') || '').replace('eq.', '');
+          const n = kind === 'tg_failed' ? 1 : 0;
+          return new Response(null, { status: 200, headers: { 'content-range': `0-${n ? n - 1 : 0}/${n}` } });
+        }
+        if (table === 'lead_events') return json([{ lead_id: 'p-lead', kind: 'tg_failed' }]);
+        if (table === 'leads') return json([{ id: 'p-lead', business_id: PAUSED }]);
+        if (table === 'businesses') {
+          const row = { id: PAUSED, slug: 'paused', name: 'Paused Roofing', owner_email: 'paused@example.com', status: 'paused' };
+          if (u.searchParams.get('id')) return json(row);
+          // PostgREST filters; so does this, or a missing .in('status') in the
+          // client would look correct here.
+          const st = u.searchParams.get('status') || '';
+          if (st.startsWith('in.(') && !st.slice(4, -1).split(',').includes('paused')) return json([]);
+          return json([row]);
+        }
+        // A bound chat, so a missing active-filter shows up as a real send rather
+        // than as an empty chat list that quietly falls through.
+        if (table === 'business_chats') return json([{ tg_chat_id: 'chat-paused' }]);
+        return json([]);
+      };
+      process.env.HEALTH_SECRET = 'health-test-secret-value';
+      const res = fakeRes();
+      await selfcheck({ method: 'GET', headers: { 'x-health-secret': 'health-test-secret-value' } }, res);
+      const tg = (await (await realFetch2(process.env.FAKE_TG_URL + '/__requests')).json()).requests;
+      const rs = (await (await realFetch2(process.env.FAKE_RESEND_URL + '/__requests')).json()).requests;
+      line(res.code === 200 && res.body.sent === 0 && res.body.emailed === 0 && tg.length === 0 && rs.length === 0,
+        'S13', 'paused business: failed event does not reach it',
+        `code=${res.code} sent=${res.body.sent} emailed=${res.body.emailed} tg=${tg.length} mail=${rs.length}`);
+    } catch (e) {
+      line(false, 'S13', 'paused business: failed event does not reach it', e.message);
+    } finally {
+      globalThis.fetch = realFetch2;
+      for (const [k, v] of Object.entries(savedEnv)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     }
   }
 

@@ -16,7 +16,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { secretMatches } from '../lib/request.js';
-import { listBusinessChats, getBusinessById } from '../lib/db.js';
+import { listBusinessChats, getBusinessById, listActiveBusinesses } from '../lib/db.js';
 import { sendMessage } from '../lib/tg.js';
 import { sendMail, escHtml } from '../lib/mail.js';
 import { deliverToBusinesses } from '../lib/ops-delivery.js';
@@ -167,17 +167,17 @@ export default async function handler(req, res) {
     }
 
     // Who to tell: the businesses that own the failed events, or every business
-    // with a bound chat when the redirect is swallowing everyone's mail.
-    let allBusinessIds = [];
-    if (redirectActive) {
-      const { data: biz } = await db().from('businesses').select('id');
-      allBusinessIds = (biz || []).map((b) => b.id);
-    }
+    // with a bound chat when the redirect is swallowing everyone's mail. Either
+    // way only businesses that are being served — a paused or churned client
+    // keeps its rows but is not emailed or messaged.
+    const active = await listActiveBusinesses();
+    const activeIds = new Set(active.map((b) => b.id));
+    const allBusinessIds = active.map((b) => b.id);
     const targets = alertTargets({
       redirectActive,
       failedByBusiness: redirectActive ? new Map() : await failuresByBusiness(since),
       allBusinessIds,
-    });
+    }).filter((id) => activeIds.has(id));
 
     const text = selfCheckText(day, { redirectActive });
     const dateKey = new Date().toISOString().slice(0, 10);
