@@ -273,6 +273,16 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - Review artefact: `_debug/patches/ops-audience-review.diff` (gitignored), single file.
 - Remote: `origin https://github.com/AbdallahIsDev/alder.git`. Never push to `main`, never force, no tags.
 
+### How PRs work here (PR map)
+| Branch | PR | Role |
+|---|---|---|
+| `main` | — | deploys to production; never pushed by an agent |
+| `ops-audience` | #6 | the operator work and every fix that came out of reviewing it; one review `.diff` against `main` |
+| `fix-invite-message` | #7 | cut from `main`, merged into `ops-audience` as `58d2707`; GitHub reports it merged |
+
+One bundle = one branch off `main`, one review artefact, push dry-run first. A PR
+description may be edited; draft state and merges are the owner's decision.
+
 ---
 
 ## 13. Change log (one row per bundle)
