@@ -957,9 +957,12 @@ try {
         google_review_url: 'https://g.page/r/op', timezone: 'America/Chicago', status: 'demo',
       }).select('id').single();
       const opChatA = 880006, opChatB = 880007;
+      // Explicit, distinct created_at: one INSERT gives both rows the same
+      // now(), and the id tiebreak would then decide who the main phone is.
+      const t0 = Date.now();
       await svc.from('business_chats').insert([
-        { business_id: opBiz.id, tg_chat_id: opChatA },
-        { business_id: opBiz.id, tg_chat_id: opChatB },
+        { business_id: opBiz.id, tg_chat_id: opChatA, created_at: new Date(t0 - 2000).toISOString() },
+        { business_id: opBiz.id, tg_chat_id: opChatB, created_at: new Date(t0 - 1000).toISOString() },
       ]);
 
       // OP10: the second phone cannot invite or list recipients.
