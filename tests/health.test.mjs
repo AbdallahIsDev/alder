@@ -233,6 +233,103 @@ try {
       `selfcheck=${viaHeader.code} healthBearer=${res2.code} healthHeader=${healthOk.code}`);
   }
 
+  /* S12: the real handler path, not the injected senders. PostgREST is faked at
+     the fetch layer, Telegram is the loopback fake in 500 mode, Resend is the
+     loopback fake in ok mode. This is the only test that proves ownerOf ->
+     getBusinessById -> sendMail actually reaches owner_email, that the
+     idempotency key is selfcheck:<businessId>:<date>, and that MAIL_REDIRECT_TO
+     still wins. */
+  {
+    const TG = process.env.FAKE_TG_URL, RS = process.env.FAKE_RESEND_URL;
+    const BIZ = '11111111-1111-1111-1111-111111111111';
+    const saved = {
+      VERCEL_ENV: process.env.VERCEL_ENV, TELEGRAM_API_BASE: process.env.TELEGRAM_API_BASE,
+      RESEND_API_BASE: process.env.RESEND_API_BASE, MAIL_REDIRECT_TO: process.env.MAIL_REDIRECT_TO,
+      MAIL_FROM: process.env.MAIL_FROM,
+    };
+    const realFetch = globalThis.fetch;
+    const ctl = (base, body) => realFetch(base + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const reset = (base) => realFetch(base + '/__reset', { method: 'POST' });
+    const reqs = async (base) => (await (await realFetch(base + '/__requests')).json()).requests;
+    const sent = [];
+    let restore = null;
+    try {
+      process.env.VERCEL_ENV = 'development';
+      process.env.TELEGRAM_API_BASE = TG;
+      process.env.RESEND_API_BASE = RS;
+      process.env.MAIL_FROM = 'alerts@example.com';
+      delete process.env.MAIL_REDIRECT_TO;
+      await ctl(TG, { mode: '500' }); await ctl(RS, { mode: 'ok' });
+      await reset(TG); await reset(RS);
+
+      const SB = process.env.SUPABASE_URL;
+      globalThis.fetch = async (input, init = {}) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (!url.startsWith(SB)) return realFetch(input, init);
+        const u = new URL(url);
+        const table = u.pathname.replace('/rest/v1/', '');
+        const select = u.searchParams.get('select') || '';
+        sent.push(table + '?' + select);
+        const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+        if (table === 'lead_events' && select === 'id') {
+          const kind = (u.searchParams.get('kind') || '').replace('eq.', '');
+          const n = kind === 'tg_failed' ? 2 : 0;
+          return new Response(null, { status: 200, headers: { 'content-range': `0-${n ? n - 1 : 0}/${n}` } });
+        }
+        if (table === 'lead_events') return json([{ lead_id: 'lead-1', kind: 'tg_failed' }]);
+        if (table === 'leads') return json([{ id: 'lead-1', business_id: BIZ }]);
+        if (table === 'business_chats') return json([{ tg_chat_id: 'chat-1' }]);
+        if (table === 'businesses') {
+          if (select === 'id') return json([{ id: BIZ }]);
+          return json({ id: BIZ, slug: 'alder-demo', name: 'Alder Roofing', status: 'demo', timezone: 'America/Chicago', owner_email: 'owner@example.com', google_review_url: 'https://g.page/r/x' });
+        }
+        return json([]);
+      };
+      restore = () => { globalThis.fetch = realFetch; };
+
+      process.env.HEALTH_SECRET = 'health-test-secret-value';
+      const call = async () => {
+        const res = fakeRes();
+        await selfcheck({ method: 'GET', headers: { 'x-health-secret': 'health-test-secret-value' } }, res);
+        return res;
+      };
+      const r1 = await call();
+      const mail1 = (await reqs(RS)).filter((x) => x.path === '/emails');
+      const tg1 = (await reqs(TG)).filter((x) => x.path.includes('/sendMessage'));
+      const m1 = mail1[0] || {};
+      const dateKey = new Date().toISOString().slice(0, 10);
+      const toOwner = m1.body && JSON.stringify(m1.body.to) === JSON.stringify(['owner@example.com']);
+      const keyOk = m1.headers && m1.headers['idempotency-key'] === `selfcheck:${BIZ}:${dateKey}`;
+      // "owner" is part of the event kind names (email_owner_sent), so the PII
+      // check looks for the business name and an address, not that word.
+      const countsOnly = m1.body && typeof m1.body.text === 'string'
+        && m1.body.text.includes('tg_failed 2') && !m1.body.text.includes('@')
+        && !/alder roofing|owner@|example\.com/i.test(m1.body.text);
+
+      // MAIL_REDIRECT_TO still wins over owner_email, as everywhere else.
+      await reset(RS);
+      process.env.MAIL_REDIRECT_TO = 'inbox@example.com';
+      const r2 = await call();
+      const mail2 = (await reqs(RS)).filter((x) => x.path === '/emails');
+      const toRedirect = mail2[0] && JSON.stringify(mail2[0].body.to) === JSON.stringify(['inbox@example.com']);
+
+      const ok = r1.code === 200 && r1.body.emailed === 1 && r1.body.sent === 0
+        && mail1.length === 1 && tg1.length === 1 && toOwner && keyOk && countsOnly
+        && r2.code === 200 && mail2.length === 1 && toRedirect;
+      line(ok, 'S12', 'selfcheck: telegram down -> owner email, redirect wins',
+        `r1=${r1.code} emailed=${r1.body.emailed} mail=${mail1.length} tg=${tg1.length} toOwner=${!!toOwner} key=${!!keyOk} counts=${!!countsOnly} redirect=${!!toRedirect}`);
+    } catch (e) {
+      line(false, 'S12', 'selfcheck: telegram down -> owner email, redirect wins', e.message);
+    } finally {
+      if (restore) restore();
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+      await ctl(TG, { mode: 'ok' }).catch(() => {});
+      await ctl(RS, { mode: 'ok' }).catch(() => {});
+    }
+  }
+
   /* S5: who gets told — everyone under a redirect, only the affected businesses otherwise */
   {
     const fails = new Map([['biz-a', { tg_failed: 2 }], ['biz-b', { email_owner_failed: 1 }]]);
