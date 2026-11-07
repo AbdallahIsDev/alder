@@ -27,6 +27,7 @@ const API = 'http://localhost:3000/api/lead';
 /* needsHttp: the suite makes real HTTP calls through `vercel dev` (platform
    behaviour). In-process-only suites skip starting the dev server entirely. */
 const DEFAULT_SUITES = [
+  { file: 'tests/network-guard.test.mjs', needsHttp: false },
   { file: 'tests/db-wall.test.mjs', needsHttp: false },
   { file: 'tests/migrations.test.mjs', needsHttp: false },
   { file: 'tests/health.test.mjs', needsHttp: false },
