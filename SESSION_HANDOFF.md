@@ -162,7 +162,7 @@ Per-business self-check counts, audience rule, shared branded email layout, plai
 ### Open
 | Severity | Issue |
 |---|---|
-| **High (ops) — RESOLVED** | The owner deleted every unused code in production (217). `/invite` is unblocked. One live unused code exists again at the time of writing; it is the owner's, not a suite's. The runner now fails a run that grows that number. |
+| **High (ops) — RESOLVED** | The owner deleted every unused code in production (217). `/invite` is unblocked. The owner minted one more invite through the live bot, so two live unused codes exist; neither is a suite's. The runner fails a run that grows that number. |
 | **RESOLVED** | Claim-then-bind now reads the binding back; on a mismatch or a throw it restores the claim and says so. Global bind ceiling raised to 600/hour with `bind_ceiling_hit`. |
 | **RESOLVED** | Ceiling 600/h, `bind_ceiling_hit` logged. |
 | Medium | `leads.business_id` has no `ON DELETE` action; offboarding must delete leads first. |
@@ -189,7 +189,7 @@ Last full run before this bundle: 385.2 s / 384.4 s / 385.6 s, all green. This b
 6. Prompt queue, unsent: README rewrite + CI without secrets + preview check + fresh-eyes review of `main` + test-quality audit.
 7. Telegram command menus: after merge, `npm run tg:commands`, then `tg-webhook set` and `info` (the `my_chat_member` handler only arrives if `allowed_updates` is re-registered).
 8. Known minor: stale handoff lines, `sharp` bump deferred, 13 images without width/height (CLS 0), `--timing` flag.
-9. Not done from ADD-ON 2: A5 (`scripts/purge-expired.mjs`, dry-run default). A2 completion: six bind tests still mint on real businesses (source guard is a ratchet, not yet a ban).
+9. A5 is done (`scripts/purge-expired.mjs`, dry run default). A2 is done: every bind test runs on `zz-test-bind-<run>` and F8 bans a real-business mint. Still open: keyset paging (report only, not small), hostile-reviewer pass.
 10. Proposals only, not implemented: `robots.txt` and `sitemap.xml` hard-coded to `alderroof.com` (pre-launch item); one brand per deployment; `/clients` and `/stats <slug>` on `v_client_leads`; retention predicates; `npm run new-client`.
 
 ---
@@ -253,9 +253,10 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 |---|---|---|
 | 1 | ~~Merge PR #7~~ | **MERGED** (observed) |
 | 2 | Review `ops-audience` from the single `.diff` | Waiting for the artefact |
-| 3 | ~~A3 cancel pending invites~~ | **Done** (R15-R21) |
-| 4 | A4 selfcheck purge **done**; A5 `scripts/purge-expired.mjs` | A5 not started |
-| 5 | GROUP 3: pasted-code ceiling 600 + `bind_ceiling_hit`; claim-then-bind recovery; `/start@botname`; keyset paging report; `tg-webhook` docs | Not started |
+| 3 | ~~A3 cancel pending invites~~ | **Done** (R15-R21, OP17-OP19) |
+| 4 | ~~A4/A5 purge~~ | **Done** (K1-K8) |
+| 5 | GROUP 3: ceiling 600, claim-then-bind, `/start@botname`, `tg-webhook` docs | **Done** (R22-R24, C37) |
+| 5b | Keyset paging for `/leads` Older | Report only: not small (cursor in callbacks, both directions, index check) |
 | 6 | GROUP 5: hostile-reviewer pass over the branch diff | Not started |
 | 7 | Owner runs the manual checks in Section 9 and reports | Owner |
 | 8 | Owner creates `.env.test` (Paris), then Phase C prompt | Blocked on owner |
@@ -268,7 +269,7 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 ## 12. Git state (as of this report)
 
 - `main` = `e981e0c` (deploys to production).
-- `ops-audience` (PR #6): 32 commits ahead of `main`, head `b953c88`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
+- `ops-audience` (PR #6): 36 commits ahead of `main`, head `0b55342`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
 - Review artefact: `_debug/patches/ops-audience-review.diff` (gitignored), single file.
 - Remote: `origin https://github.com/AbdallahIsDev/alder.git`. Never push to `main`, never force, no tags.
@@ -300,3 +301,6 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-07 | `ops-audience` | (docs) | This handoff rewritten as one coherent document; drifted §8/§9/§10 blocks folded in; corrected the "two real phones on alder-demo" claim | Docs only |
 | 2026-11-07 | `ops-audience` | `c8d45bf` | Bounded housekeeping in the daily selfcheck (codes 7 d, rate limits 2 d, 1000/run, used codes never) | K1-K7 |
 | 2026-11-07 | `ops-audience` | `b953c88` | `/invite` cancel button; bind read-back + claim restore; 600/h ceiling; health requires a review identifier | R4/R5, R15-R24, H1b |
+| 2026-11-08 | `ops-audience` | `45ef16e` | Bind tests on `zz-test-bind-<run>`; F8 bans real-business mints; OP17-OP20 real-DB cancel/restore | F8, OP17-OP20 |
+| 2026-11-08 | `ops-audience` | `829cc1e` | `/command@thisbot`; two-account MANUAL_TESTING; tg-webhook set/info docs | C37 |
+| 2026-11-08 | `ops-audience` | `0b55342` | `scripts/purge-expired.mjs` (dry run, two guards) | K8 |
