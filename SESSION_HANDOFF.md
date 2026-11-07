@@ -126,7 +126,7 @@ No data lost. "New" rows were test debris sorting above the three real `done` le
 Per-business self-check counts, audience rule, shared branded email layout, plain-English copy, preview gallery, `docs/PROPOSALS.md` §5d. Commits `5cc59aa`, `81e2132`, `92eefa2`. Disclosed: an intermediate test set `VERCEL_ENV=production` and two sends reached the real APIs (rejected). Fixed by the network guard.
 
 ### Phase 6: operator channel bundle
-- **`fix-invite-message` (PR #7, DRAFT, from main):** `/invite` had a literal `//n//n` and no tappable link. Now a real deep link, plain code, expiry. `tests/bot-text.test.mjs` guards every bot string. Commits `b5bb654`, `a2bbd67`. **Live on main until PR #7 merges.**
+- **`fix-invite-message` (PR #7, from main):** `/invite` had a literal `//n//n` and no tappable link. Now a real deep link, plain code, expiry. `tests/bot-text.test.mjs` guards every bot string. Commits `b5bb654`, `a2bbd67`. **GitHub reports PR #7 as MERGED** (observed 2026-11-07 22:10 UTC); the live bug is closed.
 - **Network guard:** `tests/env.mjs` throws on any non-loopback, non-Supabase host (N1-N5).
 - **Operator channel (`f404b4e`):** `lib/operator.js`; operator text only to the operator chat; per-business owner messages; one aggregated operator alarm (Telegram → email → `operator_alarm_undelivered`); no `TELEGRAM_CHAT_ID` button fallback.
 - **Commands and recovery (`0c9c07c`):** `/code`, `/phones`, `/businesses`, `/operator`, `/id`; owner = oldest phone; paste-a-code onboarding; `/leads` with Open and Older; stale taps answer "Already updated."; blocked-bot notice. OP1-OP13.
@@ -168,7 +168,7 @@ Per-business self-check counts, audience rule, shared branded email layout, plai
 | Medium | `leads.business_id` has no `ON DELETE` action; offboarding must delete leads first. |
 | Low | `/businesses` shows 0 phones for paused/churned clients (it re-fetches through `getBusinessActiveBySlug`). |
 | Low | `public.rls_auto_enable()` is SECURITY DEFINER with EXECUTE to `anon`/`authenticated` (event-trigger function, not directly callable). |
-| Live bug | `/invite` message broken on production `main` until PR #7 merges. |
+| Resolved | `/invite` message bug: PR #7 is merged (GitHub state observed 2026-11-07). |
 
 ### Production data (verified 2026-11-07)
 `alder-demo`: 3 leads (all `done`, review tokens), 2 `review_feedback` (5★), chat tail `6109`. `second-demo`: 0 leads, chat tail `6852`. Both `owner_email` domains are `example.com` placeholders. `MAIL_REDIRECT_TO` is active (intentional, demo).
@@ -249,7 +249,7 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 
 | # | Item | State |
 |---|---|---|
-| 1 | Merge **PR #7** (`fix-invite-message`) to fix the live `/invite` bug | Ready for review |
+| 1 | ~~Merge PR #7~~ | **MERGED** (observed) |
 | 2 | Review `ops-audience` from the single `.diff` | Waiting for the artefact |
 | 3 | ADD-ON 2 A3: `/invite` cancel-pending-invites button (unblocks the owner without waiting 24 h) | Not started |
 | 4 | ADD-ON 2 A4/A5: selfcheck purge + `scripts/purge-expired.mjs` | Not started |
@@ -266,8 +266,8 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 ## 12. Git state (as of this report)
 
 - `main` = `e981e0c` (deploys to production).
-- `ops-audience` (PR #6, **draft**): 29 commits ahead of `main`, head `e11877b`. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`.
-- `fix-invite-message` (PR #7, **draft**, unchanged): head `a2bbd67`.
+- `ops-audience` (PR #6): 30 commits ahead of `main`, head `fb1eb8e`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
+- `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
 - Review artefact: `_debug/patches/ops-audience-review.diff` (gitignored), single file.
 - Remote: `origin https://github.com/AbdallahIsDev/alder.git`. Never push to `main`, never force, no tags.
 
