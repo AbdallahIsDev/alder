@@ -81,6 +81,19 @@ const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+/* The alert path no longer falls back to TELEGRAM_CHAT_ID: an unbound chat gets
+   no alert with buttons. This suite asserts delivery to that chat, so bind it to
+   the seed business for the duration and remove the row in the cleanup. */
+const ALERT_CHAT = Number(process.env.TELEGRAM_CHAT_ID);
+{
+  const { data: seedBiz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
+  if (seedBiz && ALERT_CHAT) {
+    await svc.from('business_chats').upsert(
+      { business_id: seedBiz.id, tg_chat_id: ALERT_CHAT }, { onConflict: 'tg_chat_id' },
+    );
+  }
+}
+
 async function resetLimits() {
   await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
 }
@@ -777,6 +790,7 @@ const typeSeqOf = (api) => (s) => { let v = ''; for (const ch of s) v = api.sani
   await svc.from('leads').delete().like('notes', `${NOTES}%`);          // rows the page created with its own uuid key
   const { data: leftovers } = await svc.from('leads').select('id').or(`idempotency_key.like.${RUN}-%,notes.like.${NOTES}%`);
   await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
+  await svc.from('business_chats').delete().eq('tg_chat_id', ALERT_CHAT);
   console.log('');
   console.log(`cleanup: leads left = ${(leftovers || []).length}, rate_limits cleared`);
 }
