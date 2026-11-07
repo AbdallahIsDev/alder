@@ -11,6 +11,7 @@ import {
   botLinkedText, BOT_HELP, BOT_ALREADY_CONNECTED, BOT_NOT_CONNECTED, BOT_PLAIN_TEXT,
   reviewLandingPage,
 } from '../lib/content.js';
+import { digestText } from '../api/digest.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, '_debug', 'previews');
@@ -133,6 +134,9 @@ add('telegram-alert-done.txt', 'Telegram alert — done (review sent)', renderAl
 add('telegram-alert-done-no-email.txt', 'Telegram alert — done (no email)', renderAlert({ business, lead: { ...cleanLead, email: '' }, view: 'done', reviewResult: 'no_email' }), false);
 add('telegram-alert-error.txt', 'Telegram alert — error (Try again)', renderAlert({ business, lead: cleanLead, view: 'error', reviewResult: 'failed' }), false);
 add('telegram-alert-repeat.txt', 'Telegram alert — possible repeat', renderAlert({ business, lead: cleanLead, view: 'new', reviewResult: null, duplicate: true }), false);
+// The daily digest is counts only, so this is the whole message for both
+// channels: Telegram sends it as-is, the email fallback wraps the same text.
+add('digest.txt', 'Daily digest — Telegram and email', digestText({ newLeads: 4, repeats: 1, untouched: 2, failed: 0 }, '2026-11-07'), false);
 add('telegram-leads.txt', 'Telegram /leads list', renderLeadList([
   { name: 'Daniel Whitaker', service: 'repair', phone: '+15155550142', status: 'contacted', created_at: new Date(Date.now() - 41 * 60000).toISOString() },
   { name: 'Maria Lopez', service: 'storm', phone: '5550102345', status: 'open', created_at: new Date(Date.now() - 1500 * 60000).toISOString() },
@@ -194,7 +198,7 @@ index += '<h2>Telegram alerts (text)</h2>\n'
   + '<p class="cap">Telegram: finished, no email on file (nothing was sent)</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-done-no-email.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: review email failed — one "Try again" button (r:) resends it with the existing token</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-error.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: the same phone or email asked before — one extra line, never the earlier lead\'s details</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-repeat.txt').body) + '</pre>\n'
-  + '<p class="cap">Telegram: /leads list (spaced format)</p><pre>' + esc(files.find((f) => f.name === 'telegram-leads.txt').body) + '</pre>\n'
+  + '<p class="cap">Daily digest (18:00 UTC cron, off by default): counts only, no names, no addresses — the same text is safe by email</p><pre>' + esc(files.find((f) => f.name === 'digest.txt').body) + '</pre>\n'  + '<p class="cap">Telegram: /leads list (spaced format)</p><pre>' + esc(files.find((f) => f.name === 'telegram-leads.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: bot copy — linked, help, already connected, not connected, plain-text hint</p><pre>' + esc(files.find((f) => f.name === 'telegram-bot-copy.txt').body) + '</pre>\n';
 index += '<h2>Owner email (plain text)</h2>\n<pre>' + esc(files.find((f) => f.name === 'owner-email.txt').body) + '</pre>\n';
 index += '</body></html>\n';

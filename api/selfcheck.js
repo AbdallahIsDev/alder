@@ -19,6 +19,7 @@ import { secretMatches } from '../lib/request.js';
 import { listBusinessChats, getBusinessById } from '../lib/db.js';
 import { sendMessage } from '../lib/tg.js';
 import { sendMail, escHtml } from '../lib/mail.js';
+import { deliverToBusinesses } from '../lib/ops-delivery.js';
 
 const HEADER = 'x-health-secret';
 const KINDS = [
@@ -83,35 +84,10 @@ export function selfCheckEmail(text, dateKey) {
   };
 }
 
-/**
- * Deliver one self-check to the affected businesses.
- *
- * Telegram first. If a business has no bound chat, or none of its sends
- * succeeded, the same counts-only text goes to its owner_email — the email is a
- * fallback, never a second copy, so a business that received the Telegram
- * message gets no email.
- *
- * The senders are parameters so the three cases (Telegram down, both down, both
- * up) can be tested without a database or a network.
- */
-export async function deliverSelfCheck({ targets, text, chatsFor, sendTg, sendMailFor }) {
-  let sent = 0;
-  let emailed = 0;
-  for (const target of targets) {
-    const chats = await chatsFor(target).catch(() => []);
-    let delivered = 0;
-    for (const chat of chats) {
-      const r = await sendTg(chat, text).catch(() => ({ ok: false }));
-      if (r && r.ok) delivered++;
-    }
-    sent += delivered;
-    if (chats.length === 0 || delivered === 0) {
-      const r = await sendMailFor(target, text).catch(() => ({ ok: false }));
-      if (r && r.ok) emailed++;
-    }
-  }
-  return { sent, emailed };
-}
+/* One delivery path, shared with /api/digest: Telegram first, the same text by
+   email only when no chat received it. The name stays for the handler and the
+   tests that drive it directly. */
+export const deliverSelfCheck = deliverToBusinesses;
 
 async function countsSince(iso) {
   const out = {};

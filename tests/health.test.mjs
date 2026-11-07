@@ -87,10 +87,11 @@ try {
     const r = await call({ method: 'POST', secret: 'health-test-secret-value' });
     line(r.code === 405, 'H5', 'POST -> 405', `code=${r.code}`);
   }
-  /* H6: the cron entry is valid for a Hobby plan.
-     Hobby allows one run per day and rejects a more frequent expression at deploy
-     time, so a five-minute schedule here would break the deployment, not just the
-     job. The path must also resolve to a real function. */
+  /* H6: both cron entries are valid for a Hobby plan.
+     Hobby allows one run per day per job and rejects a more frequent expression at
+     deploy time, so a five-minute schedule here would break the deployment, not
+     just the job. Each path must resolve to a real function, and the two must not
+     land on the same hour (two daily messages in one minute is a bad morning). */
   {
     const fs = await import('node:fs');
     const path = await import('node:path');
@@ -98,13 +99,21 @@ try {
     const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
     const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'vercel.json'), 'utf8'));
     const crons = cfg.crons || [];
-    const one = crons.length === 1 ? crons[0] : null;
-    const fields = one ? one.schedule.split(' ') : [];
-    const [m, h, dom, mon, dow] = fields;
-    const daily = fields.length === 5 && m !== '*' && h !== '*' && dom === '*' && mon === '*' && dow === '*';
-    const resolves = !!one && fs.existsSync(path.join(ROOT, one.path.replace(/^\//, '') + '.js'));
-    line(!!one && daily && resolves, 'H6', 'cron: one daily job, path resolves',
-      `crons=${crons.length} schedule=${one ? one.schedule : 'none'} daily=${daily} file=${resolves}`);
+    const shapes = crons.map((c) => {
+      const [m, h, dom, mon, dow] = c.schedule.split(' ');
+      return {
+        path: c.path,
+        hour: h,
+        daily: c.schedule.split(' ').length === 5 && m !== '*' && h !== '*' && dom === '*' && mon === '*' && dow === '*',
+        resolves: fs.existsSync(path.join(ROOT, c.path.replace(/^\//, '') + '.js')),
+      };
+    });
+    const allDaily = shapes.length === 2 && shapes.every((x) => x.daily && x.resolves);
+    const distinct = new Set(shapes.map((x) => x.hour)).size === shapes.length;
+    const paths = shapes.map((x) => x.path).sort().join(',');
+    line(allDaily && distinct && paths === '/api/digest,/api/selfcheck', 'H6',
+      'crons: two daily jobs, both resolve, different hours',
+      `n=${crons.length} hours=${shapes.map((x) => x.hour).join('/')} daily=${allDaily} distinct=${distinct} paths=${paths}`);
   }
 
   /* ---------- self-check ---------- */
