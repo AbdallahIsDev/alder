@@ -947,26 +947,42 @@ try {
         'pasted code binds (case/space/hyphen); a bad one gets one generic answer',
         `bound=${!!bound}`);
 
+      // OP10/OP11 need a business whose ONLY phones are fixtures: on alder-demo
+      // the owner's real phones are older, so they are the main phone and a
+      // fixture can never exercise ownership transfer. A throwaway business keeps
+      // the real binding out of it.
+      const OP_SLUG = `op-${RUN}`;
+      const { data: opBiz } = await svc.from('businesses').insert({
+        slug: OP_SLUG, name: 'OP Fixture', owner_email: 'op@example.com',
+        google_review_url: 'https://g.page/r/op', timezone: 'America/Chicago', status: 'demo',
+      }).select('id').single();
+      const opChatA = 880006, opChatB = 880007;
+      await svc.from('business_chats').insert([
+        { business_id: opBiz.id, tg_chat_id: opChatA },
+        { business_id: opBiz.id, tg_chat_id: opChatB },
+      ]);
+
       // OP10: the second phone cannot invite or list recipients.
       await reset();
-      await good(msg(chatA2, '/invite'));
+      await good(msg(opChatB, '/invite'));
       const t1 = await allText();
       await reset();
-      await good(msg(chatA2, '/recipients'));
+      await good(msg(opChatB, '/recipients'));
       const t2 = await allText();
       line(t1 === C.BOT_OWNER_ONLY && t2 === C.BOT_OWNER_ONLY, 'OP10',
         'second phone: /invite and /recipients are owner-only', `invite=${t1.length} recipients=${t2.length}`);
 
       // OP11: the owner removes itself; the oldest remaining phone becomes owner.
       await reset();
-      await good(msg(chatA, '/recipients'));
-      const ownerRows = (await svc.from('business_chats').select('id').eq('business_id', bizA.id).order('created_at')).data;
-      await good(cb(chatA, 'x:' + ownerRows[0].id));
-      await good(cb(chatA, 'X:' + ownerRows[0].id));
+      await good(msg(opChatA, '/recipients'));
+      const ownerRows = (await svc.from('business_chats').select('id').eq('business_id', opBiz.id).order('created_at').order('id')).data;
+      await good(cb(opChatA, 'x:' + ownerRows[0].id));
+      await good(cb(opChatA, 'X:' + ownerRows[0].id));
       await reset();
-      await good(msg(chatA2, '/invite'));
+      await good(msg(opChatB, '/invite'));
       const nowOwner = (await allText()) !== C.BOT_OWNER_ONLY;
       line(nowOwner, 'OP11', 'ownership moves to the oldest remaining phone', `owner=${nowOwner}`);
+      await svc.from('businesses').delete().eq('id', opBiz.id);
 
       // OP12: /leads has Open buttons; o: sends the current card; another
       // business's lead is "Not found.".
