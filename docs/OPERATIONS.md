@@ -63,9 +63,33 @@ Test debris from the suites can be swept with `scripts/sweep-demo-leads.mjs` (al
 dry run; `--before`, `--include-suite`, `--include-nojs`). It never touches a lead that
 has a `review_token`.
 
+## 2b. The operator and the owner
+
+Two roles, and they never mix.
+
+- **The operator** is you. One private chat: `OPERATOR_CHAT_ID`, falling back to
+  `TELEGRAM_CHAT_ID` when the newer variable is unset. `OPERATOR_EMAIL` is the
+  email fallback for the daily alarm. Operator-only content — the redirect
+  warning, aggregate numbers, business slugs, "no phone connected" — goes only
+  there, whatever a business's status is. A `demo` business is a lifecycle
+  state, not an audience.
+- **The owner phone** is the oldest connected phone of a business. It is the only
+  one that may `/invite` or remove a phone. Every phone keeps alerts, the alert
+  buttons and `/leads`.
+
+Operator commands (`/code`, `/phones`, `/businesses`, `/operator`) work only in
+the operator chat. A client who types one gets the same reply as for any unknown
+text, so the commands are not discoverable. `/id` works in every private chat and
+is not listed in the menu: it is how you learn `OPERATOR_CHAT_ID` without a
+third-party bot.
+
+Register the menus once with `npm run tg:commands` (owner commands as the default
+menu, the operator commands as a chat-scoped menu when `OPERATOR_CHAT_ID` is
+set).
+
 ## 3. Add or remove a phone
 
-**Add.** A chat that is already bound sends `/invite`. The bot mints one single-use
+**Add (client).** The main phone sends `/invite`. The bot mints one single-use
 code for **that chat's business** and replies with a tappable deep link
 (`https://t.me/<bot>?start=<code>`) plus the plain code. The second phone taps the
 link and presses Start; it becomes a second `business_chats` row and receives every
@@ -85,14 +109,32 @@ Caps (env-overridable, `RECIPIENTS_MAX` / `INVITES_MAX`):
 - 5 bound phones per business, 3 unused live invites per business;
 - `/invite` itself is limited to 5 per chat per hour and fails closed (no reply).
 
+**Add (operator).** `/code <slug>` mints the same single-use code and returns a
+message you can forward as-is. Use it when a client has no phone connected yet,
+which is the one case `/invite` cannot cover.
+
+**Lost or stolen phone.** `/phones <slug>`, Remove on that row, confirm. The code
+that phone held is already used; mint a new one with `/code <slug>` for the
+replacement. If the phone may still have the chat open, remove it first — the
+binding is the authorisation.
+
 **Remove.** `/recipients` lists every phone as "Recipient 1, 2, …" (or the stored
 `business_chats.label` when set) with one **Remove** button each. Removing asks once;
 the last remaining phone cannot be removed. A second tap on an already-removed row
 answers "already removed" and changes nothing.
 
 A chat belongs to exactly one business. Sending a code from a chat that is already
-bound elsewhere answers "You're all set" and leaves the binding alone; the code stays
-unused.
+bound elsewhere answers "You're already connected" and leaves the binding alone;
+the code stays unused. An unbound chat can also paste the code as plain text —
+spaces, hyphens and case are ignored — and gets one identical answer for invalid,
+expired, used and unknown codes.
+
+**Delete chat vs Block.** Deleting the chat in Telegram removes it locally only:
+the binding stays, and pressing Start again answers "You're all set". Blocking the
+bot stops delivery; the next alert records `tg_failed` with status 403 and the
+operator gets one notice per business per day. Telegram also sends
+`my_chat_member` when the bot is blocked, which produces the same notice
+immediately.
 
 ## 4. Reading the alerts
 
@@ -185,6 +227,16 @@ verify.
 `node scripts/live-smoke.mjs --live` sends one real Telegram message and one real
 email. It refuses to run while `.test-mode` exists or either `*_API_BASE` override is
 set, so it cannot be pointed at a fake by accident.
+
+## 6b. Pre-launch checklist additions
+
+- `OPERATOR_CHAT_ID` is set, and `/id` in that chat returns the same number.
+- `OPERATOR_EMAIL` is set, or you accept that the daily alarm has no fallback.
+- Every business's `owner_email` is an address **we control**. Lead alerts, the
+  self-check and the digest all send there; once `MAIL_REDIRECT_TO` is removed, a
+  placeholder address emails a stranger. `example.com` is reserved (RFC 2606) and
+  must never survive to production.
+- `npm run tg:commands` has been run since the last command change.
 
 ## 7. Post-merge checklist
 

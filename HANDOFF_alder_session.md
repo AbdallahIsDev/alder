@@ -9,6 +9,30 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - Final full run after this bundle (all green): `db-wall 27, lead-api 44, notify 37, webhook 42, review 21, fallback 7, brand 6, outbound 7` = **191 tests**. Outbound went 4 → 7 because F5–F7 were added; no test was removed or skipped (191 PASS/FAIL lines in the run log).
 - Production is live; suites read the production database (see caveat below).
 
+## What changed in this bundle (operator, owner, recovery — 2026-11-07)
+
+- **Two roles, never mixed.** The operator chat is `OPERATOR_CHAT_ID` (falling back to
+  `TELEGRAM_CHAT_ID`); `OPERATOR_EMAIL` is the alarm fallback. Operator-only content —
+  redirect warning, aggregates, slugs, "no phone connected" — goes only there. The
+  `status=demo` audience rule is gone; a demo business is a lifecycle state.
+- **One alarm.** `/api/selfcheck` sends one aggregated operator message (problems first,
+  each affected business by slug), then owner messages per business. No recipient
+  de-duplication: two businesses sharing an inbox get two messages.
+- **Operator commands**: `/code`, `/phones`, `/businesses`, `/operator`, all authorised by
+  chat id in a private chat; `/id` works everywhere and is not in the menu. Menus are
+  registered by `npm run tg:commands` (owner default, operator chat-scoped).
+- **Owner phone = oldest connected phone.** Only it may `/invite` or remove; every phone
+  keeps alerts, buttons and `/leads`.
+- **Recovery**: paste a code in an unbound chat; `/leads` newest 8 with Open buttons and
+  Older paging; a stale tap answers "Already updated." and refreshes the card.
+- **Blocked bot**: 403 on the only phone, or `my_chat_member` kicked, sends the operator
+  one notice per business per day. `setWebhook` now subscribes to `my_chat_member`.
+- **Tests guard**: `tests/env.mjs` installs a fetch guard — any non-loopback, non-Supabase
+  host throws `network_guard_blocked` whatever `VERCEL_ENV` says.
+- **`/invite` fixed** on `fix-invite-message` (merged here): real deep link, real line
+  breaks, and `tests/bot-text.test.mjs` scans every user-facing string for artifacts.
+- Not applied: any migration. `docs/PROPOSALS.md` §5d is still the only schema proposal.
+
 ## What changed in this bundle (ops audience, branch `ops-audience`)
 
 - **The self-check is per business.** It used to count every `*_failed` event globally and send
