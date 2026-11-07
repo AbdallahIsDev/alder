@@ -12,7 +12,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomInt } from 'node:crypto';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SELF = fileURLToPath(import.meta.url);
@@ -31,14 +30,6 @@ export function loadDotEnvFiles({ env = process.env, root = ROOT, files = ['.env
 const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
 const SLUG_RE = /^[a-z0-9-]{2,60}$/;
 
-// Unambiguous alphabet: no 0/O, 1/I/L, no lowercase/uppercase pairs that look alike.
-const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-function makeCode(n) {
-  let s = '';
-  for (let i = 0; i < n; i++) s += ALPHABET[randomInt(0, ALPHABET.length)];
-  return s;
-}
-
 function fail(msg) {
   console.error('bind: ' + msg);
   process.exit(1);
@@ -53,9 +44,10 @@ async function main() {
   if (!slug || slug.startsWith('--')) fail('usage: npm run bind -- <slug>');
   if (!SLUG_RE.test(slug)) fail('invalid slug');
 
-  let getActiveBusinessBySlug, createBindCode, listBusinessSlugs, getMe;
+  let getActiveBusinessBySlug, listBusinessSlugs, getMe, mintBindCode;
   try {
-    ({ getActiveBusinessBySlug, createBindCode, listBusinessSlugs } = await import('../lib/db.js'));
+    ({ getActiveBusinessBySlug, listBusinessSlugs } = await import('../lib/db.js'));
+    ({ mintBindCode } = await import('../lib/bind-codes.js'));
     ({ getMe } = await import('../lib/tg.js'));
   } catch { fail('db_not_configured'); }
 
@@ -72,10 +64,10 @@ async function main() {
     fail(valid ? `unknown slug; valid: ${valid}` : 'unknown slug');
   }
 
-  const code = makeCode(12);
-  const expiresAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  // One minter for the script and the bot: same alphabet, same length, same life.
+  let code, expiresAt;
   try {
-    await createBindCode(code, business.id, expiresAt);
+    ({ code, expiresAt } = await mintBindCode(business.id));
   } catch { fail('db_not_configured'); }
 
   let username = '<bot-username>';

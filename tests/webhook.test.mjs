@@ -168,7 +168,9 @@ try {
 
   /* malformed callback_data is ignored (never triggers a transition) */
   await reset();
-  for (const bad of ['x:' + aLead1, 'c:not-a-uuid', 'r:not-a-uuid', 'cd:00000000-0000-0000-0000-000000000000', 'c:' + aLead1 + 'extra']) {
+  // 'q:' stands in for an unknown kind: 'x:' became a real recipient callback
+  // when /recipients landed, so it is no longer a malformed example.
+  for (const bad of ['q:' + aLead1, 'c:not-a-uuid', 'r:not-a-uuid', 'cd:00000000-0000-0000-0000-000000000000', 'c:' + aLead1 + 'extra']) {
     await good(cb(chatB, bad));
   }
   const malformedStatus = (await svc.from('leads').select('status').eq('id', aLead1).single()).data.status;
@@ -745,7 +747,7 @@ try {
     ];
     const banned = /another|other (roofer|business|compan)|roofers|administrator|provider|move it|shared|multiple/i;
     const exactOk = C.botLinkedText('Alder Roofing (demo)') === `You're connected to Alder Roofing (demo). ✅\n\nNew estimate requests from your website will appear here the moment they come in.\n\nFor each request:\n• Tap Mark contacted after you call the customer.\n• Tap Job completed when the work is done. You can then send the customer a review request.\n\nSend /leads to see your latest requests, or /help any time.`
-      && C.BOT_HELP === `How this works\n\nNew estimate requests from your website appear here as soon as they come in.\n\nFor each request:\n• Mark contacted after you call the customer.\n• Job completed when the work is done, to send a review request.\n\nCommands:\n/leads · your latest requests\n/help · this message`
+      && C.BOT_HELP === `How this works\n\nNew estimate requests from your website appear here as soon as they come in.\n\nFor each request:\n• Mark contacted after you call the customer.\n• Job completed when the work is done, to send a review request.\n\nCommands:\n/leads · your latest requests\n/invite · connect a second phone\n/recipients · who receives alerts\n/help · this message`
       && C.BOT_ALREADY_CONNECTED === `You're all set. New requests will appear here.\n\nSend /help to see what I can do.`
       && C.BOT_NOT_CONNECTED === `This chat isn't connected yet.\n\nOpen the setup link you were sent and tap Start.`
       && C.BOT_BAD_CODE === `That setup link isn't valid or has expired.\n\nAsk for a new one.`

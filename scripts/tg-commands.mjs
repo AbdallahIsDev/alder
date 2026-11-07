@@ -26,6 +26,8 @@ export function loadDotEnvFiles({ env = process.env, root = ROOT, files = ['.env
 
 export const COMMANDS = [
   { command: 'leads', description: 'Your latest requests' },
+  { command: 'invite', description: 'Connect another phone' },
+  { command: 'recipients', description: 'Who receives alerts' },
   { command: 'help', description: 'How this works' },
 ];
 export const DESCRIPTION = `Get your website's new estimate requests here the moment they arrive, and keep track of each one. Tap Start to connect this chat.`;

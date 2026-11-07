@@ -8,13 +8,17 @@ import { randomBytes } from 'node:crypto';
 import {
   getChatBinding, bindChat, claimBindCode, getBusinessById, clearRateLimit,
   listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
+  countBusinessChats, countLiveBindCodes, listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
 } from '../lib/db.js';
+import { mintBindCode } from '../lib/bind-codes.js';
 import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup } from '../lib/tg.js';
 import { secretMatches } from '../lib/request.js';
 import { sendReviewRequest } from '../lib/notify.js';
 import {
   renderAlert, renderLeadList, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard,
   botLinkedText, BOT_HELP, BOT_ALREADY_CONNECTED, BOT_NOT_CONNECTED, BOT_BAD_CODE, BOT_PLAIN_TEXT,
+  botInviteText, botRecipientsText, recipientsKeyboard, recipientConfirmText, recipientConfirmKeyboard,
+  BOT_INVITE_CAPPED, BOT_INVITE_PENDING, BOT_RECIPIENT_LAST, BOT_RECIPIENT_REMOVED, BOT_RECIPIENT_GONE,
 } from '../lib/content.js';
 
 const GENERIC_NOT_FOUND = 'Not found.';
@@ -49,6 +53,93 @@ async function handleLeads(chatId, binding) {
   const leads = await listClientLeads(binding.business_id, 10);
   if (!leads.length) return reply(chatId, 'No requests yet.');
   return reply(chatId, renderLeadList(leads));
+}
+
+/* ---------- recipients ----------
+   One business, up to a handful of phones. Tenancy is always the caller's own
+   binding: nothing here reads a business id from the message or the callback. */
+
+const RECIPIENTS_MAX_DEFAULT = 5;
+const INVITES_MAX_DEFAULT = 3;
+const INVITES_PER_HOUR = 5;
+
+const positiveInt = (raw, fallback) => {
+  const n = Number(raw || fallback);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+};
+export const recipientsMax = () => positiveInt(process.env.RECIPIENTS_MAX, RECIPIENTS_MAX_DEFAULT);
+export const invitesMax = () => positiveInt(process.env.INVITES_MAX, INVITES_MAX_DEFAULT);
+
+/** /invite — mint one single-use code for THIS chat's business. */
+async function handleInvite(chatId, binding) {
+  if (!binding) return reply(chatId, BOT_NOT_CONNECTED);
+  // Fail closed, like the plain-text hint: no reply when the counter is unreachable.
+  let within;
+  try { within = await hitRateLimit('invite:' + chatId, 3600, INVITES_PER_HOUR); } catch { return; }
+  if (!within) return;
+
+  const [bound, pending] = await Promise.all([
+    countBusinessChats(binding.business_id),
+    countLiveBindCodes(binding.business_id),
+  ]);
+  if (bound >= recipientsMax()) return reply(chatId, BOT_INVITE_CAPPED);
+  if (pending >= invitesMax()) return reply(chatId, BOT_INVITE_PENDING);
+
+  const { code } = await mintBindCode(binding.business_id);
+  return reply(chatId, botInviteText(code));
+}
+
+/** The list, as a new message or as an edit of the one the button lives on. */
+async function sendRecipients(chatId, businessId, messageId) {
+  const rows = await listBusinessChatsDetailed(businessId);
+  const text = botRecipientsText(rows);
+  const markup = { reply_markup: rows.length ? recipientsKeyboard(rows) : { inline_keyboard: [] } };
+  if (messageId) return editMessageText(chatId, messageId, text, markup).catch(() => {});
+  return sendMessage(chatId, text, markup);
+}
+
+/** /recipients — who receives alerts, with one Remove button per row. */
+async function handleRecipients(chatId, binding) {
+  if (!binding) return reply(chatId, BOT_NOT_CONNECTED);
+  return sendRecipients(chatId, binding.business_id);
+}
+
+/**
+ * x: ask before removing, X: remove, v: cancel.
+ * Scoped by business AND row id, so a forged callback from another business
+ * finds nothing. The confirm tap is idempotent: a second X removes nothing and
+ * says so instead of throwing.
+ */
+async function handleRecipientCallback({ cb, kind, rowId, binding, answer }) {
+  const chatId = cb.message && cb.message.chat && cb.message.chat.id;
+  const messageId = cb.message && cb.message.message_id;
+  const rows = await listBusinessChatsDetailed(binding.business_id);
+  const index = rows.findIndex((r) => r.id === rowId);
+
+  if (kind === 'x') {
+    const row = index >= 0 ? rows[index] : await getBusinessChat(binding.business_id, rowId);
+    if (!row) { await answer(BOT_RECIPIENT_GONE); return sendRecipients(chatId, binding.business_id, messageId); }
+    await answer('');
+    return editMessageText(chatId, messageId, recipientConfirmText(row, index < 0 ? rows.length : index), {
+      reply_markup: recipientConfirmKeyboard(rowId),
+    }).catch(() => {});
+  }
+
+  if (kind === 'v') {
+    await answer('');
+    return sendRecipients(chatId, binding.business_id, messageId);
+  }
+
+  // X: the confirm tap. Existence first: after a successful removal the list has
+  // one row left, and a second tap must say "already removed", not "that is the
+  // last phone". The delete is still scoped by business AND row, and reports 0
+  // rows if two taps race.
+  const row = index >= 0 ? rows[index] : await getBusinessChat(binding.business_id, rowId);
+  if (!row) { await answer(BOT_RECIPIENT_GONE); return sendRecipients(chatId, binding.business_id, messageId); }
+  if (rows.length <= 1) { await answer(BOT_RECIPIENT_LAST); return; }
+  const removed = await removeBusinessChat(binding.business_id, rowId);
+  await answer(removed ? BOT_RECIPIENT_REMOVED : BOT_RECIPIENT_GONE);
+  return sendRecipients(chatId, binding.business_id, messageId);
 }
 
 /** Plain-text hint, at most 3 per chat per hour; fail closed (no reply). */
@@ -243,9 +334,15 @@ async function handleCallback(cb, binding) {
 
   if (!binding) { await answer(GENERIC_NOT_FOUND); return; }
   try {
-    if (!/^[cdynr]:[0-9a-f-]{36}$/.test(data)) { await answer(GENERIC_NOT_FOUND); return; }
+    // x/X/v address a business_chats row; the rest address a lead.
+    if (!/^[cdynrvxX]:[0-9a-f-]{36}$/.test(data)) { await answer(GENERIC_NOT_FOUND); return; }
     const kind = data[0];
     const leadId = data.slice(2);
+
+    if (kind === 'x' || kind === 'X' || kind === 'v') {
+      await handleRecipientCallback({ cb, kind, rowId: leadId, binding, answer });
+      return;
+    }
 
     const lead = await getClientLead(leadId, binding.business_id);
     if (!lead) { await answer(GENERIC_NOT_FOUND); return; }
@@ -293,6 +390,10 @@ export default async function handler(req, res) {
         await handleStart(chatId, text.slice(6).trim());
       } else if (text.startsWith('/leads')) {
         await handleLeads(chatId, binding);
+      } else if (text.startsWith('/invite')) {
+        await handleInvite(chatId, binding);
+      } else if (text.startsWith('/recipients')) {
+        await handleRecipients(chatId, binding);
       } else if (text.startsWith('/help')) {
         await reply(chatId, binding ? BOT_HELP : BOT_NOT_CONNECTED);
       } else {
