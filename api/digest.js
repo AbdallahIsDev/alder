@@ -17,7 +17,7 @@
 // constant time, 503 when HEALTH_SECRET is unset.
 
 import { secretMatches } from '../lib/request.js';
-import { hitRateLimit } from '../lib/db.js';
+import { hitRateLimit, clearRateLimit } from '../lib/db.js';
 import { digestCounts, digestTargets } from '../lib/digest-db.js';
 import { deliverToBusinesses } from '../lib/ops-delivery.js';
 import { sendMessage } from '../lib/tg.js';
@@ -123,7 +123,7 @@ export default async function handler(req, res) {
     }
 
     const byId = new Map(targets.map((t) => [t.id, t]));
-    const { sent, emailed } = await deliverToBusinesses({
+    const { sent, emailed, perTarget } = await deliverToBusinesses({
       targets: due,
       // Per business: the counts differ, even though no count identifies anyone.
       textFor: (id) => digestText(counts.get(id), dateKey),
@@ -139,7 +139,17 @@ export default async function handler(req, res) {
       },
     });
 
-    return res.status(200).json({ ok: true, enabled: true, businesses: due.length, sent, emailed, skipped });
+    // Nothing reached a business, so the claim is released: the cron retry (or a
+    // second scheduler run) may try again the same day. Only an exact key is
+    // deleted — never a range, never a prefix.
+    let released = 0;
+    for (const id of due) {
+      const r = perTarget.get(id);
+      if (!r || r.sent || r.emailed) continue;
+      try { await clearRateLimit('digest:' + id); released++; } catch { /* the day's slot stays taken */ }
+    }
+
+    return res.status(200).json({ ok: true, enabled: true, businesses: due.length, sent, emailed, released, skipped });
   } catch (e) {
     console.error('digest_failed', (e && e.code) || 'no_code');
     return res.status(500).json({ ok: false });

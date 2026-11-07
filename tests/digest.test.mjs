@@ -145,6 +145,11 @@ try {
       const rLimit = u.searchParams.get('limit');
       const rTo = rLimit ? rFrom + Number(rLimit) - 1 : 1e9;
       const page = (rows) => rows.slice(rFrom, rTo + 1);
+      if (table === 'rate_limits' && String(init.method || '').toUpperCase() === 'DELETE') {
+        const key = (u.searchParams.get('key') || '').replace('eq.', '');
+        claimed.delete(key);
+        return json([]);
+      }
       if (table === 'rpc/hit_rate_limit') {
         const body = JSON.parse(init.body || '{}');
         const key = body.p_key;
@@ -296,6 +301,37 @@ try {
       `untouched=${(text.match(/Untouched over 24 h (\d+)/) || [])[1]} maxUrl=${maxUrl} chunks=${contactedCalls}`);
   } catch (e) {
     line(false, 'D13', '250 leads / 1200 events: exact, chunked, short URLs', e.message);
+  } finally { if (installed) installed(); }
+
+  /* ---------- D14/D15: a claim is released only when nobody heard it ---------- */
+  try {
+    install({ ...fixture, businesses: [fixture.businesses[0]], chats: [{ business_id: A, tg_chat_id: 'chat-a' }] });
+    process.env.DIGEST_ENABLED = '1';
+    await ctl(TG, { mode: '500' }); await ctl(RS, { mode: '500' });
+    await resetFake(TG); await resetFake(RS);
+    const first = await call({ secret: 'health-test-secret-value' });
+    const second = await call({ secret: 'health-test-secret-value' });
+    line(first.body.sent === 0 && first.body.emailed === 0 && first.body.released === 1
+      && second.body.businesses === 1 && second.body.skipped === 0,
+      'D14', 'both down: claim released, retry the same day sends',
+      `released=${first.body.released} retryBusinesses=${second.body.businesses} skipped=${second.body.skipped}`);
+  } catch (e) {
+    line(false, 'D14', 'both down: claim released, retry the same day sends', e.message);
+  } finally { if (installed) installed(); }
+
+  try {
+    install({ ...fixture, businesses: [fixture.businesses[0]], chats: [{ business_id: A, tg_chat_id: 'chat-a' }] });
+    process.env.DIGEST_ENABLED = '1';
+    await ctl(TG, { mode: '500' }); await ctl(RS, { mode: 'ok' });
+    await resetFake(TG); await resetFake(RS);
+    const first = await call({ secret: 'health-test-secret-value' });
+    const second = await call({ secret: 'health-test-secret-value' });
+    line(first.body.emailed === 1 && first.body.released === 0
+      && second.body.businesses === 0 && second.body.skipped === 1,
+      'D15', 'one channel up: claim kept, retry skipped',
+      `emailed=${first.body.emailed} released=${first.body.released} retrySkipped=${second.body.skipped}`);
+  } catch (e) {
+    line(false, 'D15', 'one channel up: claim kept, retry skipped', e.message);
   } finally { if (installed) installed(); }
 
   /* ---------- D5: Telegram down -> email ---------- */
