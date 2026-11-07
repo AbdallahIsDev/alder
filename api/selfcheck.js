@@ -59,13 +59,23 @@ export function alertTargets({ businesses, counts }) {
  * The operator alarm for one run, or null when there is nothing to say.
  * Exported so the aggregation can be tested without a database.
  */
-export function operatorAlarm({ businesses, counts, chatsByBusiness, redirectActive }) {
+export function operatorAlarm({ businesses, counts, chatsByBusiness, recentLeadBusinesses, redirectActive }) {
   const rows = businesses
     .filter((b) => failedTotal(counts.get(b.id) || {}) > 0)
     .map((b) => ({ slug: b.slug, day: counts.get(b.id) || {} }));
-  const noPhoneSlugs = businesses
-    .filter((b) => ((chatsByBusiness && chatsByBusiness.get(b.id)) || []).length === 0)
-    .map((b) => b.slug);
+
+  // "No phone connected" is a problem only when somebody is actually missing
+  // alerts. An empty demo row that never receives a lead is a parked test
+  // business, not an incident, and nagging about it every day trains the
+  // operator to ignore the alarm.
+  const noPhoneSlugs = businesses.filter((b) => {
+    const chats = chatsByBusiness ? chatsByBusiness.get(b.id) : [];
+    if (chats === null || chats === undefined) return false;   // unknown, not "no phone"
+    if (chats.length) return false;
+    if (b.status === 'active') return true;
+    return !!(recentLeadBusinesses && recentLeadBusinesses.has(b.id));
+  }).map((b) => b.slug);
+
   const body = operatorAlarmBody({ rows, redirectActive, noPhoneSlugs });
   return body ? { body, text: operatorAlarmText({ rows, redirectActive, noPhoneSlugs }) } : null;
 }
@@ -123,8 +133,18 @@ export default async function handler(req, res) {
     // needs the empty ones to say "no phone connected".
     const chatsByBusiness = new Map();
     for (const b of active) {
-      chatsByBusiness.set(b.id, await listBusinessChats(b.id).catch(() => []));
+      // null means "could not read", which is NOT the same as "no phone": an
+      // unreachable query must never be reported as an empty business.
+      let chats = null;
+      try { chats = await listBusinessChats(b.id); } catch { console.error('operator_chats_unknown'); }
+      chatsByBusiness.set(b.id, chats);
     }
+    // A demo business with no chat is only worth mentioning if it actually got a
+    // lead in the last week.
+    const recent = await eventCountsByBusiness({
+      sinceIso: new Date(Date.now() - 7 * DAY).toISOString(), kinds: ['created'],
+    }).catch(() => new Map());
+    const recentLeadBusinesses = new Set([...recent.keys()]);
 
     const dateKey = new Date().toISOString().slice(0, 10);
     const byId = new Map(active.map((b) => [b.id, b]));
@@ -155,7 +175,7 @@ export default async function handler(req, res) {
       emailed = r.emailed;
     }
 
-    const alarm = operatorAlarm({ businesses: active, counts, chatsByBusiness, redirectActive });
+    const alarm = operatorAlarm({ businesses: active, counts, chatsByBusiness, recentLeadBusinesses, redirectActive });
     let operator = 'none';
     if (alarm) operator = await deliverOperatorAlarm({ body: alarm.body, text: alarm.text, dateKey });
 

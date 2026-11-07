@@ -586,12 +586,48 @@ try {
     const alarm = operatorAlarm({
       businesses, counts,
       chatsByBusiness: new Map([['biz-a', ['c']], ['biz-b', []], ['biz-c', ['c']], ['biz-d', []]]),
+      recentLeadBusinesses: new Set(),
       redirectActive: false,
     });
+    // biz-d is a demo business with no chat and no recent lead: parked, not an
+    // incident, so it is not listed any more.
     const alarmOk = !!alarm && alarm.body.includes('biz-a: 2 alerts') && alarm.body.includes('biz-b: 1 alert email')
-      && alarm.body.includes('No phone connected: biz-b, biz-d');
+      && alarm.body.includes('No phone connected: biz-b') && !alarm.body.includes('biz-d');
     line(ok && alarmOk, 'S5', 'owner targets are per business; the alarm aggregates',
       `targets=${targets.length} alarm=${alarmOk}`);
+  }
+
+  /* S17-S20: the operator alarm goes quiet when nothing is actually wrong */
+  {
+    const demo = { id: 'd1', slug: 'second-demo', status: 'demo' };
+    const active = { id: 'a1', slug: 'client', status: 'active' };
+    const none = new Map();
+
+    const quiet = operatorAlarm({
+      businesses: [demo], counts: none,
+      chatsByBusiness: new Map([['d1', []]]), recentLeadBusinesses: new Set(), redirectActive: false,
+    });
+    line(quiet === null, 'S17', 'empty demo with no lead and no chat: no alarm at all', `alarm=${!!quiet}`);
+
+    const activeAlarm = operatorAlarm({
+      businesses: [active], counts: none,
+      chatsByBusiness: new Map([['a1', []]]), recentLeadBusinesses: new Set(), redirectActive: false,
+    });
+    line(!!activeAlarm && activeAlarm.body.includes('No phone connected: client'), 'S18',
+      'active client with no chat: alarm', `alarm=${!!activeAlarm}`);
+
+    const demoLead = operatorAlarm({
+      businesses: [demo], counts: none,
+      chatsByBusiness: new Map([['d1', []]]), recentLeadBusinesses: new Set(['d1']), redirectActive: false,
+    });
+    line(!!demoLead && demoLead.body.includes('No phone connected: second-demo'), 'S19',
+      'demo with a lead in the last week and no chat: alarm', `alarm=${!!demoLead}`);
+
+    const unknown = operatorAlarm({
+      businesses: [active], counts: none,
+      chatsByBusiness: new Map([['a1', null]]), recentLeadBusinesses: new Set(), redirectActive: false,
+    });
+    line(unknown === null, 'S20', 'a chat lookup that failed is unknown, not "no phone"', `alarm=${!!unknown}`);
   }
 
   /* S4: authorised call — shape only; `sent` depends on live data and is not asserted */
