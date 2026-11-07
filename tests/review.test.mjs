@@ -77,6 +77,21 @@ const postIn = (token, body) => callReview({ method: 'POST', token, body });
 try {
   await control(TG, { mode: 'ok' }); await reset(TG); await reset(RS);
 
+  /* D0: a stored URL that lost its leading "h" is repaired, and only that.
+     Production carried "ttps://search.google.com/..." and the page fell back to
+     "Review link unavailable" with no stars — for real customers. */
+  {
+    const { googleUrlAllowed, reviewPage } = await import('../lib/content.js');
+    const typo = 'ttps://search.google.com/local/writereview?placeid=X';
+    const fixed = googleUrlAllowed(typo);
+    const page = reviewPage({ business: { name: 'A' }, token: 't', googleUrl: typo, stars: 0 });
+    const ok = fixed === 'https://search.google.com/local/writereview?placeid=X'
+      && googleUrlAllowed('ttps://evil.example/x') === null
+      && googleUrlAllowed('http://search.google.com/x') === null
+      && (page.html.match(/role="radio"/g) || []).length === 5;
+    line(ok, 'D0', 'a "ttps://" typo is repaired; other schemes and hosts rejected', `fixed=${!!fixed}`);
+  }
+
   /* Token entropy */
   const t0 = token();
   line(t0.length === 32 && /^[A-Za-z0-9_-]+$/.test(t0), 'D1', 'review_token is 192 bits / 32 chars', `${t0.length} chars`);

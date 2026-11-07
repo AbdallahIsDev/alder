@@ -35,7 +35,12 @@ function tokenFrom(req) {
 }
 
 function usableGoogleUrl(v) {
-  return typeof v === 'string' && /^https:\/\//.test(v) && v !== '#' ? v : null;
+  if (typeof v !== 'string' || v === '#') return null;
+  // "ttps://…" is a one-character typo for https, not a different scheme: let it
+  // through to googleUrlAllowed, which repairs it and still applies the host
+  // allowlist. Without this the page fell back to "Review link unavailable".
+  if (/^ttps:\/\//i.test(v)) return v;
+  return /^https:\/\//.test(v) ? v : null;
 }
 
 

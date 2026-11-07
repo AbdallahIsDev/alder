@@ -82,9 +82,10 @@ const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_
 });
 
 /* The alert path no longer falls back to TELEGRAM_CHAT_ID: an unbound chat gets
-   no alert with buttons. This suite asserts delivery to that chat, so bind it to
-   the seed business for the duration and remove the row in the cleanup. */
-const ALERT_CHAT = Number(process.env.TELEGRAM_CHAT_ID);
+   no alert with buttons. This suite asserts delivery, so it binds its OWN fixture
+   chat (770010) for the duration. Never the real chat id: a cleanup that deletes
+   by that id removes a real binding. */
+const ALERT_CHAT = 770010;   // fixture id, never the real operator chat
 {
   const { data: seedBiz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
   if (seedBiz && ALERT_CHAT) {
