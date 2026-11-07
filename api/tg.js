@@ -12,7 +12,7 @@ import {
   getActiveBusinessBySlug, listBusinessSlugs, getChatById, removeChatById,
 } from '../lib/db.js';
 import { isOperatorChat } from '../lib/operator.js';
-import { mintBindCode } from '../lib/bind-codes.js';
+import { mintBindCode, BIND_CODE_HOURS } from '../lib/bind-codes.js';
 import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup, botUsername } from '../lib/tg.js';
 import { secretMatches } from '../lib/request.js';
 import { sendReviewRequest, notifyOperatorUnreachable } from '../lib/notify.js';
@@ -23,7 +23,8 @@ import {
   BOT_INVITE_CAPPED, BOT_INVITE_PENDING, BOT_RECIPIENT_LAST, BOT_RECIPIENT_REMOVED, BOT_RECIPIENT_GONE,
   TOAST_NOT_FOUND, TOAST_ALREADY_DONE, TOAST_CONTACT_FIRST, TOAST_NOTHING_TO_RETRY, TOAST_GENERIC_ERROR,
   TOAST_ALREADY_UPDATED, TOAST_TOO_MANY_OPENS, TOAST_OWNER_ONLY, leadListKeyboard, alertKeyboard,
-  BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_OWNER_ONLY, BOT_RECIPIENTS_OWNER_NOTE, botForwardText, operatorPhonesText, operatorPhonesKeyboard,
+  BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_OWNER_ONLY, BOT_RECIPIENTS_OWNER_NOTE, botForwardText,
+  operatorCodeText, operatorCodeResendText, operatorPhonesText, operatorPhonesKeyboard,
   operatorConfirmRemoveText, operatorConfirmRemoveKeyboard, operatorBusinessesText,
   OPERATOR_USAGE_CODE, OPERATOR_USAGE_PHONES, OPERATOR_UNKNOWN_SLUG, OPERATOR_CAPPED, OPERATOR_NO_PHONES,
   OPERATOR_PHONE_REMOVED, OPERATOR_PHONE_GONE, OPERATOR_ID_TEXT, OPERATOR_HELP,
@@ -276,9 +277,20 @@ async function handleOperatorCode(chatId, arg) {
   if (!within) return reply(chatId, OPERATOR_CAPPED);
   const business = await getActiveBusinessBySlug(slug).catch(() => null);
   if (!business) return reply(chatId, OPERATOR_UNKNOWN_SLUG);
-  const { code, expiresAt } = await mintBindCode(business.id);
+  const { code } = await mintBindCode(business.id);
   const username = await botUsername();
-  return reply(chatId, `${botForwardText({ business, code, username })}\n\nExpires: ${expiresAt}`);
+  // TWO messages, strictly. The first is the operator's (slug, code, human
+  // expiry); the second is the only text a client may ever see. They are
+  // separate sends on purpose: forwarding the first would leak the slug, and
+  // editing one message in place is not something Telegram guarantees.
+  await reply(chatId, operatorCodeText({ slug: business.slug, code, hours: BIND_CODE_HOURS }));
+  const forward = await sendMessage(chatId, botForwardText({ code, username, hours: BIND_CODE_HOURS }));
+  if (!forward || !forward.ok) {
+    // The code exists and is valid; only the forwardable copy failed. Say so
+    // and repeat the code, or the operator is left with a half-finished flow.
+    console.error('code_forward_send_failed');
+    await reply(chatId, operatorCodeResendText({ code, hours: BIND_CODE_HOURS }));
+  }
 }
 
 async function handleOperatorPhones(chatId, arg) {

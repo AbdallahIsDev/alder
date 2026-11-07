@@ -102,6 +102,36 @@ const samples = sampleTelegramTexts();
   line(ok, 'T5', 'sweep keys: suite and canary only, never manual-test or a UUID', `ok=${ok}`);
 }
 
+/* T6: /code's two messages are disjoint. The first may name the slug; the
+   second may not, and must point the code at the BOT ("send it"), never at the
+   operator ("send me"). */
+{
+  const code = 'K7M2QPX9RT4W';
+  const first = C.operatorCodeText({ slug: 'alder-demo', code });
+  const second = C.botForwardText({ code, username: 'alder_alerts_bot' });
+  const ok = first.includes('alder-demo') && first.includes(code)
+    && /expires in 24 hours/i.test(first) && !first.includes('?start=')
+    && second.includes(`https://t.me/alder_alerts_bot?start=${code}`)
+    && second.includes('send it this code') && !second.includes('send me')
+    && !second.includes('alder-demo') && !second.includes('Alder')
+    && !second.includes('operator');
+  line(ok, 'T6', '/code: operator line names the slug, forward text never does',
+    `firstSlug=${first.includes('alder-demo')} secondSlug=${second.includes('alder-demo')} me=${second.includes('send me')}`);
+}
+
+/* T7: without a username the forward text still tells the client to send the
+   code to the bot, and it carries no dead link. */
+{
+  const code = 'K7M2QPX9RT4W';
+  const text = C.botForwardText({ code });
+  const ok = !text.includes('t.me') && text.includes(code)
+    && /Open the bot and send it this code/.test(text)
+    && !text.includes('send me')
+    && /expires in 24 hours/.test(text);
+  line(ok, 'T7', 'forward fallback: no link, code goes to the bot',
+    `len=${text.length} link=${text.includes('t.me')}`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);

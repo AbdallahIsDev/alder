@@ -878,19 +878,25 @@ try {
         'non-operator /code gets the plain-text hint, mints nothing',
         `codes ${codesBefore}->${codesAfter}`);
 
-      // OP2: the operator gets a forwardable message with a real deep link.
+      // OP2: exactly TWO messages. The first names the slug; the second is the
+      // only forwardable text and must not name the business.
       await reset();
       await good(msg(OP, '/code second-demo'));
-      const opText = await allText();
-      // Take the code from the reply, then prove the database really has it:
+      const pair = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
+      const opLine = pair[0] || '';
+      const forward = pair[1] || '';
+      // Take the code from the forward text, then prove the database has it:
       // row order is not guaranteed, so picking "the last row" proved nothing.
-      const theCode = (opText.match(/\?start=([A-Z2-9]{12})/) || [])[1] || '';
+      const theCode = (forward.match(/\?start=([A-Z2-9]{12})/) || [])[1] || '';
       const stored = theCode
         ? (await svc.from('bind_codes').select('code, used_at').eq('code', theCode).eq('business_id', bizB.id)).data
         : [];
-      line(!!theCode && stored.length === 1 && stored[0].used_at === null
-        && opText.includes('Expires:') && !opText.includes('//n'),
-        'OP2', 'operator /code: deep link, plain code, expiry', `code=${theCode.slice(0, 4)}… stored=${stored.length}`);
+      line(pair.length === 2 && !!theCode && stored.length === 1 && stored[0].used_at === null
+        && opLine.includes('second-demo') && /expires in 24 hours/i.test(opLine)
+        && !opLine.includes('?start=') && forward.includes('send it this code')
+        && !forward.includes('second-demo') && !forward.includes('send me'),
+        'OP2', 'operator /code: two messages, slug only in the first',
+        `messages=${pair.length} code=${theCode.slice(0, 4)}… stored=${stored.length}`);
 
       // OP3: cap per slug, fail closed at 10/hour.
       let okCount = 0, capped = false;
@@ -901,6 +907,41 @@ try {
         if (t === C.OPERATOR_CAPPED) capped = true; else okCount++;
       }
       line(okCount === 10 && capped, 'OP3', 'operator /code capped at 10 per slug per hour', `ok=${okCount} capped=${capped}`);
+
+      // OP14: the second message fails. The code is still valid, so the
+      // operator must be told the forward text did not send and get it again.
+      await reset();
+      await control({ mode: 'fail_nth', nth: 2 });
+      await good(msg(OP, '/code second-demo'));
+      const afterFail = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
+      await control({ mode: 'ok' });
+      const resend = afterFail[2] || '';
+      const resendCode = (resend.match(/\b([A-Z2-9]{12})\b/) || [])[1] || '';
+      line(afterFail.length === 3 && /did not send/.test(resend) && !!resendCode
+        && resend.includes(resendCode),
+        'OP14', 'forward send fails: operator gets the code back', `messages=${afterFail.length}`);
+
+      // OP15: a slug with injection characters is a usage error, and nothing
+      // is minted. The slug regex is the only gate that matters here.
+      await reset();
+      const codesBeforeBad = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      await good(msg(OP, '/code alder-demo;drop'));
+      const badReply = await allText();
+      const codesAfterBad = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      line(badReply === C.OPERATOR_USAGE_CODE && codesAfterBad === codesBeforeBad,
+        'OP15', 'injection-shaped slug: usage text, no code minted',
+        `codes ${codesBeforeBad}->${codesAfterBad}`);
+
+      // OP16: two /code taps mint two different, valid codes (the cap is the
+      // only limit, and second-demo is far below it here).
+      await reset();
+      await good(msg(OP, '/code second-demo'));
+      await good(msg(OP, '/code second-demo'));
+      const two = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
+      const codes = two.map((t) => (t.match(/\?start=([A-Z2-9]{12})/) || [])[1]).filter(Boolean);
+      line(codes.length === 2 && codes[0] !== codes[1] && two.length === 4,
+        'OP16', 'two /code taps: two distinct codes, two messages each',
+        `codes=${codes.length} unique=${new Set(codes).size} messages=${two.length}`);
 
       // OP4: /phones marks the owner (oldest) and lists the others.
       await reset();

@@ -772,10 +772,14 @@ try {
   // No bound chat: no alert with buttons (every tap would answer "Not found.").
   // The operator gets ONE plain notice instead, and the event says no_chat.
   const op = process.env.OPERATOR_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+  const notice = (reqA[0] && reqA[0].body && reqA[0].body.text) || '';
   line(res.code === 200 && reqA.length === 1 && String(reqA[0].body.chat_id) === String(op)
-    && !reqA[0].body.reply_markup && /no phone is connected/.test(reqA[0].body.text)
+    && !reqA[0].body.reply_markup && /no phone is connected/.test(notice)
+    // Business name and slug only: the customer's name is not the operator's
+    // to act on, and an ops message is one more place PII can leak.
+    && notice.includes(`active-${RUN}`) && !notice.includes('Notify Tester')
     && !!f && f.meta.status === 'no_chat',
-    'B5', 'no chat -> one operator notice, no buttons, tg_failed no_chat',
+    'B5', 'no chat -> one operator notice, business only, tg_failed no_chat',
     `calls=${reqA.length} buttons=${!!reqA[0]?.body?.reply_markup} meta=${JSON.stringify(f && f.meta)}`);
 } catch (e) { line(false, 'B3', 'chat routing', e.message); }
 
