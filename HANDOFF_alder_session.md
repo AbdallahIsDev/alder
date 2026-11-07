@@ -149,6 +149,14 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 
 - `700b13a` (alerts: collapse CR/LF) also carries the owner's pre-existing unstaged edit to `lib/content.js`: the review textarea `border-radius` 6px → 8px. Same file, committed together; the change is intentional.
 
+## Page notes (2026-11-07, third bundle)
+
+- **Hero quality is non-negotiable.** No re-encode, resize, re-tier, replacement, or change to the hero video, its sources, the poster markup or the slider. Measured cost, accepted: **LCP ≈ 4.1 s on simulated mobile**, and the hero `<video>` is 5.87 MB of a 7.8 MB page (71%). Do not "optimise" this without an explicit instruction.
+- **A poster preload does not help.** Measured 3 Lighthouse runs each way: baseline LCP 4,247 ms median vs 4,254 ms with `<link rel=preload as=image href=…hero-poster-mobile.avif>`, and the LCP element stays the `<video>` in both. At 390 px the page really uses `hero-poster-mobile.avif` (one request, the preload is reused, no double download); at 1280 px the same tag fetches the mobile poster **and** `hero-poster.avif`, so a bare preload is wrong on desktop. Not applied.
+- **The close button in the estimate modal is 40 × 40 and stays that way.** It is below the 44/48 tap-target guidance by choice; Lighthouse's `target-size` audit passes because WCAG 2.2 asks for 24 px. The back button is 50 × 46 and the rest of the controls are ≥ 48.
+- **The how-we-work connector is a pseudo-element.** `ol.steps` used to hold `<span class="line"><i></i></span>`, which made the list invalid and failed Lighthouse's `list` audit. It is now `.steps::before` (track) and `.steps::after` (accent fill reading `--p`), verified pixel-identical at 390/768/1280 (0 differing pixels). Accessibility is **1.00** with no failing audits.
+- **`assets/css/style.css` and `assets/js/main.js` are gone.** They were the old direction, loaded by nothing, and only README described them; the README lines went with them.
+
 ## Known issues / next
 
 1. The suites run against the production database and should move to a separate Supabase project.
