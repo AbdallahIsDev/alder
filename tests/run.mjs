@@ -91,6 +91,14 @@ function killTree(child) {
   }
 }
 
+/** Every bound chat id, sorted. Tails are printed, never the full id. */
+async function chatSnapshot() {
+  const { data, error } = await svc
+    .from('business_chats').select('tg_chat_id').order('tg_chat_id');
+  if (error) return [`error:${error.code}`];
+  return (data || []).map((r) => String(r.tg_chat_id));
+}
+
 async function cleanup(svc) {
   if (canaryKey && svc) {
     try { await svc.from('leads').delete().eq('idempotency_key', canaryKey); } catch {}
@@ -284,6 +292,14 @@ try {
     out('runner  no selected suite needs HTTP: vercel dev and canary skipped');
   }
 
+  /* ---------- business_chats guard ----------
+     A suite must never add or remove a binding. A cleanup that deletes by
+     tg_chat_id (the real operator chat) would silently unbind a client, so the
+     runner takes a snapshot before the suites and refuses the run if it moved.
+     Tails only: the full id is never printed. */
+  const chatsBefore = await chatSnapshot();
+  const tail = (ids) => ids.map((x) => x.slice(-4)).join(',') || '(none)';
+
   /* ---------- suites ---------- */
   let failed = 0;
   for (const suite of SUITES_TO_RUN) {
@@ -315,8 +331,23 @@ try {
   }
 
   out('');
+  {
+    const chatsAfter = await chatSnapshot();
+    if (JSON.stringify(chatsAfter) !== JSON.stringify(chatsBefore)) {
+      out(`FAIL  runner  business_chats changed during the run`);
+      out(`      before ${chatsBefore.length}: ${tail(chatsBefore)}`);
+      out(`      after  ${chatsAfter.length}: ${tail(chatsAfter)}`);
+      out('      a suite added or removed a binding; every test fixture must use its own id');
+      process.exitCode = 1;
+    } else {
+      out(`runner  business_chats unchanged (${chatsBefore.length}: ${tail(chatsBefore)})`);
+    }
+  }
+
   out(`runner  total ${((Date.now() - TIMING_TOTAL) / 1000).toFixed(1)}s`);
-  out(failed ? `RUNNER  ${failed} suite(s) FAILED` : 'RUNNER  all suites passed');
+  // exitCode can be set by the business_chats guard without a suite failing.
+  const runnerFailed = failed || process.exitCode === 1;
+  out(runnerFailed ? `RUNNER  ${failed || 1} suite(s) FAILED` : 'RUNNER  all suites passed');
   if (failed) process.exitCode = 1;
 } catch (e) {
   fail(e.message || String(e));
