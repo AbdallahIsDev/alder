@@ -135,6 +135,16 @@ const iso = (msAgo) => new Date(NOW - msAgo).toISOString();
     `guards=${guards}`);
 }
 
+/* K8: the purge script refuses --yes without the typed confirmation, before it
+   opens a connection. The guard is the dangerous path, so it is tested here. */
+{
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, ['scripts/purge-expired.mjs', '--yes', '--confirm', 'wrong'], { encoding: 'utf8' });
+  line(r.status === 1 && /needs --confirm purge-expired/.test(r.stderr || ''),
+    'K8', 'purge script: --yes without the typed confirm refuses',
+    `exit=${r.status}`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
