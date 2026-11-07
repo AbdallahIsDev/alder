@@ -279,3 +279,21 @@ set, so it cannot be pointed at a fake by accident.
   last 24 h for that business only, so two messages can cover slightly different
   windows if the run takes long enough to cross a second boundary. At this size it does
   not happen; it would at hundreds of businesses.
+
+## 9. Reviewing a branch, and the backup rule
+
+**Review artefacts.** For a branch that merged another branch, the `.diff`
+(`git diff origin/main...<branch>`) is the review artefact: it applies with
+`git apply --check` to a fresh worktree of `main`. The `.patch`
+(`git format-patch`) is best-effort — `git am` cannot replay a merge commit, so
+it stops there. Use the diff to review, the patch only for a linear branch.
+
+**Restoring after a test run.** Restore from the exact timestamped file taken
+before that run, and only the rows the run could have changed. A blanket
+"delete every chat for the business, then re-insert the backup's rows" silently
+removes any phone that was legitimately connected while the run was going on.
+If the current chat set differs from the backup's in a way the run did not cause,
+refuse and tell the owner which chats exist now — do not overwrite.
+
+The runner now fails a run that adds or removes a `business_chats` row, so a
+leak is loud instead of silent.
