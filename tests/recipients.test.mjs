@@ -328,6 +328,15 @@ try {
       'recipient copy is single-tenant, no placeholders', `strings=${all.length} banned=${hits.length}`);
   }
 
+  /* R14: the phone list is ordered deterministically. The owner is the first
+     row, so a tie on created_at must be broken by id or "main phone" flips. */
+  {
+    const src = await import('node:fs').then((fs) => fs.readFileSync('lib/db.js', 'utf8'));
+    const fn = src.slice(src.indexOf('export async function listBusinessChatsDetailed'), src.indexOf('export async function getBusinessChat'));
+    const ok = fn.includes(".order('created_at', { ascending: true })") && fn.includes(".order('id', { ascending: true })");
+    line(ok, 'R14', 'listBusinessChatsDetailed orders by created_at then id', `ok=${ok}`);
+  }
+
   /* R12: an alert reaches every bound chat */
   store = freshStore();
   store.chats.push(

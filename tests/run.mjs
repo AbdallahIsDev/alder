@@ -199,7 +199,7 @@ if (RUN_SEED_CHECK) {
     out('seed-check  FAIL  reset the alder-demo row to seed values');
     process.exit(1);
   }
-  out('seed-check  OK  alder-demo matches seed, no chats bound');
+  out(`seed-check  OK  alder-demo matches seed, business_chats=${chatsCount}`);
   process.exit(0);
 }
 
@@ -321,6 +321,11 @@ try {
      runner takes a snapshot before the suites and refuses the run if it moved.
      Tails only: the full id is never printed. */
   const chatsBefore = await chatSnapshot();
+  if (!chatsBefore.ok) {
+    // A guard that cannot read the table before the run proves nothing after it.
+    out(`FAIL  runner  could not read business_chats before the run (${chatsBefore.code})`);
+    process.exit(1);
+  }
   const debrisBefore = await debrisSnapshot();
   const tail = (ids) => ids.map((x) => x.slice(-4)).join(',') || '(none)';
 
