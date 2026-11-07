@@ -150,7 +150,8 @@ add('selfcheck-demo.html', 'Alert check email — demo business', wrapHtml('Aler
 add('selfcheck-active.html', 'Alert check email — active client', wrapHtml('Alert check', withLogo(selfCheckEmail(opsDay, '2026-11-07', { redirectActive: true, operator: false }).html)), true);
 // Recipients: /invite, /recipients and the remove confirmation. Plain text, one
 // business per chat, no names — the list is "Recipient N" unless a label is set.
-add('telegram-invite.txt', 'Telegram /invite', botInviteText('K7M2QPX9RT4W'), false);
+add('telegram-invite.txt', 'Telegram /invite (deep link)', botInviteText('K7M2QPX9RT4W', { username: 'alder_alerts_bot' }), false);
+add('telegram-invite-fallback.txt', 'Telegram /invite (no username)', botInviteText('K7M2QPX9RT4W'), false);
 add('telegram-recipients.txt', 'Telegram /recipients', botRecipientsText([
   { id: 'r1', label: null },
   { id: 'r2', label: null },
@@ -219,7 +220,8 @@ index += '<h2>Telegram alerts (text)</h2>\n'
   + '<p class="cap">Telegram: finished, no email on file (nothing was sent)</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-done-no-email.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: review email failed — one "Try again" button (r:) resends it with the existing token</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-error.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: the same phone or email asked before — one extra line, never the earlier lead\'s details</p><pre>' + esc(files.find((f) => f.name === 'telegram-alert-repeat.txt').body) + '</pre>\n'
-  + '<p class="cap">Telegram: /invite — one single-use code for this chat\'s business only</p><pre>' + esc(files.find((f) => f.name === 'telegram-invite.txt').body) + '</pre>\n'
+  + '<p class="cap">Telegram: /invite — one single-use code, as a tappable deep link plus the plain code</p><pre>' + esc(files.find((f) => f.name === 'telegram-invite.txt').body) + '</pre>\n'
+  + '<p class="cap">Telegram: /invite when getMe() is unavailable — same copy, /start plus the code, still real line breaks</p><pre>' + esc(files.find((f) => f.name === 'telegram-invite-fallback.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: /recipients — every phone on this business, one Remove button each</p><pre>' + esc(files.find((f) => f.name === 'telegram-recipients.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: removing a phone asks once, and the last one cannot be removed</p><pre>' + esc(files.find((f) => f.name === 'telegram-recipient-confirm.txt').body) + '</pre>\n'
   + '<p class="cap">Daily digest (13:00 UTC cron, off by default): counts only, no names, no addresses — the same text is safe by email</p><pre>' + esc(files.find((f) => f.name === 'digest.txt').body) + '</pre>\n'

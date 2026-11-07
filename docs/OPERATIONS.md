@@ -66,8 +66,19 @@ has a `review_token`.
 ## 3. Add or remove a phone
 
 **Add.** A chat that is already bound sends `/invite`. The bot mints one single-use
-code for **that chat's business** and prints `/start <code>`. The second phone sends
-it; it becomes a second `business_chats` row and receives every alert from then on.
+code for **that chat's business** and replies with a tappable deep link
+(`https://t.me/<bot>?start=<code>`) plus the plain code. The second phone taps the
+link and presses Start; it becomes a second `business_chats` row and receives every
+alert from then on. If `getMe()` is unavailable the message falls back to
+`/start <code>` with real line breaks and the function logs `bot_username_unavailable`.
+
+**A bind code is a key.** It is single-use, expires 24 hours after it is minted, and
+whoever holds it can attach their Telegram account to the business's alerts. Never
+put one in a screenshot, a public chat, a ticket or a shared document — send it to the
+one person who needs it, in a private message. If a code may have leaked, do not wait
+for it to expire: mint a new one and remove the unexpected phone with `/recipients`
+(or ask the operator to). `npm run bind -- <slug>` mints a code from the command line
+with the same rules.
 
 Caps (env-overridable, `RECIPIENTS_MAX` / `INVITES_MAX`):
 

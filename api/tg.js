@@ -11,7 +11,7 @@ import {
   countBusinessChats, countLiveBindCodes, listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
 } from '../lib/db.js';
 import { mintBindCode } from '../lib/bind-codes.js';
-import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup } from '../lib/tg.js';
+import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup, botUsername } from '../lib/tg.js';
 import { secretMatches } from '../lib/request.js';
 import { sendReviewRequest } from '../lib/notify.js';
 import {
@@ -19,9 +19,10 @@ import {
   botLinkedText, BOT_HELP, BOT_ALREADY_CONNECTED, BOT_NOT_CONNECTED, BOT_BAD_CODE, BOT_PLAIN_TEXT,
   botInviteText, botRecipientsText, recipientsKeyboard, recipientConfirmText, recipientConfirmKeyboard,
   BOT_INVITE_CAPPED, BOT_INVITE_PENDING, BOT_RECIPIENT_LAST, BOT_RECIPIENT_REMOVED, BOT_RECIPIENT_GONE,
+  TOAST_NOT_FOUND, TOAST_ALREADY_DONE, TOAST_CONTACT_FIRST, TOAST_NOTHING_TO_RETRY, TOAST_GENERIC_ERROR,
 } from '../lib/content.js';
 
-const GENERIC_NOT_FOUND = 'Not found.';
+const GENERIC_NOT_FOUND = TOAST_NOT_FOUND;
 
 function secretOk(req) {
   const want = process.env.TELEGRAM_WEBHOOK_SECRET;
@@ -86,7 +87,10 @@ async function handleInvite(chatId, binding) {
   if (pending >= invitesMax()) return reply(chatId, BOT_INVITE_PENDING);
 
   const { code } = await mintBindCode(binding.business_id);
-  return reply(chatId, botInviteText(code));
+  // getMe() once per instance; a failure falls back to /start plus the code and
+  // logs bot_username_unavailable rather than failing the invite.
+  const username = await botUsername();
+  return reply(chatId, botInviteText(code, { username }));
 }
 
 /** The list, as a new message or as an edit of the one the button lives on. */
@@ -199,9 +203,9 @@ async function onContacted(ctx) {
 /** d: ask before emailing; no write, no email. */
 async function onJobDone(ctx) {
   const { answer, render, lead, leadId } = ctx;
-  if (lead.status === 'done') { await answer('This lead is already completed.'); return; }
+  if (lead.status === 'done') { await answer(TOAST_ALREADY_DONE); return; }
   if (lead.status !== 'contacted' && lead.status !== 'quoted' && lead.status !== 'won') {
-    await answer('Mark this lead as contacted first.');
+    await answer(TOAST_CONTACT_FIRST);
     return;
   }
   await answer('');
@@ -218,14 +222,14 @@ async function onCancel(ctx) {
 /** y: contacted/quoted/won -> done, then send the review request. */
 async function onConfirm(ctx) {
   const { answer, render, lead, leadId, businessId, business } = ctx;
-  if (lead.status === 'done') { await answer('This lead is already completed.'); return; }
+  if (lead.status === 'done') { await answer(TOAST_ALREADY_DONE); return; }
   if (lead.status !== 'contacted' && lead.status !== 'quoted' && lead.status !== 'won') {
-    await answer('Mark this lead as contacted first.');
+    await answer(TOAST_CONTACT_FIRST);
     return;
   }
   const token = randomBytes(24).toString('base64url');
   const result = await transitionLead(leadId, businessId, 'done', token);
-  if (!result.changed) { await answer('This lead is already completed.'); return; }
+  if (!result.changed) { await answer(TOAST_ALREADY_DONE); return; }
   // Post-transition: the lead is done, so a throw here must not leave the
   // old Yes/Cancel buttons on screen (Yes would only say "already
   // completed" and Try again would never be offered). Best-effort render
@@ -262,8 +266,8 @@ async function onConfirm(ctx) {
 /** r: retry the failed review email only. */
 async function onRetry(ctx) {
   const { answer, render, lead, leadId, businessId, business } = ctx;
-  if (lead.status !== 'done') { await answer('Nothing to retry.'); return; }
-  if (await hasReviewSent(leadId)) { await answer('Nothing to retry.'); return; }
+  if (lead.status !== 'done') { await answer(TOAST_NOTHING_TO_RETRY); return; }
+  if (await hasReviewSent(leadId)) { await answer(TOAST_NOTHING_TO_RETRY); return; }
   // Mutex for a double tap. Two concurrent r: callbacks both pass the checks
   // above; rate_limits is the only atomic primitive available without a schema
   // change, so the first tap claims the retry and the second becomes a no-op.
@@ -273,10 +277,10 @@ async function onRetry(ctx) {
   // more than the lock.
   let claimed = true;
   try { claimed = await hitRateLimit('retry:' + leadId, 10, 1); } catch { claimed = true; }
-  if (!claimed) { await answer('Nothing to retry.'); return; }
+  if (!claimed) { await answer(TOAST_NOTHING_TO_RETRY); return; }
   try {
     const retry = await getDoneLeadForRetry(leadId, businessId);
-    if (!retry || !retry.review_token || !retry.email) { await answer('Nothing to retry.'); return; }
+    if (!retry || !retry.review_token || !retry.email) { await answer(TOAST_NOTHING_TO_RETRY); return; }
     // Idempotency key: Resend caches per key for 24 h. After a timeout the
     // timed-out attempt may have delivered, so reuse its EXACT key (recorded
     // in that failure's meta) and let Resend dedupe; after any other failure
@@ -357,7 +361,7 @@ async function handleCallback(cb, binding) {
     // read, business read, sent-check, retry read, transition, email send),
     // log the code only and answer once.
     console.error('tg_callback_failed', (e && e.code) || 'no_code');
-    await answer('Something went wrong. Try again.');
+    await answer(TOAST_GENERIC_ERROR);
   }
 }
 
