@@ -16,7 +16,7 @@ import { startFakes } from './fakes.mjs';
 import { isLoopback } from '../lib/outbound.js';
 import { loadEnv, isTestEnv, checkNotProduction } from '../lib/env.js';
 import { createClient } from '@supabase/supabase-js';
-import { ALDER_DEMO } from './helpers.mjs';
+import { ALDER_DEMO, UUID_KEY } from './helpers.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MARKER = path.join(ROOT, '.test-mode');
@@ -96,6 +96,23 @@ function killTree(child) {
  * The result carries `ok`: an error must not compare equal to another error and
  * let the run pass — a snapshot nobody could take proves nothing.
  */
+/**
+ * Test-shaped leads and everything hanging off them. A real submission has a
+ * UUID key, so a customer arriving mid-run does not move these numbers; a suite
+ * that leaks a row does.
+ */
+async function debrisSnapshot() {
+  const { data, error } = await svc.from('leads').select('id, idempotency_key');
+  if (error) return { ok: false, code: error.code, n: 0, events: 0, feedback: 0 };
+  const ids = (data || []).filter((r) => r.idempotency_key && !UUID_KEY.test(r.idempotency_key)).map((r) => r.id);
+  if (!ids.length) return { ok: true, n: 0, events: 0, feedback: 0 };
+  const [ev, fb] = await Promise.all([
+    svc.from('lead_events').select('id', { count: 'exact', head: true }).in('lead_id', ids),
+    svc.from('review_feedback').select('lead_id', { count: 'exact', head: true }).in('lead_id', ids),
+  ]);
+  return { ok: true, n: ids.length, events: ev.count || 0, feedback: fb.count || 0 };
+}
+
 async function chatSnapshot() {
   const { data, error } = await svc
     .from('business_chats').select('tg_chat_id').order('tg_chat_id');
@@ -304,6 +321,7 @@ try {
      runner takes a snapshot before the suites and refuses the run if it moved.
      Tails only: the full id is never printed. */
   const chatsBefore = await chatSnapshot();
+  const debrisBefore = await debrisSnapshot();
   const tail = (ids) => ids.map((x) => x.slice(-4)).join(',') || '(none)';
 
   /* ---------- suites ---------- */
@@ -352,6 +370,23 @@ try {
       process.exitCode = 1;
     } else {
       out(`runner  business_chats unchanged (${chatsBefore.ids.length}: ${tail(chatsBefore.ids)})`);
+    }
+  }
+
+  {
+    const debrisAfter = await debrisSnapshot();
+    const same = debrisBefore.ok && debrisAfter.ok
+      && debrisBefore.n === debrisAfter.n
+      && debrisBefore.events === debrisAfter.events
+      && debrisBefore.feedback === debrisAfter.feedback;
+    if (!same) {
+      out('FAIL  runner  test-shaped leads changed during the run');
+      out(`      before leads=${debrisBefore.n} events=${debrisBefore.events} feedback=${debrisBefore.feedback}`);
+      out(`      after  leads=${debrisAfter.n} events=${debrisAfter.events} feedback=${debrisAfter.feedback}`);
+      out('      a suite leaked a row (or could not be counted); clean it and fix the suite');
+      process.exitCode = 1;
+    } else {
+      out(`runner  test-shaped leads unchanged (${debrisBefore.n} leads, ${debrisBefore.events} events, ${debrisBefore.feedback} feedback)`);
     }
   }
 

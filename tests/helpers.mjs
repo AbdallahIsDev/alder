@@ -27,3 +27,22 @@ export function fakeRes({ body = null } = {}) {
     end() { return this; },
   };
 }
+
+/** A page-minted key is a UUID; anything else is a test key. */
+export const UUID_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Delete test-shaped leads older than `beforeIso` for the given businesses.
+ *
+ * A suite calls this at start AND in its finally: a run killed mid-way (a shell
+ * timeout, a crash) never reaches the finally, so the next run must clear what
+ * the last one left. Real submissions always carry a UUID key, so they are never
+ * matched.
+ */
+export async function sweepTestLeads(svc, businessIds, beforeIso) {
+  const { data } = await svc.from('leads')
+    .select('id, idempotency_key').in('business_id', businessIds).lt('created_at', beforeIso);
+  const ids = (data || []).filter((r) => r.idempotency_key && !UUID_KEY.test(r.idempotency_key)).map((r) => r.id);
+  if (ids.length) await svc.from('leads').delete().in('id', ids);
+  return ids.length;
+}

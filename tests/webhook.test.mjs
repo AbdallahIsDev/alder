@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
-import { fakeRes, ALDER_DEMO } from './helpers.mjs';
+import { fakeRes, ALDER_DEMO, sweepTestLeads } from './helpers.mjs';
 
 loadEnv();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -67,6 +67,7 @@ const mkCode = (n) => { let s = ''; for (let i = 0; i < n; i++) s += ALPHA[Math.
 const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
 const { data: bizB } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
 const chatA = 880001, chatB = 880002, chatX = 880003;
+const RUN_STARTED = new Date().toISOString();
 const createdLeads = [];
 const createdCodes = [];
 
@@ -81,6 +82,8 @@ async function seedLead(businessId, name, email) {
 }
 
 try {
+  // Clear what a killed run left behind, before adding anything of our own.
+  await sweepTestLeads(svc, [bizA.id, bizB.id], RUN_STARTED).catch(() => 0);
   await control({ mode: 'ok' }); await reset(); await resetResend();
 
   /* auth */
@@ -1001,6 +1004,7 @@ try {
   line(false, 'C0', 'webhook suite threw', e.message);
 } finally {
   await svc.from('leads').delete().in('id', createdLeads);
+  await sweepTestLeads(svc, [bizA.id, bizB.id], new Date().toISOString()).catch(() => 0);
   await svc.from('business_chats').delete().in('tg_chat_id', [chatA, chatB, chatX, 880004, 880005]);
   if (createdCodes.length) await svc.from('bind_codes').delete().in('code', createdCodes);
   await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');

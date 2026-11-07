@@ -25,7 +25,7 @@ const RUN = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 /* ---------- env, one shared loader ---------- */
 // process.env > .env.test (TEST_ENV=1) > .env.local > .env, same as every other suite.
 import { loadEnv } from '../lib/env.js';
-import { fakeRes, ALDER_DEMO } from './helpers.mjs';
+import { fakeRes, ALDER_DEMO, sweepTestLeads } from './helpers.mjs';
 loadEnv();
 const FAKE_TG_URL = process.env.FAKE_TG_URL;
 async function fakeTg(cfg) {
@@ -80,6 +80,12 @@ async function post(body, opts = {}) {
 const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
+const RUN_STARTED = new Date().toISOString();
+{
+  const { data: b } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
+  if (b) await sweepTestLeads(svc, [b.id], RUN_STARTED).catch(() => 0);
+}
+
 
 /* The alert path no longer falls back to TELEGRAM_CHAT_ID: an unbound chat gets
    no alert with buttons. This suite asserts delivery, so it binds its OWN fixture
@@ -788,6 +794,7 @@ const typeSeqOf = (api) => (s) => { let v = ''; for (const ch of s) v = api.sani
 /* ---------- cleanup ---------- */
 {
   await svc.from('leads').delete().like('idempotency_key', `${RUN}-%`);
+  await sweepTestLeads(svc, [ALERT_CHAT ? (await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single()).data.id : ''], new Date().toISOString()).catch(() => 0);
   await svc.from('leads').delete().like('notes', `${NOTES}%`);          // rows the page created with its own uuid key
   const { data: leftovers } = await svc.from('leads').select('id').or(`idempotency_key.like.${RUN}-%,notes.like.${NOTES}%`);
   await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
