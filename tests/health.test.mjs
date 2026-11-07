@@ -62,11 +62,16 @@ try {
       { google_review_url: 'https://evil.example/r' },
       { google_review_url: '' },
       { google_review_url: null },
+      // An allowed host with the right scheme and no identifier leads nowhere.
+      { google_review_url: 'https://g.page/r/' },
+      { google_review_url: 'https://search.google.com/local/writereview?placeid=' },
     ];
     const ok = reviewLinkOk('https://g.page/r/x') === true
       && reviewLinkOk('ttps://search.google.com/x') === false
-      && countInvalidReviewLinks(rows) === 5;
-    line(ok, 'H1b', 'review_links_invalid counts only https on an allowed host',
+      && reviewLinkOk('https://g.page/r/') === false
+      && reviewLinkOk('https://search.google.com/local/writereview?placeid=') === false
+      && countInvalidReviewLinks(rows) === 7;
+    line(ok, 'H1b', 'invalid links: https, allowed host, and a real identifier',
       `invalid=${countInvalidReviewLinks(rows)}`);
   }
 

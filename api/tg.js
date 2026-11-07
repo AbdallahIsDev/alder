@@ -6,9 +6,10 @@
 
 import { randomBytes } from 'node:crypto';
 import {
-  getChatBinding, bindChat, claimBindCode, getBusinessById, clearRateLimit,
+  getChatBinding, bindChat, claimBindCode, restoreBindCode, getBusinessById, clearRateLimit,
   listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
-  countBusinessChats, countLiveBindCodes, listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
+  countBusinessChats, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes,
+  listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
   getActiveBusinessBySlug, listBusinessSlugs, getChatById, removeChatById,
 } from '../lib/db.js';
 import { isOperatorChat } from '../lib/operator.js';
@@ -20,10 +21,12 @@ import {
   renderAlert, renderLeadList, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard,
   botLinkedText, BOT_HELP, BOT_ALREADY_CONNECTED, BOT_NOT_CONNECTED, BOT_BAD_CODE, BOT_PLAIN_TEXT,
   botInviteText, botRecipientsText, recipientsKeyboard, recipientConfirmText, recipientConfirmKeyboard,
-  BOT_INVITE_CAPPED, BOT_INVITE_PENDING, BOT_RECIPIENT_LAST, BOT_RECIPIENT_REMOVED, BOT_RECIPIENT_GONE,
+  BOT_INVITE_CAPPED, BOT_INVITE_CANCEL_BUTTON, BOT_INVITE_CANCEL_ALREADY, BOT_INVITE_RATE_LIMIT,
+  botInvitePendingText, BOT_RECIPIENTS_PENDING, BOT_RECIPIENT_LAST, BOT_RECIPIENT_REMOVED, BOT_RECIPIENT_GONE,
   TOAST_NOT_FOUND, TOAST_ALREADY_DONE, TOAST_CONTACT_FIRST, TOAST_NOTHING_TO_RETRY, TOAST_GENERIC_ERROR,
   TOAST_ALREADY_UPDATED, TOAST_TOO_MANY_OPENS, TOAST_OWNER_ONLY, leadListKeyboard, alertKeyboard,
-  BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_OWNER_ONLY, BOT_RECIPIENTS_OWNER_NOTE, botForwardText,
+  BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_BOUND_ELSEWHERE, BOT_BIND_FAILED,
+  BOT_OWNER_ONLY, BOT_RECIPIENTS_OWNER_NOTE, botForwardText,
   operatorCodeText, operatorCodeResendText, operatorPhonesText, operatorPhonesKeyboard,
   operatorConfirmRemoveText, operatorConfirmRemoveKeyboard, operatorBusinessesText,
   OPERATOR_USAGE_CODE, OPERATOR_USAGE_PHONES, OPERATOR_UNKNOWN_SLUG, OPERATOR_CAPPED, OPERATOR_NO_PHONES,
@@ -51,7 +54,8 @@ async function reply(chatId, text) {
 
 const CODE_SHAPE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/;
 const BIND_TRIES_PER_HOUR = 10;
-const BIND_TRIES_GLOBAL_PER_HOUR = 200;
+const BIND_TRIES_GLOBAL_PER_HOUR_DEFAULT = 600;
+const bindTriesGlobal = () => positiveInt(process.env.BIND_TRIES_GLOBAL_PER_HOUR, BIND_TRIES_GLOBAL_PER_HOUR_DEFAULT);
 
 /** Spaces and hyphens are ignored, case does not matter. Null when not code-shaped. */
 function bindCodeShape(text) {
@@ -59,19 +63,51 @@ function bindCodeShape(text) {
   return CODE_SHAPE.test(s) ? s : null;
 }
 
+/**
+ * Claim, bind, then look at the real binding. A unique tg_chat_id turns a
+ * second business's upsert into a silent no-op, so "no error" never means
+ * "connected": only a read-back does. On any mismatch the claim is restored,
+ * so the client is never charged a code for a bind that did not happen.
+ */
+async function finishBind(chatId, code, badText = BOT_CODE_BAD) {
+  const businessId = await claimBindCode(code).catch(() => null);
+  if (!businessId) return reply(chatId, badText);
+  const business = await getBusinessById(businessId).catch(() => null);
+  if (!business) {
+    await restoreBindCode(code, businessId).catch(() => {});
+    return reply(chatId, badText);
+  }
+
+  try {
+    await bindChat(businessId, chatId);
+  } catch (e) {
+    await restoreBindCode(code, businessId).catch(() => {});
+    console.error('bind_after_claim_failed', (e && e.code) || 'no_code');
+    return reply(chatId, BOT_BIND_FAILED);
+  }
+
+  const actual = await getChatBinding(chatId).catch(() => null);
+  if (!actual || String(actual.business_id) !== String(businessId)) {
+    await restoreBindCode(code, businessId).catch(() => {});
+    return reply(chatId, BOT_BOUND_ELSEWHERE);
+  }
+
+  return reply(chatId, botLinkedText(business.name));
+}
+
 async function handlePastedCode(chatId, code) {
   let within;
   try { within = await hitRateLimit('bindtry:' + chatId, 3600, BIND_TRIES_PER_HOUR); } catch { return; }
   if (!within) return reply(chatId, BOT_CODE_BAD);
   let global;
-  try { global = await hitRateLimit('bindtry:all', 3600, BIND_TRIES_GLOBAL_PER_HOUR); } catch { return; }
-  if (!global) return reply(chatId, BOT_CODE_BAD);
-  const businessId = await claimBindCode(code).catch(() => null);
-  if (!businessId) return reply(chatId, BOT_CODE_BAD);
-  const business = await getBusinessById(businessId).catch(() => null);
-  if (!business) return reply(chatId, BOT_CODE_BAD);
-  await bindChat(businessId, chatId);
-  return reply(chatId, botLinkedText(business.name));
+  try { global = await hitRateLimit('bindtry:all', 3600, bindTriesGlobal()); } catch { return; }
+  if (!global) {
+    // A global ceiling protects the table from a distributed guessing run. It
+    // is not a per-chat answer, so say nothing new to the chat and log it.
+    console.error('bind_ceiling_hit');
+    return reply(chatId, BOT_CODE_BAD);
+  }
+  return finishBind(chatId, code);
 }
 
 /**
@@ -91,13 +127,7 @@ async function handleStart(chatId, arg) {
   }
   if (!arg) return reply(chatId, BOT_NOT_CONNECTED);
 
-  const businessId = await claimBindCode(arg);
-  if (!businessId) return reply(chatId, BOT_BAD_CODE);
-  const business = await getBusinessById(businessId);
-  if (!business) return reply(chatId, BOT_BAD_CODE);
-
-  await bindChat(businessId, chatId);
-  return reply(chatId, botLinkedText(business.name));
+  return finishBind(chatId, arg, BOT_BAD_CODE);
 }
 
 /* ---------- lead list and lead recovery ----------
@@ -162,33 +192,82 @@ const positiveInt = (raw, fallback) => {
 export const recipientsMax = () => positiveInt(process.env.RECIPIENTS_MAX, RECIPIENTS_MAX_DEFAULT);
 export const invitesMax = () => positiveInt(process.env.INVITES_MAX, INVITES_MAX_DEFAULT);
 
-/** /invite — mint one single-use code for THIS chat's business. */
-async function handleInvite(chatId, binding) {
-  if (!binding) return reply(chatId, BOT_NOT_CONNECTED);
-  if (!(await isOwnerChat(binding.business_id, chatId))) return reply(chatId, BOT_OWNER_ONLY);
-  // Fail closed, like the plain-text hint: no reply when the counter is unreachable.
+/** Remaining whole hours, rounded up, never below 1. */
+const hoursLeft = (iso) => Math.max(1, Math.ceil((new Date(iso).getTime() - Date.now()) / 3600000));
+
+/**
+ * Mint one code and send the invite text. The rate limit is checked here, right
+ * before a mint, so listing pending invites does not spend the hourly budget.
+ * Fail closed, like the plain-text hint: no reply when the counter is unreachable.
+ */
+async function mintAndSendInvite(chatId, businessId) {
   let within;
   try { within = await hitRateLimit('invite:' + chatId, 3600, INVITES_PER_HOUR); } catch { return; }
-  if (!within) return;
+  if (!within) return reply(chatId, BOT_INVITE_RATE_LIMIT);
 
-  const [bound, pending] = await Promise.all([
-    countBusinessChats(binding.business_id),
-    countLiveBindCodes(binding.business_id),
-  ]);
-  if (bound >= recipientsMax()) return reply(chatId, BOT_INVITE_CAPPED);
-  if (pending >= invitesMax()) return reply(chatId, BOT_INVITE_PENDING);
-
-  const { code } = await mintBindCode(binding.business_id);
+  const { code } = await mintBindCode(businessId);
   // getMe() once per instance; a failure falls back to /start plus the code and
   // logs bot_username_unavailable rather than failing the invite.
   const username = await botUsername();
   return reply(chatId, botInviteText(code, { username }));
 }
 
+/** /invite — mint one single-use code for THIS chat's business. */
+async function handleInvite(chatId, binding) {
+  if (!binding) return reply(chatId, BOT_NOT_CONNECTED);
+  if (!(await isOwnerChat(binding.business_id, chatId))) return reply(chatId, BOT_OWNER_ONLY);
+
+  const [bound, pending] = await Promise.all([
+    countBusinessChats(binding.business_id),
+    countLiveBindCodes(binding.business_id),
+  ]);
+  if (bound >= recipientsMax()) return reply(chatId, BOT_INVITE_CAPPED);
+  if (pending >= invitesMax()) {
+    // Say how many are waiting and when each lapses, never the codes. The one
+    // button cancels them and mints a fresh code, so a full cap is not a dead end.
+    const rows = await listLiveBindCodes(binding.business_id);
+    return sendMessage(chatId, botInvitePendingText({ hours: rows.map((r) => hoursLeft(r.expires_at)) }), {
+      reply_markup: { inline_keyboard: [[{ text: BOT_INVITE_CANCEL_BUTTON, callback_data: 'i:c' }]] },
+    });
+  }
+
+  return mintAndSendInvite(chatId, binding.business_id);
+}
+
+/**
+ * The cap button. Owner only, business from the binding. The second tap inside
+ * a minute must not mint a second code, so a short mutex gates the whole action.
+ * The hourly mint budget is checked BEFORE expiring: a rate-limited tap must
+ * leave the old invites alive.
+ */
+async function handleInviteCancel({ chatId, businessId, answer }) {
+  if (!(await isOwnerChat(businessId, chatId))) { await answer(BOT_OWNER_ONLY); return; }
+
+  let first;
+  try { first = await hitRateLimit('invitecancel:' + businessId, 60, 1); } catch { await answer(TOAST_GENERIC_ERROR); return; }
+  if (!first) { await answer(BOT_INVITE_CANCEL_ALREADY); return; }
+
+  let within;
+  try { within = await hitRateLimit('invite:' + chatId, 3600, INVITES_PER_HOUR); } catch { await answer(TOAST_GENERIC_ERROR); return; }
+  if (!within) { await answer(BOT_INVITE_RATE_LIMIT); return; }
+
+  try {
+    await expireLiveBindCodes(businessId);
+    const { code } = await mintBindCode(businessId);
+    const username = await botUsername();
+    await sendMessage(chatId, botInviteText(code, { username }));
+    await answer(BOT_INVITE_CANCELLED);
+  } catch (e) {
+    console.error('invite_cancel_failed', (e && e.code) || 'no_code');
+    await answer(TOAST_GENERIC_ERROR);
+  }
+}
+
 /** The list, as a new message or as an edit of the one the button lives on. */
 async function sendRecipients(chatId, businessId, messageId) {
   const rows = await listBusinessChatsDetailed(businessId);
-  const text = `${botRecipientsText(rows)}\n\n${BOT_RECIPIENTS_OWNER_NOTE}`;
+  const pending = await countLiveBindCodes(businessId);
+  const text = `${botRecipientsText(rows)}\n\n${BOT_RECIPIENTS_OWNER_NOTE}\n${BOT_RECIPIENTS_PENDING(pending)}`;
   const markup = { reply_markup: rows.length ? recipientsKeyboard(rows) : { inline_keyboard: [] } };
   if (messageId) return editMessageText(chatId, messageId, text, markup).catch(() => {});
   return sendMessage(chatId, text, markup);
@@ -558,6 +637,9 @@ const CB_LEAD = /^([cdynrvxo]):([0-9a-f-]{36})$/;
 const CB_RECIPIENT = /^([xXv]):([0-9a-f-]{36})$/;
 const CB_OPERATOR_PHONE = /^([pPq]):([0-9a-f-]{36})$/;
 const CB_PAGE = /^l:(\d{1,3})$/;
+// The invite-cap button. No business id in the payload: the business comes from
+// the binding, so a forged callback can only ever act on the sender's own.
+const CB_INVITE_CANCEL = /^i:c$/;
 
 /** Open one lead as a NEW message with its current card. */
 async function handleOpenLead({ cb, leadId, binding, answer }) {
@@ -599,6 +681,11 @@ async function handleCallback(cb, binding) {
     }
 
     if (!binding) { await answer(GENERIC_NOT_FOUND); return; }
+
+    if (CB_INVITE_CANCEL.test(data)) {
+      await handleInviteCancel({ chatId, businessId: binding.business_id, answer });
+      return;
+    }
 
     const page = CB_PAGE.exec(data);
     if (page) {

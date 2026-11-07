@@ -12,7 +12,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { secretMatches } from '../lib/request.js';
 import { operatorChatId, operatorEmail, operatorReachable } from '../lib/operator.js';
-import { GOOGLE_HOSTS } from '../lib/content.js';
+import { googleReviewUrlOk } from '../lib/content.js';
 
 const HEADER = 'x-health-secret';
 const KINDS = [
@@ -33,10 +33,7 @@ const DAY = 24 * HOUR;
  * this is the number that says how many are wrong. Counts only.
  */
 export function reviewLinkOk(v) {
-  try {
-    const u = new URL(String(v == null ? '' : v).trim());
-    return u.protocol === 'https:' && GOOGLE_HOSTS.includes(u.hostname);
-  } catch { return false; }
+  return googleReviewUrlOk(v);
 }
 
 export function countInvalidReviewLinks(rows) {

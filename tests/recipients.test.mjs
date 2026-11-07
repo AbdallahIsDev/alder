@@ -20,6 +20,7 @@
 
 import { loadEnv } from './env.mjs';
 import { fakeRes } from './helpers.mjs';
+import * as C from '../lib/content.js';
 
 loadEnv();
 
@@ -121,9 +122,16 @@ const install = () => {
         return json(doomed.map((r) => ({ id: r.id })));
       }
       if (method === 'POST') {
+        if (store.failBind) return new Response('{}', { status: 500 });
         const body = JSON.parse(init.body || '{}');
         const rows = Array.isArray(body) ? body : [body];
         for (const r of rows) {
+          // Simulate a concurrent bind landing between the read and the write.
+          if (store.raceBind && String(r.tg_chat_id) === String(store.raceBind.chatId)) {
+            store.chats.push({ id: uuid(store.seq++), business_id: store.raceBind.businessId, tg_chat_id: r.tg_chat_id, label: null, created_at: new Date().toISOString() });
+            store.raceBind = null;
+            return json([]);
+          }
           if (!store.chats.some((c) => String(c.tg_chat_id) === String(r.tg_chat_id))) {
             store.chats.push({ id: uuid(store.seq++), label: null, created_at: new Date().toISOString(), ...r });
           }
@@ -145,11 +153,18 @@ const install = () => {
         return json([]);
       }
       if (method === 'PATCH') {
+        const body = JSON.parse(init.body || '{}');
         const hit = store.codes.filter((r) => match(r, params));
-        for (const r of hit) r.used_at = new Date().toISOString();
-        return json(hit.map((r) => ({ business_id: r.business_id })));
+        for (const r of hit) {
+          if ('used_at' in body) r.used_at = body.used_at;
+          if ('expires_at' in body) r.expires_at = body.expires_at;
+        }
+        return json(hit.map((r) => ({ business_id: r.business_id, code: r.code })));
       }
-      const rows = store.codes.filter((r) => match(r, params));
+      let rows = store.codes.filter((r) => match(r, params));
+      if ((u.searchParams.get('order') || '').startsWith('expires_at')) {
+        rows = rows.slice().sort((a, b) => (a.expires_at < b.expires_at ? -1 : 1));
+      }
       if (countRequested(init)) return countHeader(rows.length);
       return json(rows);
     }
@@ -214,26 +229,36 @@ try {
   line(store.codes.length === 0 && r3.includes('maximum number of phones'), 'R3',
     'bound-chat cap refuses, no code', `codes=${store.codes.length}`);
 
-  /* R4: pending-invite cap */
+  /* R4: pending-invite cap — lists the invites, never the codes, one button */
   store = freshStore();
   store.chats.push({ id: uuid(1), business_id: BIZ_A, tg_chat_id: CHAT_A, label: null, created_at: '2026-11-01T10:00:00Z' });
-  for (let i = 0; i < 3; i++) store.codes.push({ code: `LIVE${i}CODE234`, business_id: BIZ_A, expires_at: '2099-01-01T00:00:00Z', used_at: null });
+  const soon = (h) => new Date(Date.now() + h * 3600000).toISOString();
+  for (const h of [5, 12, 23]) store.codes.push({ code: `LIVE${h}CODE2345`, business_id: BIZ_A, expires_at: soon(h), used_at: null });
   await tgReset();
   await call(msg(CHAT_A, '/invite'));
   const r4 = await lastText();
-  line(store.codes.length === 3 && r4.includes('unused invite codes'), 'R4',
-    'pending-invite cap refuses, no code', `codes=${store.codes.length}`);
+  const r4send = (await tgReqs()).filter((r) => r.path.includes('/sendMessage')).pop();
+  const r4btn = (r4send && r4send.body.reply_markup && r4send.body.reply_markup.inline_keyboard[0][0]) || {};
+  const leaked = store.codes.some((c) => r4.includes(c.code));
+  line(store.codes.length === 3 && /3 unused invites/.test(r4) && /Invite 1 · expires in 5 h/.test(r4)
+    && !leaked && r4btn.callback_data === 'i:c' && String(r4btn.text).length > 10,
+    'R4', 'pending-invite cap: counts and expiry, no code, one button',
+    `codes=${store.codes.length} cb=${r4btn.callback_data} leaked=${leaked}`);
 
-  /* R5: rate limit per chat, fail closed */
+  /* R5: rate limit per chat. A cap of 10 keeps the pending cap out of the way,
+     so the 6th call is the rate limit itself, and it says so. */
   store = freshStore();
   store.chats.push({ id: uuid(1), business_id: BIZ_A, tg_chat_id: CHAT_A, label: null, created_at: '2026-11-01T10:00:00Z' });
+  process.env.INVITES_MAX = '10';
   await tgReset();
   for (let i = 0; i < 5; i++) await call(msg(CHAT_A, '/invite'));
   const before6 = texts(await tgReqs()).length;
   await call(msg(CHAT_A, '/invite'));
-  const after6 = texts(await tgReqs()).length;
-  line(before6 === 5 && after6 === 5, 'R5', 'invite rate limit: 5 per hour, 6th is silent',
-    `replies=${before6}->${after6}`);
+  const r5 = await lastText();
+  delete process.env.INVITES_MAX;
+  line(before6 === 5 && store.codes.length === 5 && r5 === C.BOT_INVITE_RATE_LIMIT,
+    'R5', 'invite rate limit: 5 per hour, 6th says so, no code',
+    `replies=${before6} codes=${store.codes.length}`);
 
   /* R6: single use */
   store = freshStore();
@@ -318,7 +343,8 @@ try {
   {
     const C = await import('../lib/content.js');
     const all = [
-      C.BOT_INVITE_CAPPED, C.BOT_INVITE_PENDING, C.BOT_RECIPIENT_LAST,
+      C.BOT_INVITE_CAPPED, C.botInvitePendingText({ hours: [5, 12, 23] }), C.BOT_INVITE_CANCEL_BUTTON,
+      C.BOT_INVITE_CANCELLED, C.BOT_INVITE_CANCEL_ALREADY, C.BOT_INVITE_RATE_LIMIT, C.BOT_RECIPIENT_LAST,
       C.BOT_RECIPIENT_REMOVED, C.BOT_RECIPIENT_GONE, C.BOT_RECIPIENTS_EMPTY,
       C.botInviteText('K7M2QPX9RT4W'), C.botRecipientsText([{ id: 'a', label: null }]),
       C.recipientConfirmText({ id: 'a', label: null }, 0),
@@ -336,6 +362,151 @@ try {
     const fn = src.slice(src.indexOf('export async function listBusinessChatsDetailed'), src.indexOf('export async function getBusinessChat'));
     const ok = fn.includes(".order('created_at', { ascending: true })") && fn.includes(".order('id', { ascending: true })");
     line(ok, 'R14', 'listBusinessChatsDetailed orders by created_at then id', `ok=${ok}`);
+  }
+
+  /* R15: the owner taps the cap button. Old invites die, exactly one new code
+     is minted, and the normal invite text is sent. */
+  {
+    store = freshStore();
+    store.chats.push({ id: uuid(1), business_id: BIZ_A, tg_chat_id: CHAT_A, label: null, created_at: '2026-11-01T10:00:00Z' });
+    for (const h of [5, 12, 23]) store.codes.push({ code: `OLD${h}CODE23456`, business_id: BIZ_A, expires_at: soon(h), used_at: null });
+    await tgReset();
+    await call(cb(CHAT_A, 'i:c'));
+    const live = store.codes.filter((c) => !c.used_at && new Date(c.expires_at) > new Date());
+    const inv = await lastText();
+    line(store.codes.length === 4 && live.length === 1 && inv.includes('/start ' + live[0].code),
+      'R15', 'cancel tap: old invites expire, one new code, invite text',
+      `rows=${store.codes.length} live=${live.length}`);
+  }
+
+  /* R16: a second tap inside the mutex must not mint a second code. */
+  {
+    await tgReset();
+    await call(cb(CHAT_A, 'i:c'));
+    const live = store.codes.filter((c) => !c.used_at && new Date(c.expires_at) > new Date());
+    const answers16 = (await tgReqs()).filter((r) => r.path.includes('/answerCallbackQuery')).map((r) => String(r.body.text));
+    line(live.length === 1 && store.codes.length === 4 && answers16.includes(C.BOT_INVITE_CANCEL_ALREADY),
+      'R16', 'double tap: no second code, says already cancelled',
+      `live=${live.length} rows=${store.codes.length}`);
+  }
+
+  /* R17: a staff phone cannot cancel, and nothing changes. */
+  {
+    store = freshStore();
+    store.chats.push(
+      { id: uuid(1), business_id: BIZ_A, tg_chat_id: CHAT_A, label: null, created_at: '2026-11-01T10:00:00Z' },
+      { id: uuid(2), business_id: BIZ_A, tg_chat_id: CHAT_A2, label: null, created_at: '2026-11-02T10:00:00Z' },
+    );
+    for (const h of [5, 12, 23]) store.codes.push({ code: `STF${h}CODE23456`, business_id: BIZ_A, expires_at: soon(h), used_at: null });
+    await tgReset();
+    await call(cb(CHAT_A2, 'i:c'));
+    const answers17 = (await tgReqs()).filter((r) => r.path.includes('/answerCallbackQuery')).map((r) => String(r.body.text));
+    const live = store.codes.filter((c) => !c.used_at && new Date(c.expires_at) > new Date());
+    line(live.length === 3 && store.codes.length === 3 && answers17.includes(C.BOT_OWNER_ONLY),
+      'R17', 'staff phone: owner-only, nothing expired or minted',
+      `live=${live.length} toasts=${answers17.join('/')}`);
+  }
+
+  /* R18: an unbound chat tapping the button gets the generic answer. */
+  {
+    store = freshStore();
+    await tgReset();
+    await call(cb(CHAT_A, 'i:c'));
+    const answers18 = (await tgReqs()).filter((r) => r.path.includes('/answerCallbackQuery')).map((r) => String(r.body.text));
+    line(store.codes.length === 0 && answers18.includes(C.TOAST_NOT_FOUND),
+      'R18', 'unbound chat: generic answer, nothing minted', `codes=${store.codes.length}`);
+  }
+
+  /* R19: a code redeemed between the list and the tap stays used and keeps its
+     expiry; the tap only expires the codes nobody used. */
+  {
+    store = freshStore();
+    store.chats.push({ id: uuid(1), business_id: BIZ_A, tg_chat_id: CHAT_A, label: null, created_at: '2026-11-01T10:00:00Z' });
+    for (const h of [5, 12, 23]) store.codes.push({ code: `RED${h}CODE23456`, business_id: BIZ_A, expires_at: soon(h), used_at: null });
+    await call(msg(CHAT_A2, '/start RED5CODE23456'));
+    const redeemed = store.codes.find((c) => c.code === 'RED5CODE23456');
+    const redeemedExpiry = redeemed.expires_at;
+    await tgReset();
+    await call(cb(CHAT_A, 'i:c'));
+    const live = store.codes.filter((c) => !c.used_at && new Date(c.expires_at) > new Date());
+    line(!!redeemed.used_at && redeemed.expires_at === redeemedExpiry && live.length === 1,
+      'R19', 'code used between list and tap: kept used, not re-expired',
+      `used=${!!redeemed.used_at} live=${live.length}`);
+  }
+
+  /* R20: /recipients states how many invites are waiting. */
+  {
+    store = freshStore();
+    store.chats.push({ id: uuid(1), business_id: BIZ_A, tg_chat_id: CHAT_A, label: null, created_at: '2026-11-01T10:00:00Z' });
+    for (const h of [5, 12]) store.codes.push({ code: `PND${h}CODE23456`, business_id: BIZ_A, expires_at: soon(h), used_at: null });
+    await tgReset();
+    await call(msg(CHAT_A, '/recipients'));
+    const r20 = await lastText();
+    line(r20.includes('Pending invites: 2.'), 'R20', '/recipients names the pending count', `has=${r20.includes('Pending invites: 2.')}`);
+  }
+
+  /* R21: a rate-limited tap must not destroy the old invites. */
+  {
+    store = freshStore();
+    store.chats.push({ id: uuid(1), business_id: BIZ_A, tg_chat_id: CHAT_A, label: null, created_at: '2026-11-01T10:00:00Z' });
+    for (const h of [5, 12, 23]) store.codes.push({ code: `RTL${h}CODE23456`, business_id: BIZ_A, expires_at: soon(h), used_at: null });
+    process.env.INVITES_MAX = '10';
+    for (let i = 0; i < 5; i++) await call(msg(CHAT_A, '/invite'));
+    const before21 = store.codes.filter((c) => !c.used_at && new Date(c.expires_at) > new Date()).length;
+    await tgReset();
+    await call(cb(CHAT_A, 'i:c'));
+    delete process.env.INVITES_MAX;
+    const after21 = store.codes.filter((c) => !c.used_at && new Date(c.expires_at) > new Date()).length;
+    const answers21 = (await tgReqs()).filter((r) => r.path.includes('/answerCallbackQuery')).map((r) => String(r.body.text));
+    line(before21 === 8 && after21 === 8 && answers21.includes(C.BOT_INVITE_RATE_LIMIT),
+      'R21', 'rate-limited tap: old invites survive, no mint',
+      `live=${before21}->${after21}`);
+  }
+
+  /* R22: a bind that silently does nothing must not burn the code. */
+  {
+    store = freshStore();
+    store.codes.push({ code: 'RACECDE23456', business_id: BIZ_A, expires_at: '2099-01-01T00:00:00Z', used_at: null });
+    store.raceBind = { chatId: CHAT_A, businessId: BIZ_B };
+    await tgReset();
+    await call(msg(CHAT_A, 'RACECDE23456'));
+    const r22 = await lastText();
+    const row = store.chats.find((c) => String(c.tg_chat_id) === String(CHAT_A));
+    line(r22 === C.BOT_BOUND_ELSEWHERE && store.codes[0].used_at === null && row.business_id === BIZ_B,
+      'R22', 'race: bound elsewhere, told so, code restored',
+      `text=${r22.slice(0, 24)} used=${!!store.codes[0].used_at}`);
+  }
+
+  /* R23: a throwing bind restores the claim and says so. */
+  {
+    store = freshStore();
+    store.codes.push({ code: 'THRWCDE23456', business_id: BIZ_A, expires_at: '2099-01-01T00:00:00Z', used_at: null });
+    store.failBind = true;
+    await tgReset();
+    await call(msg(CHAT_A, 'THRWCDE23456'));
+    const r23 = await lastText();
+    line(r23 === C.BOT_BIND_FAILED && store.codes[0].used_at === null && store.chats.length === 0,
+      'R23', 'bind throws: code restored, "ask for a new code"',
+      `used=${!!store.codes[0].used_at} chats=${store.chats.length}`);
+  }
+
+  /* R24: the global bind ceiling trips at 600 (1 here) and logs. */
+  {
+    store = freshStore();
+    store.codes.push(
+      { code: 'CECDEF234567', business_id: BIZ_A, expires_at: '2099-01-01T00:00:00Z', used_at: null },
+      { code: 'CECDEF678923', business_id: BIZ_A, expires_at: '2099-01-01T00:00:00Z', used_at: null },
+    );
+    process.env.BIND_TRIES_GLOBAL_PER_HOUR = '1';
+    await tgReset();
+    await call(msg(CHAT_A, 'CECDEF234567'));
+    const firstOk = store.chats.length === 1;
+    await call(msg(CHAT_A2, 'CECDEF678923'));
+    const r24 = await lastText();
+    delete process.env.BIND_TRIES_GLOBAL_PER_HOUR;
+    line(firstOk && r24 === C.BOT_CODE_BAD && store.chats.length === 1 && store.codes[1].used_at === null,
+      'R24', 'global bind ceiling: second attempt refused, code intact',
+      `chats=${store.chats.length} used2=${!!store.codes[1].used_at} text=${r24.slice(0,30)}`);
   }
 
   /* R12: an alert reaches every bound chat */
