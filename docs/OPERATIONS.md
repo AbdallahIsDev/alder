@@ -87,15 +87,26 @@ unused.
 
 | Where | What it means | What to do |
 |---|---|---|
-| `/api/selfcheck` message, "N alerts did not go out." | `tg_failed` + `email_owner_failed` + `autoreply_failed` + `review_request_failed` over 24 h is non-zero | open `/api/health` and read `last_24h`; §5 |
-| `/api/selfcheck` message, "Email redirect is ON in production" | `MAIL_REDIRECT_TO` is set while `VERCEL_ENV=production` | remove it (§7) |
-| Digest line `Failed alerts N` | same four kinds, same 24 h window | same as above |
+| Alert check, `⚠️ Needs attention` / "N alerts could not be delivered" | `tg_failed` over 24 h for **that business** is non-zero | open `/api/health` and read `last_24h`; §5 |
+| Alert check, "N alert emails to you did not go out" | `email_owner_failed` for that business | check Resend and the sender domain; §5 |
+| Alert check, "N confirmation emails to a customer failed" | `autoreply_failed` for that business | the customer got no acknowledgement; §5 |
+| Alert check, "N review requests to a customer failed" | `review_request_failed` for that business | the owner can retry from the bot; §5 |
+| Alert check, "⚠️ Test mode is on …" | `MAIL_REDIRECT_TO` is set while `VERCEL_ENV=production` | remove it (§7). Demo businesses only — a client never sees this line |
+| Digest section `⚠️ Needs attention` | the same four kinds, same 24 h window, for that business | same as above |
 | `/api/health` → `mail_redirect_active: true` | `MAIL_REDIRECT_TO` is set, in **any** environment | if production, remove it |
 | `/api/health` → `webhook_secret_set: false` | `TELEGRAM_WEBHOOK_SECRET` missing → `/api/tg` answers 503 | set it (§6) |
 | `/api/health` → `salt_set: false` | `IP_HASH_SALT` missing → `/api/lead` answers 500 | set it (§6) |
 | Log line `owner_alert_fallback` | both owner channels failed and each was retried once | check Telegram and Resend |
 | Log line `autoreply_capped` | the business hit `AUTOREPLY_DAILY_CAP` (default 40) | expected on a flood; raise the cap or the plan |
 | Log line `mail_redirect_active` | first send in production with a redirect configured | remove the redirect |
+
+**Who receives what.** Every message carries only the counts of the business that
+receives it. A business with status `demo` is the operator's own: it also gets the
+redirect warning and, in a clearly separated last line, the setting name. A business
+with status `active` is a client: it hears from us only when one of its own sends
+failed, and it never sees operator text. Two businesses that share an owner email get
+one message per run, not two — the one with more failures wins, and the response's
+`deduped` count records the suppressed copy.
 
 `/api/health` and `/api/selfcheck` and `/api/digest` all answer **503 when
 `HEALTH_SECRET` is unset**, even if `CRON_SECRET` is set. `/api/health` takes
@@ -197,3 +208,11 @@ set, so it cannot be pointed at a fake by accident.
   Telegram has none of those constraints.
 - **No queue for alerts.** If both Telegram and email fail for a lead, the lead is
   still stored and both failures are recorded as events; nothing retries later.
+- **A shared inbox gets one message.** Two businesses with the same `owner_email` are
+  de-duplicated per run, worst-first. The second business's numbers are not merged into
+  the message, so its counts are missing from that run. Distinct inboxes are the normal
+  case; this only bites an operator running several demo businesses on one address.
+- **The self-check is per business but its window is global.** Each message counts the
+  last 24 h for that business only, so two messages can cover slightly different
+  windows if the run takes long enough to cross a second boundary. At this size it does
+  not happen; it would at hundreds of businesses.
