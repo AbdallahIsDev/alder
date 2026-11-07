@@ -12,6 +12,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { secretMatches } from '../lib/request.js';
 import { operatorChatId, operatorEmail, operatorReachable } from '../lib/operator.js';
+import { GOOGLE_HOSTS } from '../lib/content.js';
 
 const HEADER = 'x-health-secret';
 const KINDS = [
@@ -25,6 +26,22 @@ const KINDS = [
 ];
 const HOUR = 3600 * 1000;
 const DAY = 24 * HOUR;
+
+/**
+ * Is a stored review link usable AS STORED? Strict on purpose: the page repairs
+ * a "ttps://" typo at render time, but the column should still be fixed, and
+ * this is the number that says how many are wrong. Counts only.
+ */
+export function reviewLinkOk(v) {
+  try {
+    const u = new URL(String(v == null ? '' : v).trim());
+    return u.protocol === 'https:' && GOOGLE_HOSTS.includes(u.hostname);
+  } catch { return false; }
+}
+
+export function countInvalidReviewLinks(rows) {
+  return (rows || []).filter((r) => !reviewLinkOk(r && r.google_review_url)).length;
+}
 
 let client = null;
 function db() {
@@ -72,9 +89,13 @@ export default async function handler(req, res) {
       countsSince(new Date(now - HOUR).toISOString()),
       countsSince(new Date(now - DAY).toISOString()),
     ]);
+    const { data: linkRows, error: linkErr } = await db()
+      .from('businesses').select('google_review_url').in('status', ['demo', 'active']);
+    if (linkErr) throw linkErr;
     return res.status(200).json({
       ok: true,
       last_hour: lastHour,
+      review_links_invalid: countInvalidReviewLinks(linkRows),
       last_24h: lastDay,
       mail_redirect_active: !!process.env.MAIL_REDIRECT_TO,
       webhook_secret_set: !!process.env.TELEGRAM_WEBHOOK_SECRET,

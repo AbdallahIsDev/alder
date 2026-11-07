@@ -237,6 +237,8 @@ set, so it cannot be pointed at a fake by accident.
   placeholder address emails a stranger. `example.com` is reserved (RFC 2606) and
   must never survive to production.
 - `npm run tg:commands` has been run since the last command change.
+- `review_links_invalid` in `/api/health` is `0` (every demo/active business has
+  an `https://` Google review link on an allowed host).
 
 ## 7. Post-merge checklist
 
@@ -288,12 +290,12 @@ set, so it cannot be pointed at a fake by accident.
 (`git format-patch`) is best-effort — `git am` cannot replay a merge commit, so
 it stops there. Use the diff to review, the patch only for a linear branch.
 
-**Restoring after a test run.** Restore from the exact timestamped file taken
-before that run, and only the rows the run could have changed. A blanket
-"delete every chat for the business, then re-insert the backup's rows" silently
-removes any phone that was legitimately connected while the run was going on.
-If the current chat set differs from the backup's in a way the run did not cause,
-refuse and tell the owner which chats exist now — do not overwrite.
+**Restoring after a test run.** The backup, the reset and the restore touch the
+`businesses` columns of `alder-demo` and **nothing else**. `business_chats` is
+never read for a restore, never deleted and never re-inserted: a phone can be
+connected at any moment, and a blanket "delete every chat, put the backup's rows
+back" silently unbinds a client. That is exactly how the second phone was lost on
+2026-11-07. `seed-check` reports the chat count and does not require it to be zero.
 
 The runner now fails a run that adds or removes a `business_chats` row, so a
 leak is loud instead of silent.

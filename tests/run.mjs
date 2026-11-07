@@ -91,12 +91,16 @@ function killTree(child) {
   }
 }
 
-/** Every bound chat id, sorted. Tails are printed, never the full id. */
+/**
+ * Every bound chat id, sorted. Tails are printed, never the full id.
+ * The result carries `ok`: an error must not compare equal to another error and
+ * let the run pass — a snapshot nobody could take proves nothing.
+ */
 async function chatSnapshot() {
   const { data, error } = await svc
     .from('business_chats').select('tg_chat_id').order('tg_chat_id');
-  if (error) return [`error:${error.code}`];
-  return (data || []).map((r) => String(r.tg_chat_id));
+  if (error) return { ok: false, code: error.code, ids: [] };
+  return { ok: true, code: null, ids: (data || []).map((r) => String(r.tg_chat_id)) };
 }
 
 async function cleanup(svc) {
@@ -169,11 +173,13 @@ if (RUN_SEED_CHECK) {
   if (error) { out('seed-check  FAIL  ' + error.code); process.exit(1); }
   if (!row) { out('seed-check  FAIL  alder-demo row missing'); process.exit(1); }
   const differing = Object.keys(seed).filter((k) => String(row[k] ?? '') !== String(seed[k]));
+  // business_chats is reported, never required to be empty: a connected phone is
+  // a real binding and the ritual must not touch it. Suites bind their own ids.
   const { data: chats } = await svc.from('business_chats').select('id').eq('business_id', row.id);
   const chatsCount = (chats || []).length;
   out(`seed-check  differing-columns: ${differing.length ? differing.join(',') : '(none)'} business_chats-rows: ${chatsCount}`);
-  if (differing.length || chatsCount > 0) {
-    out('seed-check  FAIL  reset the alder-demo row to seed values and delete its business_chats rows');
+  if (differing.length) {
+    out('seed-check  FAIL  reset the alder-demo row to seed values');
     process.exit(1);
   }
   out('seed-check  OK  alder-demo matches seed, no chats bound');
@@ -333,14 +339,19 @@ try {
   out('');
   {
     const chatsAfter = await chatSnapshot();
-    if (JSON.stringify(chatsAfter) !== JSON.stringify(chatsBefore)) {
+    if (!chatsBefore.ok || !chatsAfter.ok) {
+      out('FAIL  runner  could not snapshot business_chats');
+      out(`      before=${chatsBefore.ok ? 'ok' : chatsBefore.code} after=${chatsAfter.ok ? 'ok' : chatsAfter.code}`);
+      out('      a guard that cannot read the table must fail the run, not pass it');
+      process.exitCode = 1;
+    } else if (JSON.stringify(chatsAfter.ids) !== JSON.stringify(chatsBefore.ids)) {
       out(`FAIL  runner  business_chats changed during the run`);
-      out(`      before ${chatsBefore.length}: ${tail(chatsBefore)}`);
-      out(`      after  ${chatsAfter.length}: ${tail(chatsAfter)}`);
+      out(`      before ${chatsBefore.ids.length}: ${tail(chatsBefore.ids)}`);
+      out(`      after  ${chatsAfter.ids.length}: ${tail(chatsAfter.ids)}`);
       out('      a suite added or removed a binding; every test fixture must use its own id');
       process.exitCode = 1;
     } else {
-      out(`runner  business_chats unchanged (${chatsBefore.length}: ${tail(chatsBefore)})`);
+      out(`runner  business_chats unchanged (${chatsBefore.ids.length}: ${tail(chatsBefore.ids)})`);
     }
   }
 

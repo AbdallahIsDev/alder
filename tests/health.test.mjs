@@ -28,13 +28,13 @@ const line = (ok, id, what, d) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${String(id).padEnd(4)}${String(what).padEnd(50)}${d ? '  ' + String(d).replace(/\s+/g, ' ').slice(0, 96) : ''}`);
 };
 
-const { default: handler } = await import('../api/health.js');
+const { default: handler, countInvalidReviewLinks, reviewLinkOk } = await import('../api/health.js');
 const { default: selfcheck, alertTargets, deliverSelfCheck, operatorAlarm } = await import('../api/selfcheck.js');
 const { selfCheckText, shouldAlertBusiness, failedTotal, operatorAlarmText } = await import('../lib/ops-copy.js');
 const { selfCheckEmail } = await import('../lib/email-builders.js');
 
 const KINDS = ['created', 'tg_sent', 'tg_failed', 'email_owner_sent', 'email_owner_failed', 'autoreply_failed', 'review_request_failed'];
-const TOP = ['last_24h', 'last_hour', 'mail_redirect_active', 'ok', 'operator_chat_set', 'operator_email_set', 'operator_reachable', 'salt_set', 'webhook_secret_set'];
+const TOP = ['last_24h', 'last_hour', 'mail_redirect_active', 'ok', 'operator_chat_set', 'operator_email_set', 'operator_reachable', 'review_links_invalid', 'salt_set', 'webhook_secret_set'];
 
 const call = async ({ method = 'GET', secret } = {}) => {
   const res = fakeRes();
@@ -50,6 +50,24 @@ try {
   {
     const r = await call({ secret: 'anything' });
     line(r.code === 503 && r.body && r.body.ok === false, 'H1', 'no HEALTH_SECRET -> 503', `code=${r.code}`);
+  }
+
+  /* H1b: the review-link count is strict about what is STORED. */
+  {
+    const rows = [
+      { google_review_url: 'https://g.page/r/x' },
+      { google_review_url: 'https://search.google.com/local/writereview?placeid=1' },
+      { google_review_url: 'ttps://search.google.com/local/writereview?placeid=1' },
+      { google_review_url: 'http://g.page/r/x' },
+      { google_review_url: 'https://evil.example/r' },
+      { google_review_url: '' },
+      { google_review_url: null },
+    ];
+    const ok = reviewLinkOk('https://g.page/r/x') === true
+      && reviewLinkOk('ttps://search.google.com/x') === false
+      && countInvalidReviewLinks(rows) === 5;
+    line(ok, 'H1b', 'review_links_invalid counts only https on an allowed host',
+      `invalid=${countInvalidReviewLinks(rows)}`);
   }
 
   /* H2: configured, but the caller has the wrong (or no) secret */
