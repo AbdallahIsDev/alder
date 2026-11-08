@@ -269,7 +269,7 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 ## 12. Git state (as of this report)
 
 - `main` = `e981e0c` (deploys to production).
-- `ops-audience` (PR #6): 38 commits ahead of `main`, head `dbb7eec`. `git merge-tree --write-tree origin/main ops-audience` exits 0: no conflicts against `e981e0c`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
+- `ops-audience` (PR #6): 39 commits ahead of `main`, head `fafa5d8` (plus this docs commit). `git merge-tree --write-tree origin/main ops-audience` exits 0: no conflicts against `e981e0c`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
 - Review artefact: `_debug/patches/ops-audience-review.diff` (gitignored), single file.
 - Remote: `origin https://github.com/AbdallahIsDev/alder.git`. Never push to `main`, never force, no tags.
@@ -306,3 +306,4 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-08 | `ops-audience` | `0b55342` | `scripts/purge-expired.mjs` (dry run, two guards) | K8 |
 | 2026-11-08 | `ops-audience` | `45f32f7` | Retry lock keyed by failure generation; C33 loops 20x; OP21 pins unset OPERATOR_CHAT_ID | C33-C35, OP21 |
 | 2026-11-08 | `ops-audience` | `dbb7eec` | Resend idempotency 409 = duplicate; bind read error says "something went wrong" and restores the claim | C38/C39, R25 |
+| 2026-11-08 | `ops-audience` | `fafa5d8` | Client message is text + entities (no parse_mode, no visible URL, code once); link replies are role-aware, and an unbound operator cannot bind itself | T2/T3/T6/T7, OP2/OP16, W1-W5 |
