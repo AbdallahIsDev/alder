@@ -1274,6 +1274,60 @@ try {
           `op=${w1 === C2.OPERATOR_WELCOME}/${w2 === C2.OPERATOR_WELCOME}/${w3 === C2.OPERATOR_WELCOME} client=${client === C2.BOT_NOT_CONNECTED}`);
       }
 
+      // OP27/OP28: /remove_lead. Owner only, five per page, scoped delete,
+      // double tap is idempotent, stale taps are graceful.
+      {
+        const C2 = await import('../lib/content.js');
+        const ids = [];
+        for (let i = 0; i < 6; i++) ids.push(await seedLead(bindBiz.id, `Remove Me ${i + 1}`, `remove${i}@example.com`));
+        const lastText = async () => ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text || '';
+        await reset();
+        await good(msg(bindA, '/remove_lead'));
+        const list = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
+        const kb = (list && list.body.reply_markup && list.body.reply_markup.inline_keyboard) || [];
+        const listText = (list && list.body.text) || '';
+        const nums = kb[0] || [];
+        const nav = kb[1] || [];
+        await reset();
+        await good(cb(bindA, 'rl:' + ids[0]));
+        const confirm = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop();
+        const ckb = (confirm && confirm.body.reply_markup && confirm.body.reply_markup.inline_keyboard[0]) || [];
+        await reset();
+        await good(cb(bindA, 'RL:' + ids[0]));
+        const gone = (await svc.from('leads').select('id').eq('id', ids[0])).data.length;
+        const afterText = ((await sent()).filter((x) => x.path.includes('/editMessageText')).pop() || {}).body?.text || '';
+        await reset();
+        await good(cb(bindA, 'RL:' + ids[0]));
+        const second = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        await reset();
+        await good(cb(bindA, 'rl:' + ids[0]));
+        const stale = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        line(listText.startsWith(C2.REMOVE_LEAD_TITLE) && nums.length === 5 && nav.some((b) => b.text === 'Older')
+          && confirm && confirm.body.text.includes('Remove Me 1') && ckb[0].style === 'danger'
+          && ckb[1].text === 'Cancel' && gone === 0 && afterText === C2.REMOVE_LEAD_DONE
+          && second.includes(C2.REMOVE_LEAD_GONE) && stale.includes(C2.REMOVE_LEAD_GONE),
+          'OP27', '/remove_lead: list, confirm, scoped delete, double/stale taps',
+          `nums=${nums.length} gone=${gone} second=${second.join('/')}`);
+
+        await reset();
+        await good(msg(bindB, '/remove_lead'));
+        const staff = await lastText();
+        await reset();
+        await good(cb(bindB, 'RL:' + ids[1]));
+        const staffTap = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        const stillThere = (await svc.from('leads').select('id').eq('id', ids[1])).data.length;
+        // A forged delete of another business's lead must fail on the scope.
+        const foreign = await seedLead(bizB.id, 'Foreign Remove', 'foreignremove@example.com');
+        await reset();
+        await good(cb(bindA, 'RL:' + foreign));
+        const foreignText = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        const foreignKept = (await svc.from('leads').select('id').eq('id', foreign)).data.length;
+        line(staff === C2.BOT_OWNER_ONLY && staffTap.includes(C2.TOAST_OWNER_ONLY) && stillThere === 1
+          && foreignText.includes(C2.REMOVE_LEAD_GONE) && foreignKept === 1,
+          'OP28', 'staff cannot list or delete; another business lead is out of scope',
+          `staff=${staff === C2.BOT_OWNER_ONLY} kept=${stillThere} foreign=${foreignKept}`);
+      }
+
       // OP25: the operator chat can never become a business phone, even via a
       // direct bindChat caller. No row is written.
       {

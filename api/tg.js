@@ -6,7 +6,7 @@
 
 import { randomBytes } from 'node:crypto';
 import {
-  getChatBinding, bindChat, claimBindCode, restoreBindCode, getBindCodeState, getBusinessById, clearRateLimit,
+  getChatBinding, bindChat, claimBindCode, restoreBindCode, getBindCodeState, getBusinessById, clearRateLimit, deleteLeadScoped,
   listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
   countBusinessChats, countBusinessesByName, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
   listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
@@ -26,6 +26,7 @@ import {
   TOAST_NOT_FOUND, TOAST_ALREADY_DONE, TOAST_CONTACT_FIRST, TOAST_NOTHING_TO_RETRY, TOAST_GENERIC_ERROR,
   TOAST_ALREADY_UPDATED, TOAST_TOO_MANY_OPENS, TOAST_OWNER_ONLY, leadListKeyboard, alertKeyboard,
   BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_BOUND_ELSEWHERE, BOT_BIND_FAILED, TOAST_LEAD_GONE, BOT_RECIPIENT_SELF,
+  removeLeadListText, removeLeadKeyboard, removeLeadConfirmText, removeLeadConfirmKeyboard, REMOVE_LEAD_DONE, REMOVE_LEAD_GONE,
   OPERATOR_ALREADY_CONNECTED_CODE, OPERATOR_DO_NOT_OPEN, OPERATOR_WELCOME, OPERATOR_CODE_USED, OPERATOR_CODE_EXPIRED, OPERATOR_CODE_UNKNOWN,
   BOT_OWNER_ONLY, botForwardText,
   operatorCodeText, operatorCodeResendText, operatorPhonesText, operatorPhonesKeyboard,
@@ -198,6 +199,31 @@ async function sendLeadsPage(chatId, businessId, page, messageId) {
 async function handleLeads(chatId, binding) {
   if (!binding) return reply(chatId, BOT_NOT_CONNECTED);
   return sendLeadsPage(chatId, binding.business_id, 0, null);
+}
+
+const REMOVE_PAGE = 5;
+
+/** The /remove_lead list: five per page, numbers only, no actions. */
+async function sendRemovePage(chatId, businessId, page, messageId) {
+  const safePage = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
+  const leads = await listClientLeads(businessId, REMOVE_PAGE + 1, safePage * REMOVE_PAGE);
+  const hasOlder = leads.length > REMOVE_PAGE;
+  const shown = leads.slice(0, REMOVE_PAGE);
+  if (!shown.length) {
+    const text = safePage === 0 ? 'No requests to remove.' : 'No older requests.';
+    if (messageId) return editMessageText(chatId, messageId, text, { reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    return reply(chatId, text);
+  }
+  const markup = removeLeadKeyboard(shown, safePage, hasOlder);
+  if (messageId) return editMessageText(chatId, messageId, removeLeadListText(shown), markup).catch(() => {});
+  return sendMessage(chatId, removeLeadListText(shown), markup);
+}
+
+/** Owner only, like /invite: staff get the same toast as any owner command. */
+async function handleRemoveLead(chatId, binding) {
+  if (!binding) return reply(chatId, BOT_NOT_CONNECTED);
+  if (!(await isOwnerChat(binding.business_id, chatId))) return reply(chatId, BOT_OWNER_ONLY);
+  return sendRemovePage(chatId, binding.business_id, 0, null);
 }
 
 /**
@@ -723,6 +749,11 @@ const CB_LEAD = /^([cdynrvxo]):([0-9a-f-]{36})$/;
 const CB_RECIPIENT = /^([xXv]):([0-9a-f-]{36})$/;
 const CB_OPERATOR_PHONE = /^([pPq]):([0-9a-f-]{36})$/;
 const CB_PAGE = /^l:(\d{1,3})$/;
+// /remove_lead: open a confirm, delete, cancel, page. All scoped to the binding.
+const CB_REMOVE_OPEN = /^rl:([0-9a-f-]{36})$/;
+const CB_REMOVE_DELETE = /^RL:([0-9a-f-]{36})$/;
+const CB_REMOVE_CANCEL = /^rc:([0-9a-f-]{36})$/;
+const CB_REMOVE_PAGE = /^rm:(\d{1,3})$/;
 // The invite-cap button. No business id in the payload: the business comes from
 // the binding, so a forged callback can only ever act on the sender's own.
 const CB_INVITE_CANCEL = /^i:c$/;
@@ -787,6 +818,31 @@ async function handleCallback(cb, binding) {
     if (CB_INVITE_CANCEL.test(data)) {
       await handleInviteCancel({ chatId, businessId: binding.business_id, answer });
       return;
+    }
+
+    const rmOpen = CB_REMOVE_OPEN.exec(data);
+    const rmDel = CB_REMOVE_DELETE.exec(data);
+    const rmCancel = CB_REMOVE_CANCEL.exec(data);
+    const rmPage = CB_REMOVE_PAGE.exec(data);
+    if (rmOpen || rmDel || rmCancel || rmPage) {
+      // Owner only, before any read; the business is always the binding's.
+      if (!(await isOwnerChat(binding.business_id, chatId))) { await answer(TOAST_OWNER_ONLY); return; }
+      const messageId = cb.message && cb.message.message_id;
+      if (rmPage) { await answer(''); return sendRemovePage(chatId, binding.business_id, Number(rmPage[1]), messageId); }
+      const leadId = (rmOpen || rmDel || rmCancel)[1];
+      if (rmCancel) {
+        await answer('');
+        return sendRemovePage(chatId, binding.business_id, 0, messageId);
+      }
+      const lead = await getClientLead(leadId, binding.business_id).catch(() => null);
+      if (!lead) { await answer(REMOVE_LEAD_GONE); return; }
+      if (rmOpen) {
+        await answer('');
+        return editMessageText(chatId, messageId, removeLeadConfirmText(lead), removeLeadConfirmKeyboard(leadId)).catch(() => {});
+      }
+      const removed = await deleteLeadScoped(leadId, binding.business_id).catch(() => 0);
+      await answer(removed ? REMOVE_LEAD_DONE : REMOVE_LEAD_GONE);
+      return editMessageText(chatId, messageId, removed ? REMOVE_LEAD_DONE : REMOVE_LEAD_GONE, { reply_markup: { inline_keyboard: [] } }).catch(() => {});
     }
 
     const page = CB_PAGE.exec(data);
@@ -893,6 +949,8 @@ export default async function handler(req, res) {
         await handleInvite(chatId, binding);
       } else if (first === '/recipients') {
         await handleRecipients(chatId, binding);
+      } else if (first === '/remove_lead') {
+        await handleRemoveLead(chatId, binding);
       } else if (first === '/help') {
         await reply(chatId, binding ? BOT_HELP : BOT_NOT_CONNECTED);
       } else if (first === '/id') {
