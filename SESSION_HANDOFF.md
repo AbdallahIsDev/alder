@@ -189,7 +189,7 @@ Last full run before this bundle: 385.2 s / 384.4 s / 385.6 s, all green. This b
 6. Prompt queue, unsent: README rewrite + CI without secrets + preview check + fresh-eyes review of `main` + test-quality audit.
 7. Telegram command menus: after merge, `npm run tg:commands`, then `tg-webhook set` and `info` (the `my_chat_member` handler only arrives if `allowed_updates` is re-registered).
 8. Known minor: stale handoff lines, `sharp` bump deferred, 13 images without width/height (CLS 0), `--timing` flag.
-9. A5 is done (`scripts/purge-expired.mjs`, dry run default). A2 is done: every bind test runs on `zz-test-bind-<run>` and F8 bans a real-business mint. Keyset paging is report-only. Hostile review done; findings: Resend 409 counted as failure (Medium), `botUsername()` cache (Low), bind read-error reported as "already connected" (Low), retry lock window edge needs a unique index (Low, schema proposal).
+9. A5 is done (`scripts/purge-expired.mjs`, dry run default). A2 is done: every bind test runs on `zz-test-bind-<run>` and F8 bans a real-business mint. Keyset paging is report-only. Hostile review: 409 and bind read-error are fixed; `botUsername()` cache (Low) and the retry lock window edge (Low) remain. The retry lock should become a unique index in the next migration proposal — no migration file is added now.
 10. Proposals only, not implemented: `robots.txt` and `sitemap.xml` hard-coded to `alderroof.com` (pre-launch item); one brand per deployment; `/clients` and `/stats <slug>` on `v_client_leads`; retention predicates; `npm run new-client`.
 
 ---
@@ -269,7 +269,7 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 ## 12. Git state (as of this report)
 
 - `main` = `e981e0c` (deploys to production).
-- `ops-audience` (PR #6): 37 commits ahead of `main`, head `45f32f7`. `git merge-tree --write-tree origin/main ops-audience` exits 0: no conflicts against `e981e0c`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
+- `ops-audience` (PR #6): 38 commits ahead of `main`, head `dbb7eec`. `git merge-tree --write-tree origin/main ops-audience` exits 0: no conflicts against `e981e0c`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
 - Review artefact: `_debug/patches/ops-audience-review.diff` (gitignored), single file.
 - Remote: `origin https://github.com/AbdallahIsDev/alder.git`. Never push to `main`, never force, no tags.
@@ -305,3 +305,4 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-08 | `ops-audience` | `829cc1e` | `/command@thisbot`; two-account MANUAL_TESTING; tg-webhook set/info docs | C37 |
 | 2026-11-08 | `ops-audience` | `0b55342` | `scripts/purge-expired.mjs` (dry run, two guards) | K8 |
 | 2026-11-08 | `ops-audience` | `45f32f7` | Retry lock keyed by failure generation; C33 loops 20x; OP21 pins unset OPERATOR_CHAT_ID | C33-C35, OP21 |
+| 2026-11-08 | `ops-audience` | `dbb7eec` | Resend idempotency 409 = duplicate; bind read error says "something went wrong" and restores the claim | C38/C39, R25 |
