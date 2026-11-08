@@ -345,9 +345,15 @@ try {
     const r = await call({ secret: 'health-test-secret-value' });
     const mail = (await fakeReqs(RS)).filter((x) => x.path === '/emails');
     const to = mail[0] && JSON.stringify(mail[0].body.to);
+    // Handler-level header/footer: the email was built from the business the
+    // handler selected, not from a fixture passed by the test.
+    const html = (mail[0] && mail[0].body.html) || '';
     line(r.code === 200 && r.body.sent === 0 && r.body.emailed === 1 && mail.length === 1
-      && to === JSON.stringify(['owner@example.com']),
-      'D5', 'telegram down: same counts go out by email', `sent=${r.body.sent} emailed=${r.body.emailed} to=${to}`);
+      && to === JSON.stringify(['owner@example.com'])
+      && html.includes('>Alder Roofing<') && html.includes('Sent by Lead Alerts')
+      && !html.includes('>Lead Alerts<'),
+      'D5', 'telegram down: email carries the company header and platform footer',
+      `emailed=${r.body.emailed} header=${html.includes('>Alder Roofing<')} footer=${html.includes('Sent by Lead Alerts')}`);
   } catch (e) {
     line(false, 'D5', 'telegram down: same counts go out by email', e.message);
   } finally { if (installed) installed(); }

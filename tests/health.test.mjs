@@ -359,6 +359,9 @@ try {
       const keyOk = m1.headers && m1.headers['idempotency-key'] === `selfcheck:${BIZ}:${dateKey}`;
       // "owner" is part of the event kind names (email_owner_sent), so the PII
       // check looks for the business name and an address, not that word.
+      // The HTML header is the company's (the text part stays name-free).
+      const headerOk = m1.body && typeof m1.body.html === 'string'
+        && m1.body.html.includes('>Alder Roofing<') && m1.body.html.includes('Sent by Lead Alerts');
       const countsOnly = m1.body && typeof m1.body.text === 'string'
         && m1.body.text.includes('1 alert could not be delivered') && !m1.body.text.includes('@')
         && !/alder roofing|owner@|example\.com/i.test(m1.body.text);
@@ -380,11 +383,11 @@ try {
       const opMail = mail1.find((x) => JSON.stringify(x.body.to) === JSON.stringify(['ops@example.com']));
       const ok = r1.code === 200 && r1.body.emailed === 1 && r1.body.sent === 0
         && r1.body.operator === 'email'
-        && mail1.length === 2 && !!opMail && tg1.length === 2 && !!opTg && toOwner && keyOk && countsOnly
+        && mail1.length === 2 && !!opMail && tg1.length === 2 && !!opTg && toOwner && keyOk && countsOnly && headerOk
         && /alder-demo: 1 alert could not be delivered/.test(opTg.body.text)
         && r2.code === 200 && mail2.length === 2 && toRedirect;
       line(ok, 'S12', 'selfcheck: telegram down -> owner email, redirect wins',
-        `r1=${r1.code} emailed=${r1.body.emailed} tg=${tg1.length} op=${!!opTg} key=${!!keyOk} counts=${!!countsOnly} redirect=${!!toRedirect}`);
+        `r1=${r1.code} emailed=${r1.body.emailed} tg=${tg1.length} op=${!!opTg} key=${!!keyOk} counts=${!!countsOnly} header=${!!headerOk} redirect=${!!toRedirect}`);
     } catch (e) {
       line(false, 'S12', 'selfcheck: telegram down -> owner email, redirect wins', e.message);
     } finally {
