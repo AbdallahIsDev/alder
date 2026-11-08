@@ -8,9 +8,9 @@ import { randomBytes } from 'node:crypto';
 import {
   getChatBinding, bindChat, claimBindCode, restoreBindCode, getBindCodeState, getBusinessById, clearRateLimit,
   listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
-  countBusinessChats, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
+  countBusinessChats, countBusinessesByName, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
   listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
-  getActiveBusinessBySlug, listBusinessSlugs, getChatById, removeChatById,
+  getActiveBusinessBySlug, listBusinessSlugs, listPickerBusinesses, getChatById, removeChatById,
 } from '../lib/db.js';
 import { isOperatorChat } from '../lib/operator.js';
 import { mintBindCode, BIND_CODE_HOURS } from '../lib/bind-codes.js';
@@ -25,13 +25,14 @@ import {
   botInvitePendingText, BOT_RECIPIENTS_PENDING, BOT_RECIPIENT_LAST, BOT_RECIPIENT_REMOVED, BOT_RECIPIENT_GONE,
   TOAST_NOT_FOUND, TOAST_ALREADY_DONE, TOAST_CONTACT_FIRST, TOAST_NOTHING_TO_RETRY, TOAST_GENERIC_ERROR,
   TOAST_ALREADY_UPDATED, TOAST_TOO_MANY_OPENS, TOAST_OWNER_ONLY, leadListKeyboard, alertKeyboard,
-  BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_BOUND_ELSEWHERE, BOT_BIND_FAILED,
+  BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_BOUND_ELSEWHERE, BOT_BIND_FAILED, TOAST_LEAD_GONE, BOT_RECIPIENT_SELF,
   OPERATOR_ALREADY_CONNECTED_CODE, OPERATOR_DO_NOT_OPEN, OPERATOR_CODE_USED, OPERATOR_CODE_EXPIRED, OPERATOR_CODE_UNKNOWN,
-  BOT_OWNER_ONLY, BOT_RECIPIENTS_OWNER_NOTE, botForwardText,
+  BOT_OWNER_ONLY, botForwardText,
   operatorCodeText, operatorCodeResendText, operatorPhonesText, operatorPhonesKeyboard,
   operatorConfirmRemoveText, operatorConfirmRemoveKeyboard, operatorBusinessesText,
   OPERATOR_USAGE_CODE, OPERATOR_USAGE_PHONES, OPERATOR_UNKNOWN_SLUG, OPERATOR_CAPPED, OPERATOR_NO_PHONES,
-  OPERATOR_PHONE_REMOVED, OPERATOR_PHONE_GONE, OPERATOR_ID_TEXT, OPERATOR_HELP,
+  OPERATOR_PHONE_REMOVED, OPERATOR_PHONE_GONE, operatorIdMessage, OPERATOR_HELP,
+  OPERATOR_PICK_TEXT, OPERATOR_NO_BUSINESSES, operatorPickerKeyboard,
 } from '../lib/content.js';
 
 const GENERIC_NOT_FOUND = TOAST_NOT_FOUND;
@@ -168,7 +169,7 @@ async function handleStart(chatId, arg) {
    number is the only thing in the callback, bounded, and the business always
    comes from the binding. */
 
-const LEADS_PAGE = 8;
+const LEADS_PAGE = 5;
 const LEADS_PAGE_MAX = 50;
 const OPENS_PER_HOUR = 30;
 
@@ -300,8 +301,8 @@ async function handleInviteCancel({ chatId, businessId, answer }) {
 async function sendRecipients(chatId, businessId, messageId) {
   const rows = await listBusinessChatsDetailed(businessId);
   const pending = await countLiveBindCodes(businessId);
-  const text = `${botRecipientsText(rows)}\n\n${BOT_RECIPIENTS_OWNER_NOTE}\n${BOT_RECIPIENTS_PENDING(pending)}`;
-  const markup = { reply_markup: rows.length ? recipientsKeyboard(rows) : { inline_keyboard: [] } };
+  const text = `${botRecipientsText(rows)}\n\n${BOT_RECIPIENTS_PENDING(pending)}`;
+  const markup = { reply_markup: rows.length ? recipientsKeyboard(rows, { selfChatId: chatId }) : { inline_keyboard: [] } };
   if (messageId) return editMessageText(chatId, messageId, text, markup).catch(() => {});
   return sendMessage(chatId, text, markup);
 }
@@ -332,6 +333,7 @@ async function handleRecipientCallback({ cb, kind, rowId, binding, answer }) {
   if (kind === 'x') {
     const row = index >= 0 ? rows[index] : await getBusinessChat(binding.business_id, rowId);
     if (!row) { await answer(BOT_RECIPIENT_GONE); return sendRecipients(chatId, binding.business_id, messageId); }
+    if (String(row.tg_chat_id) === String(chatId)) { await answer(BOT_RECIPIENT_SELF); return; }
     await answer('');
     return editMessageText(chatId, messageId, recipientConfirmText(row, index < 0 ? rows.length : index), {
       reply_markup: recipientConfirmKeyboard(rowId),
@@ -349,6 +351,7 @@ async function handleRecipientCallback({ cb, kind, rowId, binding, answer }) {
   // rows if two taps race.
   const row = index >= 0 ? rows[index] : await getBusinessChat(binding.business_id, rowId);
   if (!row) { await answer(BOT_RECIPIENT_GONE); return sendRecipients(chatId, binding.business_id, messageId); }
+  if (String(row.tg_chat_id) === String(chatId)) { await answer(BOT_RECIPIENT_SELF); return; }
   if (rows.length <= 1) { await answer(BOT_RECIPIENT_LAST); return; }
   const removed = await removeBusinessChat(binding.business_id, rowId);
   await answer(removed ? BOT_RECIPIENT_REMOVED : BOT_RECIPIENT_GONE);
@@ -383,8 +386,16 @@ async function handlePlainText(chatId, binding, text = '') {
 const SLUG_RE = /^[a-z0-9-]{2,60}$/;
 const CODES_PER_SLUG_HOUR = 10;
 
+async function operatorPick(chatId, prefix, usageText) {
+  const rows = await listPickerBusinesses().catch(() => []);
+  if (!rows.length) return reply(chatId, OPERATOR_NO_BUSINESSES);
+  if (rows.length > 8) return reply(chatId, usageText);
+  return sendMessage(chatId, OPERATOR_PICK_TEXT, operatorPickerKeyboard(rows, prefix));
+}
+
 async function handleOperatorCode(chatId, arg) {
   const slug = String(arg || '').trim();
+  if (!slug) return operatorPick(chatId, 'pc', OPERATOR_USAGE_CODE);
   if (!SLUG_RE.test(slug)) return reply(chatId, OPERATOR_USAGE_CODE);
   // Fail closed: an unreachable counter means no code, not an unlimited one.
   let within;
@@ -392,13 +403,23 @@ async function handleOperatorCode(chatId, arg) {
   if (!within) return reply(chatId, OPERATOR_CAPPED);
   const business = await getActiveBusinessBySlug(slug).catch(() => null);
   if (!business) return reply(chatId, OPERATOR_UNKNOWN_SLUG);
+  // A new code supersedes the business's older unused ones: leaving them live
+  // fills the owner's invite cap with codes nobody will use. Used codes are
+  // never touched (they are the record of who connected).
+  let cancelled = 0;
+  try {
+    // Count only codes that were actually live; the update also touches rows
+    // that expired long ago, and telling the operator about those would lie.
+    cancelled = (await listLiveBindCodes(business.id)).length;
+    await expireLiveBindCodes(business.id);
+  } catch { cancelled = 0; }
   const { code } = await mintBindCode(business.id);
   const username = await botUsername();
   // TWO messages, strictly. The first is the operator's (slug, code, human
   // expiry); the second is the only text a client may ever see. They are
   // separate sends on purpose: forwarding the first would leak the slug, and
   // editing one message in place is not something Telegram guarantees.
-  await replyMessage(chatId, operatorCodeText({ slug: business.slug, code, hours: BIND_CODE_HOURS }));
+  await replyMessage(chatId, operatorCodeText({ slug: business.slug, code, hours: BIND_CODE_HOURS, cancelled }));
   const forward = await replyMessage(chatId, botForwardText({ code, username, hours: BIND_CODE_HOURS }));
   if (!forward || !forward.ok) {
     // The code exists and is valid; only the forwardable copy failed. Say so
@@ -410,14 +431,17 @@ async function handleOperatorCode(chatId, arg) {
 
 async function handleOperatorPhones(chatId, arg) {
   const slug = String(arg || '').trim();
+  if (!slug) return operatorPick(chatId, 'pb', OPERATOR_USAGE_PHONES);
   if (!SLUG_RE.test(slug)) return reply(chatId, OPERATOR_USAGE_PHONES);
   const business = await getActiveBusinessBySlug(slug).catch(() => null);
   if (!business) return reply(chatId, OPERATOR_UNKNOWN_SLUG);
   const rows = await listBusinessChatsDetailed(business.id);
+  const duplicateName = await countBusinessesByName(business.name).then((n) => n > 1).catch(() => false);
+  const title = `${business.name}${duplicateName ? ` (${business.slug})` : ''}`;
   if (!rows.length) {
-    return reply(chatId, `${OPERATOR_NO_PHONES}\n\n${business.name} (${business.slug}). Mint an invite with /code ${business.slug}.`);
+    return reply(chatId, `${OPERATOR_NO_PHONES}\n\n${title}. Mint an invite with /code ${business.slug}.`);
   }
-  return sendMessage(chatId, operatorPhonesText({ business, rows, ownerId: rows[0].id }), operatorPhonesKeyboard(rows));
+  return sendMessage(chatId, operatorPhonesText({ business, rows, ownerId: rows[0].id, selfChatId: chatId, duplicateName }), operatorPhonesKeyboard(rows));
 }
 
 async function handleOperatorBusinesses(chatId) {
@@ -426,7 +450,7 @@ async function handleOperatorBusinesses(chatId) {
   for (const r of slugs) {
     const b = await getActiveBusinessBySlug(r.slug).catch(() => null);
     const phones = b ? await countBusinessChats(b.id).catch(() => 0) : 0;
-    rows.push({ slug: r.slug, status: r.status, phones });
+    rows.push({ slug: r.slug, name: r.name, status: r.status, phones });
   }
   return reply(chatId, operatorBusinessesText(rows));
 }
@@ -695,6 +719,9 @@ const CB_PAGE = /^l:(\d{1,3})$/;
 // The invite-cap button. No business id in the payload: the business comes from
 // the binding, so a forged callback can only ever act on the sender's own.
 const CB_INVITE_CANCEL = /^i:c$/;
+// Operator pickers: pb = phones, pc = code. The payload is the business id, so a
+// stale list can only ever point at a business that no longer exists.
+const CB_OPERATOR_PICK = /^(pb|pc):([0-9a-f-]{36})$/;
 
 /** Open one lead as a NEW message with its current card. */
 async function handleOpenLead({ cb, leadId, binding, answer }) {
@@ -704,7 +731,7 @@ async function handleOpenLead({ cb, leadId, binding, answer }) {
   try { within = await hitRateLimit('open:' + chatId, 3600, OPENS_PER_HOUR); } catch { return; }
   if (!within) { await answer(TOAST_TOO_MANY_OPENS); return; }
   const lead = await getClientLead(leadId, binding.business_id).catch(() => null);
-  if (!lead) { await answer(GENERIC_NOT_FOUND); return; }
+  if (!lead) { await answer(TOAST_LEAD_GONE); return; }
   const business = await getBusinessById(binding.business_id).catch(() => null);
   if (!business) { await answer(GENERIC_NOT_FOUND); return; }
   const card = await cardFor({ lead, leadId });
@@ -726,6 +753,19 @@ async function handleCallback(cb, binding) {
   const messageId = cb.message && cb.message.message_id;
 
   try {
+    const pick = CB_OPERATOR_PICK.exec(data);
+    if (pick) {
+      // Operator-only BEFORE any data read; a non-operator gets the same answer
+      // as any unknown callback.
+      if (!isOperatorChat(chatId, chatType)) { await answer(GENERIC_NOT_FOUND); return; }
+      const b = await getBusinessById(pick[2]).catch(() => null);
+      if (!b || (b.status !== 'demo' && b.status !== 'active')) { await answer(OPERATOR_UNKNOWN_SLUG); return; }
+      await answer('');
+      if (pick[1] === 'pb') await handleOperatorPhones(chatId, b.slug);
+      else await handleOperatorCode(chatId, b.slug);
+      return;
+    }
+
     const opPhone = CB_OPERATOR_PHONE.exec(data);
     if (opPhone) {
       // A non-operator tapping a forged p:/P:/q: gets the same answer as any
@@ -852,7 +892,7 @@ export default async function handler(req, res) {
         // Every private chat, bound or not, operator or not: it is how the
         // operator learns OPERATOR_CHAT_ID without a third-party bot. Not in
         // the command menu.
-        await reply(chatId, OPERATOR_ID_TEXT(chatId));
+        await replyMessage(chatId, operatorIdMessage(chatId, { operator: isOperatorChat(chatId) }));
       } else if (isOperatorChat(chatId, chat.type)) {
         // Operator commands. A non-operator never reaches this branch, so the
         // reply they get is the same as for any unknown text.

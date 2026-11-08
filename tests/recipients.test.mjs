@@ -308,9 +308,10 @@ try {
   const listMsg = reqs8.filter((r) => r.path.includes('/sendMessage')).pop();
   const kb = listMsg && listMsg.body.reply_markup && listMsg.body.reply_markup.inline_keyboard;
   const r8 = listMsg ? listMsg.body.text : '';
-  const kbOk = Array.isArray(kb) && kb.length === 3 && kb[0][0].callback_data === 'x:' + uuid(1) && kb[2][0].callback_data === 'x:' + uuid(3);
-  line(r8.includes('1. Recipient 1') && r8.includes('2. Recipient 2') && r8.includes('3. Office') && kbOk, 'R8',
-    '/recipients lists bind order with one Remove button each',
+  // No button on this chat's own row: the owner cannot remove itself.
+  const kbOk = Array.isArray(kb) && kb.length === 2 && kb[0][0].callback_data === 'x:' + uuid(2);
+  line(r8.includes('Phone 1 · you (main)') && r8.includes('Phone 2') && r8.includes('Phone 3 (Office)') && kbOk,
+    'R8', '/recipients: phones, self row unremovable, others one button each',
     `rows=${kb ? kb.length : 0} labels=${r8.includes('Office')}`);
 
   /* R9: forged cross-business callback */
@@ -326,14 +327,17 @@ try {
   line(!!victim && store.chats.length === 3, 'R9', 'forged cross-business remove does nothing',
     `rows=${store.chats.length} victim=${!!victim}`);
 
-  /* R10: last recipient */
+  /* R10: the owner cannot remove its own row, even when it is the only one. */
   store = freshStore();
-  store.chats.push({ id: uuid(1), business_id: BIZ_A, tg_chat_id: CHAT_A, label: null, created_at: '2026-11-01T10:00:00Z' });
+  store.chats.push(
+    { id: uuid(1), business_id: BIZ_A, tg_chat_id: CHAT_A, label: null, created_at: '2026-11-01T10:00:00Z' },
+    { id: uuid(2), business_id: BIZ_A, tg_chat_id: CHAT_A2, label: null, created_at: '2026-11-02T10:00:00Z' },
+  );
   await tgReset();
   await call(cb(CHAT_A, 'X:' + uuid(1)));
   const answers10 = (await tgReqs()).filter((r) => r.path.includes('/answerCallbackQuery'));
-  line(store.chats.length === 1 && answers10.length === 1 && String(answers10[0].body.text).includes('last phone'), 'R10',
-    'the last recipient cannot be removed', `rows=${store.chats.length} toast=${answers10[0] && answers10[0].body.text}`);
+  line(store.chats.length === 2 && answers10.length === 1 && String(answers10[0].body.text).includes('cannot remove this phone'), 'R10',
+    'the owner cannot remove its own phone', `rows=${store.chats.length} toast=${answers10[0] && answers10[0].body.text}`);
 
   /* R11: double tap */
   store = freshStore();
