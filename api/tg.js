@@ -6,7 +6,7 @@
 
 import { randomBytes } from 'node:crypto';
 import {
-  getChatBinding, bindChat, claimBindCode, restoreBindCode, getBusinessById, clearRateLimit,
+  getChatBinding, bindChat, claimBindCode, restoreBindCode, getBindCodeState, getBusinessById, clearRateLimit,
   listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
   countBusinessChats, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
   listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
@@ -26,6 +26,7 @@ import {
   TOAST_NOT_FOUND, TOAST_ALREADY_DONE, TOAST_CONTACT_FIRST, TOAST_NOTHING_TO_RETRY, TOAST_GENERIC_ERROR,
   TOAST_ALREADY_UPDATED, TOAST_TOO_MANY_OPENS, TOAST_OWNER_ONLY, leadListKeyboard, alertKeyboard,
   BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_BOUND_ELSEWHERE, BOT_BIND_FAILED,
+  OPERATOR_ALREADY_CONNECTED_CODE, OPERATOR_DO_NOT_OPEN, OPERATOR_CODE_USED, OPERATOR_CODE_EXPIRED, OPERATOR_CODE_UNKNOWN,
   BOT_OWNER_ONLY, BOT_RECIPIENTS_OWNER_NOTE, botForwardText,
   operatorCodeText, operatorCodeResendText, operatorPhonesText, operatorPhonesKeyboard,
   operatorConfirmRemoveText, operatorConfirmRemoveKeyboard, operatorBusinessesText,
@@ -44,6 +45,11 @@ function secretOk(req) {
 async function reply(chatId, text) {
   // Best effort. A failed reply changes nothing about the update.
   await sendMessage(chatId, text);
+}
+
+/** Plain text plus entities. Never parse_mode: nothing here is markup. */
+async function replyMessage(chatId, msg) {
+  return sendMessage(chatId, msg.text, { entities: msg.entities });
 }
 
 /* ---------- binding by pasted code ----------
@@ -119,6 +125,20 @@ async function handlePastedCode(chatId, code) {
 }
 
 /**
+ * What the operator is told when they open a client's link from a chat that is
+ * already bound. Never claims the code is still valid without checking, and
+ * never names the business that owns it.
+ */
+async function operatorLinkReply(code) {
+  let state = 'unknown';
+  try { state = await getBindCodeState(code); } catch { state = 'unknown'; }
+  if (state === 'live') return OPERATOR_ALREADY_CONNECTED_CODE;
+  if (state === 'used') return OPERATOR_CODE_USED;
+  if (state === 'expired') return OPERATOR_CODE_EXPIRED;
+  return OPERATOR_CODE_UNKNOWN;
+}
+
+/**
  * The owner phone is the oldest connected phone (no schema change). It is the
  * only one that may invite or remove; every phone keeps alerts, buttons and
  * /leads.
@@ -130,10 +150,15 @@ async function isOwnerChat(businessId, chatId) {
 
 async function handleStart(chatId, arg) {
   const existing = await getChatBinding(chatId);
+  const shaped = bindCodeShape(arg);
   if (existing) {
-    return reply(chatId, bindCodeShape(arg) ? BOT_ALREADY_CONNECTED_CODE : BOT_ALREADY_CONNECTED);
+    if (shaped && isOperatorChat(chatId)) return reply(chatId, await operatorLinkReply(shaped));
+    return reply(chatId, shaped ? BOT_ALREADY_CONNECTED_CODE : BOT_ALREADY_CONNECTED);
   }
   if (!arg) return reply(chatId, BOT_NOT_CONNECTED);
+  // An unbound operator opening a client link would bind the operator and burn
+  // the code the client needs. Refuse before the claim.
+  if (shaped && isOperatorChat(chatId)) return reply(chatId, OPERATOR_DO_NOT_OPEN);
 
   return finishBind(chatId, arg, BOT_BAD_CODE);
 }
@@ -217,7 +242,7 @@ async function mintAndSendInvite(chatId, businessId) {
   // getMe() once per instance; a failure falls back to /start plus the code and
   // logs bot_username_unavailable rather than failing the invite.
   const username = await botUsername();
-  return reply(chatId, botInviteText(code, { username }));
+  return replyMessage(chatId, botInviteText(code, { username }));
 }
 
 /** /invite — mint one single-use code for THIS chat's business. */
@@ -263,7 +288,7 @@ async function handleInviteCancel({ chatId, businessId, answer }) {
     await expireLiveBindCodes(businessId);
     const { code } = await mintBindCode(businessId);
     const username = await botUsername();
-    await sendMessage(chatId, botInviteText(code, { username }));
+    await replyMessage(chatId, botInviteText(code, { username }));
     await answer(BOT_INVITE_CANCELLED);
   } catch (e) {
     console.error('invite_cancel_failed', (e && e.code) || 'no_code');
@@ -335,8 +360,11 @@ async function handlePlainText(chatId, binding, text = '') {
   const shaped = bindCodeShape(text);
   if (binding) {
     // A bound chat never moves between businesses by pasting a code.
-    if (shaped) return reply(chatId, BOT_ALREADY_CONNECTED_CODE);
+    if (shaped) {
+      return reply(chatId, isOperatorChat(chatId) ? await operatorLinkReply(shaped) : BOT_ALREADY_CONNECTED_CODE);
+    }
   } else if (shaped) {
+    if (isOperatorChat(chatId)) return reply(chatId, OPERATOR_DO_NOT_OPEN);
     return handlePastedCode(chatId, shaped);
   }
   let within;
@@ -370,13 +398,13 @@ async function handleOperatorCode(chatId, arg) {
   // expiry); the second is the only text a client may ever see. They are
   // separate sends on purpose: forwarding the first would leak the slug, and
   // editing one message in place is not something Telegram guarantees.
-  await reply(chatId, operatorCodeText({ slug: business.slug, code, hours: BIND_CODE_HOURS }));
-  const forward = await sendMessage(chatId, botForwardText({ code, username, hours: BIND_CODE_HOURS }));
+  await replyMessage(chatId, operatorCodeText({ slug: business.slug, code, hours: BIND_CODE_HOURS }));
+  const forward = await replyMessage(chatId, botForwardText({ code, username, hours: BIND_CODE_HOURS }));
   if (!forward || !forward.ok) {
     // The code exists and is valid; only the forwardable copy failed. Say so
     // and repeat the code, or the operator is left with a half-finished flow.
     console.error('code_forward_send_failed');
-    await reply(chatId, operatorCodeResendText({ code, hours: BIND_CODE_HOURS }));
+    await replyMessage(chatId, operatorCodeResendText({ code, hours: BIND_CODE_HOURS }));
   }
 }
 

@@ -4,7 +4,7 @@
 import http from 'node:http';
 
 function start(name) {
-  const state = { mode: 'ok', status: 200, hangMs: 2500, hangUsed: false, requests: [] };
+  const state = { mode: 'ok', status: 200, hangMs: 2500, hangUsed: false, requests: [], all: [] };
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -27,6 +27,11 @@ function start(name) {
     if (req.url === '/__requests' && req.method === 'GET') {
       return send(200, { count: state.requests.length, requests: state.requests });
     }
+    // /__all survives /__reset: a suite-wide record, used to prove no payload
+    // ever carried a forbidden field.
+    if (req.url === '/__all' && req.method === 'GET') {
+      return send(200, { count: state.all.length, requests: state.all });
+    }
     if (req.url === '/__reset' && req.method === 'POST') {
       // Clear the request log only. Mode is owned by /__control so tests can set a
       // failure mode and then reset the log without losing it.
@@ -39,6 +44,7 @@ function start(name) {
     try { parsed = JSON.parse(raw || '{}'); } catch {}
     const entry = { method: req.method, path: req.url, headers: req.headers, body: parsed, raw, at: Date.now() };
     state.requests.push(entry);
+    state.all.push(entry);
 
     let mode = state.mode;
     if (mode === '400_if_keyboard') mode = parsed && parsed.reply_markup ? '400' : 'ok';

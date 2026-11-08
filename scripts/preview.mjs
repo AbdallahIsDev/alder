@@ -10,10 +10,12 @@ import {
   ownerEmail, autoReply, reviewEmail, renderAlert, renderLeadList,
   botLinkedText, BOT_HELP, BOT_ALREADY_CONNECTED, BOT_NOT_CONNECTED, BOT_PLAIN_TEXT,
   reviewLandingPage, botInviteText, botRecipientsText, recipientConfirmText,
+  operatorCodeText, botForwardText,
 } from '../lib/content.js';
 import { digestText } from '../api/digest.js';
 import { selfCheckText } from '../lib/ops-copy.js';
 import { selfCheckEmail, digestEmail } from '../lib/email-builders.js';
+import { renderMessage } from '../lib/sample-texts.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, '_debug', 'previews');
@@ -150,8 +152,9 @@ add('selfcheck-demo.html', 'Alert check email — demo business', wrapHtml('Aler
 add('selfcheck-active.html', 'Alert check email — active client', wrapHtml('Alert check', withLogo(selfCheckEmail(opsDay, '2026-11-07', { redirectActive: true, operator: false }).html)), true);
 // Recipients: /invite, /recipients and the remove confirmation. Plain text, one
 // business per chat, no names — the list is "Recipient N" unless a label is set.
-add('telegram-invite.txt', 'Telegram /invite (deep link)', botInviteText('K7M2QPX9RT4W', { username: 'alder_alerts_bot' }), false);
-add('telegram-invite-fallback.txt', 'Telegram /invite (no username)', botInviteText('K7M2QPX9RT4W'), false);
+add('telegram-invite.txt', 'Telegram /invite (deep link; [[link]] and [[code]] show entities)', renderMessage(botInviteText('K7M2QPX9RT4W', { username: 'alder_alerts_bot' })), false);
+add('telegram-invite-fallback.txt', 'Telegram /invite (no username)', renderMessage(botInviteText('K7M2QPX9RT4W')), false);
+add('telegram-code.txt', 'Telegram /code: operator line + client message', [renderMessage(operatorCodeText({ slug: 'alder-demo', code: 'K7M2QPX9RT4W' })), renderMessage(botForwardText({ code: 'K7M2QPX9RT4W', username: 'alder_alerts_bot' }))].join('\n\n---\n\n'), false);
 add('telegram-recipients.txt', 'Telegram /recipients', botRecipientsText([
   { id: 'r1', label: null },
   { id: 'r2', label: null },
