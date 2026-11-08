@@ -1193,6 +1193,98 @@ try {
         'OP16', 'two /code taps: two distinct codes, two messages each',
         `codes=${codes.length} unique=${new Set(codes).size} messages=${two.length}`);
 
+      // OP22: /id speaks differently to the operator chat, and the id is a
+      // code entity (tap to copy) in both cases.
+      {
+        const C2 = await import('../lib/content.js');
+        const saved = process.env.OPERATOR_CHAT_ID;
+        process.env.OPERATOR_CHAT_ID = String(OP);
+        await reset();
+        await good(msg(OP, '/id'));
+        const opId = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
+        await reset();
+        await good(msg(chatA, '/id'));
+        const clientId = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
+        process.env.OPERATOR_CHAT_ID = saved;
+        const opText = (opId && opId.body.text) || '';
+        const clText = (clientId && clientId.body.text) || '';
+        const ent = (opId && opId.body.entities && opId.body.entities[0]) || {};
+        line(opText.includes('This chat is the operator chat.') && !opText.includes('Set OPERATOR_CHAT_ID')
+          && clText.includes('Set OPERATOR_CHAT_ID')
+          && opText.slice(ent.offset, ent.offset + ent.length) === String(OP)
+          && ent.type === 'code',
+          'OP22', '/id: operator says so, id is a code entity', `opEnt=${ent.type}`);
+      }
+
+      // OP23: a new /code expires the business's older UNUSED codes, leaves a
+      // used code and another business alone, and says how many it cancelled.
+      {
+        await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
+        const oldA = 'OLDA' + mkCode(8), oldB = 'OLDB' + mkCode(8), usedC = 'OLDC' + mkCode(8), other = 'OTHR' + mkCode(8);
+        for (const c of [oldA, oldB, usedC]) { createdCodes.push(c); await createBindCode(c, codeBiz.id, new Date(Date.now() + 3600000).toISOString()); }
+        createdCodes.push(other);
+        await createBindCode(other, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
+        await svc.from('bind_codes').update({ used_at: new Date().toISOString() }).eq('code', usedC);
+        const liveBefore = (await svc.from('bind_codes').select('code').eq('business_id', codeBiz.id)
+          .is('used_at', null).gt('expires_at', new Date().toISOString())).data.length;
+        await reset();
+        await good(msg(OP, `/code ${CODE_SLUG}`));
+        const reqs = (await sent()).filter((x) => x.path.includes('/sendMessage'));
+        const m1 = (reqs[0] && reqs[0].body.text) || '';
+        const states = (await svc.from('bind_codes').select('code, used_at, expires_at').in('code', [oldA, oldB, usedC, other])).data;
+        const by = new Map(states.map((r) => [r.code, r]));
+        const expiredA = new Date(by.get(oldA).expires_at) <= new Date();
+        const expiredB = new Date(by.get(oldB).expires_at) <= new Date();
+        const usedKept = !!by.get(usedC).used_at && new Date(by.get(usedC).expires_at) > new Date();
+        const otherKept = new Date(by.get(other).expires_at) > new Date();
+        const phrase = `${liveBefore} older ${liveBefore === 1 ? 'invite was' : 'invites were'} cancelled`;
+        line(expiredA && expiredB && usedKept && otherKept && m1.includes(phrase),
+          'OP23', '/code cancels older unused codes, keeps used and other business',
+          `n=${liveBefore} has=${m1.includes('cancelled')} m1=${m1.slice(60, 130)}`);
+      }
+
+      // OP24: pickers. No slug -> names as buttons; the tap runs the same
+      // action; a forged or stale id is unknown; a non-operator gets nothing.
+      {
+        const C2 = await import('../lib/content.js');
+        await reset();
+        await good(msg(OP, '/phones'));
+        const ph = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
+        const phKb = (ph && ph.body.reply_markup && ph.body.reply_markup.inline_keyboard) || [];
+        const phBtn = phKb.flat().find((b) => b.callback_data === 'pb:' + bizA.id);
+        const pickText = ph && ph.body && ph.body.text;
+        const phKeys = ph && ph.body ? Object.keys(ph.body).join('+') : 'none';
+        await reset();
+        await good(cb(OP, 'pb:' + bizA.id));
+        const phText = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
+        const phonesTitle = (phText && phText.body.text) || '';
+
+        await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
+        await reset();
+        await good(msg(OP, '/code'));
+        const codeKb = ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body.reply_markup.inline_keyboard;
+        await reset();
+        await good(cb(OP, 'pc:' + codeBiz.id));
+        const codeMsgs = (await sent()).filter((x) => x.path.includes('/sendMessage'));
+
+        await reset();
+        await good(cb(OP, 'pc:00000000-0000-0000-0000-000000000000'));
+        const stale = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        // A non-operator tap must not act. The same isOperatorChat gate is
+        // exercised by OP6 (forged p: from a client), so this checks silence.
+        await reset();
+        await good(cb(chatA, 'pb:' + bizA.id));
+        const foreignSends = (await sent()).filter((x) => x.path.includes('/sendMessage')).length;
+
+        line(!!phBtn && phBtn.text.length <= 20 && pickText === C2.OPERATOR_PICK_TEXT
+          && phonesTitle.startsWith('Alder Roofing') && !phonesTitle.includes('alder-demo')
+          && !!codeKb && codeKb.flat().some((b) => b.callback_data === 'pc:' + codeBiz.id)
+          && codeMsgs.length === 2
+          && stale.includes(C2.OPERATOR_UNKNOWN_SLUG) && foreignSends === 0,
+          'OP24', 'pickers: names, same action, forged/stale/foreign refused',
+          `k=${codeKb ? codeKb.flat().map((b) => b.callback_data.slice(0,3)).join(',') : 'none'} pt=${JSON.stringify(pickText)} pk=${phKeys} ti=${phonesTitle.startsWith('Alder Roofing')} f=${foreignSends}`);
+      }
+
       // OP17-OP20 run against real rows on a throwaway business: the cancel
       // flow and the claim restore are SQL, and the in-memory fake cannot
       // prove the predicates.
@@ -1300,7 +1392,7 @@ try {
       await reset();
       await good(msg(OP, '/businesses'));
       const bizText = await allText();
-      line(bizText.includes('alder-demo · demo ·') && bizText.includes('second-demo · demo ·'), 'OP7',
+      line(bizText.includes('Alder Roofing · Demo ·') && bizText.includes('Second Demo Roofing · Demo ·'), 'OP7',
         '/businesses: slug, status, phone count', `len=${bizText.length}`);
 
       // OP8: /id works unbound and says nothing else.
@@ -1352,12 +1444,11 @@ try {
       line(t1 === C.BOT_OWNER_ONLY && t2 === C.BOT_OWNER_ONLY, 'OP10',
         'second phone: /invite and /recipients are owner-only', `invite=${t1.length} recipients=${t2.length}`);
 
-      // OP11: the owner removes itself; the oldest remaining phone becomes owner.
-      await reset();
-      await good(msg(opChatA, '/recipients'));
+      // OP11: the operator removes the owner phone; the oldest remaining phone
+      // becomes owner. (The owner can no longer remove itself from /recipients.)
       const ownerRows = (await svc.from('business_chats').select('id').eq('business_id', opBiz.id).order('created_at').order('id')).data;
-      await good(cb(opChatA, 'x:' + ownerRows[0].id));
-      await good(cb(opChatA, 'X:' + ownerRows[0].id));
+      await good(cb(OP, 'p:' + ownerRows[0].id));
+      await good(cb(OP, 'P:' + ownerRows[0].id));
       await reset();
       await good(msg(opChatB, '/invite'));
       const nowOwner = (await allText()) !== C.BOT_OWNER_ONLY;
@@ -1378,7 +1469,7 @@ try {
       await reset();
       await good(cb(chatA2, 'o:' + foreign));
       const foreignAnswer = await answersNow();
-      line(kb.includes('o:' + leadA) && card.includes('Open Me') && foreignAnswer.includes('Not found'), 'OP12',
+      line(kb.includes('o:' + leadA) && card.includes('Open Me') && foreignAnswer.includes('no longer here'), 'OP12',
         '/leads Open button -> current card; another business\'s lead is Not found',
         `kb=${kb.includes('o:')} card=${card.includes('Open Me')}`);
 

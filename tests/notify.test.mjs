@@ -813,15 +813,15 @@ try {
   const expected = [
     'Recent requests',
     '',
-    'Legacy Phone',
+    '1. Legacy Phone',
     'Repair · +15550102345',
     '41m ago · 🔵 Contacted',
     '',
-    'A'.repeat(27) + '…',
+    '2. ' + 'A'.repeat(27) + '…',
     'Storm damage · +201005408345',
     '1d ago · ✅ Done',
     '',
-    'Unknown Status',
+    '3. Unknown Status',
     'Not sure · +15125550100',
     '3d ago · banana',
   ].join('\n');
@@ -829,7 +829,8 @@ try {
     name: 'N'.repeat(80), service: 'S'.repeat(60), phone: '+20100540834533333333333333', status: 'contacted', created_at: at(1),
   }));
   const maxLen = renderLeadList(maxLeads, now).length;
-  const ok = out === expected && !out.includes('—') && !/^\d+\./m.test(out)
+  const ok = out === expected && !out.includes('—')
+    && /^1\. /m.test(out) && /^3\. /m.test(out)
     && out.split('\n')[1] === '' && maxLen < 4096;
   line(ok, 'L1', 'renderLeadList: exact spaced format, 10 max leads < 4096', `len=${out.length} maxLen=${maxLen}`);
   if (out !== expected) console.log('NOTE       got:\n' + out);

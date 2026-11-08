@@ -145,6 +145,23 @@ const samples = sampleTelegramTexts();
     `len=${m.text.length} entities=${m.entities.length}`);
 }
 
+/* T9: buttons stay short for narrow phones, and the obvious is not spelled out. */
+{
+  const C = await import('../lib/content.js');
+  const buttons = [
+    C.BOT_INVITE_CANCEL_BUTTON,
+    ...C.recipientsKeyboard([{ id: 'a', label: null }], {}).inline_keyboard.flat().map((b) => b.text),
+    ...C.operatorPhonesKeyboard([{ id: 'a', label: null }]).reply_markup.inline_keyboard.flat().map((b) => b.text),
+    ...C.leadListKeyboard([{ id: 'x' }], 0, true).reply_markup.inline_keyboard.flat().map((b) => b.text),
+  ];
+  const long = buttons.filter((t) => t.length > 20);
+  const copy = [C.OPERATOR_USAGE_PHONES, C.OPERATOR_USAGE_CODE, C.OPERATOR_HELP, C.BOT_INVITE_CANCEL_BUTTON,
+    C.botRecipientsText([{ id: 'a', label: null }]), C.botInvitePendingText({ hours: [5] })].join('\n');
+  const banned = /with a Remove button each|Tap Remove to disconnect|The main phone is the one connected first|Cancel them to make a new one/i;
+  line(long.length === 0 && !banned.test(copy), 'T9', 'buttons <= 20 chars, no obvious copy',
+    `buttons=${buttons.length} long=${long.join(',') || 'none'}`);
+}
+
 /* T8: the preview renders entities, not just .text. It spawns the real script
    and reads the file it writes, so a preview that silently drops the markers
    fails here. */
