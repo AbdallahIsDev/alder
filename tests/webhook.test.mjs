@@ -1337,6 +1337,52 @@ try {
           `staff=${staff === C2.BOT_OWNER_ONLY} kept=${stillThere} foreign=${foreignKept}`);
       }
 
+      // OP33: operator answers for the owner commands, no client text.
+      {
+        const C2 = await import('../lib/content.js');
+        const lastText = async () => ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text || '';
+        const lastKb = async () => ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.reply_markup?.inline_keyboard || [];
+        await reset(); await good(msg(OP, '/invite'));
+        const inv = await lastText(); const invKb = await lastKb();
+        await reset(); await good(msg(OP, '/recipients'));
+        const rec = await lastText(); const recKb = await lastKb();
+        await reset(); await good(msg(OP, '/help'));
+        const help = await lastText();
+        await reset(); await good(msg(OP, '/remove_lead'));
+        const rm = await lastText();
+        await reset(); await good(msg(OP, '/leads'));
+        const leads1 = await lastText();
+        await reset(); await good(msg(OP, '/leads second-demo'));
+        const leads2 = await lastText();
+        await reset(); await good(msg(chatX, '/leads'));
+        const client = await lastText();
+        await reset(); await good(msg(chatA, '/leads second-demo'));
+        const own = await lastText();
+        line(inv === C2.OPERATOR_PICK_TEXT && invKb.flat().some((b) => String(b.callback_data).startsWith('pc:'))
+          && rec === C2.OPERATOR_PICK_TEXT && recKb.flat().some((b) => String(b.callback_data).startsWith('pb:'))
+          && help === C2.OPERATOR_HELP && rm === C2.OPERATOR_REMOVE_LEAD
+          && leads1 === C2.OPERATOR_LEADS_HINT && leads2 === C2.OPERATOR_LEADS_HINT
+          && client === C2.BOT_NOT_CONNECTED && !/Beta|Second/.test(own),
+          'OP33', 'operator answers for /invite /recipients /help /remove_lead /leads',
+          `help=${help === C2.OPERATOR_HELP} rm=${JSON.stringify(rm)} client=${client === C2.BOT_NOT_CONNECTED} own=${!/Beta|Second/.test(own)}`);
+      }
+
+      // OP34: /businesses counts phones for a paused business, not 0.
+      {
+        const C2 = await import('../lib/content.js');
+        const paused = await svc.from('businesses').insert({
+          slug: 'zz-test-paused-' + CODE_SLUG.slice(-6), name: 'ZZ Paused Fixture',
+          owner_email: 'paused@zz-test.invalid', google_review_url: 'https://g.page/r/zz', status: 'paused',
+        }).select('id').single();
+        await svc.from('business_chats').insert({ business_id: paused.data.id, tg_chat_id: FIXTURE_CHATS.webhookX });
+        await reset();
+        await good(msg(OP, '/businesses'));
+        const text = ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text || '';
+        await svc.from('businesses').delete().eq('id', paused.data.id);
+        line(/ZZ Paused Fixture · Paused · 1 phone/.test(text), 'OP34',
+          '/businesses counts a paused business phone', text.split('\n').find((l) => l.includes('ZZ Paused')) || 'missing');
+      }
+
       // OP25: the operator chat can never become a business phone, even via a
       // direct bindChat caller. No row is written.
       {
