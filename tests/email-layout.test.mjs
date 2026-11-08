@@ -118,6 +118,49 @@ const FIXTURES = {
     offenders.length ? offenders.join(',') : `scanned ${files.length} files`);
 }
 
+/* L5: no email carries an emoji. Telegram keeps its own; the email variant is
+   stripped at the builder boundary, so this walks subject, text and HTML. */
+{
+  const PICTO = /\p{Extended_Pictographic}/u;
+  const bad = [];
+  for (const name of Object.keys(EMAIL_BUILDERS).sort()) {
+    const out = EMAIL_BUILDERS[name](...FIXTURES[name]);
+    for (const part of ['subject', 'text', 'html']) {
+      const v = String(out[part] || '');
+      if (PICTO.test(v) || /[\uFE0F\u200D]/.test(v)) bad.push(`${name}:${part}`);
+    }
+  }
+  line(bad.length === 0, 'L5', 'no email subject, text or html carries an emoji',
+    bad.length ? bad.join(',') : `${Object.keys(EMAIL_BUILDERS).length} builders clean`);
+}
+
+/* L6: header = logo + brand name as text; footer names the right brand.
+   Owner/operator emails use the platform; customer emails use the company. */
+{
+  const bad = [];
+  const build = (name) => EMAIL_BUILDERS[name](...FIXTURES[name]);
+  // Everything before the body cell is header: the <style> block is long.
+  const head = (html) => String(html).split('<td style="padding:24px 24px"')[0];
+  const cases = [
+    ['ownerEmail', 'Lead Alerts', 'Lead Alerts', true],
+    ['selfCheckEmail', 'Lead Alerts', 'Lead Alerts', true],
+    ['digestEmail', 'Lead Alerts', 'Lead Alerts', true],
+    ['operatorAlarmEmail', 'Lead Alerts', 'Lead Alerts', true],
+    ['autoReply', 'Alder Roofing', 'Alder Roofing', false],
+    ['reviewEmail', 'Alder Roofing', 'Alder Roofing', false],
+  ];
+  for (const [name, headerName, footerName, platform] of cases) {
+    const out = build(name);
+    const h = head(out.html);
+    if (!out.html.includes('cid:brand-logo')) bad.push(`${name}:logo`);
+    if (!h.includes(`>${headerName}<`)) bad.push(`${name}:header`);
+    if (!out.html.includes(`Sent by ${footerName}`)) bad.push(`${name}:footer`);
+    if (platform && h.includes('Alder Roofing')) bad.push(`${name}:company-in-header`);
+  }
+  line(bad.length === 0, 'L6', 'every header has logo + name, footer names the right brand',
+    bad.length ? bad.join(',') : `${cases.length} builders checked`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
