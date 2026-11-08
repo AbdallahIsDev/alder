@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
-import { fakeRes, ALDER_DEMO } from './helpers.mjs';
+import { fakeRes, ALDER_DEMO, fixtureEmail } from './helpers.mjs';
+import { FIXTURE_CHATS } from './fixture-ids.mjs';
 
 loadEnv();
 const TG = process.env.FAKE_TG_URL;
@@ -56,6 +57,22 @@ async function clean() {
 }
 
 
+/* One bound phone for alder-demo, for the whole suite.
+   Alerts no longer fall back to TELEGRAM_CHAT_ID: a chat with no binding would
+   show buttons whose every tap answers "Not found.". So the suite binds a real
+   row first and removes it in the cleanup at the end. */
+const FIXTURE_CHAT = FIXTURE_CHATS.notifyOwner;
+let SEED_NAME = '';
+{
+  const { data: seedBiz } = await svc.from('businesses').select('id, name').eq('slug', ALDER_DEMO).single();
+  SEED_NAME = (seedBiz && seedBiz.name) || '';
+  // A killed run leaves the row behind; clear both fixture ids before binding.
+  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond]);
+  await svc.from('business_chats').upsert(
+    { business_id: seedBiz.id, tg_chat_id: FIXTURE_CHAT }, { onConflict: 'tg_chat_id' },
+  );
+}
+
 let ip = 40;
 /* One phone per post. The suite must not collide with rows already in the
    database (duplicate detection would add a line to the alert and break the
@@ -65,7 +82,11 @@ let contactSeq = 0;
 const nextPhone = () => '515555' + String(2000 + (parseInt(RUN, 36) % 6000) + contactSeq++).slice(-4);
 /* The email has to be unique per post too: duplicate detection matches phone OR
    email, and earlier runs left leads on alder-demo with the old fixed address. */
-const nextEmail = () => `notify${parseInt(RUN, 36) % 100000}-${contactSeq}@example.com`;
+// The duplicate lookup returns the OLDEST match for the business. A RUN-derived
+// address can collide with a lead an earlier run left behind, which would make
+// duplicate_of point at that row instead of this run's first post. A random
+// suffix makes a cross-run collision impossible.
+const nextEmail = () => fixtureEmail(`notify${parseInt(RUN, 36) % 100000}-${contactSeq}-${Math.random().toString(36).slice(2, 6)}`);
 async function post(over, extra) {
   const body = {
     service: 'replacement', home: 'house', timing: 'asap', age: '10 to 20 years',
@@ -375,7 +396,10 @@ try {
    alert, so a second send would be a duplicate; only when NEITHER delivered does
    each usable channel get one more attempt, marked { fallback: true }. */
 
-const sendMessageCount = async () => (await requests(TG)).filter((r) => r.path.includes('/sendMessage')).length;
+// Count only the suite's own fixture chat: real phones may be bound to the same
+// business, and their alerts are correct, not noise.
+const sendMessageCount = async () => (await requests(TG))
+  .filter((r) => r.path.includes('/sendMessage') && String(r.body.chat_id) === String(FIXTURE_CHAT)).length;
 const emailCount = async () => (await requests(RS)).filter((r) => r.path === '/emails').length;
 const metaOf = (evs) => evs.map((e) => e.meta || {});
 
@@ -468,9 +492,21 @@ try {
   await clean();
   await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
   await reset(TG); await reset(RS);
-  const dupEmail = nextEmail();
-  const mixed = await post({ email: dupEmail.toUpperCase() });
-  const lower = await post({ email: dupEmail });
+  // The lookup returns the OLDEST match for the business, so this test needs a
+  // phone AND an email that no earlier lead uses — otherwise duplicate_of can
+  // point at that older row. Check the database, do not hope.
+  let dupEmail = '';
+  let dupPhone = '';
+  for (let i = 0; i < 20 && !dupEmail; i++) {
+    const p = '515555' + String(1000 + Math.floor(Math.random() * 9000));
+    const e = `b15-${RUN}-${Math.random().toString(36).slice(2, 10)}@example.com`;
+    const { data: byPhone } = await svc.from('leads').select('id').eq('phone', '+1' + p).limit(1);
+    const { data: byEmail } = await svc.from('leads').select('id').eq('email', e).limit(1);
+    if (!(byPhone && byPhone.length) && !(byEmail && byEmail.length)) { dupPhone = p; dupEmail = e; }
+  }
+  if (!dupEmail) throw new Error('no unused phone/email pair');
+  const mixed = await post({ email: dupEmail.toUpperCase(), phone: dupPhone });
+  const lower = await post({ email: dupEmail, phone: dupPhone });
   const mixedRows = await leadFor(mixed.key);
   const lowerRows = await leadFor(lower.key);
   const stored = mixedRows.length ? (await svc.from('leads').select('email').eq('id', mixedRows[0].id).single()).data.email : null;
@@ -505,7 +541,11 @@ try {
   const evsThird = ids[2] ? await events(ids[2]) : [];
   const createdSecond = evsSecond.find((e) => e.kind === 'created');
   const createdThird = evsThird.find((e) => e.kind === 'created');
-  const alerts = (await requests(TG)).filter((r) => r.path.includes('/sendMessage')).map((r) => r.body.text || '');
+  // One alert per post from the suite's own chat. Real phones bound to the same
+  // business receive their own copy, which would shift every index below.
+  const alerts = (await requests(TG))
+    .filter((r) => r.path.includes('/sendMessage') && String(r.body.chat_id) === String(FIXTURE_CHAT))
+    .map((r) => r.body.text || '');
   const flagged = alerts[1] && alerts[1].includes('Possible repeat of an earlier request');
   const notFlagged = alerts[0] && !alerts[0].includes('Possible repeat')
     && alerts[2] && !alerts[2].includes('Possible repeat');
@@ -540,14 +580,14 @@ try {
   await reset(TG); await reset(RS);
   const { res, key, body: sentBody } = await post({ notes: 'A note that should be capped' });
   const tgReq = (await requests(TG)).filter((x) => x.method === 'POST' && x.path.includes('/sendMessage'));
-  const t = tgReq[0] && tgReq[0].body;
+  const t = tgReq.map((x) => x.body).find((b) => String(b.chat_id) === String(FIXTURE_CHAT));
   // NEW (item 2): one "Label: value" per line, blank lines between groups, title
   // carries the only "·", phone keeps the +1 tappable form.
   // Before (item 3): the status block ended with the plain line 'Status: New'.
   // After (item 3, deliberate change): emoji status lines, one fact per line,
   // and the email never appears in the status block.
   const expectedText = [
-    'New lead · Alder Roofing (demo)',
+    `New lead · ${SEED_NAME}`,
     '',
     'Name: Notify Tester',
     `Phone: +1${sentBody.phone}`,
@@ -570,8 +610,8 @@ try {
   const kb = t && t.reply_markup && t.reply_markup.inline_keyboard;
   const oneBtn = Array.isArray(kb) && kb.length === 1 && kb[0].length === 1
     && kb[0][0].text === 'Mark contacted' && /^c:[0-9a-f-]{36}$/.test(kb[0][0].callback_data || '');
-  line(res.code === 200 && textOk && noJoin && noParse && oneBtn && t.chat_id === process.env.TELEGRAM_CHAT_ID,
-    'B1', 'exact plain text, no parse_mode, demo fallback chat', `chat=${t && t.chat_id} keys=${t && Object.keys(t).join(',')}`);
+  line(res.code === 200 && textOk && noJoin && noParse && oneBtn && String(t.chat_id) === String(FIXTURE_CHAT),
+    'B1', 'exact plain text, no parse_mode, bound chat', `chat=${t && t.chat_id} keys=${t && Object.keys(t).join(',')}`);
   const rows = await leadFor(key);
   const evs = rows.length ? await events(rows[0].id) : [];
   line(evs.some((e) => e.kind === 'tg_sent'), 'B2', 'tg_sent event recorded');
@@ -583,7 +623,7 @@ try {
   const minReq = (await requests(TG)).filter((x) => x.method === 'POST' && x.path.includes('/sendMessage'));
   const minText = minReq[0] && minReq[0].body && minReq[0].body.text;
   const minExpected = [
-    'New lead · Alder Roofing (demo)',
+    `New lead · ${SEED_NAME}`,
     '',
     'Name: Notify Tester',
     `Phone: +1${noContact.body.phone}`,
@@ -689,24 +729,33 @@ try {
 let boundId = null, activeId = null;
 try {
   await clean();
-  const { data: biz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
-  const chat = 770001;
-  await svc.from('business_chats').upsert({ business_id: biz.id, tg_chat_id: chat }, { onConflict: 'tg_chat_id' });
+  const chat = FIXTURE_CHAT;
+  const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
   await reset(TG);
   await post({});
   const tgReq = (await requests(TG)).filter((x) => x.path.includes('/sendMessage'));
-  line(tgReq.length === 1 && String(tgReq[0].body.chat_id) === String(chat),
-    'B3', 'bound business -> its chat only', `calls=${tgReq.length} chat=${tgReq[0] && tgReq[0].body.chat_id}`);
+  // Every chat bound to this business gets one alert, and nobody else does.
+  // Real phones may be bound alongside the fixture.
+  const boundA = (await svc.from('business_chats').select('tg_chat_id').eq('business_id', bizA.id)).data
+    .map((r) => String(r.tg_chat_id)).sort();
+  const gotA = tgReq.map((x) => String(x.body.chat_id)).sort();
+  line(JSON.stringify(gotA) === JSON.stringify(boundA) && gotA.includes(String(chat)),
+    'B3', 'every bound chat gets one alert, nobody else',
+    `calls=${tgReq.length} bound=${boundA.length}`);
 
   /* Second business -> its own chat */
   const { data: biz2 } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
-  const chat2 = 770002;
+  const chat2 = FIXTURE_CHATS.notifySecond;
   await svc.from('business_chats').upsert({ business_id: biz2.id, tg_chat_id: chat2 }, { onConflict: 'tg_chat_id' });
   await reset(TG);
   await post({ slug: 'second-demo' });
   const req2 = (await requests(TG)).filter((x) => x.path.includes('/sendMessage'));
-  line(req2.length === 1 && String(req2[0].body.chat_id) === String(chat2),
-    'B4', 'second business -> its own chat only', `chat=${req2[0] && req2[0].body.chat_id}`);
+  const boundB = (await svc.from('business_chats').select('tg_chat_id').eq('business_id', biz2.id)).data
+    .map((r) => String(r.tg_chat_id)).sort();
+  const gotB = req2.map((x) => String(x.body.chat_id)).sort();
+  line(JSON.stringify(gotB) === JSON.stringify(boundB) && gotB.includes(String(chat2)),
+    'B4', 'second business: its own chats only, never the first business\'s',
+    `calls=${req2.length} bound=${boundB.length}`);
 
   /* Active business with no chat -> no call, tg_failed no_chat */
   const { data: made } = await svc.from('businesses').insert({
@@ -720,8 +769,18 @@ try {
   const rows = await leadFor(key);
   const evs = rows.length ? await events(rows[0].id) : [];
   const f = evs.find((e) => e.kind === 'tg_failed');
-  line(res.code === 200 && reqA.length === 0 && !!f && f.meta.status === 'no_chat',
-    'B5', 'active + no chat -> no call, tg_failed no_chat', `calls=${reqA.length} meta=${JSON.stringify(f && f.meta)}`);
+  // No bound chat: no alert with buttons (every tap would answer "Not found.").
+  // The operator gets ONE plain notice instead, and the event says no_chat.
+  const op = process.env.OPERATOR_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+  const notice = (reqA[0] && reqA[0].body && reqA[0].body.text) || '';
+  line(res.code === 200 && reqA.length === 1 && String(reqA[0].body.chat_id) === String(op)
+    && !reqA[0].body.reply_markup && /no phone is connected/.test(notice)
+    // Business name and slug only: the customer's name is not the operator's
+    // to act on, and an ops message is one more place PII can leak.
+    && notice.includes(`active-${RUN}`) && !notice.includes('Notify Tester')
+    && !!f && f.meta.status === 'no_chat',
+    'B5', 'no chat -> one operator notice, business only, tg_failed no_chat',
+    `calls=${reqA.length} buttons=${!!reqA[0]?.body?.reply_markup} meta=${JSON.stringify(f && f.meta)}`);
 } catch (e) { line(false, 'B3', 'chat routing', e.message); }
 
 /* 400-with-keyboard retries once without it */
@@ -729,7 +788,10 @@ try {
   await clean();
   await control(TG, { mode: '400_if_keyboard' }); await reset(TG);
   const { res } = await post({});
-  const reqs = (await requests(TG)).filter((x) => x.path.includes('/sendMessage'));
+  // One chat may retry twice; real phones bound to the same business get their
+  // own attempt each, so count only the fixture's.
+  const reqs = (await requests(TG)).filter((x) => x.path.includes('/sendMessage')
+    && String(x.body.chat_id) === String(FIXTURE_CHAT));
   await control(TG, { mode: 'ok' });
   line(res.code === 200 && reqs.length === 2 && !!reqs[0].body.reply_markup && !reqs[1].body.reply_markup,
     'B6', '400 with keyboard -> one retry without it', `calls=${reqs.length} keyboard=${!!reqs[0]?.body?.reply_markup}/${!!reqs[1]?.body?.reply_markup}`);
@@ -792,13 +854,13 @@ try {
   const key = process.env.RESEND_API_KEY || '';
   const logText = logs.join('\n');
   const tokenLeak = (token && logText.includes(token)) || /bot\d+:/.test(logText) || (key && logText.includes(key));
-  const piiLeak = /notify@example\.com|5155550142|Notify Tester|<script>/.test(logText);
+  const piiLeak = /@fixture\.invalid|5155550142|Notify Tester|<script>/.test(logText);
   line(!tokenLeak && !piiLeak, 'B8', 'logs contain no token, key, URL or PII', `${logs.length} log lines`);
 } catch (e) { line(false, 'B8', 'log scan', e.message); }
 
 /* cleanup */
 try {
-  await svc.from('business_chats').delete().in('tg_chat_id', [770001, 770002]);
+  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond]);
   if (activeId) {
     await svc.from('leads').delete().eq('business_id', activeId);
     await svc.from('businesses').delete().eq('id', activeId);

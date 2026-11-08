@@ -204,11 +204,13 @@ try {
     const { r, tg, mail } = await run();
     const textA = (tg[0] && tg[0].body && tg[0].body.text) || '';
     const textB = (mail[0] && mail[0].body && mail[0].body.text) || '';
-    const aOk = textA.includes('New leads 3') && textA.includes('Possible repeats 1')
-      && textA.includes('Untouched over 24 h 1') && textA.includes('Failed alerts 1')
-      && textA.includes('Open /leads in the bot');
-    const bOk = textB.includes('New leads 1') && textB.includes('Untouched over 24 h 0')
-      && textB.includes('Failed alerts 0');
+    const aOk = textA.includes('New requests: 3') && textA.includes('Possible repeat requests: 1')
+      && textA.includes('Waiting for you over a day: 1')
+      && textA.includes('Needs attention') && textA.includes('1 lead alert to your phone could not be delivered')
+      && textA.includes('Open /leads to see them.');
+    // B had no failure, so it must have no Needs attention section at all.
+    const bOk = textB.includes('New requests: 1') && textB.includes('Waiting for you over a day: 0')
+      && !textB.includes('Needs attention');
     line(r.code === 200 && tg.length === 1 && mail.length === 1 && aOk && bOk,
       'D3', 'counts: new / repeats / untouched / failed, per business',
       `code=${r.code} tg=${tg.length} mail=${mail.length} a=${aOk} b=${bOk} sent=${r.body.sent} emailed=${r.body.emailed}`);
@@ -295,10 +297,10 @@ try {
     // Four chunks (250 / 80) plus a second page for the chunk that holds the lead
     // with 1,050 duplicate events — so >= 4 proves chunking and <= 6 proves the
     // loop is not spinning.
-    const ok = r.code === 200 && text.includes('Untouched over 24 h 100')
+    const ok = r.code === 200 && text.includes('Waiting for you over a day: 100')
       && maxUrl < 4000 && contactedCalls >= 4 && contactedCalls <= 6;
     line(ok, 'D13', '250 leads / 1200 events: exact, chunked, short URLs',
-      `untouched=${(text.match(/Untouched over 24 h (\d+)/) || [])[1]} maxUrl=${maxUrl} chunks=${contactedCalls}`);
+      `untouched=${(text.match(/Waiting for you over a day: (\d+)/) || [])[1]} maxUrl=${maxUrl} chunks=${contactedCalls}`);
   } catch (e) {
     line(false, 'D13', '250 leads / 1200 events: exact, chunked, short URLs', e.message);
   } finally { if (installed) installed(); }
@@ -379,11 +381,25 @@ try {
     line(false, 'D7', 'second call the same UTC day sends nothing', e.message);
   } finally { if (installed) installed(); }
 
+  /* ---------- D3b: failures are named by kind, a zero kind is hidden ---------- */
+  {
+    const { digestBody } = await import('../lib/ops-copy.js');
+    const one = digestBody({ newLeads: 0, repeats: 0, untouched: 0, failed: 2, failures: { tg_failed: 1, autoreply_failed: 1 } });
+    const none = digestBody({ newLeads: 0, repeats: 0, untouched: 0, failed: 1, failures: { tg_failed: 1, review_request_failed: 0 } });
+    const ok = one.includes('1 lead alert to your phone could not be delivered')
+      && one.includes('1 confirmation email to a customer failed')
+      && !one.includes('review request')
+      && none.includes('1 lead alert to your phone could not be delivered') && !none.includes('review request');
+    line(ok, 'D3b', 'digest failures named by kind; a zero kind is not shown', `one=${one.length} none=${none.length}`);
+  }
+
   /* ---------- D8: the text carries no PII ---------- */
   {
     const text = digestText({ newLeads: 3, repeats: 1, untouched: 2, failed: 1 }, '2026-11-07');
+    // The date moved to the email subject; the body is counts and plain words.
     const clean = !text.includes('@') && !/alder|beta roofing|quiet/i.test(text)
-      && !/\d{3}[-.\s]\d{3}[-.\s]\d{4}/.test(text) && text.includes('2026-11-07');
+      && !/\d{3}[-.\s]\d{3}[-.\s]\d{4}/.test(text)
+      && text.startsWith('📋 Your lead summary') && text.includes('Open /leads to see them.');
     line(clean, 'D8', 'digest text: counts only, no address or name', `${text.length} chars`);
   }
 

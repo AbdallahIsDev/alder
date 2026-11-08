@@ -12,6 +12,8 @@ import {
   reviewLandingPage, botInviteText, botRecipientsText, recipientConfirmText,
 } from '../lib/content.js';
 import { digestText } from '../api/digest.js';
+import { selfCheckText } from '../lib/ops-copy.js';
+import { selfCheckEmail, digestEmail } from '../lib/email-builders.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, '_debug', 'previews');
@@ -137,6 +139,15 @@ add('telegram-alert-repeat.txt', 'Telegram alert — possible repeat', renderAle
 // The daily digest is counts only, so this is the whole message for both
 // channels: Telegram sends it as-is, the email fallback wraps the same text.
 add('digest.txt', 'Daily digest — Telegram and email', digestText({ newLeads: 4, repeats: 1, untouched: 2, failed: 0 }, '2026-11-07'), false);
+add('digest-attention.txt', 'Daily digest — with a failure', digestText({ newLeads: 4, repeats: 1, untouched: 2, failed: 2 }, '2026-11-07'), false);
+add('digest.html', 'Daily digest email', wrapHtml('Daily digest', withLogo(digestEmail({ newLeads: 4, repeats: 1, untouched: 2, failed: 0 }, '2026-11-07').html)), true);
+// The self-check has two audiences. A demo business is the operator's own and may
+// see the redirect warning; an active client never does.
+const opsDay = { created: 3, tg_sent: 3, email_owner_sent: 3, tg_failed: 1, email_owner_failed: 0, autoreply_failed: 1, review_request_failed: 0 };
+add('selfcheck-demo.txt', 'Alert check — demo business (operator)', selfCheckText(opsDay, { redirectActive: true, operator: true }), false);
+add('selfcheck-active.txt', 'Alert check — active client', selfCheckText(opsDay, { redirectActive: true, operator: false }), false);
+add('selfcheck-demo.html', 'Alert check email — demo business', wrapHtml('Alert check', withLogo(selfCheckEmail(opsDay, '2026-11-07', { redirectActive: true, operator: true }).html)), true);
+add('selfcheck-active.html', 'Alert check email — active client', wrapHtml('Alert check', withLogo(selfCheckEmail(opsDay, '2026-11-07', { redirectActive: true, operator: false }).html)), true);
 // Recipients: /invite, /recipients and the remove confirmation. Plain text, one
 // business per chat, no names — the list is "Recipient N" unless a label is set.
 add('telegram-invite.txt', 'Telegram /invite (deep link)', botInviteText('K7M2QPX9RT4W', { username: 'alder_alerts_bot' }), false);
@@ -213,9 +224,17 @@ index += '<h2>Telegram alerts (text)</h2>\n'
   + '<p class="cap">Telegram: /invite when getMe() is unavailable — same copy, /start plus the code, still real line breaks</p><pre>' + esc(files.find((f) => f.name === 'telegram-invite-fallback.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: /recipients — every phone on this business, one Remove button each</p><pre>' + esc(files.find((f) => f.name === 'telegram-recipients.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: removing a phone asks once, and the last one cannot be removed</p><pre>' + esc(files.find((f) => f.name === 'telegram-recipient-confirm.txt').body) + '</pre>\n'
-  + '<p class="cap">Daily digest (18:00 UTC cron, off by default): counts only, no names, no addresses — the same text is safe by email</p><pre>' + esc(files.find((f) => f.name === 'digest.txt').body) + '</pre>\n'  + '<p class="cap">Telegram: /leads list (spaced format)</p><pre>' + esc(files.find((f) => f.name === 'telegram-leads.txt').body) + '</pre>\n'
+  + '<p class="cap">Daily digest (13:00 UTC cron, off by default): counts only, no names, no addresses — the same text is safe by email</p><pre>' + esc(files.find((f) => f.name === 'digest.txt').body) + '</pre>\n'
+  + '<p class="cap">The same digest when something failed: one extra section, in plain words, no internal event names</p><pre>' + esc(files.find((f) => f.name === 'digest-attention.txt').body) + '</pre>\n'
+  + '<p class="cap">Alert check, demo business (operator): problems first, then the counts, then the redirect warning in a separate block</p><pre>' + esc(files.find((f) => f.name === 'selfcheck-demo.txt').body) + '</pre>\n'
+  + '<p class="cap">Alert check, active client: its own counts only — no redirect warning, no setting names</p><pre>' + esc(files.find((f) => f.name === 'selfcheck-active.txt').body) + '</pre>\n'  + '<p class="cap">Telegram: /leads list (spaced format)</p><pre>' + esc(files.find((f) => f.name === 'telegram-leads.txt').body) + '</pre>\n'
   + '<p class="cap">Telegram: bot copy — linked, help, already connected, not connected, plain-text hint</p><pre>' + esc(files.find((f) => f.name === 'telegram-bot-copy.txt').body) + '</pre>\n';
 index += '<h2>Owner email (plain text)</h2>\n<pre>' + esc(files.find((f) => f.name === 'owner-email.txt').body) + '</pre>\n';
+index += '<h2>Operations emails</h2>\n'
+  + '<p class="cap">The scheduled messages now use the same shell as the product emails: same logo (a CID inline image, so it is referenced rather than left dangling as an attachment), same header band, same footer and padding. Only the content differs.</p>\n'
+  + '<p class="cap">Your lead summary — nothing failed, so there is no Needs attention section at all.</p><iframe src="digest.html" width="640" height="420"></iframe>\n'
+  + '<p class="cap">Alert check — demo business. Operator detail is last and clearly separated.</p><iframe src="selfcheck-demo.html" width="640" height="480"></iframe>\n'
+  + '<p class="cap">Alert check — active client. Same layout, no operator detail.</p><iframe src="selfcheck-active.html" width="640" height="480"></iframe>\n';
 index += '</body></html>\n';
 write('index.html', index);
 

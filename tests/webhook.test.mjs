@@ -8,7 +8,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
-import { fakeRes, ALDER_DEMO } from './helpers.mjs';
+import { fakeRes, ALDER_DEMO, sweepTestLeads, fixtureEmail } from './helpers.mjs';
+import { FIXTURE_CHATS } from './fixture-ids.mjs';
 
 loadEnv();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -16,7 +17,7 @@ const TG = process.env.FAKE_TG_URL;
 if (!TG) { console.log('FAIL  pre  run through tests/run.mjs'); process.exit(1); }
 
 const { default: tgHandler } = await import('../api/tg.js');
-const { createBindCode } = await import('../lib/db.js');
+const { createBindCode, claimBindCode, restoreBindCode, expireLiveBindCodes } = await import('../lib/db.js');
 const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
@@ -64,15 +65,52 @@ const cb = (chatId, data, messageId = 100, text = 'Original alert') => ({
 const ALPHA = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const mkCode = (n) => { let s = ''; for (let i = 0; i < n; i++) s += ALPHA[Math.floor(Math.random() * ALPHA.length)]; return s; };
 
+const RUN_STARTED = new Date().toISOString();
+const chatA = FIXTURE_CHATS.webhookA, chatB = FIXTURE_CHATS.webhookB, chatX = FIXTURE_CHATS.webhookX;
+const bindA = FIXTURE_CHATS.webhookBindA, bindB = FIXTURE_CHATS.webhookBindB, bindX = FIXTURE_CHATS.webhookBindX;
+// Every fixture id this suite may bind, for the start-of-suite and finally sweeps.
+const WEBHOOK_CHATS = [chatA, chatB, chatX, bindA, bindB, bindX,
+  FIXTURE_CHATS.webhookA2, FIXTURE_CHATS.webhookA3,
+  FIXTURE_CHATS.webhookOpA, FIXTURE_CHATS.webhookOpB, FIXTURE_CHATS.webhookOperator];
+
 const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
 const { data: bizB } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
-const chatA = 880001, chatB = 880002, chatX = 880003;
+
+// A throwaway business for every /code mint. Real businesses must never carry
+// a suite-minted code: the owner's /invite cap counts live unused rows, and a
+// killed run would leave ten of them behind. status must be demo/active because
+// /code resolves through getActiveBusinessBySlug; it is deleted in the finally.
+const CODE_SLUG = `zz-test-${RUN}`;
+let codeBiz = null;
+// A second throwaway for every bind test. No suite may mint a code on a real
+// business: the code is what /invite's cap counts, and a killed run leaves it.
+const BIND_SLUG = `zz-test-bind-${RUN}`;
+let bindBiz = null;
+const INV_SLUG = `zz-test-inv-${RUN}`;
+let invBiz = null;
+// Clear throwaways a killed run left behind (never a live one: the runner is
+// sequential, and the predicate is the reserved slug prefix).
+await svc.from('businesses').delete().like('slug', 'zz-test-%').lt('created_at', RUN_STARTED);
+({ data: codeBiz } = await svc.from('businesses').insert({
+  slug: CODE_SLUG, name: 'ZZ Code Fixture', owner_email: 'code@zz-test.invalid',
+  google_review_url: 'https://g.page/r/zz-code', timezone: 'America/Chicago', status: 'demo',
+}).select('id, slug, name').single());
+if (!codeBiz) throw new Error('could not create the zz-test business');
+({ data: bindBiz } = await svc.from('businesses').insert({
+  slug: BIND_SLUG, name: 'ZZ Bind Fixture', owner_email: 'bind@zz-test.invalid',
+  google_review_url: 'https://g.page/r/zz-bind', timezone: 'America/Chicago', status: 'demo',
+}).select('id, slug, name').single());
+if (!bindBiz) throw new Error('could not create the zz-test bind business');
+
 const createdLeads = [];
 const createdCodes = [];
 
 async function seedLead(businessId, name, email) {
+  // Every seeded lead carries the reserved fixture marker, so a sweep needs two
+  // signals before deleting it. The empty-email case is deleted by exact key.
+  const marked = email ? String(email).replace(/@example\.com$/, '@fixture.invalid') : email;
   const { data } = await svc.from('leads').insert({
-    business_id: businessId, name, phone: '5155550100', email, zip: '50265',
+    business_id: businessId, name, phone: '5155550100', email: marked, zip: '50265',
     service: 'repair', home: 'house', timing: 'asap', roof_age: 'Not sure',
     insurance_claim: false, notes: null, idempotency_key: `${RUN}-${mkCode(8)}`,
   }).select('id').single();
@@ -81,7 +119,21 @@ async function seedLead(businessId, name, email) {
 }
 
 try {
+  // Clear what a killed run left behind, before adding anything of our own.
+  await sweepTestLeads(svc, [bizA.id, bizB.id], RUN_STARTED).catch(() => 0);
+  // Clear anything a killed run left bound, before this run binds its own.
+  try { await svc.from('business_chats').delete().in('tg_chat_id', WEBHOOK_CHATS); } catch { /* best effort */ }
   await control({ mode: 'ok' }); await reset(); await resetResend();
+
+  // chatA and chatB are bound up front: the bind tests below use their own
+  // throwaway chats and business, so nothing here depends on a minted code.
+  {
+    const t0 = Date.now();
+    await svc.from('business_chats').insert([
+      { business_id: bizA.id, tg_chat_id: chatA, created_at: new Date(t0 - 5000).toISOString() },
+      { business_id: bizB.id, tg_chat_id: chatB, created_at: new Date(t0 - 4000).toISOString() },
+    ]);
+  }
 
   /* auth */
   const before = (await svc.from('business_chats').select('*').eq('tg_chat_id', chatX)).data.length;
@@ -105,16 +157,16 @@ try {
 
   /* bind once */
   const code1 = mkCode(12); createdCodes.push(code1);
-  await createBindCode(code1, bizA.id, new Date(Date.now() + 3600000).toISOString());
+  await createBindCode(code1, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
   await reset();
-  await good(msg(chatA, '/start ' + code1));
-  const bound1 = (await svc.from('business_chats').select('business_id').eq('tg_chat_id', chatA).maybeSingle()).data;
+  await good(msg(bindA, '/start ' + code1));
+  const bound1 = (await svc.from('business_chats').select('business_id').eq('tg_chat_id', bindA).maybeSingle()).data;
   const confirmation = (await sent()).map((x) => x.body && x.body.text).join(' ');
-  line(group.code === 200 && !!bound1 && bound1.business_id === bizA.id && confirmation.includes('Alder Roofing'),
+  line(group.code === 200 && !!bound1 && bound1.business_id === bindBiz.id && confirmation.includes('ZZ Bind Fixture'),
     'C4', 'valid /start CODE binds once and names business', `bound=${!!bound1}`);
 
   await reset();
-  await good(msg(chatX, '/start ' + code1));
+  await good(msg(bindX, '/start ' + code1));
   const second = (await svc.from('bind_codes').select('used_at').eq('code', code1).single()).data;
   const secondText = (await sent()).map((x) => x.body && x.body.text).join(' ');
   // Before (bot copy): 'That link is not valid. Ask for a new one.'
@@ -123,18 +175,18 @@ try {
 
   /* expired code */
   const expired = mkCode(12); createdCodes.push(expired);
-  await createBindCode(expired, bizA.id, new Date(Date.now() - 60000).toISOString());
+  await createBindCode(expired, bindBiz.id, new Date(Date.now() - 60000).toISOString());
   await reset();
-  await good(msg(chatX, '/start ' + expired));
+  await good(msg(bindX, '/start ' + expired));
   const expText = (await sent()).map((x) => x.body && x.body.text).join(' ');
   const expUsed = (await svc.from('bind_codes').select('used_at').eq('code', expired).single()).data;
   line(!expUsed.used_at && expText.includes("isn't valid or has expired"), 'C6', 'expired code rejected, not consumed');
 
   /* second business + /leads isolation */
   const code2 = mkCode(12); createdCodes.push(code2);
-  await createBindCode(code2, bizB.id, new Date(Date.now() + 3600000).toISOString());
+  await createBindCode(code2, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
   await reset();
-  await good(msg(chatB, '/start ' + code2));
+  await good(msg(bindB, '/start ' + code2));
   // Seeds are order-independent (unique idempotency keys per lead).
   // Promise.all keeps the input order in its result, but the pushes into
   // createdLeads happen in completion order — so createdLeads[3] is a bizA lead
@@ -326,24 +378,41 @@ try {
 
     // C33: two r: callbacks fired at the same time send exactly one email.
     // Both pass the "done and nothing sent yet" checks before either writes, so
-    // without a compare-and-set both would send. rate_limits is the CAS.
-    const raceLead = await seedLead(bizB.id, 'Race Retry', 'raceretry@example.com');
-    await resendCtrl({ mode: '500' });
-    await good(cb(chatB, 'c:' + raceLead));
-    await good(cb(chatB, 'd:' + raceLead));
-    await good(cb(chatB, 'y:' + raceLead));            // email fails -> error view
-    await resendCtrl({ mode: 'ok' });
-    await resetResend();
-    await svc.from('rate_limits').delete().eq('key', 'retry:' + raceLead);
-    await Promise.all([good(cb(chatB, 'r:' + raceLead)), good(cb(chatB, 'r:' + raceLead))]);
-    const raceEmails = (await resendCalls()).length;
-    const raceRow = (await svc.from('leads').select('status').eq('id', raceLead).single()).data;
-    line(raceEmails === 1 && raceRow.status === 'done',
-      'C33', 'two r: at once -> exactly one send', `emails=${raceEmails} status=${raceRow.status}`);
+    // the claim has to be re-checked after it is taken and kept on success.
+    // C33_LOOP repeats the race with a fresh lead to shake out timing.
+    {
+      const loops = Math.max(1, Number(process.env.C33_LOOP) || 1);
+      let bad = 0, lastEmails = 0, lastStatus = '';
+      for (let i = 0; i < loops; i++) {
+        const raceLead = await seedLead(bizB.id, `Race Retry ${i}`, `raceretry${i}@example.com`);
+        await resendCtrl({ mode: '500' });
+        await good(cb(chatB, 'c:' + raceLead));
+        await good(cb(chatB, 'd:' + raceLead));
+        await good(cb(chatB, 'y:' + raceLead));            // email fails -> error view
+        await resendCtrl({ mode: 'ok' });
+        await resetResend();
+        await svc.from('rate_limits').delete().like('key', 'retry:' + raceLead + '%');
+        if (process.env.C33_BOUNDARY) {
+          // Park just before a 10 s bucket edge, so the two claims can land in
+          // different windows: the exact interleaving that produced the flake.
+          for (;;) {
+            const left = 10000 - (Date.now() % 10000);
+            if (left <= 120) break;
+            await new Promise((r) => setTimeout(r, Math.min(left - 100, 20)));
+          }
+        }
+        await Promise.all([good(cb(chatB, 'r:' + raceLead)), good(cb(chatB, 'r:' + raceLead))]);
+        lastEmails = (await resendCalls()).length;
+        lastStatus = (await svc.from('leads').select('status').eq('id', raceLead).single()).data.status;
+        if (lastEmails !== 1 || lastStatus !== 'done') bad++;
+      }
+      line(bad === 0, 'C33', `two r: at once -> exactly one send (${loops}x)`,
+        `bad=${bad}/${loops} lastEmails=${lastEmails} status=${lastStatus}`);
+    }
 
-    // C34/C35: the retry mutex is a 10 s bucket in rate_limits. A claim left
-    // behind by an invocation that died before its finally block stops blocking
-    // as soon as the clock leaves that bucket, so a stale lock costs at most 10 s.
+    // C34/C35: the retry lock is keyed by the failure generation. A claim left
+    // behind by an invocation that died is cleared once it is 5 minutes old, so
+    // a crash costs at most five minutes, not the lead.
     const mkFailedRetry = async (label, email) => {
       const id = await seedLead(bizB.id, label, email);
       await resendCtrl({ mode: '500' });
@@ -357,10 +426,11 @@ try {
 
     {
       const staleLead = await mkFailedRetry('Stale Lock', 'stalelock@example.com');
-      await svc.from('rate_limits').delete().eq('key', 'retry:' + staleLead);
+      const staleKey = 'retry:' + staleLead + ':1';
+      await svc.from('rate_limits').delete().eq('key', staleKey);
       await svc.from('rate_limits').insert({
-        key: 'retry:' + staleLead,
-        window_start: new Date(Date.now() - 60000).toISOString(),
+        key: staleKey,
+        window_start: new Date(Date.now() - 10 * 60000).toISOString(),
         count: 1,
       });
       await good(cb(chatB, 'r:' + staleLead));
@@ -373,16 +443,48 @@ try {
       // Same guard as db-wall test 6: do not straddle a bucket boundary.
       const msLeft = 10000 - (Date.now() % 10000);
       if (msLeft < 3000) await new Promise((r) => setTimeout(r, msLeft + 50));
-      // Claim through the same RPC the handler uses, so the bucket comes from the
-      // database clock rather than this machine's (they are not the same clock,
-      // and a manual insert landed in a different bucket).
-      await svc.from('rate_limits').delete().eq('key', 'retry:' + lockLead);
-      await svc.rpc('hit_rate_limit', { p_key: 'retry:' + lockLead, p_window_seconds: 10, p_max: 1 });
+      // Claim through the same RPC the handler uses, with the same key shape
+      // (failure generation 1) and the same 5-minute window, so it is live.
+      const lockKey = 'retry:' + lockLead + ':1';
+      await svc.from('rate_limits').delete().eq('key', lockKey);
+      await svc.rpc('hit_rate_limit', { p_key: lockKey, p_window_seconds: 300, p_max: 1 });
       await good(cb(chatB, 'r:' + lockLead));
       const emails = (await resendCalls()).length;
       const sentFlag = await svc.from('lead_events').select('id').eq('lead_id', lockLead).eq('kind', 'review_requested');
       line(emails === 0 && (sentFlag.data || []).length === 0, 'C35',
         'live retry claim blocks the send', `emails=${emails}`);
+    }
+
+    // C38/C39: a Resend 409 on an idempotent request is a duplicate, not a
+    // failure. Directly (with and without a key), and through the review retry:
+    // no "Try again", no new failure event, no second key.
+    {
+      const { sendMail } = await import('../lib/mail.js');
+      const savedRedirect = process.env.MAIL_REDIRECT_TO;
+      process.env.MAIL_REDIRECT_TO = 'redirect@example.com';
+      await resendCtrl({ mode: '409' });
+      const dup = await sendMail({ to: 'x@example.com', subject: 'S', html: '<p>x</p>', text: 'x', idempotencyKey: 'test:key:1' });
+      const noKey = await sendMail({ to: 'x@example.com', subject: 'S', html: '<p>x</p>', text: 'x' });
+      await resendCtrl({ mode: 'ok' });
+      if (savedRedirect === undefined) delete process.env.MAIL_REDIRECT_TO; else process.env.MAIL_REDIRECT_TO = savedRedirect;
+      line(dup.ok === true && dup.status === 'duplicate' && noKey.ok === false && Number(noKey.status) === 409,
+        'C38', 'mail: 409 with a key is duplicate; without a key it is a failure',
+        `dup=${dup.status} noKey=${noKey.status}`);
+
+      const dupLead = await mkFailedRetry('Dup 409', 'dup409@example.com');
+      const failsBefore = (await svc.from('lead_events').select('id').eq('lead_id', dupLead).eq('kind', 'review_request_failed')).data.length;
+      await resendCtrl({ mode: '409' });
+      await reset();
+      await good(cb(chatB, 'r:' + dupLead));
+      const dupRow = (await svc.from('leads').select('status').eq('id', dupLead).single()).data;
+      const dupEdits = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+      const dupSent = (await svc.from('lead_events').select('id').eq('lead_id', dupLead).eq('kind', 'review_requested')).data.length;
+      const dupFails = (await svc.from('lead_events').select('id').eq('lead_id', dupLead).eq('kind', 'review_requested_failed')).data.length;
+      await resendCtrl({ mode: 'ok' });
+      line(dupRow.status === 'done' && dupEdits.length === 1 && dupEdits[0].body.text.includes('Review request sent')
+        && dupSent === 1 && dupFails <= failsBefore,
+        'C39', 'review retry on 409: sent view, no new failure, no new key',
+        `sent=${dupSent} fails=${failsBefore}->${dupFails} edits=${dupEdits.length}`);
     }
 
     // r: on an open lead is refused with "Nothing to retry."
@@ -666,9 +768,15 @@ try {
   const guardSent = await sent();
   const guardEdits = guardSent.filter((x) => x.path.includes('/editMessageText'));
   const guardAnswered = guardSent.some((x) => x.path.includes('/answerCallbackQuery'));
+  // The tap is refused (no DB change) but the card is refreshed in place and
+  // the toast says "Already updated." instead of "Not found.".
+  const guardToast = guardSent.filter((x) => x.path.includes('/answerCallbackQuery'))
+    .map((x) => (x.body && x.body.text) || '').join('|');
   line(doneAfter.status === 'done' && doneAfter.review_token === doneBefore.review_token
-    && eventsAfter === eventsBefore && guardEdits.length === 0 && guardAnswered,
-    'C13b', 'Contacted on done lead -> no DB change, answers', `status=${doneAfter.status} edits=${guardEdits.length} answered=${guardAnswered}`);
+    && eventsAfter === eventsBefore && guardEdits.length === 1 && guardAnswered
+    && guardToast.includes('Already updated'),
+    'C13b', 'Contacted on done lead -> no DB change, refreshed, Already updated',
+    `status=${doneAfter.status} edits=${guardEdits.length} toast=${guardToast}`);
 
   /* C14: double tap Contacted -> one transition, one edit, still answers twice */
   const ccLead = await seedLead(bizB.id, 'Double Tap C', 'doublec@example.com');
@@ -680,8 +788,10 @@ try {
   const ccSent = await sent();
   const ccEdits = ccSent.filter((x) => x.path.includes('/editMessageText'));
   const ccAnswers = ccSent.filter((x) => x.path.includes('/answerCallbackQuery'));
-  line(ccRow.status === 'contacted' && ccEvents === 1 && ccEdits.length === 1 && ccAnswers.length === 2,
-    'C14', 'double tap Contacted -> one change, answers twice', `status=${ccRow.status} events=${ccEvents} edits=${ccEdits.length} answers=${ccAnswers.length}`);
+  // Second tap: one transition, and the stale card is refreshed to the current
+  // state (one edit per tap), so both taps leave the same card on screen.
+  line(ccRow.status === 'contacted' && ccEvents === 1 && ccEdits.length === 2 && ccAnswers.length === 2,
+    'C14', 'double tap Contacted -> one change, both cards refreshed', `status=${ccRow.status} events=${ccEvents} edits=${ccEdits.length} answers=${ccAnswers.length}`);
 
   /* C11c: every button style is allowed and callback_data is unchanged */
   {
@@ -749,10 +859,10 @@ try {
     const exactOk = C.botLinkedText('Alder Roofing (demo)') === `You're connected to Alder Roofing (demo). ✅\n\nNew estimate requests from your website will appear here the moment they come in.\n\nFor each request:\n• Tap Mark contacted after you call the customer.\n• Tap Job completed when the work is done. You can then send the customer a review request.\n\nSend /leads to see your latest requests, or /help any time.`
       && C.BOT_HELP === `How this works\n\nNew estimate requests from your website appear here as soon as they come in.\n\nFor each request:\n• Mark contacted after you call the customer.\n• Job completed when the work is done, to send a review request.\n\nCommands:\n/leads · your latest requests\n/invite · connect a second phone\n/recipients · who receives alerts\n/help · this message`
       && C.BOT_ALREADY_CONNECTED === `You're all set. New requests will appear here.\n\nSend /help to see what I can do.`
-      && C.BOT_NOT_CONNECTED === `This chat isn't connected yet.\n\nOpen the setup link you were sent and tap Start.`
+      && C.BOT_NOT_CONNECTED === `This chat isn't connected yet.\n\nIf you were sent a setup link, tap it and press Start. If you have a setup code, send it to me here.\n\nNo link or code? Ask the person who set up your lead alerts for a new one.`
       && C.BOT_BAD_CODE === `That setup link isn't valid or has expired.\n\nAsk for a new one.`
       && C.BOT_PLAIN_TEXT === `I only respond to commands.\n\nSend /leads to see your latest requests, or /help.`
-      && C.BOT_DESCRIPTION === `Get your website's new estimate requests here the moment they arrive, and keep track of each one. Tap Start to connect this chat.`
+      && C.BOT_DESCRIPTION === `Get your website's new estimate requests here the moment they arrive. To connect, open the setup link you were given.`
       && C.BOT_SHORT_DESCRIPTION === `New estimate requests from your website, delivered instantly.`;
     const bannedOk = all.every((t) => !banned.test(t)) && !banned.test('Alder Roofing (demo)');
     const lengthsOk = C.BOT_DESCRIPTION.length <= 512 && C.BOT_SHORT_DESCRIPTION.length <= 120;
@@ -760,7 +870,7 @@ try {
       `exact=${exactOk} banned=${bannedOk} descLen=${C.BOT_DESCRIPTION.length}/${C.BOT_SHORT_DESCRIPTION.length}`);
   }
   {
-    const { BOT_NOT_CONNECTED, BOT_PLAIN_TEXT, BOT_ALREADY_CONNECTED } = await import('../lib/content.js');
+    const { BOT_NOT_CONNECTED, BOT_PLAIN_TEXT, BOT_ALREADY_CONNECTED_CODE, BOT_HELP } = await import('../lib/content.js');
     const textOf = async () => (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text).join('\n');
 
     // Unbound /start with no code → NOT CONNECTED.
@@ -770,12 +880,32 @@ try {
 
     // Bound /start with a fresh valid code → ALREADY CONNECTED, code NOT consumed.
     const fresh = mkCode(12); createdCodes.push(fresh);
-    await createBindCode(fresh, bizB.id, new Date(Date.now() + 3600000).toISOString());
+    await createBindCode(fresh, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
     await reset();
-    await good(msg(chatB, '/start ' + fresh));
+    await good(msg(bindB, '/start ' + fresh));
     const freshUsed = (await svc.from('bind_codes').select('used_at').eq('code', fresh).single()).data;
-    line((await textOf()) === BOT_ALREADY_CONNECTED && !freshUsed.used_at,
-      'D3', 'bound /start with code → ALREADY CONNECTED, code not consumed');
+    line((await textOf()) === BOT_ALREADY_CONNECTED_CODE && !freshUsed.used_at,
+      'D3', 'bound /start with code → already connected, code not consumed');
+
+    // C37: /command@botname. Only this bot's username is stripped; another
+    // bot's suffix is not a command and gets the plain-text answer.
+    {
+      const savedUser = process.env.TELEGRAM_BOT_USERNAME;
+      process.env.TELEGRAM_BOT_USERNAME = 'alder_test_bot';
+      await reset();
+      await good(msg(chatA, '/help@alder_test_bot'));
+      const own = await textOf();
+      await reset();
+      await good(msg(chatA, '/help@other_bot'));
+      const foreign = await textOf();
+      await reset();
+      await good(msg(chatX, '/help@alder_test_bot'));
+      const unbound = await textOf();
+      process.env.TELEGRAM_BOT_USERNAME = savedUser;
+      line(own === BOT_HELP && foreign === BOT_PLAIN_TEXT && unbound === BOT_NOT_CONNECTED,
+        'C37', '@botname: own suffix runs, another bot is plain text',
+        `own=${own === BOT_HELP} foreign=${foreign === BOT_PLAIN_TEXT}`);
+    }
 
     // Plain text: bound → hint (max 3/hour), then silence; unbound → NOT CONNECTED.
     const hintCounts = [];
@@ -824,12 +954,352 @@ try {
   const directLeadSelect = /\.from\(['"]leads['"]\)\s*\.select\s*\(/.test(all);
   line(!forbidden && !directLeadSelect, 'C10', 'no private schema, no direct lead SELECT',
     `files=${seen.size} forbidden=${forbidden} directSelect=${directLeadSelect}`);
+  // OP21: OPERATOR_CHAT_ID unset (and no TELEGRAM_CHAT_ID fallback) must fail
+  // closed: /code is not a command for anyone, and nothing is minted. This is
+  // the state a fresh deployment is in until the owner sets it.
+  {
+    const savedOp = process.env.OPERATOR_CHAT_ID;
+    const savedTg = process.env.TELEGRAM_CHAT_ID;
+    delete process.env.OPERATOR_CHAT_ID;
+    delete process.env.TELEGRAM_CHAT_ID;
+    try {
+      const C = await import('../lib/content.js');
+      const codesBefore = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      await reset();
+      await good(msg(chatA, '/code alder-demo'));
+      const text = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text).join('\n');
+      const codesAfter = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      line(text === C.BOT_PLAIN_TEXT && codesAfter === codesBefore,
+        'OP21', 'OPERATOR_CHAT_ID unset: /code is not a command, nothing minted',
+        `codes ${codesBefore}->${codesAfter}`);
+    } finally {
+      if (savedOp === undefined) delete process.env.OPERATOR_CHAT_ID; else process.env.OPERATOR_CHAT_ID = savedOp;
+      if (savedTg === undefined) delete process.env.TELEGRAM_CHAT_ID; else process.env.TELEGRAM_CHAT_ID = savedTg;
+    }
+  }
+
+  /* ---------- operator commands, owner role, lead recovery ---------- */
+  {
+    const OP = FIXTURE_CHATS.webhookOperator;
+    const chatA2 = FIXTURE_CHATS.webhookA2;   // second phone on bizA
+    const chatA3 = FIXTURE_CHATS.webhookA3;   // third phone, removed by the operator
+    const savedOp = process.env.OPERATOR_CHAT_ID;
+    const savedUser = process.env.TELEGRAM_BOT_USERNAME;
+    process.env.OPERATOR_CHAT_ID = String(OP);
+    process.env.TELEGRAM_BOT_USERNAME = 'alder_test_bot';
+    // Edits matter as much as new messages here: the confirm screen and the
+    // refreshed card are edits.
+    const allText = async () => (await sent())
+      .filter((x) => x.path.includes('/sendMessage') || x.path.includes('/editMessageText'))
+      .map((x) => x.body.text).join('\n');
+    const answersNow = async () => (await sent()).filter((x) => x.path.includes('/answerCallbackQuery'))
+      .map((x) => (x.body && x.body.text) || '').join('|');
+    try {
+      // Ownership order, without minting a code on a real business. Explicit,
+      // distinct created_at: one INSERT gives every row the same timestamp.
+      await svc.from('business_chats').delete().in('tg_chat_id', [chatA, chatA2, chatA3]);
+      {
+        const t0 = Date.now();
+        await svc.from('business_chats').insert([
+          { business_id: bizA.id, tg_chat_id: chatA, created_at: new Date(t0 - 3000).toISOString() },
+          { business_id: bizA.id, tg_chat_id: chatA2, created_at: new Date(t0 - 2000).toISOString() },
+          { business_id: bizA.id, tg_chat_id: chatA3, created_at: new Date(t0 - 1000).toISOString() },
+        ]);
+      }
+      const C = await import('../lib/content.js');
+
+      // OP1: a non-operator gets exactly the unknown-text reply, and no code.
+      await reset();
+      const codesBefore = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      await good(msg(chatA, '/code alder-demo'));
+      const codesAfter = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      line((await allText()) === C.BOT_PLAIN_TEXT && codesAfter === codesBefore, 'OP1',
+        'non-operator /code gets the plain-text hint, mints nothing',
+        `codes ${codesBefore}->${codesAfter}`);
+
+      // OP2: exactly TWO messages. The first names the slug; the second is the
+      // only forwardable text and must not name the business.
+      await reset();
+      await good(msg(OP, `/code ${CODE_SLUG}`));
+      const pair = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
+      const opLine = pair[0] || '';
+      const forward = pair[1] || '';
+      // Take the code from the forward text, then prove the database has it:
+      // row order is not guaranteed, so picking "the last row" proved nothing.
+      const theCode = (forward.match(/\?start=([A-Z2-9]{12})/) || [])[1] || '';
+      const stored = theCode
+        ? (await svc.from('bind_codes').select('code, used_at').eq('code', theCode).eq('business_id', codeBiz.id)).data
+        : [];
+      line(pair.length === 2 && !!theCode && stored.length === 1 && stored[0].used_at === null
+        && opLine.includes(CODE_SLUG) && /expires in 24 hours/i.test(opLine)
+        && !opLine.includes('?start=') && forward.includes('send it this code')
+        && !forward.includes(CODE_SLUG) && !forward.includes('send me'),
+        'OP2', 'operator /code: two messages, slug only in the first',
+        `messages=${pair.length} code=${theCode.slice(0, 4)}… stored=${stored.length}`);
+
+      // OP3: cap per slug, fail closed at 10/hour. OP2 already used one slot,
+      // so clear the bucket to measure the cap itself.
+      await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
+      let okCount = 0, capped = false;
+      for (let i = 0; i < 11; i++) {
+        await reset();
+        await good(msg(OP, `/code ${CODE_SLUG}`));
+        const t = await allText();
+        if (t === C.OPERATOR_CAPPED) capped = true; else okCount++;
+      }
+      line(okCount === 10 && capped, 'OP3', 'operator /code capped at 10 per slug per hour', `ok=${okCount} capped=${capped}`);
+
+      // OP14: the second message fails. The code is still valid, so the
+      // operator must be told the forward text did not send and get it again.
+      await reset();
+      await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
+      await control({ mode: 'fail_nth', nth: 2 });
+      await good(msg(OP, `/code ${CODE_SLUG}`));
+      const afterFail = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
+      await control({ mode: 'ok' });
+      const resend = afterFail[2] || '';
+      const resendCode = (resend.match(/\b([A-Z2-9]{12})\b/) || [])[1] || '';
+      line(afterFail.length === 3 && /did not send/.test(resend) && !!resendCode
+        && resend.includes(resendCode),
+        'OP14', 'forward send fails: operator gets the code back', `messages=${afterFail.length}`);
+
+      // OP15: a slug with injection characters is a usage error, and nothing
+      // is minted. The slug regex is the only gate that matters here.
+      await reset();
+      const codesBeforeBad = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      await good(msg(OP, '/code alder-demo;drop'));
+      const badReply = await allText();
+      const codesAfterBad = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      line(badReply === C.OPERATOR_USAGE_CODE && codesAfterBad === codesBeforeBad,
+        'OP15', 'injection-shaped slug: usage text, no code minted',
+        `codes ${codesBeforeBad}->${codesAfterBad}`);
+
+      // OP16: two /code taps mint two different, valid codes (the cap is the
+      // only limit, and the bucket was cleared above).
+      await reset();
+      await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
+      await good(msg(OP, `/code ${CODE_SLUG}`));
+      await good(msg(OP, `/code ${CODE_SLUG}`));
+      const two = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
+      const codes = two.map((t) => (t.match(/\?start=([A-Z2-9]{12})/) || [])[1]).filter(Boolean);
+      line(codes.length === 2 && codes[0] !== codes[1] && two.length === 4,
+        'OP16', 'two /code taps: two distinct codes, two messages each',
+        `codes=${codes.length} unique=${new Set(codes).size} messages=${two.length}`);
+
+      // OP17-OP20 run against real rows on a throwaway business: the cancel
+      // flow and the claim restore are SQL, and the in-memory fake cannot
+      // prove the predicates.
+      const invOwner = FIXTURE_CHATS.webhookInvOwner, invStaff = FIXTURE_CHATS.webhookInvStaff;
+      await svc.from('business_chats').delete().in('tg_chat_id', [invOwner, invStaff]);
+      if (!invBiz) {
+        ({ data: invBiz } = await svc.from('businesses').insert({
+          slug: INV_SLUG, name: 'ZZ Invite Fixture', owner_email: 'inv@zz-test.invalid',
+          google_review_url: 'https://g.page/r/zz-inv', timezone: 'America/Chicago', status: 'demo',
+        }).select('id').single());
+        if (!invBiz) throw new Error('could not create the zz-test invite business');
+      }
+      {
+        const t0 = Date.now();
+        await svc.from('business_chats').insert([
+          { business_id: invBiz.id, tg_chat_id: invOwner, created_at: new Date(t0 - 2000).toISOString() },
+          { business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date(t0 - 1000).toISOString() },
+        ]);
+      }
+      const liveInvites = async () => (await svc.from('bind_codes')
+        .select('code, used_at, expires_at').eq('business_id', invBiz.id).is('used_at', null)
+        .gt('expires_at', new Date().toISOString())).data || [];
+      const soonIso = (h) => new Date(Date.now() + h * 3600000).toISOString();
+      const invCodes = ['INVAA' + mkCode(7), 'INVBB' + mkCode(7), 'INVCC' + mkCode(7)];
+      for (let i = 0; i < invCodes.length; i++) {
+        createdCodes.push(invCodes[i]);
+        await createBindCode(invCodes[i], invBiz.id, soonIso(5 + i * 6));
+      }
+
+      // OP17: cap lists three, the tap expires them and mints exactly one.
+      await reset();
+      await good(msg(invOwner, '/invite'));
+      const capSend = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
+      const capText = (capSend && capSend.body.text) || '';
+      const capBtn = (capSend && capSend.body.reply_markup && capSend.body.reply_markup.inline_keyboard[0][0]) || {};
+      const cappedLive = (await liveInvites()).length;
+      await reset();
+      await good(cb(invOwner, 'i:c'));
+      const afterTap = await liveInvites();
+      const oldExpired = (await svc.from('bind_codes').select('code, expires_at')
+        .in('code', invCodes)).data.every((r) => new Date(r.expires_at).getTime() <= Date.now() + 1000);
+      line(cappedLive === 3 && /3 unused invites/.test(capText) && capBtn.callback_data === 'i:c'
+        && afterTap.length === 1 && oldExpired,
+        'OP17', 'real DB: cap lists three, tap expires them, one new code',
+        `live=${cappedLive}->${afterTap.length} oldExpired=${oldExpired}`);
+
+      // OP18: a second tap inside the mutex mints nothing.
+      await reset();
+      await good(cb(invOwner, 'i:c'));
+      const afterSecond = await liveInvites();
+      line(afterSecond.length === 1, 'OP18', 'real DB: double tap mints no second code',
+        `live=${afterSecond.length}`);
+
+      // OP19: the expire predicate itself, on real rows. A used code keeps its
+      // expiry; only the live one is pushed past now. (The tap's use of this
+      // helper is OP17; this pins the WHERE clause against the real database.)
+      const usedCode = 'INVDD' + mkCode(7); createdCodes.push(usedCode);
+      await createBindCode(usedCode, invBiz.id, soonIso(8));
+      const usedBefore = (await svc.from('bind_codes').select('expires_at').eq('code', usedCode).single()).data;
+      await reset();
+      await good(msg(chatX, '/start ' + usedCode));
+      await expireLiveBindCodes(invBiz.id);
+      const usedAfter = (await svc.from('bind_codes').select('used_at, expires_at').eq('code', usedCode).single()).data;
+      line(!!usedAfter.used_at && usedAfter.expires_at === usedBefore.expires_at && (await liveInvites()).length === 0,
+        'OP19', 'real DB: expire leaves a used code and its expiry alone',
+        `used=${!!usedAfter.used_at} live=${(await liveInvites()).length}`);
+
+      // OP20: restore after a failed bind. Claim, restore, claim again.
+      const restoreCode = 'INVEE' + mkCode(7); createdCodes.push(restoreCode);
+      await createBindCode(restoreCode, invBiz.id, soonIso(9));
+      const claimed = await claimBindCode(restoreCode);
+      const restored = await restoreBindCode(restoreCode, invBiz.id);
+      const reclaimed = await claimBindCode(restoreCode);
+      line(claimed === invBiz.id && restored === 1 && reclaimed === invBiz.id,
+        'OP20', 'real DB: a claim can be restored and claimed again',
+        `claimed=${claimed === invBiz.id} restored=${restored}`);
+
+      // OP4: /phones marks the owner (oldest) and lists the others.
+      await reset();
+      await good(msg(OP, '/phones alder-demo'));
+      const phonesText = await allText();
+      line(/Phone 1 · main phone/.test(phonesText) && /Phone 3/.test(phonesText), 'OP4',
+        '/phones: owner marked, other phones listed', `lines=${phonesText.split('\n').length}`);
+
+      // OP6: a forged p: from a client changes nothing.
+      const rows = (await svc.from('business_chats').select('id, tg_chat_id').eq('business_id', bizA.id).order('created_at')).data;
+      const thirdRow = rows[rows.length - 1].id;
+      await reset();
+      await good(cb(chatA2, 'p:' + thirdRow));
+      const stillThere = (await svc.from('business_chats').select('id').eq('id', thirdRow)).data.length;
+      line((await answersNow()).includes('Not found') && stillThere === 1, 'OP6',
+        'forged operator callback from a client: Not found, nothing removed', `rows=${stillThere}`);
+
+      // OP5: the operator asks, then removes.
+      await reset();
+      await good(cb(OP, 'p:' + thirdRow));
+      const confirmText = await allText();
+      await reset();
+      await good(cb(OP, 'P:' + thirdRow));
+      const gone = (await svc.from('business_chats').select('id').eq('id', thirdRow)).data.length;
+      line(/Remove it\?/.test(confirmText) && gone === 0, 'OP5',
+        'operator remove: confirm, then the row is gone', `confirm=${/Remove it/.test(confirmText)} gone=${gone}`);
+
+      // OP7: /businesses lists both slugs with a phone count.
+      await reset();
+      await good(msg(OP, '/businesses'));
+      const bizText = await allText();
+      line(bizText.includes('alder-demo · demo ·') && bizText.includes('second-demo · demo ·'), 'OP7',
+        '/businesses: slug, status, phone count', `len=${bizText.length}`);
+
+      // OP8: /id works unbound and says nothing else.
+      await svc.from('business_chats').delete().eq('tg_chat_id', chatX);
+      await reset();
+      await good(msg(chatX, '/id'));
+      const idText = await allText();
+      line(idText.includes(String(chatX)) && idText.includes('OPERATOR_CHAT_ID') && !idText.includes('alder'), 'OP8',
+        '/id: this chat id, unbound, nothing else', `len=${idText.length}`);
+
+      // OP9: paste the code instead of /start; then a bad code from an unbound
+      // chat gets one generic answer.
+      const pasteCode = mkCode(12); createdCodes.push(pasteCode);
+      await createBindCode(pasteCode, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
+      await reset();
+      await good(msg(bindX, '  ' + pasteCode.slice(0, 4).toLowerCase() + '-' + pasteCode.slice(4).toLowerCase() + ' '));
+      const bound = (await svc.from('business_chats').select('business_id').eq('tg_chat_id', bindX).maybeSingle()).data;
+      await reset();
+      await good(msg(chatA3, mkCode(12)));
+      line(!!bound && bound.business_id === bindBiz.id && (await allText()) === C.BOT_CODE_BAD, 'OP9',
+        'pasted code binds (case/space/hyphen); a bad one gets one generic answer',
+        `bound=${!!bound}`);
+
+      // OP10/OP11 need a business whose ONLY phones are fixtures: on alder-demo
+      // the owner's real phones are older, so they are the main phone and a
+      // fixture can never exercise ownership transfer. A throwaway business keeps
+      // the real binding out of it.
+      const OP_SLUG = `op-${RUN}`;
+      const { data: opBiz } = await svc.from('businesses').insert({
+        slug: OP_SLUG, name: 'OP Fixture', owner_email: 'op@example.com',
+        google_review_url: 'https://g.page/r/op', timezone: 'America/Chicago', status: 'demo',
+      }).select('id').single();
+      const opChatA = FIXTURE_CHATS.webhookOpA, opChatB = FIXTURE_CHATS.webhookOpB;
+      // Explicit, distinct created_at: one INSERT gives both rows the same
+      // now(), and the id tiebreak would then decide who the main phone is.
+      const t0 = Date.now();
+      await svc.from('business_chats').insert([
+        { business_id: opBiz.id, tg_chat_id: opChatA, created_at: new Date(t0 - 2000).toISOString() },
+        { business_id: opBiz.id, tg_chat_id: opChatB, created_at: new Date(t0 - 1000).toISOString() },
+      ]);
+
+      // OP10: the second phone cannot invite or list recipients.
+      await reset();
+      await good(msg(opChatB, '/invite'));
+      const t1 = await allText();
+      await reset();
+      await good(msg(opChatB, '/recipients'));
+      const t2 = await allText();
+      line(t1 === C.BOT_OWNER_ONLY && t2 === C.BOT_OWNER_ONLY, 'OP10',
+        'second phone: /invite and /recipients are owner-only', `invite=${t1.length} recipients=${t2.length}`);
+
+      // OP11: the owner removes itself; the oldest remaining phone becomes owner.
+      await reset();
+      await good(msg(opChatA, '/recipients'));
+      const ownerRows = (await svc.from('business_chats').select('id').eq('business_id', opBiz.id).order('created_at').order('id')).data;
+      await good(cb(opChatA, 'x:' + ownerRows[0].id));
+      await good(cb(opChatA, 'X:' + ownerRows[0].id));
+      await reset();
+      await good(msg(opChatB, '/invite'));
+      const nowOwner = (await allText()) !== C.BOT_OWNER_ONLY;
+      line(nowOwner, 'OP11', 'ownership moves to the oldest remaining phone', `owner=${nowOwner}`);
+      await svc.from('businesses').delete().eq('id', opBiz.id);
+
+      // OP12: /leads has Open buttons; o: sends the current card; another
+      // business's lead is "Not found.".
+      const leadA = await seedLead(bizA.id, 'Open Me', 'open@example.com');
+      await reset();
+      await good(msg(chatA2, '/leads'));
+      const listSent = (await sent()).filter((x) => x.path.includes('/sendMessage'));
+      const kb = listSent.length ? JSON.stringify(listSent[listSent.length - 1].body.reply_markup || {}) : '';
+      await reset();
+      await good(cb(chatA2, 'o:' + leadA));
+      const card = await allText();
+      const foreign = await seedLead(bizB.id, 'Foreign', 'foreign@example.com');
+      await reset();
+      await good(cb(chatA2, 'o:' + foreign));
+      const foreignAnswer = await answersNow();
+      line(kb.includes('o:' + leadA) && card.includes('Open Me') && foreignAnswer.includes('Not found'), 'OP12',
+        '/leads Open button -> current card; another business\'s lead is Not found',
+        `kb=${kb.includes('o:')} card=${card.includes('Open Me')}`);
+
+      // OP13: my_chat_member (blocked) reaches the operator.
+      await svc.from('rate_limits').delete().like('key', 'ops:blocked:%');
+      await reset();
+      await good({ my_chat_member: { chat: { id: chatA2, type: 'private' }, new_chat_member: { status: 'kicked' } } });
+      const blockedText = await allText();
+      line(/blocked/.test(blockedText) && blockedText.includes('alder-demo'), 'OP13',
+        'blocked bot: one operator notice naming the business', `len=${blockedText.length}`);
+    } finally {
+      if (savedOp === undefined) delete process.env.OPERATOR_CHAT_ID; else process.env.OPERATOR_CHAT_ID = savedOp;
+      if (savedUser === undefined) delete process.env.TELEGRAM_BOT_USERNAME; else process.env.TELEGRAM_BOT_USERNAME = savedUser;
+      await svc.from('business_chats').delete().in('tg_chat_id', [chatA, chatA2, chatA3]);
+    }
+  }
+
 } catch (e) {
   line(false, 'C0', 'webhook suite threw', e.message);
 } finally {
   await svc.from('leads').delete().in('id', createdLeads);
-  await svc.from('business_chats').delete().in('tg_chat_id', [chatA, chatB, chatX]);
+  await sweepTestLeads(svc, [bizA.id, bizB.id], new Date().toISOString()).catch(() => 0);
+  await svc.from('business_chats').delete().in('tg_chat_id', WEBHOOK_CHATS);
   if (createdCodes.length) await svc.from('bind_codes').delete().in('code', createdCodes);
+  // The throwaways and every code minted on them go together (ON DELETE CASCADE).
+  if (codeBiz) await svc.from('businesses').delete().eq('id', codeBiz.id);
+  if (bindBiz) await svc.from('businesses').delete().eq('id', bindBiz.id);
+  if (invBiz) await svc.from('businesses').delete().eq('id', invBiz.id);
   await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
 }
 

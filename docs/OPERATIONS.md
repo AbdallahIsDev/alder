@@ -63,9 +63,33 @@ Test debris from the suites can be swept with `scripts/sweep-demo-leads.mjs` (al
 dry run; `--before`, `--include-suite`, `--include-nojs`). It never touches a lead that
 has a `review_token`.
 
+## 2b. The operator and the owner
+
+Two roles, and they never mix.
+
+- **The operator** is you. One private chat: `OPERATOR_CHAT_ID`, falling back to
+  `TELEGRAM_CHAT_ID` when the newer variable is unset. `OPERATOR_EMAIL` is the
+  email fallback for the daily alarm. Operator-only content — the redirect
+  warning, aggregate numbers, business slugs, "no phone connected" — goes only
+  there, whatever a business's status is. A `demo` business is a lifecycle
+  state, not an audience.
+- **The owner phone** is the oldest connected phone of a business. It is the only
+  one that may `/invite` or remove a phone. Every phone keeps alerts, the alert
+  buttons and `/leads`.
+
+Operator commands (`/code`, `/phones`, `/businesses`, `/operator`) work only in
+the operator chat. A client who types one gets the same reply as for any unknown
+text, so the commands are not discoverable. `/id` works in every private chat and
+is not listed in the menu: it is how you learn `OPERATOR_CHAT_ID` without a
+third-party bot.
+
+Register the menus once with `npm run tg:commands` (owner commands as the default
+menu, the operator commands as a chat-scoped menu when `OPERATOR_CHAT_ID` is
+set).
+
 ## 3. Add or remove a phone
 
-**Add.** A chat that is already bound sends `/invite`. The bot mints one single-use
+**Add (client).** The main phone sends `/invite`. The bot mints one single-use
 code for **that chat's business** and replies with a tappable deep link
 (`https://t.me/<bot>?start=<code>`) plus the plain code. The second phone taps the
 link and presses Start; it becomes a second `business_chats` row and receives every
@@ -85,28 +109,57 @@ Caps (env-overridable, `RECIPIENTS_MAX` / `INVITES_MAX`):
 - 5 bound phones per business, 3 unused live invites per business;
 - `/invite` itself is limited to 5 per chat per hour and fails closed (no reply).
 
+**Add (operator).** `/code <slug>` mints the same single-use code and returns a
+message you can forward as-is. Use it when a client has no phone connected yet,
+which is the one case `/invite` cannot cover.
+
+**Lost or stolen phone.** `/phones <slug>`, Remove on that row, confirm. The code
+that phone held is already used; mint a new one with `/code <slug>` for the
+replacement. If the phone may still have the chat open, remove it first — the
+binding is the authorisation.
+
 **Remove.** `/recipients` lists every phone as "Recipient 1, 2, …" (or the stored
 `business_chats.label` when set) with one **Remove** button each. Removing asks once;
 the last remaining phone cannot be removed. A second tap on an already-removed row
 answers "already removed" and changes nothing.
 
 A chat belongs to exactly one business. Sending a code from a chat that is already
-bound elsewhere answers "You're all set" and leaves the binding alone; the code stays
-unused.
+bound elsewhere answers "You're already connected" and leaves the binding alone;
+the code stays unused. An unbound chat can also paste the code as plain text —
+spaces, hyphens and case are ignored — and gets one identical answer for invalid,
+expired, used and unknown codes.
+
+**Delete chat vs Block.** Deleting the chat in Telegram removes it locally only:
+the binding stays, and pressing Start again answers "You're all set". Blocking the
+bot stops delivery; the next alert records `tg_failed` with status 403 and the
+operator gets one notice per business per day. Telegram also sends
+`my_chat_member` when the bot is blocked, which produces the same notice
+immediately.
 
 ## 4. Reading the alerts
 
 | Where | What it means | What to do |
 |---|---|---|
-| `/api/selfcheck` message, "N alerts did not go out." | `tg_failed` + `email_owner_failed` + `autoreply_failed` + `review_request_failed` over 24 h is non-zero | open `/api/health` and read `last_24h`; §5 |
-| `/api/selfcheck` message, "Email redirect is ON in production" | `MAIL_REDIRECT_TO` is set while `VERCEL_ENV=production` | remove it (§7) |
-| Digest line `Failed alerts N` | same four kinds, same 24 h window | same as above |
+| Alert check, `⚠️ Needs attention` / "N alerts could not be delivered" | `tg_failed` over 24 h for **that business** is non-zero | open `/api/health` and read `last_24h`; §5 |
+| Alert check, "N alert emails to you did not go out" | `email_owner_failed` for that business | check Resend and the sender domain; §5 |
+| Alert check, "N confirmation emails to a customer failed" | `autoreply_failed` for that business | the customer got no acknowledgement; §5 |
+| Alert check, "N review requests to a customer failed" | `review_request_failed` for that business | the owner can retry from the bot; §5 |
+| Alert check, "⚠️ Test mode is on …" | `MAIL_REDIRECT_TO` is set while `VERCEL_ENV=production` | remove it (§7). Demo businesses only — a client never sees this line |
+| Digest section `⚠️ Needs attention` | the same four kinds, same 24 h window, for that business | same as above |
 | `/api/health` → `mail_redirect_active: true` | `MAIL_REDIRECT_TO` is set, in **any** environment | if production, remove it |
 | `/api/health` → `webhook_secret_set: false` | `TELEGRAM_WEBHOOK_SECRET` missing → `/api/tg` answers 503 | set it (§6) |
 | `/api/health` → `salt_set: false` | `IP_HASH_SALT` missing → `/api/lead` answers 500 | set it (§6) |
 | Log line `owner_alert_fallback` | both owner channels failed and each was retried once | check Telegram and Resend |
 | Log line `autoreply_capped` | the business hit `AUTOREPLY_DAILY_CAP` (default 40) | expected on a flood; raise the cap or the plan |
 | Log line `mail_redirect_active` | first send in production with a redirect configured | remove the redirect |
+
+**Who receives what.** Every message carries only the counts of the business that
+receives it. A business with status `demo` is the operator's own: it also gets the
+redirect warning and, in a clearly separated last line, the setting name. A business
+with status `active` is a client: it hears from us only when one of its own sends
+failed, and it never sees operator text. Two businesses that share an owner email get
+one message per run, not two — the one with more failures wins, and the response's
+`deduped` count records the suppressed copy.
 
 `/api/health` and `/api/selfcheck` and `/api/digest` all answer **503 when
 `HEALTH_SECRET` is unset**, even if `CRON_SECRET` is set. `/api/health` takes
@@ -120,6 +173,20 @@ fallback instead (or `owner_alert_fallback` in the logs).
 Check the token: `node scripts/tg-webhook.mjs info` prints `ok`, `status` and the
 webhook **host** only. If Telegram rejects the token, create a new one in BotFather
 (`/revoke`), then follow §6 for `TELEGRAM_BOT_TOKEN` and re-register the webhook.
+
+**Webhook registration: `set` vs `info`.**
+`node scripts/tg-webhook.mjs set https://<host>/api/tg` registers the URL, the
+`TELEGRAM_WEBHOOK_SECRET` header, and `allowed_updates` = `message`,
+`callback_query`, `my_chat_member`. It also sends `drop_pending_updates: true`:
+Telegram discards everything it queued while the old registration was in place, so
+a tap or a message sent during the switch is lost by design. Do not run it while
+someone is mid-flow, and do not expect `/start` sent a minute earlier to arrive
+afterwards. `delete` drops pending updates too.
+`node scripts/tg-webhook.mjs info` prints the registered host, `status`,
+`pending_update_count`, the last error Telegram saw, and the allowed updates it
+actually has. If `my_chat_member` is missing from that list, the blocked-bot
+notice never arrives; re-run `set`. Neither command is called by the tests: the
+suite uses a loopback fake.
 
 **Resend quota hit.**
 Symptom: `email_owner_failed` / `autoreply_failed`, and Resend returns 429.
@@ -175,6 +242,18 @@ verify.
 email. It refuses to run while `.test-mode` exists or either `*_API_BASE` override is
 set, so it cannot be pointed at a fake by accident.
 
+## 6b. Pre-launch checklist additions
+
+- `OPERATOR_CHAT_ID` is set, and `/id` in that chat returns the same number.
+- `OPERATOR_EMAIL` is set, or you accept that the daily alarm has no fallback.
+- Every business's `owner_email` is an address **we control**. Lead alerts, the
+  self-check and the digest all send there; once `MAIL_REDIRECT_TO` is removed, a
+  placeholder address emails a stranger. `example.com` is reserved (RFC 2606) and
+  must never survive to production.
+- `npm run tg:commands` has been run since the last command change.
+- `review_links_invalid` in `/api/health` is `0` (every demo/active business has
+  an `https://` Google review link on an allowed host).
+
 ## 7. Post-merge checklist
 
 1. **Set every variable in both scopes.** Vercel → Project → Settings → Environment
@@ -185,6 +264,11 @@ set, so it cannot be pointed at a fake by accident.
 3. **Run `npm run tg:commands`** after the first deploy that adds a command. The menu
    is `/leads`, `/invite`, `/recipients`, `/help`; the script also sets the bot
    description and short description. `npm run tg:commands:info` lists what is live.
+3b. **Re-register the webhook** if this deploy adds an update type the bot has never
+   received: `node scripts/tg-webhook.mjs set https://<host>/api/tg`, then
+   `node scripts/tg-webhook.mjs info`. The `set` call drops updates Telegram queued
+   while the old registration was live, and `info` must show `my_chat_member` in
+   `allowed_updates` or the blocked-bot notice is silently never sent.
 4. **Enable the digest** with `DIGEST_ENABLED=1` (it is off by default), redeploy, then
    `curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/digest` → the body
    has `"enabled": true`. The first message goes out at the next 13:00 UTC run; until
@@ -208,3 +292,38 @@ set, so it cannot be pointed at a fake by accident.
   Telegram has none of those constraints.
 - **No queue for alerts.** If both Telegram and email fail for a lead, the lead is
   still stored and both failures are recorded as events; nothing retries later.
+- **A shared inbox gets one message.** Two businesses with the same `owner_email` are
+  de-duplicated per run, worst-first. The second business's numbers are not merged into
+  the message, so its counts are missing from that run. Distinct inboxes are the normal
+  case; this only bites an operator running several demo businesses on one address.
+- **The self-check is per business but its window is global.** Each message counts the
+  last 24 h for that business only, so two messages can cover slightly different
+  windows if the run takes long enough to cross a second boundary. At this size it does
+  not happen; it would at hundreds of businesses.
+
+## 9. Reviewing a branch, and the backup rule
+
+**Review artefacts.** For a branch that merged another branch, the `.diff`
+(`git diff origin/main...<branch>`) is the review artefact: it applies with
+`git apply --check` to a fresh worktree of `main`. The `.patch`
+(`git format-patch`) is best-effort — `git am` cannot replay a merge commit, so
+it stops there. Use the diff to review, the patch only for a linear branch.
+
+**Restoring after a test run.** The backup, the reset and the restore touch the
+`businesses` columns of `alder-demo` and **nothing else**. `business_chats` is
+never read for a restore, never deleted and never re-inserted: a phone can be
+connected at any moment, and a blanket "delete every chat, put the backup's rows
+back" silently unbinds a client. That is exactly how the second phone was lost on
+2026-11-07. `seed-check` reports the chat count and does not require it to be zero.
+
+The runner now fails a run that adds or removes a `business_chats` row, so a
+leak is loud instead of silent.
+
+### Test runs against production are a pre-launch blocker
+
+While the suites run against production, each suite binds fixture chats to
+`alder-demo` for a few minutes. A real lead arriving in that window is alerted to
+those fixture chats as well as the real phones, and a bug in a suite can touch
+real rows. **No suite may run against production once a real client is onboarded.**
+A separate test project (`docs/TEST_PROJECT.md`, `.env.test`) is a hard
+pre-launch requirement, not a nice-to-have.

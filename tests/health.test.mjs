@@ -28,11 +28,13 @@ const line = (ok, id, what, d) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${String(id).padEnd(4)}${String(what).padEnd(50)}${d ? '  ' + String(d).replace(/\s+/g, ' ').slice(0, 96) : ''}`);
 };
 
-const { default: handler } = await import('../api/health.js');
-const { default: selfcheck, shouldAlert, selfCheckText, alertTargets, deliverSelfCheck, selfCheckEmail } = await import('../api/selfcheck.js');
+const { default: handler, countInvalidReviewLinks, reviewLinkOk } = await import('../api/health.js');
+const { default: selfcheck, alertTargets, deliverSelfCheck, operatorAlarm } = await import('../api/selfcheck.js');
+const { selfCheckText, shouldAlertBusiness, failedTotal, operatorAlarmText } = await import('../lib/ops-copy.js');
+const { selfCheckEmail } = await import('../lib/email-builders.js');
 
 const KINDS = ['created', 'tg_sent', 'tg_failed', 'email_owner_sent', 'email_owner_failed', 'autoreply_failed', 'review_request_failed'];
-const TOP = ['last_24h', 'last_hour', 'mail_redirect_active', 'ok', 'salt_set', 'webhook_secret_set'];
+const TOP = ['last_24h', 'last_hour', 'mail_redirect_active', 'ok', 'operator_chat_set', 'operator_email_set', 'operator_reachable', 'review_links_invalid', 'salt_set', 'webhook_secret_set'];
 
 const call = async ({ method = 'GET', secret } = {}) => {
   const res = fakeRes();
@@ -48,6 +50,29 @@ try {
   {
     const r = await call({ secret: 'anything' });
     line(r.code === 503 && r.body && r.body.ok === false, 'H1', 'no HEALTH_SECRET -> 503', `code=${r.code}`);
+  }
+
+  /* H1b: the review-link count is strict about what is STORED. */
+  {
+    const rows = [
+      { google_review_url: 'https://g.page/r/x' },
+      { google_review_url: 'https://search.google.com/local/writereview?placeid=1' },
+      { google_review_url: 'ttps://search.google.com/local/writereview?placeid=1' },
+      { google_review_url: 'http://g.page/r/x' },
+      { google_review_url: 'https://evil.example/r' },
+      { google_review_url: '' },
+      { google_review_url: null },
+      // An allowed host with the right scheme and no identifier leads nowhere.
+      { google_review_url: 'https://g.page/r/' },
+      { google_review_url: 'https://search.google.com/local/writereview?placeid=' },
+    ];
+    const ok = reviewLinkOk('https://g.page/r/x') === true
+      && reviewLinkOk('ttps://search.google.com/x') === false
+      && reviewLinkOk('https://g.page/r/') === false
+      && reviewLinkOk('https://search.google.com/local/writereview?placeid=') === false
+      && countInvalidReviewLinks(rows) === 7;
+    line(ok, 'H1b', 'invalid links: https, allowed host, and a real identifier',
+      `invalid=${countInvalidReviewLinks(rows)}`);
   }
 
   /* H2: configured, but the caller has the wrong (or no) secret */
@@ -152,20 +177,27 @@ try {
       `${wrongHeader.code}/${wrongBearer.code}/${healthAsBearer.code}/${cronInHeader.code}`);
   }
 
-  /* S3: the rule and the message text, without a database */
+  /* S3: the owner copy and the operator alarm, without a database */
   {
-    const ruleOk = shouldAlert({ failedTotal: 0, redirectActive: false }) === false
-      && shouldAlert({ failedTotal: 1, redirectActive: false }) === true
-      && shouldAlert({ failedTotal: 0, redirectActive: true }) === true;
+    const ruleOk = shouldAlertBusiness({ status: 'demo', failed: 0 }) === false
+      && shouldAlertBusiness({ status: 'demo', failed: 2 }) === true
+      && shouldAlertBusiness({ status: 'active', failed: 0 }) === false
+      && shouldAlertBusiness({ status: 'active', failed: 2 }) === true
+      && shouldAlertBusiness({ status: 'paused', failed: 2 }) === false;
     const zero = Object.fromEntries(KINDS.map((k) => [k, 0]));
-    const text = selfCheckText({ ...zero, tg_failed: 2 }, { redirectActive: true });
-    const countsOnly = !text.includes('@') && !/alder/i.test(text) && !text.includes('+1')
-      && text.includes('tg_failed 2') && text.includes('2 alerts did not go out')
-      && text.includes('Email redirect is ON');
-    const clean = selfCheckText(zero, { redirectActive: false });
-    const silent = !clean.includes('did not go out') && !clean.includes('redirect');
-    line(ruleOk && countsOnly && silent, 'S3', 'selfcheck: rule and counts-only text',
-      `rule=${ruleOk} counts=${countsOnly} silent=${silent}`);
+    const owner = selfCheckText({ ...zero, tg_failed: 2, created: 3 });
+    const own = owner.includes('New requests: 3') && owner.includes('2 alerts could not be delivered');
+    const noOperator = !/Test mode|MAIL_REDIRECT_TO|alder-demo|second-demo/.test(owner);
+    const alarm = operatorAlarmText({ rows: [{ slug: 'alder-demo', day: { tg_failed: 2 } }], redirectActive: true, noPhoneSlugs: ['second-demo'] });
+    const alarmOk = alarm.includes('alder-demo: 2 alerts could not be delivered')
+      && alarm.includes('No phone connected: second-demo')
+      && alarm.includes('Test mode is on')
+      && alarm.indexOf('Needs attention') < alarm.indexOf('Test mode');
+    const silent = operatorAlarmText({ rows: [], redirectActive: false, noPhoneSlugs: [] }) === null;
+    const totals = failedTotal({ ...zero, tg_failed: 2, autoreply_failed: 1 }) === 3;
+    line(ruleOk && own && noOperator && alarmOk && silent && totals, 'S3',
+      'owner copy has no operator text; one alarm names every business',
+      `rule=${ruleOk} own=${own} clean=${noOperator} alarm=${alarmOk} silent=${silent}`);
   }
 
   /* S6-S9: delivery — Telegram first, email only when Telegram did not land.
@@ -227,9 +259,14 @@ try {
   /* S10: the email body carries the counts and nothing else */
   {
     const zero = Object.fromEntries(KINDS.map((k) => [k, 0]));
-    const body = selfCheckEmail(selfCheckText({ ...zero, tg_failed: 1 }, { redirectActive: false }), '2026-11-07');
-    const clean = !body.subject.includes('@') && !body.html.includes('@') && !/alder/i.test(body.text + body.html)
-      && body.text.includes('tg_failed 1') && body.html.includes('tg_failed 1');
+    const body = selfCheckEmail({ ...zero, tg_failed: 1 }, '2026-11-07');
+    // The shell's <style> block contains "@media", so the address check is a
+    // real address shape, not a bare "@".
+    const clean = !body.subject.includes('@') && !/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(body.html)
+      // The layout marker is data-alder-layout, so the check is the business
+      // name and an address, not the bare word.
+      && !/alder roofing|owner@|example\.com/i.test(body.text + body.html)
+      && body.text.includes('1 alert could not be delivered') && body.html.includes('1 alert could not be delivered');
     line(clean && body.subject.includes('2026-11-07'), 'S10', 'email fallback body: counts only',
       `subject=${body.subject.length} chars html=${body.html.length}`);
   }
@@ -258,7 +295,8 @@ try {
     const saved = {
       VERCEL_ENV: process.env.VERCEL_ENV, TELEGRAM_API_BASE: process.env.TELEGRAM_API_BASE,
       RESEND_API_BASE: process.env.RESEND_API_BASE, MAIL_REDIRECT_TO: process.env.MAIL_REDIRECT_TO,
-      MAIL_FROM: process.env.MAIL_FROM,
+      MAIL_FROM: process.env.MAIL_FROM, OPERATOR_CHAT_ID: process.env.OPERATOR_CHAT_ID,
+      OPERATOR_EMAIL: process.env.OPERATOR_EMAIL,
     };
     const realFetch = globalThis.fetch;
     const ctl = (base, body) => realFetch(base + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -271,6 +309,8 @@ try {
       process.env.TELEGRAM_API_BASE = TG;
       process.env.RESEND_API_BASE = RS;
       process.env.MAIL_FROM = 'alerts@example.com';
+      process.env.OPERATOR_CHAT_ID = 'op-chat';
+      process.env.OPERATOR_EMAIL = 'ops@example.com';
       delete process.env.MAIL_REDIRECT_TO;
       await ctl(TG, { mode: '500' }); await ctl(RS, { mode: 'ok' });
       await reset(TG); await reset(RS);
@@ -320,7 +360,7 @@ try {
       // "owner" is part of the event kind names (email_owner_sent), so the PII
       // check looks for the business name and an address, not that word.
       const countsOnly = m1.body && typeof m1.body.text === 'string'
-        && m1.body.text.includes('tg_failed 2') && !m1.body.text.includes('@')
+        && m1.body.text.includes('1 alert could not be delivered') && !m1.body.text.includes('@')
         && !/alder roofing|owner@|example\.com/i.test(m1.body.text);
 
       // MAIL_REDIRECT_TO still wins over owner_email, as everywhere else.
@@ -328,13 +368,23 @@ try {
       process.env.MAIL_REDIRECT_TO = 'inbox@example.com';
       const r2 = await call();
       const mail2 = (await reqs(RS)).filter((x) => x.path === '/emails');
-      const toRedirect = mail2[0] && JSON.stringify(mail2[0].body.to) === JSON.stringify(['inbox@example.com']);
+      // The redirect rewrites EVERY recipient, so both the owner and the
+      // operator email land in the test inbox.
+      const toRedirect = mail2.length === 2
+        && mail2.every((x) => JSON.stringify(x.body.to) === JSON.stringify(['inbox@example.com']));
 
+      // Two Telegram attempts: the owner chat (mode 500) and the operator alarm.
+      const opTg = tg1.find((x) => String(x.body.chat_id) === 'op-chat');
+      // Telegram is in 500 mode for everyone, so the operator alarm falls back
+      // to OPERATOR_EMAIL: two emails, one owner and one operator.
+      const opMail = mail1.find((x) => JSON.stringify(x.body.to) === JSON.stringify(['ops@example.com']));
       const ok = r1.code === 200 && r1.body.emailed === 1 && r1.body.sent === 0
-        && mail1.length === 1 && tg1.length === 1 && toOwner && keyOk && countsOnly
-        && r2.code === 200 && mail2.length === 1 && toRedirect;
+        && r1.body.operator === 'email'
+        && mail1.length === 2 && !!opMail && tg1.length === 2 && !!opTg && toOwner && keyOk && countsOnly
+        && /alder-demo: 1 alert could not be delivered/.test(opTg.body.text)
+        && r2.code === 200 && mail2.length === 2 && toRedirect;
       line(ok, 'S12', 'selfcheck: telegram down -> owner email, redirect wins',
-        `r1=${r1.code} emailed=${r1.body.emailed} mail=${mail1.length} tg=${tg1.length} toOwner=${!!toOwner} key=${!!keyOk} counts=${!!countsOnly} redirect=${!!toRedirect}`);
+        `r1=${r1.code} emailed=${r1.body.emailed} tg=${tg1.length} op=${!!opTg} key=${!!keyOk} counts=${!!countsOnly} redirect=${!!toRedirect}`);
     } catch (e) {
       line(false, 'S12', 'selfcheck: telegram down -> owner email, redirect wins', e.message);
     } finally {
@@ -410,15 +460,186 @@ try {
     }
   }
 
-  /* S5: who gets told — everyone under a redirect, only the affected businesses otherwise */
+  /* S14/S15/S16: per-business owner counts, no de-duplication, one alarm. */
   {
-    const fails = new Map([['biz-a', { tg_failed: 2 }], ['biz-b', { email_owner_failed: 1 }]]);
-    const all = ['biz-a', 'biz-b', 'biz-c'];
-    const redirect = alertTargets({ redirectActive: true, failedByBusiness: fails, allBusinessIds: all });
-    const partial = alertTargets({ redirectActive: false, failedByBusiness: fails, allBusinessIds: all });
-    const ok = redirect.length === 3 && partial.length === 2
-      && partial.includes('biz-a') && partial.includes('biz-b') && !partial.includes('biz-c');
-    line(ok, 'S5', 'selfcheck: redirect tells everyone, else only affected', `redirect=${redirect.length} partial=${partial.length}`);
+    const TG = process.env.FAKE_TG_URL, RS = process.env.FAKE_RESEND_URL;
+    const DEMO = '33333333-3333-3333-3333-333333333333';
+    const ACT = '44444444-4444-4444-4444-444444444444';
+    const B1 = '55555555-5555-5555-5555-555555555555';
+    const B2 = '66666666-6666-6666-6666-666666666666';
+    const SB = process.env.SUPABASE_URL;
+    const realFetch3 = globalThis.fetch;
+    const savedEnv = {
+      VERCEL_ENV: process.env.VERCEL_ENV, TELEGRAM_API_BASE: process.env.TELEGRAM_API_BASE,
+      RESEND_API_BASE: process.env.RESEND_API_BASE, MAIL_REDIRECT_TO: process.env.MAIL_REDIRECT_TO,
+      MAIL_FROM: process.env.MAIL_FROM, OPERATOR_CHAT_ID: process.env.OPERATOR_CHAT_ID,
+    };
+    const ctl = (base, body) => realFetch3(base + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const reset = (base) => realFetch3(base + '/__reset', { method: 'POST' });
+    const reqs = async (base) => (await (await realFetch3(base + '/__requests')).json()).requests;
+    const install = (data) => {
+      globalThis.fetch = async (input, init = {}) => {
+        const url = typeof input === 'string' ? input : input.url;
+        if (!url.startsWith(SB)) return realFetch3(input, init);
+        const u = new URL(url);
+        const table = u.pathname.replace('/rest/v1/', '');
+        const json = (b) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+        if (table === 'businesses') return json(data.businesses || []);
+        // PostgREST filters; so does this. Without the business_id filter the
+        // chat lookup would hand every business the same chat.
+        if (table === 'business_chats') {
+          const bid = (u.searchParams.get('business_id') || '').replace('eq.', '');
+          return json((data.chats || []).filter((c) => !bid || c.business_id === bid));
+        }
+        if (table === 'lead_events') return json(data.events || []);
+        if (table === 'leads') return json(data.leads || []);
+        return json([]);
+      };
+    };
+    const call = async () => {
+      const res = fakeRes();
+      await selfcheck({ method: 'GET', headers: { 'x-health-secret': 'health-test-secret-value' } }, res);
+      return res;
+    };
+    try {
+      process.env.VERCEL_ENV = 'development';
+      delete process.env.MAIL_REDIRECT_TO;
+      process.env.MAIL_FROM = 'alerts@example.com';
+      process.env.TELEGRAM_API_BASE = TG;
+      process.env.RESEND_API_BASE = RS;
+      process.env.OPERATOR_CHAT_ID = 'op-chat';
+      await ctl(TG, { mode: 'ok' }); await ctl(RS, { mode: 'ok' });
+      await reset(TG); await reset(RS);
+
+      // Demo: one failed alert, a bound chat. Active: two failed owner emails,
+      // no chat. Each owner message carries its own number and only its own; the
+      // operator gets ONE alarm naming both.
+      install({
+        businesses: [
+          { id: DEMO, slug: 'alder-demo', name: 'D', owner_email: 'demo@example.com', status: 'demo' },
+          { id: ACT, slug: 'second-demo', name: 'A', owner_email: 'client@example.com', status: 'active' },
+        ],
+        chats: [{ business_id: DEMO, tg_chat_id: 'chat-demo' }],
+        events: [
+          { lead_id: 'l-demo', kind: 'tg_failed' },
+          { lead_id: 'l-act', kind: 'email_owner_failed' },
+          { lead_id: 'l-act', kind: 'email_owner_failed' },
+        ],
+        leads: [{ id: 'l-demo', business_id: DEMO }, { id: 'l-act', business_id: ACT }],
+      });
+      const r = await call();
+      const tg = (await reqs(TG)).filter((x) => x.path.includes('/sendMessage'));
+      const mail = (await reqs(RS)).filter((x) => x.path === '/emails');
+      const ownerTg = tg.find((x) => String(x.body.chat_id) === 'chat-demo');
+      const opTg = tg.find((x) => String(x.body.chat_id) === 'op-chat');
+      const clientText = (mail[0] && mail[0].body && mail[0].body.text) || '';
+      const split = r.code === 200 && r.body.sent === 1 && r.body.emailed === 1 && r.body.failed === 3
+        && tg.length === 2 && mail.length === 1
+        && /1 alert could not be delivered/.test(ownerTg.body.text) && !/2 alert emails/.test(ownerTg.body.text)
+        && /2 alert emails to you did not go out/.test(clientText) && !/1 alert could not/.test(clientText)
+        && !/MAIL_REDIRECT_TO|alder-demo|second-demo/.test(clientText);
+      line(split, 'S14', 'each owner message carries only its own counts',
+        `sent=${r.body.sent} emailed=${r.body.emailed} tg=${tg.length} failed=${r.body.failed}`);
+
+      const alarmOk = !!opTg
+        && /alder-demo: 1 alert could not be delivered/.test(opTg.body.text)
+        && /second-demo: 2 alert emails to the owner did not go out/.test(opTg.body.text)
+        && /No phone connected: second-demo/.test(opTg.body.text);
+      line(alarmOk, 'S15', 'the operator gets one alarm naming every affected business',
+        `op=${!!opTg} slugs=${alarmOk}`);
+
+      // Two active businesses, one shared inbox, one failure each: two messages,
+      // because each carries that business's own numbers (decision: never drop).
+      await reset(TG); await reset(RS);
+      install({
+        businesses: [
+          { id: B1, slug: 'b1', name: 'B1', owner_email: 'shared@example.com', status: 'active' },
+          { id: B2, slug: 'b2', name: 'B2', owner_email: 'shared@example.com', status: 'active' },
+        ],
+        chats: [],
+        events: [{ lead_id: 'l-1', kind: 'tg_failed' }, { lead_id: 'l-2', kind: 'tg_failed' }],
+        leads: [{ id: 'l-1', business_id: B1 }, { id: 'l-2', business_id: B2 }],
+      });
+      const r2 = await call();
+      const mail2 = (await reqs(RS)).filter((x) => x.path === '/emails');
+      line(r2.code === 200 && r2.body.emailed === 2 && mail2.length === 2, 'S16',
+        'a shared inbox gets two messages, one per business',
+        `emailed=${r2.body.emailed} mail=${mail2.length}`);
+    } catch (e) {
+      line(false, 'S14', 'selfcheck: per-business counts', e.message);
+    } finally {
+      globalThis.fetch = realFetch3;
+      for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+      await ctl(TG, { mode: 'ok' }).catch(() => {});
+      await ctl(RS, { mode: 'ok' }).catch(() => {});
+    }
+  }
+
+  /* S5: who gets an owner message — only the business with its own failures */
+  {
+    const businesses = [
+      { id: 'biz-a', slug: 'biz-a', status: 'demo' }, { id: 'biz-b', slug: 'biz-b', status: 'active' },
+      { id: 'biz-c', slug: 'biz-c', status: 'active' }, { id: 'biz-d', slug: 'biz-d', status: 'demo' },
+    ];
+    const counts = new Map([['biz-a', { tg_failed: 2 }], ['biz-b', { email_owner_failed: 1 }]]);
+    const targets = alertTargets({ businesses, counts });
+    const ok = targets.length === 2 && targets.includes('biz-a') && targets.includes('biz-b')
+      && !targets.includes('biz-c') && !targets.includes('biz-d');
+    // The alarm, by contrast, is one message that names both.
+    const alarm = operatorAlarm({
+      businesses, counts,
+      chatsByBusiness: new Map([['biz-a', ['c']], ['biz-b', []], ['biz-c', ['c']], ['biz-d', []]]),
+      recentLeadBusinesses: new Set(),
+      redirectActive: false,
+    });
+    // biz-d is a demo business with no chat and no recent lead: parked, not an
+    // incident, so it is not listed any more.
+    const alarmOk = !!alarm && alarm.body.includes('biz-a: 2 alerts') && alarm.body.includes('biz-b: 1 alert email')
+      && alarm.body.includes('No phone connected: biz-b') && !alarm.body.includes('biz-d');
+    line(ok && alarmOk, 'S5', 'owner targets are per business; the alarm aggregates',
+      `targets=${targets.length} alarm=${alarmOk}`);
+  }
+
+  /* S17-S20: the operator alarm goes quiet when nothing is actually wrong */
+  {
+    const demo = { id: 'd1', slug: 'second-demo', status: 'demo' };
+    const active = { id: 'a1', slug: 'client', status: 'active' };
+    const none = new Map();
+
+    const quiet = operatorAlarm({
+      businesses: [demo], counts: none,
+      chatsByBusiness: new Map([['d1', []]]), recentLeadBusinesses: new Set(), redirectActive: false,
+    });
+    line(quiet === null, 'S17', 'empty demo with no lead and no chat: no alarm at all', `alarm=${!!quiet}`);
+
+    const activeAlarm = operatorAlarm({
+      businesses: [active], counts: none,
+      chatsByBusiness: new Map([['a1', []]]), recentLeadBusinesses: new Set(), redirectActive: false,
+    });
+    line(!!activeAlarm && activeAlarm.body.includes('No phone connected: client'), 'S18',
+      'active client with no chat: alarm', `alarm=${!!activeAlarm}`);
+
+    const demoLead = operatorAlarm({
+      businesses: [demo], counts: none,
+      chatsByBusiness: new Map([['d1', []]]), recentLeadBusinesses: new Set(['d1']), redirectActive: false,
+    });
+    line(!!demoLead && demoLead.body.includes('No phone connected: second-demo'), 'S19',
+      'demo with a lead in the last week and no chat: alarm', `alarm=${!!demoLead}`);
+
+    const unknown = operatorAlarm({
+      businesses: [active], counts: none,
+      chatsByBusiness: new Map([['a1', null]]), recentLeadBusinesses: new Set(), redirectActive: false,
+    });
+    line(unknown === null, 'S20', 'a chat lookup that failed is unknown, not "no phone"', `alarm=${!!unknown}`);
+
+    const noRecent = operatorAlarm({
+      businesses: [demo], counts: none,
+      chatsByBusiness: new Map([['d1', []]]), recentLeadBusinesses: null, redirectActive: false,
+    });
+    line(!!noRecent && noRecent.body.includes('No phone connected: second-demo'), 'S21',
+      'a failed recent-lead query reports the demo row instead of excusing it', `alarm=${!!noRecent}`);
   }
 
   /* S4: authorised call — shape only; `sent` depends on live data and is not asserted */
@@ -428,7 +649,7 @@ try {
     const shapeOk = r.code === 200 && b.ok === true
       && typeof b.sent === 'number' && typeof b.failed === 'number'
       && typeof b.redirect_active === 'boolean'
-      && JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['emailed', 'failed', 'ok', 'redirect_active', 'sent']);
+      && JSON.stringify(Object.keys(b).sort()) === JSON.stringify(['emailed', 'failed', 'ok', 'operator', 'operator_reachable', 'redirect_active', 'sent']);
     line(shapeOk, 'S4', 'selfcheck: authorised call returns counts only', `code=${r.code} sent=${b.sent} failed=${b.failed}`);
   }
 

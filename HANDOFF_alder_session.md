@@ -9,6 +9,57 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - Final full run after this bundle (all green): `db-wall 27, lead-api 44, notify 37, webhook 42, review 21, fallback 7, brand 6, outbound 7` = **191 tests**. Outbound went 4 → 7 because F5–F7 were added; no test was removed or skipped (191 PASS/FAIL lines in the run log).
 - Production is live; suites read the production database (see caveat below).
 
+## What changed in this bundle (operator, owner, recovery — 2026-11-07)
+
+- **Two roles, never mixed.** The operator chat is `OPERATOR_CHAT_ID` (falling back to
+  `TELEGRAM_CHAT_ID`); `OPERATOR_EMAIL` is the alarm fallback. Operator-only content —
+  redirect warning, aggregates, slugs, "no phone connected" — goes only there. The
+  `status=demo` audience rule is gone; a demo business is a lifecycle state.
+- **One alarm.** `/api/selfcheck` sends one aggregated operator message (problems first,
+  each affected business by slug), then owner messages per business. No recipient
+  de-duplication: two businesses sharing an inbox get two messages.
+- **Operator commands**: `/code`, `/phones`, `/businesses`, `/operator`, all authorised by
+  chat id in a private chat; `/id` works everywhere and is not in the menu. Menus are
+  registered by `npm run tg:commands` (owner default, operator chat-scoped).
+- **Owner phone = oldest connected phone.** Only it may `/invite` or remove; every phone
+  keeps alerts, buttons and `/leads`.
+- **Recovery**: paste a code in an unbound chat; `/leads` newest 8 with Open buttons and
+  Older paging; a stale tap answers "Already updated." and refreshes the card.
+- **Blocked bot**: 403 on the only phone, or `my_chat_member` kicked, sends the operator
+  one notice per business per day. `setWebhook` now subscribes to `my_chat_member`.
+- **Tests guard**: `tests/env.mjs` installs a fetch guard — any non-loopback, non-Supabase
+  host throws `network_guard_blocked` whatever `VERCEL_ENV` says.
+- **`/invite` fixed** on `fix-invite-message` (merged here): real deep link, real line
+  breaks, and `tests/bot-text.test.mjs` scans every user-facing string for artifacts.
+- Not applied: any migration. `docs/PROPOSALS.md` §5d is still the only schema proposal.
+
+## What changed in this bundle (ops audience, branch `ops-audience`)
+
+- **The self-check is per business.** It used to count every `*_failed` event globally and send
+  that one text to every target, so a demo business was told about another business's failures.
+  `eventCountsByBusiness` (lib/digest-db.js) now returns `Map<business_id, {kind: n}>` from two
+  paged queries, and each message carries only its own numbers.
+- **Audience rule, no new env var.** `shouldAlertBusiness` (lib/ops-copy.js): a `demo` business
+  is told when it has a failure **or** the mail redirect is on; an `active` client is told only
+  when one of its own sends failed, and never sees the redirect warning or a setting name. A
+  paused or churned business is never told anything.
+- **One recipient, one message.** `deliverToBusinesses` de-dupes chat ids and (via `mailKeyFor`)
+  owner addresses per run. Targets are sorted worst-first, so a shared inbox keeps the message
+  with the most failures. The response gained `deduped`.
+- **Every email now uses the shared layout.** `lib/email-builders.js` is the registry;
+  `selfCheckEmail` and `digestEmail` render through `shell()`/`opsHeader()`, so the logo is a
+  referenced `cid:brand-logo` instead of an attachment nobody points at (that stray "logo.png"
+  card). `shell()` carries `data-alder-layout="1"` as the checkable marker.
+- **Copy rewritten in plain words.** "Your lead summary" (digest) and "Alert check" (self-check):
+  no event names, no underscores, no "tg", problems first, and a "Needs attention" section that
+  does not exist when nothing failed.
+- **Guard test:** `tests/email-layout.test.mjs` (L1–L4) asserts every registered builder produces
+  the marker, the ops email references the CID logo, the detector rejects a hand-rolled body, and
+  every module that calls `sendMail()` imports the registry.
+- **Preview gallery:** `node scripts/preview.mjs` now renders the digest email, both alert-check
+  emails and the four ops text variants.
+- Proposal only: owner-controlled summary schedule, `docs/PROPOSALS.md` §5d. No migration, no code.
+
 ## What changed in this bundle (test speed)
 
 - Measured before/after, full run, same machine. Before (`_debug/before-run.txt`, pre-bundle code): total **411.4 s**, of which dev-ready 55.8 s; lead-api **125.9 s**, notify 32.9 s, webhook **102.9 s**, review 64.6 s, fallback 16.8 s, db-wall 7.7 s, brand 0.3 s, outbound 0.07 s. After (`_debug/final5-run.txt`): total **304.2 s**; lead-api **85.7 s**, notify 28.3 s, webhook **89.5 s**, review 44.6 s, fallback 16.5 s, db-wall 7.7 s, brand 0.3 s, outbound 0.1 s. The eight suites sum to 272.7 s, so 31.5 s of the 304.2 s is process overhead (npx version check, dev start, canary, cleanup).
@@ -110,14 +161,14 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 ## Ops endpoints
 
 - `GET /api/health` — seven event counts for the last hour and the last 24 hours (`created`, `tg_sent`, `tg_failed`, `email_owner_sent`, `email_owner_failed`, `autoreply_failed`, `review_request_failed`) plus `mail_redirect_active`, `webhook_secret_set`, `salt_set`. Numbers and booleans only; no PII, no business names, no env values. Auth: `x-health-secret` compared in constant time; **503 when `HEALTH_SECRET` is unset**, 401 otherwise, 405 for anything but GET.
-- `GET /api/selfcheck` — same counts, but it only messages anyone when something is wrong: any `*_failed` in 24 h, or `MAIL_REDIRECT_TO` set while `VERCEL_ENV=production`. It sends one plain-text, counts-only Telegram message to the bound chats of the affected businesses (every business with a chat, in the redirect case). **If a business has no chat, or none of its sends landed, the same text goes to its `owner_email` instead** — a fallback, never a second copy. Clean state sends nothing. The response is `{ ok, sent, emailed, failed, redirect_active }`.
+- `GET /api/selfcheck` — per-business counts for the last 24 h. A `demo` business is messaged when one of its own sends failed **or** `MAIL_REDIRECT_TO` is set while `VERCEL_ENV=production`; an `active` client only when one of its own sends failed. Each message carries that business's numbers only, and only a demo business sees the redirect warning. **If a business has no chat, or none of its sends landed, the same text goes to its `owner_email` instead** — a fallback, never a second copy. Two businesses sharing one inbox get one message per run (worst-first). Clean state sends nothing. The response is `{ ok, sent, emailed, deduped, failed, redirect_active }`, where `failed` is the sum across active businesses.
 - `vercel.json` schedules `/api/selfcheck` daily at `0 9 * * *`. Vercel documents **Hobby as one run per day minimum interval** — a more frequent expression fails the deployment — and Pro/Enterprise as once per minute, so daily is legal on every plan (source: https://vercel.com/docs/schedules/cron-jobs/usage-and-pricing, read 2026-11-06). Cron Jobs are marked legacy there in favour of "Schedules".
 - Auth: `/api/health` accepts `x-health-secret` = `HEALTH_SECRET` only. `/api/selfcheck` accepts that header **or** `Authorization: Bearer $CRON_SECRET`; the two secrets are independent and neither is accepted in the other's place. Both comparisons are constant-time.
 - **Both secrets must be set in Vercel.** `/api/selfcheck` returns **503 when `HEALTH_SECRET` is unset even if `CRON_SECRET` is set** — the health secret is the gate, the cron secret is only the second way to present it. A cron with only `CRON_SECRET` configured therefore fails loudly every day instead of silently doing nothing.
 - `GET /api/digest` — daily owner digest, **off unless `DIGEST_ENABLED=1`** (returns `200 {ok:true, enabled:false}` and sends nothing). Same auth as `/api/selfcheck`. For every **active** business (`status` in `demo`/`active`; paused and churned are never messaged) with a bound chat or an `owner_email` it counts the last 24 h — new leads, possible repeats (`duplicate_of` on the `created` event), still-open leads older than 24 h but newer than `DIGEST_UNTOUCHED_DAYS` with no `contacted` event, and failed alerts — and sends one message. **Counts only**: no name, phone, email, note or business name, so the same text is safe by email. A business with 0 new, 0 untouched and 0 failed gets nothing.
 - The digest claims `digest:<businessId>` in `rate_limits` for 86 400 s before sending, so a cron retry or a second scheduler finds the slot taken and sends nothing; the email idempotency key is `digest:<businessId>:<date>`. **If nothing reached the business (sent 0 and emailed 0) the claim is released**, so a later run the same day can try again. The window is the last 24 h and the date key is the **UTC day** — a roofer in America/Chicago gets "yesterday evening to this evening" labelled with the UTC date. No per-business timezone arithmetic.
 - `vercel.json` also schedules `/api/digest` daily at `0 13 * * *` (selfcheck is `0 9 * * *`; H6 pins both schedules exactly, both daily, both resolving, different hours).
-- **Future upgrade path (not implemented):** on Vercel Pro the cron can run hourly. The digest would then send only when a business's *local* hour equals its chosen digest hour, using `businesses.timezone` (already stored and already used for the review page). That needs one `digest_hour` column on `businesses` (schema change, proposal only) and a `digest:<id>` claim that is still one per UTC day, so the hourly job cannot double-send.
+- **Future upgrade path (proposal only, `docs/PROPOSALS.md` §5d):** on Vercel Pro the cron can run hourly. The digest would send only when a business's *local* hour matches its chosen slot, using `businesses.timezone` (already stored), with one claim per business per slot (`digest:<id>:<local-date>:<morning|evening>`). That needs one `summary_schedule` column on `businesses` and a `/summary` command; neither is implemented, and `vercel.json` must keep the single daily entry until the plan is Pro.
 - Neither ops endpoint is linked from the site and all three set `Cache-Control: no-store`.
 
 ## Multiple recipients (2026-11-07 bundle)
@@ -178,4 +229,11 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 16. The per-business cap is 200 leads/hour. At two emails per lead that exhausts a Resend free-plan daily quota (100/day) in about 15 minutes, after which owner emails and auto-replies stop while Telegram keeps working. **Partly addressed:** the customer auto-reply now has its own daily ceiling (`AUTOREPLY_DAILY_CAP`, default 40). The owner email is deliberately not capped, so a flood can still exhaust the quota through owner alerts alone.
 17. `sharp` 0.34.5 carries libvips/libheif/librsvg advisories (`npm audit`: 1 high). Dev-only image pipeline, fed only local trusted files; the fix is sharp 0.35.5, a breaking change. **Deferred by decision** — revisit before the next image-pipeline run.
 18. ~~No observability~~ Partly addressed: `/api/health` (counts on demand) and `/api/selfcheck` (daily, only speaks when something failed). Still missing: an alert when the *check itself* stops running.
-19. `lead_events` has no index on `(kind, created_at)` — only `(lead_id, created_at)`. Every health/selfcheck count is a sequential scan. Fine at this size; add `create index lead_events_kind_created on public.lead_events (kind, created_at desc)` when the table grows. **Schema change, not applied.**
+19. **The digest's failure line is generic.** `digestCounts` returns one `failed` total, so the
+    message says "N messages could not be delivered" rather than naming the kind. The self-check
+    does name the kind because it reads the events per business. Splitting the digest count by kind
+    is a small change to `digestCounts`, not done here.
+20. **A shared owner email loses one business's numbers.** De-duplication keeps one message per
+    recipient per run (worst-first) instead of merging two businesses' counts. In production the
+    two owner addresses are distinct, so this is theoretical today.
+21. `lead_events` has no index on `(kind, created_at)` — only `(lead_id, created_at)`. Every health/selfcheck count is a sequential scan. Fine at this size; add `create index lead_events_kind_created on public.lead_events (kind, created_at desc)` when the table grows. **Schema change, not applied.**

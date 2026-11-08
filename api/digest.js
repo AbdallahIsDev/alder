@@ -21,7 +21,12 @@ import { hitRateLimit, clearRateLimit } from '../lib/db.js';
 import { digestCounts, digestTargets } from '../lib/digest-db.js';
 import { deliverToBusinesses } from '../lib/ops-delivery.js';
 import { sendMessage } from '../lib/tg.js';
-import { sendMail, escHtml } from '../lib/mail.js';
+import { sendMail } from '../lib/mail.js';
+import { digestEmail } from '../lib/email-builders.js';
+import { digestText } from '../lib/ops-copy.js';
+
+// Re-exported so the preview script and the tests keep one import site.
+export { digestText };
 
 const HEADER = 'x-health-secret';
 const DAY = 24 * 3600 * 1000;
@@ -44,29 +49,6 @@ export function digestEnabled() {
 /** A business with nothing to report gets no message at all. */
 export function digestHasSomething(day) {
   return day.newLeads > 0 || day.untouched > 0 || day.failed > 0;
-}
-
-/** The message. Counts only, so the same text is safe by email. */
-export function digestText(day, dateKey) {
-  return [
-    `Daily digest — ${dateKey} (UTC)`,
-    '',
-    `New leads ${day.newLeads}`,
-    `Possible repeats ${day.repeats}`,
-    `Untouched over 24 h ${day.untouched}`,
-    `Failed alerts ${day.failed}`,
-    '',
-    'Open /leads in the bot to see them.',
-  ].join('\n');
-}
-
-/** The email body: same text, wrapped so it survives plain-text clients. */
-export function digestEmail(text, dateKey) {
-  return {
-    subject: `Daily digest — ${dateKey}`,
-    text,
-    html: `<pre style="font:13px/1.5 ui-monospace,monospace;white-space:pre-wrap">${escHtml(text)}</pre>`,
-  };
 }
 
 function authorised(req, healthSecret, cronSecret) {
@@ -126,14 +108,14 @@ export default async function handler(req, res) {
     const { sent, emailed, perTarget } = await deliverToBusinesses({
       targets: due,
       // Per business: the counts differ, even though no count identifies anyone.
-      textFor: (id) => digestText(counts.get(id), dateKey),
+      textFor: (id) => digestText(counts.get(id)),
       chatsFor: (id) => chatMap.get(id) || [],
       sendTg: (chat, body) => sendMessage(chat, body),
-      sendMailFor: async (id, body) => {
+      sendMailFor: async (id) => {
         const owner = byId.get(id) && byId.get(id).ownerEmail;
         if (!owner) return { ok: false, status: 'no_owner_email' };
         return sendMail({
-          to: owner, fromName: 'Lead Alerts', ...digestEmail(body, dateKey),
+          to: owner, fromName: 'Lead Alerts', ...digestEmail(counts.get(id), dateKey),
           idempotencyKey: `digest:${id}:${dateKey}`,
         });
       },

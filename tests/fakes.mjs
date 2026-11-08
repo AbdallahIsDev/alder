@@ -17,7 +17,8 @@ function start(name) {
     if (req.url === '/__control' && req.method === 'POST') {
       try {
         const c = JSON.parse(raw || '{}');
-        if (c.mode !== undefined) { state.mode = String(c.mode); state.hangUsed = false; }
+        if (c.mode !== undefined) { state.mode = String(c.mode); state.hangUsed = false; state.calls = 0; }
+        if (c.nth !== undefined) state.nth = Number(c.nth);
         if (c.status !== undefined) state.status = Number(c.status);
         if (c.hangMs !== undefined) state.hangMs = Number(c.hangMs);
       } catch {}
@@ -42,6 +43,8 @@ function start(name) {
     let mode = state.mode;
     if (mode === '400_if_keyboard') mode = parsed && parsed.reply_markup ? '400' : 'ok';
     if (mode === 'hang_once') mode = state.hangUsed ? 'ok' : 'hang';
+    // fail_nth: fail exactly the nth request after the last control call.
+    if (mode === 'fail_nth') { state.calls = (state.calls || 0) + 1; mode = state.calls === Number(state.nth || 1) ? '500' : 'ok'; }
     if (mode === 'hang' && state.mode === 'hang_once') state.hangUsed = true;
 
     if (mode === 'hang') {

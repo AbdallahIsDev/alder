@@ -24,14 +24,28 @@ export function loadDotEnvFiles({ env = process.env, root = ROOT, files = ['.env
   return loadEnv({ env, root, files, testEnv: false }).env;
 }
 
+import { BOT_DESCRIPTION, BOT_SHORT_DESCRIPTION } from '../lib/content.js';
+
+/* The default menu every private chat sees: owner commands only. /id exists but
+   is deliberately not listed — it is a recovery tool, not a feature. */
 export const COMMANDS = [
   { command: 'leads', description: 'Your latest requests' },
   { command: 'invite', description: 'Connect another phone' },
   { command: 'recipients', description: 'Who receives alerts' },
   { command: 'help', description: 'How this works' },
 ];
-export const DESCRIPTION = `Get your website's new estimate requests here the moment they arrive, and keep track of each one. Tap Start to connect this chat.`;
-export const SHORT_DESCRIPTION = `New estimate requests from your website, delivered instantly.`;
+
+/* Registered only for the operator chat, as a chat-scoped menu. */
+export const OPERATOR_COMMANDS = [
+  { command: 'code', description: 'Invite code for a business' },
+  { command: 'phones', description: 'Connected phones for a business' },
+  { command: 'businesses', description: 'Every business and its phones' },
+  { command: 'id', description: "This chat's id" },
+  { command: 'operator', description: 'Operator help' },
+];
+
+export const DESCRIPTION = BOT_DESCRIPTION;
+export const SHORT_DESCRIPTION = BOT_SHORT_DESCRIPTION;
 
 function fail(msg) {
   console.error('tg:commands: ' + msg);
@@ -58,6 +72,23 @@ async function main() {
     if (!r || !r.ok) fail('setMyDescription failed status=' + (r && r.status !== undefined ? r.status : 'timeout'));
     try { r = await setMyShortDescription(SHORT_DESCRIPTION); } catch { fail('tg_not_configured'); }
     if (!r || !r.ok) fail('setMyShortDescription failed status=' + (r && r.status !== undefined ? r.status : 'timeout'));
+
+    // The extra commands are registered for ONE chat, as a scoped menu. Without
+    // OPERATOR_CHAT_ID there is no chat to scope them to, and a global menu
+    // would advertise them to every client.
+    const op = String(process.env.OPERATOR_CHAT_ID || '').trim();
+    if (!op) {
+      console.log('operator menu skipped: OPERATOR_CHAT_ID is not set');
+    } else if (!/^-?\d+$/.test(op)) {
+      console.log('operator menu skipped: OPERATOR_CHAT_ID is not a numeric chat id');
+    } else {
+      let r2;
+      try {
+        r2 = await setMyCommands(OPERATOR_COMMANDS, { scope: { type: 'chat', chat_id: Number(op) } });
+      } catch { fail('tg_not_configured'); }
+      if (!r2 || !r2.ok) fail('setMyCommands(operator scope) failed status=' + (r2 && r2.status !== undefined ? r2.status : 'timeout'));
+    }
+
     for (const c of COMMANDS) console.log(c.command);
   } else {
     let r;

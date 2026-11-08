@@ -1,25 +1,33 @@
 // Vercel serverless function: GET /api/selfcheck
 //
-// Daily operational self-check. Reads the same event counts as /api/health and,
-// only when something is wrong, sends ONE plain-text Telegram message to the
-// bound chat(s) of the affected business(es). Clean state sends nothing.
+// Daily operational self-check. Reads the event counts for the last 24 hours per
+// business and produces two independent messages:
 //
-// "Wrong" means: any *_failed event in the last 24 h, or MAIL_REDIRECT_TO set
-// while VERCEL_ENV is production (every customer email is going to the test
-// address). Counts only — no names, no addresses, no env values.
+//   1. OWNER messages — one per business, only when that business's own failure
+//      count is non-zero, carrying only its own numbers. Never an aggregate,
+//      never a slug, never the redirect warning.
+//   2. ONE OPERATOR alarm — problems first, every affected business by slug with
+//      its own counts, the "no phone connected" list, and the mail-redirect
+//      warning. Telegram to OPERATOR_CHAT_ID, email to OPERATOR_EMAIL as the
+//      fallback. If neither is configured the alarm is undeliverable and that is
+//      a logged event plus an /api/health flag, not silence.
+//
+// Counts only in owner messages: no names, no addresses, no lead data, no env
+// values. The operator message may name a business by slug, and nothing else.
 //
 // Auth: x-health-secret (HEALTH_SECRET), or `Authorization: Bearer <CRON_SECRET>`
-// so a Vercel cron can call it — Vercel sends its own CRON_SECRET as a bearer
-// token. The two secrets are independent: the health secret is not accepted as a
-// bearer and the cron secret is not accepted in the header. Both comparisons are
-// constant time. 503 when HEALTH_SECRET is unset.
+// so a Vercel cron can call it. The two secrets are independent and neither is
+// accepted in the other's place. 503 when HEALTH_SECRET is unset.
 
-import { createClient } from '@supabase/supabase-js';
 import { secretMatches } from '../lib/request.js';
-import { listBusinessChats, getBusinessById, listActiveBusinesses } from '../lib/db.js';
+import { listBusinessChats, listActiveBusinesses, sweepExpired } from '../lib/db.js';
 import { sendMessage } from '../lib/tg.js';
-import { sendMail, escHtml } from '../lib/mail.js';
+import { sendMail } from '../lib/mail.js';
 import { deliverToBusinesses } from '../lib/ops-delivery.js';
+import { selfCheckEmail, operatorAlarmEmail } from '../lib/email-builders.js';
+import { eventCountsByBusiness } from '../lib/digest-db.js';
+import { selfCheckText, operatorAlarmBody, operatorAlarmText, shouldAlertBusiness, failedTotal } from '../lib/ops-copy.js';
+import { operatorChatId, operatorEmail, operatorReachable } from '../lib/operator.js';
 
 const HEADER = 'x-health-secret';
 const KINDS = [
@@ -31,106 +39,48 @@ const KINDS = [
   'autoreply_failed',
   'review_request_failed',
 ];
-const FAILED_KINDS = ['tg_failed', 'email_owner_failed', 'autoreply_failed', 'review_request_failed'];
 const DAY = 24 * 3600 * 1000;
 
-let client = null;
-function db() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error('db_not_configured');
-  if (!client) {
-    client = createClient(url, key, {
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-      global: { headers: { 'x-application-name': 'alder-selfcheck' } },
-    });
-  }
-  return client;
-}
-
-/** The rule, kept separate so it can be tested without a database. */
-export function shouldAlert({ failedTotal, redirectActive }) {
-  return failedTotal > 0 || redirectActive;
-}
-
-/** The message. Counts only: no business name, no lead data, no env values. */
-export function selfCheckText(day, { redirectActive }) {
-  const lines = ['Lead alerts self-check', '', 'Last 24 hours'];
-  for (const k of KINDS) lines.push(`${k} ${day[k] || 0}`);
-  const failed = FAILED_KINDS.reduce((a, k) => a + (day[k] || 0), 0);
-  if (failed) {
-    lines.push('');
-    lines.push(failed === 1 ? '1 alert did not go out.' : `${failed} alerts did not go out.`);
-  }
-  if (redirectActive) {
-    lines.push('');
-    lines.push('Email redirect is ON in production: customer email is going to the test address.');
-  }
-  return lines.join('\n');
-}
-
-/** Who gets told: everyone when the redirect is swallowing all mail, otherwise
- *  only the businesses that own a failed event. */
-export function alertTargets({ redirectActive, failedByBusiness, allBusinessIds }) {
-  return redirectActive ? [...allBusinessIds] : [...failedByBusiness.keys()];
-}
-
-/** The email body. Counts only, same rule as the Telegram text. */
-export function selfCheckEmail(text, dateKey) {
-  return {
-    subject: `Lead alerts self-check — ${dateKey}`,
-    text,
-    html: `<pre style="font:13px/1.5 ui-monospace,monospace;white-space:pre-wrap">${escHtml(text)}</pre>`,
-  };
-}
-
-/* One delivery path, shared with /api/digest: Telegram first, the same text by
-   email only when no chat received it. The name stays for the handler and the
-   tests that drive it directly. */
+/* One delivery path, shared with /api/digest. */
 export const deliverSelfCheck = deliverToBusinesses;
 
-async function countsSince(iso) {
-  const out = {};
-  await Promise.all(KINDS.map(async (kind) => {
-    const { count, error } = await db()
-      .from('lead_events')
-      .select('id', { count: 'exact', head: true })
-      .eq('kind', kind)
-      .gte('created_at', iso);
-    if (error) throw error;
-    out[kind] = count || 0;
-  }));
-  return out;
+/**
+ * Who gets an owner message: a business whose OWN failure count is non-zero.
+ * Same rule for demo and active — a demo row is the operator's test business,
+ * not an audience for operator text.
+ */
+export function alertTargets({ businesses, counts }) {
+  return businesses
+    .filter((b) => shouldAlertBusiness({ status: b.status, failed: failedTotal(counts.get(b.id) || {}) }))
+    .map((b) => b.id);
 }
 
-/** business_id -> { kind: count } for the failed kinds in the window. */
-async function failuresByBusiness(iso) {
-  const { data: evs, error } = await db()
-    .from('lead_events')
-    .select('lead_id, kind')
-    .in('kind', FAILED_KINDS)
-    .gte('created_at', iso)
-    .limit(5000);
-  if (error) throw error;
-  const ids = [...new Set((evs || []).map((e) => e.lead_id))];
-  if (!ids.length) return new Map();
+/**
+ * The operator alarm for one run, or null when there is nothing to say.
+ * Exported so the aggregation can be tested without a database.
+ */
+export function operatorAlarm({ businesses, counts, chatsByBusiness, recentLeadBusinesses, redirectActive }) {
+  const rows = businesses
+    .filter((b) => failedTotal(counts.get(b.id) || {}) > 0)
+    .map((b) => ({ slug: b.slug, day: counts.get(b.id) || {} }));
 
-  const { data: leads, error: leadErr } = await db()
-    .from('leads')
-    .select('id, business_id')
-    .in('id', ids);
-  if (leadErr) throw leadErr;
-  const businessOf = new Map((leads || []).map((l) => [l.id, l.business_id]));
+  // "No phone connected" is a problem only when somebody is actually missing
+  // alerts. An empty demo row that never receives a lead is a parked test
+  // business, not an incident, and nagging about it every day trains the
+  // operator to ignore the alarm.
+  const noPhoneSlugs = businesses.filter((b) => {
+    const chats = chatsByBusiness ? chatsByBusiness.get(b.id) : [];
+    if (chats === null || chats === undefined) return false;   // unknown, not "no phone"
+    if (chats.length) return false;
+    if (b.status === 'active') return true;
+    // Unknown (null) counts as "might have had a lead": say so rather than
+    // assuming the business is parked.
+    if (recentLeadBusinesses === null) return true;
+    return recentLeadBusinesses.has(b.id);
+  }).map((b) => b.slug);
 
-  const out = new Map();
-  for (const e of evs) {
-    const biz = businessOf.get(e.lead_id);
-    if (!biz) continue;
-    const m = out.get(biz) || {};
-    m[e.kind] = (m[e.kind] || 0) + 1;
-    out.set(biz, m);
-  }
-  return out;
+  const body = operatorAlarmBody({ rows, redirectActive, noPhoneSlugs });
+  return body ? { body, text: operatorAlarmText({ rows, redirectActive, noPhoneSlugs }) } : null;
 }
 
 function authorised(req, healthSecret, cronSecret) {
@@ -141,6 +91,25 @@ function authorised(req, healthSecret, cronSecret) {
     return secretMatches({ headers: { 'x-bearer': auth.slice(7) } }, 'x-bearer', cronSecret);
   }
   return false;
+}
+
+/** Telegram, then email, then a loud log line. Never throws. */
+async function deliverOperatorAlarm({ body, text, dateKey }) {
+  const chat = operatorChatId();
+  if (chat) {
+    const r = await sendMessage(chat, text).catch(() => ({ ok: false }));
+    if (r && r.ok) return 'telegram';
+  }
+  const to = operatorEmail();
+  if (to) {
+    const r = await sendMail({
+      to, fromName: 'Lead Alerts', ...operatorAlarmEmail(body, dateKey),
+      idempotencyKey: `selfcheck:operator:${dateKey}`,
+    }).catch(() => ({ ok: false }));
+    if (r && r.ok) return 'email';
+  }
+  console.error('operator_alarm_undelivered');
+  return 'undelivered';
 }
 
 export default async function handler(req, res) {
@@ -157,54 +126,77 @@ export default async function handler(req, res) {
 
   try {
     const since = new Date(Date.now() - DAY).toISOString();
-    const day = await countsSince(since);
-    const failedTotal = FAILED_KINDS.reduce((a, k) => a + (day[k] || 0), 0);
-    // The redirect only matters where real customers are being served.
     const redirectActive = !!process.env.MAIL_REDIRECT_TO && process.env.VERCEL_ENV === 'production';
 
-    if (!shouldAlert({ failedTotal, redirectActive })) {
-      return res.status(200).json({ ok: true, sent: 0, emailed: 0, failed: 0, redirect_active: redirectActive });
+    const active = await listActiveBusinesses();
+    const counts = await eventCountsByBusiness({ sinceIso: since, kinds: KINDS });
+    const failed = active.reduce((a, b) => a + failedTotal(counts.get(b.id) || {}), 0);
+
+    // One chat query per business; there are a handful, and the operator alarm
+    // needs the empty ones to say "no phone connected".
+    const chatsByBusiness = new Map();
+    for (const b of active) {
+      // null means "could not read", which is NOT the same as "no phone": an
+      // unreachable query must never be reported as an empty business.
+      let chats = null;
+      try { chats = await listBusinessChats(b.id); } catch { console.error('operator_chats_unknown'); }
+      chatsByBusiness.set(b.id, chats);
+    }
+    // A demo business with no chat is only worth mentioning if it actually got a
+    // lead in the last week.
+    // null means "could not tell", which is not the same as "no recent lead":
+    // a demo row with no chat is then reported rather than silently excused.
+    let recentLeadBusinesses = null;
+    try {
+      const recent = await eventCountsByBusiness({
+        sinceIso: new Date(Date.now() - 7 * DAY).toISOString(), kinds: ['created'],
+      });
+      recentLeadBusinesses = new Set([...recent.keys()]);
+    } catch { console.error('operator_recent_unknown'); }
+
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const byId = new Map(active.map((b) => [b.id, b]));
+    const targets = alertTargets({ businesses: active, counts });
+
+    let sent = 0;
+    let emailed = 0;
+    if (targets.length) {
+      const r = await deliverSelfCheck({
+        targets,
+        textFor: (id) => selfCheckText(counts.get(id) || {}),
+        chatsFor: (id) => chatsByBusiness.get(id) || [],
+        sendTg: (chat, body) => sendMessage(chat, body),
+        // No de-duplication: each business's numbers are its own, and dropping
+        // one message to protect a shared inbox loses a client's only warning.
+        sendMailFor: async (id) => {
+          const b = byId.get(id);
+          if (!b || !b.owner_email) return { ok: false, status: 'no_owner_email' };
+          return sendMail({
+            to: b.owner_email,
+            fromName: 'Lead Alerts',
+            ...selfCheckEmail(counts.get(id) || {}, dateKey),
+            idempotencyKey: `selfcheck:${id}:${dateKey}`,
+          });
+        },
+      });
+      sent = r.sent;
+      emailed = r.emailed;
     }
 
-    // Who to tell: the businesses that own the failed events, or every business
-    // with a bound chat when the redirect is swallowing everyone's mail. Either
-    // way only businesses that are being served — a paused or churned client
-    // keeps its rows but is not emailed or messaged.
-    const active = await listActiveBusinesses();
-    const activeIds = new Set(active.map((b) => b.id));
-    const allBusinessIds = active.map((b) => b.id);
-    const targets = alertTargets({
-      redirectActive,
-      failedByBusiness: redirectActive ? new Map() : await failuresByBusiness(since),
-      allBusinessIds,
-    }).filter((id) => activeIds.has(id));
+    const alarm = operatorAlarm({ businesses: active, counts, chatsByBusiness, recentLeadBusinesses, redirectActive });
+    let operator = 'none';
+    if (alarm) operator = await deliverOperatorAlarm({ body: alarm.body, text: alarm.text, dateKey });
 
-    const text = selfCheckText(day, { redirectActive });
-    const dateKey = new Date().toISOString().slice(0, 10);
-    const owners = new Map();
-    const ownerOf = async (id) => {
-      if (!owners.has(id)) {
-        const b = await getBusinessById(id).catch(() => null);
-        owners.set(id, b && b.owner_email ? b.owner_email : null);
-      }
-      return owners.get(id);
-    };
+    // Housekeeping last, and never able to fail the run: bounded, counts only.
+    // A sweep error is a number in the log, not a 500 on the daily check.
+    let swept = { codes: 0, limits: 0, failed: 0 };
+    try { swept = await sweepExpired(); } catch { swept.failed++; }
+    console.error('housekeeping_swept', swept.codes, swept.limits, swept.failed);
 
-    const { sent, emailed } = await deliverSelfCheck({
-      targets,
-      text,
-      chatsFor: (id) => listBusinessChats(id),
-      sendTg: (chat, body) => sendMessage(chat, body),
-      sendMailFor: async (id, body) => {
-        const to = await ownerOf(id);
-        if (!to) return { ok: false, status: 'no_owner_email' };
-        return sendMail({
-          to, fromName: 'Lead Alerts', ...selfCheckEmail(body, dateKey),
-          idempotencyKey: `selfcheck:${id}:${dateKey}`,
-        });
-      },
+    return res.status(200).json({
+      ok: true, sent, emailed, failed, redirect_active: redirectActive,
+      operator, operator_reachable: operatorReachable(),
     });
-    return res.status(200).json({ ok: true, sent, emailed, failed: failedTotal, redirect_active: redirectActive });
   } catch (e) {
     console.error('selfcheck_failed', (e && e.code) || 'no_code');
     return res.status(500).json({ ok: false });

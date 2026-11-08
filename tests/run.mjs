@@ -16,7 +16,8 @@ import { startFakes } from './fakes.mjs';
 import { isLoopback } from '../lib/outbound.js';
 import { loadEnv, isTestEnv, checkNotProduction } from '../lib/env.js';
 import { createClient } from '@supabase/supabase-js';
-import { ALDER_DEMO } from './helpers.mjs';
+import { ALDER_DEMO, isFixtureLead, fetchAllRows } from './helpers.mjs';
+import { FIXTURE_ID_BASE } from './fixture-ids.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MARKER = path.join(ROOT, '.test-mode');
@@ -28,10 +29,13 @@ const API = 'http://localhost:3000/api/lead';
    behaviour). In-process-only suites skip starting the dev server entirely. */
 const DEFAULT_SUITES = [
   { file: 'tests/network-guard.test.mjs', needsHttp: false },
+  { file: 'tests/fixture-safety.test.mjs', needsHttp: false },
+  { file: 'tests/housekeeping.test.mjs', needsHttp: false },
   { file: 'tests/bot-text.test.mjs', needsHttp: false },
   { file: 'tests/db-wall.test.mjs', needsHttp: false },
   { file: 'tests/migrations.test.mjs', needsHttp: false },
   { file: 'tests/health.test.mjs', needsHttp: false },
+  { file: 'tests/email-layout.test.mjs', needsHttp: false },
   { file: 'tests/digest.test.mjs', needsHttp: false },
   { file: 'tests/recipients.test.mjs', needsHttp: false },
   { file: 'tests/delete-scripts.test.mjs', needsHttp: false },
@@ -88,6 +92,77 @@ function killTree(child) {
   } else {
     try { child.kill('SIGTERM'); } catch {}
   }
+}
+
+/**
+ * Every bound chat id, sorted. Tails are printed, never the full id.
+ * The result carries `ok`: an error must not compare equal to another error and
+ * let the run pass — a snapshot nobody could take proves nothing.
+ */
+/**
+ * Test-shaped leads and everything hanging off them. A real submission has a
+ * UUID key, so a customer arriving mid-run does not move these numbers; a suite
+ * that leaks a row does.
+ */
+async function debrisSnapshot(businessIds) {
+  let rows;
+  try {
+    // Scoped to this deployment's businesses and paged: an unbounded select
+    // stops at 1000 rows without saying so, and a global scan would count a
+    // fixture in another project.
+    rows = await fetchAllRows(() => svc.from('leads')
+      .select('id, idempotency_key, email').in('business_id', businessIds));
+  } catch (e) {
+    return { ok: false, code: e.code || 'no_code', n: 0, events: 0, feedback: 0 };
+  }
+  // Both signals: the suite key shape AND the reserved fixture email marker.
+  // A manual-test- lead the owner submits mid-run has neither.
+  const ids = rows.filter(isFixtureLead).map((r) => r.id);
+  if (!ids.length) return { ok: true, n: 0, events: 0, feedback: 0 };
+  const CHUNK = 80;
+  const countIn = async (table, column) => {
+    let total = 0;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK);
+      const { count, error } = await svc.from(table)
+        .select(column, { count: 'exact', head: true }).in(column, slice);
+      if (error) throw error;
+      total += count || 0;
+    }
+    return total;
+  };
+  try {
+    const [events, feedback] = await Promise.all([
+      countIn('lead_events', 'lead_id'),
+      countIn('review_feedback', 'lead_id'),
+    ]);
+    return { ok: true, n: ids.length, events, feedback };
+  } catch (e) {
+    return { ok: false, code: e.code || 'no_code', n: 0, events: 0, feedback: 0 };
+  }
+}
+
+/**
+ * Live unused bind codes for the real businesses. A suite may mint one to test a
+ * bind, but it must delete it by exact code; a leak here is what filled the
+ * owner's /invite cap (INVITES_MAX counts live unused rows). The owner must not
+ * mint a code while a run is in progress, or this looks like a leak.
+ */
+async function unusedCodeCount(businessIds) {
+  const { count, error } = await svc.from('bind_codes')
+    .select('code', { count: 'exact', head: true })
+    .in('business_id', businessIds)
+    .is('used_at', null)
+    .gt('expires_at', new Date().toISOString());
+  if (error) return { ok: false, code: error.code, n: 0 };
+  return { ok: true, code: null, n: count || 0 };
+}
+
+async function chatSnapshot() {
+  const { data, error } = await svc
+    .from('business_chats').select('tg_chat_id').order('tg_chat_id');
+  if (error) return { ok: false, code: error.code, ids: [] };
+  return { ok: true, code: null, ids: (data || []).map((r) => String(r.tg_chat_id)) };
 }
 
 async function cleanup(svc) {
@@ -160,14 +235,16 @@ if (RUN_SEED_CHECK) {
   if (error) { out('seed-check  FAIL  ' + error.code); process.exit(1); }
   if (!row) { out('seed-check  FAIL  alder-demo row missing'); process.exit(1); }
   const differing = Object.keys(seed).filter((k) => String(row[k] ?? '') !== String(seed[k]));
+  // business_chats is reported, never required to be empty: a connected phone is
+  // a real binding and the ritual must not touch it. Suites bind their own ids.
   const { data: chats } = await svc.from('business_chats').select('id').eq('business_id', row.id);
   const chatsCount = (chats || []).length;
   out(`seed-check  differing-columns: ${differing.length ? differing.join(',') : '(none)'} business_chats-rows: ${chatsCount}`);
-  if (differing.length || chatsCount > 0) {
-    out('seed-check  FAIL  reset the alder-demo row to seed values and delete its business_chats rows');
+  if (differing.length) {
+    out('seed-check  FAIL  reset the alder-demo row to seed values');
     process.exit(1);
   }
-  out('seed-check  OK  alder-demo matches seed, no chats bound');
+  out(`seed-check  OK  alder-demo matches seed, business_chats=${chatsCount}`);
   process.exit(0);
 }
 
@@ -264,7 +341,10 @@ try {
     });
     const tgReqs = await fakes.tg.requests();
     out(`runner  canary: POST ${r.status}, fake telegram requests = ${tgReqs.length}`);
-    if (r.status !== 200 || tgReqs.length !== 1) {
+    // One request per bound chat. A real business may have several phones
+    // connected, so the point is "the fake received the traffic", not "exactly
+    // one": zero means the loopback override never reached the function.
+    if (r.status !== 200 || tgReqs.length < 1) {
       throw new Error(`canary failed: the fake Telegram server received ${tgReqs.length} requests. `
         + 'The loopback override did not reach the function. Aborting before any real send.');
     }
@@ -282,6 +362,36 @@ try {
   } else {
     out('runner  no selected suite needs HTTP: vercel dev and canary skipped');
   }
+
+  /* ---------- business_chats guard ----------
+     A suite must never add or remove a binding. A cleanup that deletes by
+     tg_chat_id (the real operator chat) would silently unbind a client, so the
+     runner takes a snapshot before the suites and refuses the run if it moved.
+     Tails only: the full id is never printed. */
+  /* A killed run can leave a fixture binding behind. Every fixture id is at or
+     above FIXTURE_ID_BASE, a range no real Telegram chat can occupy, so this
+     delete can never touch a customer. It runs BEFORE the snapshot, so the run
+     starts from a clean, known state instead of failing on the last run's row. */
+  {
+    const { data: stale, error } = await svc.from('business_chats')
+      .delete().gte('tg_chat_id', FIXTURE_ID_BASE).select('tg_chat_id');
+    if (error) {
+      out(`FAIL  runner  could not pre-clean fixture chats (${error.code || 'no_code'})`);
+      process.exit(1);
+    }
+    if ((stale || []).length) out(`runner  pre-clean: removed ${stale.length} leftover fixture chat(s)`);
+  }
+
+  const businessIds = (await fetchAllRows(() => svc.from('businesses').select('id'))).map((r) => r.id);
+  const chatsBefore = await chatSnapshot();
+  if (!chatsBefore.ok) {
+    // A guard that cannot read the table before the run proves nothing after it.
+    out(`FAIL  runner  could not read business_chats before the run (${chatsBefore.code})`);
+    process.exit(1);
+  }
+  const debrisBefore = await debrisSnapshot(businessIds);
+  const codesBefore = await unusedCodeCount(businessIds);
+  const tail = (ids) => ids.map((x) => x.slice(-4)).join(',') || '(none)';
 
   /* ---------- suites ---------- */
   let failed = 0;
@@ -314,8 +424,70 @@ try {
   }
 
   out('');
+  {
+    const chatsAfter = await chatSnapshot();
+    if (!chatsBefore.ok || !chatsAfter.ok) {
+      out('FAIL  runner  could not snapshot business_chats');
+      out(`      before=${chatsBefore.ok ? 'ok' : chatsBefore.code} after=${chatsAfter.ok ? 'ok' : chatsAfter.code}`);
+      out('      a guard that cannot read the table must fail the run, not pass it');
+      process.exitCode = 1;
+    } else if (JSON.stringify(chatsAfter.ids) !== JSON.stringify(chatsBefore.ids)) {
+      out(`FAIL  runner  business_chats changed during the run`);
+      out(`      before ${chatsBefore.ids.length}: ${tail(chatsBefore.ids)}`);
+      out(`      after  ${chatsAfter.ids.length}: ${tail(chatsAfter.ids)}`);
+      out('      a suite added or removed a binding; every test fixture must use its own id');
+      process.exitCode = 1;
+    } else {
+      out(`runner  business_chats unchanged (${chatsBefore.ids.length}: ${tail(chatsBefore.ids)})`);
+    }
+  }
+
+  {
+    const codesAfter = await unusedCodeCount(businessIds);
+    if (!codesBefore.ok || !codesAfter.ok) {
+      out('FAIL  runner  could not count unused bind codes');
+      out(`      before=${codesBefore.ok ? 'ok' : codesBefore.code} after=${codesAfter.ok ? 'ok' : codesAfter.code}`);
+      process.exitCode = 1;
+    } else if (codesAfter.n > codesBefore.n) {
+      out('FAIL  runner  unused bind codes grew during the run');
+      out(`      before ${codesBefore.n}, after ${codesAfter.n}`);
+      out('      a suite minted a code on a real business and did not delete it;');
+      out('      the owner /invite cap counts exactly these rows');
+      process.exitCode = 1;
+    } else {
+      out(`runner  unused bind codes unchanged (${codesBefore.n})`);
+    }
+  }
+
+  {
+    const debrisAfter = await debrisSnapshot(businessIds);
+    // A leak is an INCREASE. A decrease is a suite's start sweep clearing what a
+    // killed run left behind, which is the behaviour we asked for.
+    const grew = debrisAfter.n > debrisBefore.n
+      || debrisAfter.events > debrisBefore.events
+      || debrisAfter.feedback > debrisBefore.feedback;
+    const shrank = debrisAfter.n < debrisBefore.n;
+    const same = debrisBefore.ok && debrisAfter.ok && !grew && !shrank
+      && debrisBefore.n === debrisAfter.n
+      && debrisBefore.events === debrisAfter.events
+      && debrisBefore.feedback === debrisAfter.feedback;
+    if (!debrisBefore.ok || !debrisAfter.ok || grew) {
+      out('FAIL  runner  test-shaped leads changed during the run');
+      out(`      before leads=${debrisBefore.n} events=${debrisBefore.events} feedback=${debrisBefore.feedback}`);
+      out(`      after  leads=${debrisAfter.n} events=${debrisAfter.events} feedback=${debrisAfter.feedback}`);
+      out('      a suite leaked a row (or could not be counted); clean it and fix the suite');
+      process.exitCode = 1;
+    } else if (shrank) {
+      out(`runner  test-shaped leads cleaned (${debrisBefore.n} -> ${debrisAfter.n} leads)`);
+    } else {
+      out(`runner  test-shaped leads unchanged (${debrisBefore.n} leads, ${debrisBefore.events} events, ${debrisBefore.feedback} feedback)`);
+    }
+  }
+
   out(`runner  total ${((Date.now() - TIMING_TOTAL) / 1000).toFixed(1)}s`);
-  out(failed ? `RUNNER  ${failed} suite(s) FAILED` : 'RUNNER  all suites passed');
+  // exitCode can be set by the business_chats guard without a suite failing.
+  const runnerFailed = failed || process.exitCode === 1;
+  out(runnerFailed ? `RUNNER  ${failed || 1} suite(s) FAILED` : 'RUNNER  all suites passed');
   if (failed) process.exitCode = 1;
 } catch (e) {
   fail(e.message || String(e));

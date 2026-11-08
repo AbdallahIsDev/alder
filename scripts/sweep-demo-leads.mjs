@@ -15,6 +15,7 @@
 //      customer may hold that link
 //   4. the idempotency key has a test shape:
 //        canary-%            the runner's canary row, always safe
+//        manual-test-%       scripts/send-test-lead.mjs, always safe
 //        ^[0-9a-z]{8}-…      suite runs; needs --include-suite
 //        form-%              server-minted no-JS key; needs --include-nojs,
 //                            because a real no-JS visitor gets the same shape
@@ -32,6 +33,12 @@ if (!slug) fail(`${NAME}: usage: sweep-demo-leads.mjs <slug> [--yes --confirm <s
 if (!/^[a-z0-9-]{2,60}$/.test(slug)) fail(`${NAME}: that does not look like a slug.`);
 
 const includeSuite = argv.includes('--include-suite');
+// --prefix <p> targets ONE suite run's keys ("<run>-<suffix>"). Same safety
+// rules as everything else: dry run, --yes + --confirm, prod opt-in, scoped by
+// business, and a UUID key is never matched.
+const pi = argv.indexOf('--prefix');
+const prefix = pi > -1 ? String(argv[pi + 1] || '') : null;
+if (prefix !== null && !/^[a-z0-9]{4,12}$/.test(prefix)) fail(`${NAME}: --prefix must be 4-12 lowercase alphanumerics.`);
 const includeNojs = argv.includes('--include-nojs');
 const bi = argv.indexOf('--before');
 const before = bi > -1 ? argv[bi + 1] : new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z';
@@ -48,22 +55,29 @@ if (!found.rows.length) {
 }
 const biz = found.rows[0].id;
 
-const shapes = ["idempotency_key like 'canary-%'"];
+// 'manual-test-' is the prefix scripts/send-test-lead.mjs mints. A page-minted
+// key is a UUID, so this shape can only come from that script: always included.
+const shapes = ["idempotency_key like 'canary-%'", "idempotency_key like 'manual-test-%'"];
 // Suite runs mint '<8 base36>-<rest>'; 'measure-' is a one-off manual probe that
 // has the same character. Both are opt-in because neither is a page-minted key.
 if (includeSuite) shapes.push("(idempotency_key ~ '^[0-9a-z]{8}-' and idempotency_key !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-') or idempotency_key like 'measure-%'");
 if (includeNojs) shapes.push("idempotency_key like 'form-%'");
+if (prefix) shapes.push(`idempotency_key like '${prefix}-%'`);
 
+// A review token normally protects a row: a customer may hold that link. With
+// --prefix the operator has named ONE suite run's keys, and --include-tokened
+// says out loud that the rows it created may carry a token too.
+const includeTokened = argv.includes('--include-tokened');
 const PREDICATE = `business_id = $1
   and created_at < $2
-  and review_token is null
+  ${includeTokened ? '' : 'and review_token is null'}
   and (${shapes.join(' or ')})`;
 
 out(`${NAME}`);
 out(`${pad('target', 24)}${isProd ? 'PRODUCTION' : 'non-production'} database`);
 out(`${pad('slug', 24)}${slug}`);
 out(`${pad('before', 24)}${before}`);
-out(`${pad('shapes', 24)}canary${includeSuite ? ' + suite' : ''}${includeNojs ? ' + no-js' : ''}`);
+out(`${pad('shapes', 24)}canary + manual-test${includeSuite ? ' + suite' : ''}${includeNojs ? ' + no-js' : ''}${prefix ? ' + prefix:' + prefix : ''}${includeTokened ? ' + tokened' : ''}`);
 out('');
 
 const candidates = await client.query(
@@ -74,8 +88,9 @@ const ids = candidates.rows.map((r) => r.id);
 const byShape = {};
 for (const r of candidates.rows) {
   const s = /^canary-/.test(r.idempotency_key) ? 'canary'
-    : /^form-/.test(r.idempotency_key) ? 'no-js'
-      : 'suite';
+    : /^manual-test-/.test(r.idempotency_key) ? 'manual-test'
+      : /^form-/.test(r.idempotency_key) ? 'no-js'
+        : 'suite';
   byShape[s] = (byShape[s] || 0) + 1;
 }
 
