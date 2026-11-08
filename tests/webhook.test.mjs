@@ -1146,15 +1146,24 @@ try {
 
       // OP3: cap per slug, fail closed at 10/hour. OP2 already used one slot,
       // so clear the bucket to measure the cap itself.
-      await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
-      let okCount = 0, capped = false;
-      for (let i = 0; i < 11; i++) {
-        await reset();
-        await good(msg(OP, `/code ${CODE_SLUG}`));
-        const t = await allText();
-        if (t === C.OPERATOR_CAPPED) capped = true; else okCount++;
+      // The cap is a fixed 3600 s bucket. If the burst straddles the boundary a
+      // second row appears and the 11th mint is allowed; retry once in that
+      // case so the test measures the cap, not the clock.
+      let okCount = 0, capped = false, attempts = 0;
+      for (attempts = 1; attempts <= 2; attempts++) {
+        await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
+        okCount = 0; capped = false;
+        for (let i = 0; i < 11; i++) {
+          await reset();
+          await good(msg(OP, `/code ${CODE_SLUG}`));
+          const t = await allText();
+          if (t === C.OPERATOR_CAPPED) capped = true; else okCount++;
+        }
+        const rows = (await svc.from('rate_limits').select('window_start').eq('key', 'opcode:' + CODE_SLUG)).data;
+        if ((rows || []).length <= 1) break;
       }
-      line(okCount === 10 && capped, 'OP3', 'operator /code capped at 10 per slug per hour', `ok=${okCount} capped=${capped}`);
+      line(okCount === 10 && capped, 'OP3', 'operator /code capped at 10 per slug per hour',
+        `ok=${okCount} capped=${capped} attempts=${attempts}`);
 
       // OP14: the second message fails. The code is still valid, so the
       // operator must be told the forward text did not send and get it again.

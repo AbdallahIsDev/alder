@@ -115,7 +115,7 @@ export default async function handler(req, res) {
         const owner = byId.get(id) && byId.get(id).ownerEmail;
         if (!owner) return { ok: false, status: 'no_owner_email' };
         return sendMail({
-          to: owner, fromName: 'Lead Alerts', ...digestEmail(counts.get(id), dateKey),
+          to: owner, fromName: 'Lead Alerts', ...digestEmail(counts.get(id), dateKey, byId.get(id)),
           idempotencyKey: `digest:${id}:${dateKey}`,
         });
       },

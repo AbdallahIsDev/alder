@@ -272,9 +272,10 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - `ops-audience` (PR #6): merged to `main` on GitHub (`4348b24`); local `main` = `origin/main`.
 - `fix-code-copy`: merged to `main` as `1e3be74` (PR #8).
 - `operator-ux`: merged to `main` as `baf15d1` (PR #9).
-- `email-brand` (PR #10, draft): no emoji in email, company header everywhere; head `c7de690`.
-- `operator-roles` (new, from `origin/main`): operator never bound, operator welcome, truthful destructive confirms; head `b754c61`. Draft PR against `main`.
-- Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones** (verified after the owner's change). `git merge-tree --write-tree origin/main ops-audience` exits 0: no conflicts against `e981e0c`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
+- `email-brand`: merged to `main` as `fb4680c` (PR #10).
+- `operator-roles` (from `origin/main`): operator never bound, operator welcome, truthful destructive confirms, `/remove_lead`; head `d06d404`. Draft PR #11 against `main`.
+- Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
+- `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
 - Review artefact: `_debug/patches/ops-audience-review.diff` (gitignored), single file.
 - Remote: `origin https://github.com/AbdallahIsDev/alder.git`. Never push to `main`, never force, no tags.
@@ -314,3 +315,6 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-08 | `ops-audience` | `fafa5d8` | Client message is text + entities (no parse_mode, no visible URL, code once); link replies are role-aware, and an unbound operator cannot bind itself | T2/T3/T6/T7, OP2/OP16, W1-W5 |
 | 2026-11-08 | `fix-code-copy` | `f710cc7` | No `parse_mode` anywhere (C40); resend is text + entities; fallback drops the link sentence; operator link replies read the code state; preview renders entities | T3/T7/T8, OP14, W2 |
 | 2026-11-08 | `operator-ux` | `1c900e2` | Numeric /leads (5/page), phone list without self-remove, operator names + pickers, /id operator wording, /code cancels older codes, copy audit | OP7/11/12/22/23/24, R8/R10, T9 |
+| 2026-11-08 | `email-brand` | `e118554` | Emails strip emoji at the builder boundary; one lockup renders logo + name (platform for owner/ops, company for customers) | L5, L6 |
+| 2026-11-08 | `email-brand` | `7a96514` `057f783` `d435dcd` | Company header on every company email; digest targets carry the name; preview uses current builders; OP3 boundary retry | L6b/L7-L9, D-name, T8, OP3 |
+| 2026-11-08 | `operator-roles` | `d06d404` | `/remove_lead` (owner only, scoped, confirm + danger), operator welcome, never bound | OP25-OP28, T10 |

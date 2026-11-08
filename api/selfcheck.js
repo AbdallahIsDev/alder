@@ -174,7 +174,7 @@ export default async function handler(req, res) {
           return sendMail({
             to: b.owner_email,
             fromName: 'Lead Alerts',
-            ...selfCheckEmail(counts.get(id) || {}, dateKey),
+            ...selfCheckEmail(counts.get(id) || {}, dateKey, b),
             idempotencyKey: `selfcheck:${id}:${dateKey}`,
           });
         },

@@ -25,34 +25,39 @@ const val = (f) => { const i = argv.indexOf(f); return i > -1 ? argv[i + 1] : nu
 function fail(msg) { console.error('preview-send: ' + msg); process.exit(1); }
 
 if (!argv.includes('--yes')) fail('refusing to send without --yes');
+const emailOnly = argv.includes('--email-only');
+const redirect = String(process.env.MAIL_REDIRECT_TO || '').trim();
+if (emailOnly && !redirect) fail('--email-only needs MAIL_REDIRECT_TO; refusing to guess a recipient');
 const to = val('--to');
-if (!to || !/^-?\d+$/.test(String(to))) fail('--to <chat id> is required');
-const email = val('--email');
+if (!emailOnly && (!to || !/^-?\d+$/.test(String(to)))) fail('--to <chat id> is required');
+const email = emailOnly ? redirect : val('--email');
 
 const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-if (!argv.includes('--allow-bound')) {
+if (!emailOnly && !argv.includes('--allow-bound')) {
   const { data } = await svc.from('business_chats').select('tg_chat_id').eq('tg_chat_id', Number(to));
   if (data && data.length) fail('that chat is bound to a business; pass --allow-bound if you really mean it');
 }
 
 let sent = 0;
-for (const { name, text } of sampleTelegramTexts()) {
-  const r = await sendMessage(to, `PREVIEW · ${name}\n\n${text}`);
-  if (r && r.ok) sent++;
-  else console.log('failed ' + name + ' status=' + (r && r.status !== undefined ? r.status : 'timeout'));
+if (!emailOnly) {
+  for (const { name, text } of sampleTelegramTexts()) {
+    const r = await sendMessage(to, `PREVIEW · ${name}\n\n${text}`);
+    if (r && r.ok) sent++;
+    else console.log('failed ' + name + ' status=' + (r && r.status !== undefined ? r.status : 'timeout'));
+  }
+  console.log('telegram previews sent ' + sent);
 }
-console.log('telegram previews sent ' + sent);
 
 if (email) {
   const mails = [
     ['owner', ownerEmail({ business: sampleBusiness, lead: sampleLead })],
     ['auto-reply', autoReply({ business: sampleBusiness, lead: sampleLead })],
     ['review', reviewEmail({ business: sampleBusiness, token: 'preview-token', siteUrl: process.env.SITE_URL || 'http://localhost:3000' })],
-    ['alert-check', selfCheckEmail({ created: 3, tg_sent: 2, email_owner_sent: 1, tg_failed: 1 }, new Date().toISOString().slice(0, 10))],
-    ['lead-summary', digestEmail({ newLeads: 4, repeats: 1, untouched: 2, failed: 1 }, new Date().toISOString().slice(0, 10))],
+    ['alert-check', selfCheckEmail({ created: 3, tg_sent: 2, email_owner_sent: 1, tg_failed: 1 }, new Date().toISOString().slice(0, 10), sampleBusiness)],
+    ['lead-summary', digestEmail({ newLeads: 4, repeats: 1, untouched: 2, failed: 1 }, new Date().toISOString().slice(0, 10), sampleBusiness)],
   ];
   for (const [name, mail] of mails) {
     const r = await sendMail({

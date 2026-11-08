@@ -189,12 +189,21 @@ const samples = sampleTelegramTexts();
   const file = ' _debug/previews/telegram-invite.txt'.trim();
   const body = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const sample = samples.find((x) => x.name === 'invite:link:rendered');
+  // Same spawn: the HTML previews must show the company header and no emoji.
+  const htmlFiles = ['digest.html', 'selfcheck-active.html', 'owner-email-stress.html', 'review-request.html'];
+  const htmlBad = [];
+  for (const f of htmlFiles) {
+    const html = fs.existsSync('_debug/previews/' + f) ? fs.readFileSync('_debug/previews/' + f, 'utf8') : '';
+    if (!html.includes('Alder Roofing')) htmlBad.push(f + ':name');
+    if (/\p{Extended_Pictographic}/u.test(html)) htmlBad.push(f + ':emoji');
+  }
   const ok = r.status === 0
     && body.includes('[[link:https://t.me/alder_alerts_bot?start=')
     && body.includes('[[code]]K7M2QPX9RT4W[[/code]]')
-    && !!sample && sample.text.includes('[[link:') && sample.text.includes('[[code]]');
-  line(ok, 'T8', 'preview and samples show the link words and the code span',
-    `exit=${r.status} file=${body.length}b`);
+    && !!sample && sample.text.includes('[[link:') && sample.text.includes('[[code]]')
+    && htmlBad.length === 0;
+  line(ok, 'T8', 'preview: entities, no emoji, company name in the HTML header',
+    `exit=${r.status} bad=${htmlBad.join(',') || 'none'}`);
 }
 
 console.log('');
