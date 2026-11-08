@@ -430,15 +430,6 @@ try {
     'digestTargets carries the business name', `targets=${targets.length}`);
 }
 
-/* D-name: the real digest target carries the company name, because the email
-   header uses it. This is the data path, not a fixture. */
-{
-  const { digestTargets } = await import('../lib/digest-db.js');
-  const targets = await digestTargets();
-  line(targets.length > 0 && targets.every((t) => typeof t.name === 'string' && t.name.length > 0), 'D-name',
-    'digestTargets carries the business name', `targets=${targets.length}`);
-}
-
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);

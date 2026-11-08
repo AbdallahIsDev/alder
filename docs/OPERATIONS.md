@@ -165,6 +165,16 @@ one message per run, not two — the one with more failures wins, and the respon
 `HEALTH_SECRET` is unset**, even if `CRON_SECRET` is set. `/api/health` takes
 `x-health-secret`; the other two also accept `Authorization: Bearer $CRON_SECRET`.
 
+## 4b. Rate limits are fixed windows
+
+`hit_rate_limit()` counts inside a fixed bucket (`floor(epoch / window)`), not a
+sliding window. A burst that straddles a boundary can therefore get up to twice
+the limit in that instant — 10 `/code` mints before the hour turns, 10 after.
+That is accepted for the operator-only commands (`/code`, `/phones`) because the
+operator is trusted and the cap is there to stop a runaway loop, not an attacker.
+The bind and invite paths use the same primitive; there the cap is one of several
+guards, and the code itself is single-use.
+
 ## 5. Incident playbooks
 
 **Telegram down, or the bot token revoked.**
