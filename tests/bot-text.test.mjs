@@ -178,6 +178,36 @@ const samples = sampleTelegramTexts();
     `exit=${r.status} file=${body.length}b`);
 }
 
+/* T11: the regenerated HTML previews show the current builders: no emoji, and
+   every company header carries the company name. */
+{
+  const r = spawnSync(process.execPath, ['scripts/preview.mjs'], { encoding: 'utf8' });
+  const files = ['digest.html', 'selfcheck-active.html', 'owner-email-stress.html', 'review-request.html'];
+  const bad = [];
+  for (const f of files) {
+    const body = fs.existsSync('_debug/previews/' + f) ? fs.readFileSync('_debug/previews/' + f, 'utf8') : '';
+    if (!body.includes('Alder Roofing')) bad.push(f + ':name');
+    if (/\p{Extended_Pictographic}/u.test(body)) bad.push(f + ':emoji');
+  }
+  line(r.status === 0 && bad.length === 0, 'T11', 'preview HTML: no emoji, company name in the header',
+    bad.length ? bad.join(',') : `${files.length} files`);
+}
+
+/* T11: the regenerated HTML previews show the current builders: no emoji, and
+   every company header carries the company name. */
+{
+  const r = spawnSync(process.execPath, ['scripts/preview.mjs'], { encoding: 'utf8' });
+  const files = ['digest.html', 'selfcheck-active.html', 'owner-email-stress.html', 'review-request.html'];
+  const bad = [];
+  for (const f of files) {
+    const body = fs.existsSync('_debug/previews/' + f) ? fs.readFileSync('_debug/previews/' + f, 'utf8') : '';
+    if (!body.includes('Alder Roofing')) bad.push(f + ':name');
+    if (/\p{Extended_Pictographic}/u.test(body)) bad.push(f + ':emoji');
+  }
+  line(r.status === 0 && bad.length === 0, 'T11', 'preview HTML: no emoji, company name in the header',
+    bad.length ? bad.join(',') : `${files.length} files`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);

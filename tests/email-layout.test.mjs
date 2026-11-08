@@ -162,6 +162,36 @@ const FIXTURES = {
     bad.length ? bad.join(',') : `${cases.length} builders checked`);
 }
 
+/* L6b: a company email with no business must not fall back silently. */
+{
+  const orig = console.error;
+  const seen = [];
+  console.error = (...a) => seen.push(a.join(' '));
+  try {
+    EMAIL_BUILDERS.digestEmail(digestDay, '2026-11-07');
+    EMAIL_BUILDERS.selfCheckEmail(opsDay, '2026-11-07');
+  } finally {
+    console.error = orig;
+  }
+  line(seen.filter((x) => x.includes('email_business_missing')).length === 2, 'L6b',
+    'missing business logs email_business_missing', `logs=${seen.length}`);
+}
+
+/* L6b: a company email with no business must not fall back silently. */
+{
+  const orig = console.error;
+  const seen = [];
+  console.error = (...a) => seen.push(a.join(' '));
+  try {
+    EMAIL_BUILDERS.digestEmail(digestDay, '2026-11-07');
+    EMAIL_BUILDERS.selfCheckEmail(opsDay, '2026-11-07');
+  } finally {
+    console.error = orig;
+  }
+  line(seen.filter((x) => x.includes('email_business_missing')).length === 2, 'L6b',
+    'missing business logs email_business_missing', `logs=${seen.length}`);
+}
+
 /* L7: the header marker exists exactly once, so L6 cannot silently split on
    nothing and pass. */
 {
