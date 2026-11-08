@@ -455,6 +455,38 @@ try {
         'live retry claim blocks the send', `emails=${emails}`);
     }
 
+    // C38/C39: a Resend 409 on an idempotent request is a duplicate, not a
+    // failure. Directly (with and without a key), and through the review retry:
+    // no "Try again", no new failure event, no second key.
+    {
+      const { sendMail } = await import('../lib/mail.js');
+      const savedRedirect = process.env.MAIL_REDIRECT_TO;
+      process.env.MAIL_REDIRECT_TO = 'redirect@example.com';
+      await resendCtrl({ mode: '409' });
+      const dup = await sendMail({ to: 'x@example.com', subject: 'S', html: '<p>x</p>', text: 'x', idempotencyKey: 'test:key:1' });
+      const noKey = await sendMail({ to: 'x@example.com', subject: 'S', html: '<p>x</p>', text: 'x' });
+      await resendCtrl({ mode: 'ok' });
+      if (savedRedirect === undefined) delete process.env.MAIL_REDIRECT_TO; else process.env.MAIL_REDIRECT_TO = savedRedirect;
+      line(dup.ok === true && dup.status === 'duplicate' && noKey.ok === false && Number(noKey.status) === 409,
+        'C38', 'mail: 409 with a key is duplicate; without a key it is a failure',
+        `dup=${dup.status} noKey=${noKey.status}`);
+
+      const dupLead = await mkFailedRetry('Dup 409', 'dup409@example.com');
+      const failsBefore = (await svc.from('lead_events').select('id').eq('lead_id', dupLead).eq('kind', 'review_request_failed')).data.length;
+      await resendCtrl({ mode: '409' });
+      await reset();
+      await good(cb(chatB, 'r:' + dupLead));
+      const dupRow = (await svc.from('leads').select('status').eq('id', dupLead).single()).data;
+      const dupEdits = (await sent()).filter((x) => x.path.includes('/editMessageText'));
+      const dupSent = (await svc.from('lead_events').select('id').eq('lead_id', dupLead).eq('kind', 'review_requested')).data.length;
+      const dupFails = (await svc.from('lead_events').select('id').eq('lead_id', dupLead).eq('kind', 'review_requested_failed')).data.length;
+      await resendCtrl({ mode: 'ok' });
+      line(dupRow.status === 'done' && dupEdits.length === 1 && dupEdits[0].body.text.includes('Review request sent')
+        && dupSent === 1 && dupFails <= failsBefore,
+        'C39', 'review retry on 409: sent view, no new failure, no new key',
+        `sent=${dupSent} fails=${failsBefore}->${dupFails} edits=${dupEdits.length}`);
+    }
+
     // r: on an open lead is refused with "Nothing to retry."
     const openRetry = await seedLead(bizB.id, 'Open Retry', 'openretry@example.com');
     await resetResend();

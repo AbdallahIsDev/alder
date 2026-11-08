@@ -86,7 +86,15 @@ async function finishBind(chatId, code, badText = BOT_CODE_BAD) {
     return reply(chatId, BOT_BIND_FAILED);
   }
 
-  const actual = await getChatBinding(chatId).catch(() => null);
+  let actual = null;
+  let readFailed = false;
+  try { actual = await getChatBinding(chatId); } catch { readFailed = true; }
+  if (readFailed) {
+    // A failed read is not evidence that the chat belongs elsewhere. Say so,
+    // and do not charge the code for a bind we cannot confirm.
+    await restoreBindCode(code, businessId).catch(() => {});
+    return reply(chatId, BOT_BIND_FAILED);
+  }
   if (!actual || String(actual.business_id) !== String(businessId)) {
     await restoreBindCode(code, businessId).catch(() => {});
     return reply(chatId, BOT_BOUND_ELSEWHERE);

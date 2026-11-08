@@ -138,6 +138,17 @@ const install = () => {
         }
         return json([]);
       }
+      // A read can fail while the write succeeded; the bind path must tell that
+      // apart from "bound elsewhere". Fail the nth GET for one chat.
+      {
+        const tid = (u.searchParams.get('tg_chat_id') || '').replace(/^eq\./, '');
+        if (store.failReadChat && tid === String(store.failReadChat)) {
+          store.reads = store.reads || {};
+          const n = (store.reads[tid] || 0) + 1;
+          store.reads[tid] = n;
+          if (n === Number(store.failReadAfter || 0)) return new Response('{}', { status: 500 });
+        }
+      }
       // Honour order= like PostgREST, or a reversed sort in the client looks correct.
       const order = u.searchParams.get('order') || '';
       const desc = order.endsWith('.desc');
@@ -507,6 +518,23 @@ try {
     line(firstOk && r24 === C.BOT_CODE_BAD && store.chats.length === 1 && store.codes[1].used_at === null,
       'R24', 'global bind ceiling: second attempt refused, code intact',
       `chats=${store.chats.length} used2=${!!store.codes[1].used_at} text=${r24.slice(0,30)}`);
+  }
+
+  /* R25: the read-back after a bind fails. The client is told to ask for a new
+     code, and the claim is restored — not told it is bound elsewhere. */
+  {
+    store = freshStore();
+    store.codes.push({ code: 'RDFAEC234567', business_id: BIZ_A, expires_at: '2099-01-01T00:00:00Z', used_at: null });
+    store.failReadChat = CHAT_A;
+    store.failReadAfter = 2;   // 1st GET is the dispatch's binding check
+    await tgReset();
+    await call(msg(CHAT_A, 'RDFAEC234567'));
+    const r25 = await lastText();
+    // The write may have landed before the read failed, so the row count is not
+    // the point: the code is restored and the text says "ask for a new code".
+    line(r25 === C.BOT_BIND_FAILED && store.codes[0].used_at === null,
+      'R25', 'bind read-back fails: "ask for a new code", claim restored',
+      `text=${r25.slice(0, 22)} used=${!!store.codes[0].used_at}`);
   }
 
   /* R12: an alert reaches every bound chat */
