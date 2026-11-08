@@ -15,6 +15,8 @@
 //
 // Mutation: put //n back into botInviteText and T1 fails.
 
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { loadEnv } from './env.mjs';
 import { sampleTelegramTexts } from '../lib/sample-texts.js';
 import * as C from '../lib/content.js';
@@ -81,10 +83,13 @@ const samples = sampleTelegramTexts();
   const types = m.entities.map((e) => e.type);
   const ent = m.entities[0] || {};
   const ok = !types.includes('text_link') && types.includes('code')
-    && m.text.includes(`/start ${code}`) && !m.text.includes('t.me')
+    && m.text.startsWith('Connect your lead alerts on Telegram. Open the bot and send it this code:')
+    && !m.text.includes('Tap here') && !m.text.includes('t.me')
+    && m.text.includes(`/start ${code}`)
     && m.text.slice(ent.offset, ent.offset + ent.length) === `/start ${code}`
-    && m.text.split(code).length - 1 === 1;
-  line(ok, 'T3', 'client fallback: no link, /start CODE as a code entity',
+    && m.text.split(code).length - 1 === 1
+    && /expires in 24 hours/.test(m.text);
+  line(ok, 'T3', 'client fallback: no link sentence, /start CODE as a code entity',
     `types=${types.join(',')} lines=${m.text.split('\n').length}`);
 }
 
@@ -132,11 +137,28 @@ const samples = sampleTelegramTexts();
   const code = 'K7M2QPX9RT4W';
   const m = C.botForwardText({ code });
   const ok = !m.text.includes('t.me') && m.text.includes(`/start ${code}`)
-    && !m.text.includes('Hi!') && !m.text.includes('send me')
+    && m.text.startsWith('Connect your lead alerts on Telegram.')
+    && !m.text.includes('Hi!') && !m.text.includes('send me') && !m.text.includes('Tap here')
     && /expires in 24 hours/.test(m.text)
     && m.entities.every((e) => e.type === 'code');
   line(ok, 'T7', 'client fallback: no link, /start CODE, no "send me"',
     `len=${m.text.length} entities=${m.entities.length}`);
+}
+
+/* T8: the preview renders entities, not just .text. It spawns the real script
+   and reads the file it writes, so a preview that silently drops the markers
+   fails here. */
+{
+  const r = spawnSync(process.execPath, ['scripts/preview.mjs'], { encoding: 'utf8' });
+  const file = ' _debug/previews/telegram-invite.txt'.trim();
+  const body = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const sample = samples.find((x) => x.name === 'invite:link:rendered');
+  const ok = r.status === 0
+    && body.includes('[[link:https://t.me/alder_alerts_bot?start=')
+    && body.includes('[[code]]K7M2QPX9RT4W[[/code]]')
+    && !!sample && sample.text.includes('[[link:') && sample.text.includes('[[code]]');
+  line(ok, 'T8', 'preview and samples show the link words and the code span',
+    `exit=${r.status} file=${body.length}b`);
 }
 
 console.log('');

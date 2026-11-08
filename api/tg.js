@@ -6,7 +6,7 @@
 
 import { randomBytes } from 'node:crypto';
 import {
-  getChatBinding, bindChat, claimBindCode, restoreBindCode, getBusinessById, clearRateLimit,
+  getChatBinding, bindChat, claimBindCode, restoreBindCode, getBindCodeState, getBusinessById, clearRateLimit,
   listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
   countBusinessChats, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
   listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
@@ -26,7 +26,7 @@ import {
   TOAST_NOT_FOUND, TOAST_ALREADY_DONE, TOAST_CONTACT_FIRST, TOAST_NOTHING_TO_RETRY, TOAST_GENERIC_ERROR,
   TOAST_ALREADY_UPDATED, TOAST_TOO_MANY_OPENS, TOAST_OWNER_ONLY, leadListKeyboard, alertKeyboard,
   BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_BOUND_ELSEWHERE, BOT_BIND_FAILED,
-  OPERATOR_ALREADY_CONNECTED_CODE, OPERATOR_DO_NOT_OPEN,
+  OPERATOR_ALREADY_CONNECTED_CODE, OPERATOR_DO_NOT_OPEN, OPERATOR_CODE_USED, OPERATOR_CODE_EXPIRED, OPERATOR_CODE_UNKNOWN,
   BOT_OWNER_ONLY, BOT_RECIPIENTS_OWNER_NOTE, botForwardText,
   operatorCodeText, operatorCodeResendText, operatorPhonesText, operatorPhonesKeyboard,
   operatorConfirmRemoveText, operatorConfirmRemoveKeyboard, operatorBusinessesText,
@@ -125,6 +125,20 @@ async function handlePastedCode(chatId, code) {
 }
 
 /**
+ * What the operator is told when they open a client's link from a chat that is
+ * already bound. Never claims the code is still valid without checking, and
+ * never names the business that owns it.
+ */
+async function operatorLinkReply(code) {
+  let state = 'unknown';
+  try { state = await getBindCodeState(code); } catch { state = 'unknown'; }
+  if (state === 'live') return OPERATOR_ALREADY_CONNECTED_CODE;
+  if (state === 'used') return OPERATOR_CODE_USED;
+  if (state === 'expired') return OPERATOR_CODE_EXPIRED;
+  return OPERATOR_CODE_UNKNOWN;
+}
+
+/**
  * The owner phone is the oldest connected phone (no schema change). It is the
  * only one that may invite or remove; every phone keeps alerts, buttons and
  * /leads.
@@ -138,7 +152,7 @@ async function handleStart(chatId, arg) {
   const existing = await getChatBinding(chatId);
   const shaped = bindCodeShape(arg);
   if (existing) {
-    if (shaped && isOperatorChat(chatId)) return reply(chatId, OPERATOR_ALREADY_CONNECTED_CODE);
+    if (shaped && isOperatorChat(chatId)) return reply(chatId, await operatorLinkReply(shaped));
     return reply(chatId, shaped ? BOT_ALREADY_CONNECTED_CODE : BOT_ALREADY_CONNECTED);
   }
   if (!arg) return reply(chatId, BOT_NOT_CONNECTED);
@@ -347,7 +361,7 @@ async function handlePlainText(chatId, binding, text = '') {
   if (binding) {
     // A bound chat never moves between businesses by pasting a code.
     if (shaped) {
-      return reply(chatId, isOperatorChat(chatId) ? OPERATOR_ALREADY_CONNECTED_CODE : BOT_ALREADY_CONNECTED_CODE);
+      return reply(chatId, isOperatorChat(chatId) ? await operatorLinkReply(shaped) : BOT_ALREADY_CONNECTED_CODE);
     }
   } else if (shaped) {
     if (isOperatorChat(chatId)) return reply(chatId, OPERATOR_DO_NOT_OPEN);
@@ -390,7 +404,7 @@ async function handleOperatorCode(chatId, arg) {
     // The code exists and is valid; only the forwardable copy failed. Say so
     // and repeat the code, or the operator is left with a half-finished flow.
     console.error('code_forward_send_failed');
-    await reply(chatId, operatorCodeResendText({ code, hours: BIND_CODE_HOURS }));
+    await replyMessage(chatId, operatorCodeResendText({ code, hours: BIND_CODE_HOURS }));
   }
 }
 

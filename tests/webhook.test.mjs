@@ -1006,14 +1006,25 @@ try {
     line(w1 === C.OPERATOR_DO_NOT_OPEN && w2 === C.OPERATOR_DO_NOT_OPEN && (await codeState(live)) === null,
       'W1', 'unbound operator: do not open it, code untouched', `start=${w1 === C.OPERATOR_DO_NOT_OPEN} paste=${w2 === C.OPERATOR_DO_NOT_OPEN}`);
 
-    // Bound operator pressing a link: the operator wording, no client advice.
+    // Bound operator pressing a link: the operator wording, and the code state
+    // is checked rather than assumed. No client advice, no business name.
     await svc.from('business_chats').insert({ business_id: codeBiz.id, tg_chat_id: OP, created_at: new Date().toISOString() });
     await reset();
     await good(msg(OP, '/start ' + live));
     const w3 = await lastText();
+    await reset();
+    await good(msg(OP, '/start ' + used));
+    const w3used = await lastText();
+    await reset();
+    await good(msg(OP, '/start ' + expired));
+    const w3exp = await lastText();
     await svc.from('business_chats').delete().eq('tg_chat_id', OP);
-    line(w3 === C.OPERATOR_ALREADY_CONNECTED_CODE && !/person who set up/i.test(w3) && (await codeState(live)) === null,
-      'W2', 'bound operator: operator wording, code still valid for the client', `ok=${w3 === C.OPERATOR_ALREADY_CONNECTED_CODE}`);
+    line(w3 === C.OPERATOR_ALREADY_CONNECTED_CODE && w3used === C.OPERATOR_CODE_USED
+      && w3exp === C.OPERATOR_CODE_EXPIRED
+      && ![w3, w3used, w3exp].some((t) => /person who set up/i.test(t) || /ZZ|alder/i.test(t))
+      && (await codeState(live)) === null,
+      'W2', 'bound operator: live / used / expired wording, code untouched',
+      `live=${w3 === C.OPERATOR_ALREADY_CONNECTED_CODE} used=${w3used === C.OPERATOR_CODE_USED} expired=${w3exp === C.OPERATOR_CODE_EXPIRED}`);
 
     // Bound client and staff phone: the existing client wording, code untouched.
     await reset();
@@ -1047,6 +1058,17 @@ try {
       `expired=${w7 === C.BOT_BAD_CODE} used=${w8 === C.BOT_BAD_CODE}`);
 
     if (savedOp === undefined) delete process.env.OPERATOR_CHAT_ID; else process.env.OPERATOR_CHAT_ID = savedOp;
+  }
+
+  // C40: no sendMessage payload in the whole suite carries parse_mode. The bot
+  // sends plain text plus entities, and one stray parse_mode would make
+  // Telegram parse the message instead.
+  {
+    const all = (await (await fetch(TG + '/__all')).json()).requests
+      .filter((x) => x.path.includes('/sendMessage'));
+    const bad = all.filter((x) => x.body && 'parse_mode' in x.body);
+    line(all.length > 0 && bad.length === 0, 'C40', 'no sendMessage payload carries parse_mode',
+      `sends=${all.length} bad=${bad.length}`);
   }
 
   /* ---------- operator commands, owner role, lead recovery ---------- */
@@ -1109,7 +1131,8 @@ try {
         && ((pair[0].body.entities) || []).some((e) => e.type === 'code'
           && opLine.slice(e.offset, e.offset + e.length) === theCode)
         && ((pair[1].body.entities) || []).some((e) => e.type === 'code'
-          && forward.slice(e.offset, e.offset + e.length) === theCode),
+          && forward.slice(e.offset, e.offset + e.length) === theCode)
+        && pair.every((x) => !('parse_mode' in x.body)),
         'OP2', 'operator /code: two messages, slug only in the first',
         `messages=${pair.length} code=${theCode.slice(0, 4)}… stored=${stored.length}`);
 
@@ -1131,13 +1154,18 @@ try {
       await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
       await control({ mode: 'fail_nth', nth: 2 });
       await good(msg(OP, `/code ${CODE_SLUG}`));
-      const afterFail = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
+      const afterFail = (await sent()).filter((x) => x.path.includes('/sendMessage'));
       await control({ mode: 'ok' });
-      const resend = afterFail[2] || '';
+      const resendReq = afterFail[2] || {};
+      const resend = (resendReq.body && resendReq.body.text) || '';
       const resendCode = (resend.match(/\b([A-Z2-9]{12})\b/) || [])[1] || '';
+      const resendEnt = ((resendReq.body && resendReq.body.entities) || [])[0] || {};
       line(afterFail.length === 3 && /did not send/.test(resend) && !!resendCode
-        && resend.includes(resendCode),
-        'OP14', 'forward send fails: operator gets the code back', `messages=${afterFail.length}`);
+        && resendEnt.type === 'code'
+        && resend.slice(resendEnt.offset, resendEnt.offset + resendEnt.length) === resendCode
+        && !('parse_mode' in (resendReq.body || {})),
+        'OP14', 'forward send fails: operator gets the code back as a code entity',
+        `messages=${afterFail.length} ent=${resendEnt.type}`);
 
       // OP15: a slug with injection characters is a usage error, and nothing
       // is minted. The slug regex is the only gate that matters here.
