@@ -271,7 +271,10 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - `main` = `e981e0c` (deploys to production).
 - `ops-audience` (PR #6): merged to `main` on GitHub (`4348b24`); local `main` = `origin/main`.
 - `fix-code-copy`: merged to `main` as `1e3be74` (PR #8).
-- `operator-ux` (new, from `origin/main`): numeric /leads, phone list, operator names and pickers; head `1c900e2`. Draft PR against `main`. `git merge-tree --write-tree origin/main ops-audience` exits 0: no conflicts against `e981e0c`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
+- `operator-ux`: merged to `main` as `baf15d1` (PR #9).
+- `email-brand` (PR #10, draft): no emoji in email, company header everywhere; head `c7de690`.
+- `operator-roles` (new, from `origin/main`): operator never bound, operator welcome, truthful destructive confirms; head `b754c61`. Draft PR against `main`.
+- Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones** (verified after the owner's change). `git merge-tree --write-tree origin/main ops-audience` exits 0: no conflicts against `e981e0c`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
 - Review artefact: `_debug/patches/ops-audience-review.diff` (gitignored), single file.
 - Remote: `origin https://github.com/AbdallahIsDev/alder.git`. Never push to `main`, never force, no tags.
