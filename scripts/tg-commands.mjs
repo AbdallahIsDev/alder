@@ -32,6 +32,7 @@ export const COMMANDS = [
   { command: 'leads', description: 'Your latest requests' },
   { command: 'invite', description: 'Connect another phone' },
   { command: 'recipients', description: 'Who receives alerts' },
+  { command: 'remove_lead', description: 'Remove a request' },
   { command: 'help', description: 'How this works' },
 ];
 
