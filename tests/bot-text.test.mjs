@@ -162,6 +162,25 @@ const samples = sampleTelegramTexts();
     `buttons=${buttons.length} long=${long.join(',') || 'none'}`);
 }
 
+/* T10: destructive confirms say what happens, and only they carry danger. */
+{
+  const C = await import('../lib/content.js');
+  const one = C.recipientConfirmText({ id: 'a', label: null }, 0, { isLast: false });
+  const last = C.recipientConfirmText({ id: 'a', label: null }, 0, { isLast: true });
+  const kb = C.recipientConfirmKeyboard('row-1').inline_keyboard[0];
+  const opKb = C.operatorConfirmRemoveKeyboard('row-1').reply_markup.inline_keyboard[0];
+  const danger = [kb[0], opKb[0]];
+  const cancel = [kb[1], opKb[1]];
+  const ok = !/Remove it\?/.test(one) && !/Remove it\?/.test(last)
+    && one.includes('It will stop receiving alerts.')
+    && last.includes('This is the last phone.')
+    && danger.every((b) => b.style === 'danger')
+    && cancel.every((b) => b.style === undefined)
+    && C.BOT_RECIPIENT_REMOVED === 'Removed.';
+  line(ok, 'T10', 'destructive confirm: says what happens, danger only on the action',
+    `one=${one.split('\n').pop()} danger=${danger.map((b) => b.style).join(',')}`);
+}
+
 /* T8: the preview renders entities, not just .text. It spawns the real script
    and reads the file it writes, so a preview that silently drops the markers
    fails here. */

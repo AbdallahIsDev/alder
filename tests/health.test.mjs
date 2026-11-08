@@ -34,7 +34,7 @@ const { selfCheckText, shouldAlertBusiness, failedTotal, operatorAlarmText } = a
 const { selfCheckEmail } = await import('../lib/email-builders.js');
 
 const KINDS = ['created', 'tg_sent', 'tg_failed', 'email_owner_sent', 'email_owner_failed', 'autoreply_failed', 'review_request_failed'];
-const TOP = ['last_24h', 'last_hour', 'mail_redirect_active', 'ok', 'operator_chat_set', 'operator_email_set', 'operator_reachable', 'review_links_invalid', 'salt_set', 'webhook_secret_set'];
+const TOP = ['last_24h', 'last_hour', 'mail_redirect_active', 'ok', 'operator_chat_bound', 'operator_chat_set', 'operator_email_set', 'operator_reachable', 'review_links_invalid', 'salt_set', 'webhook_secret_set'];
 
 const call = async ({ method = 'GET', secret } = {}) => {
   const res = fakeRes();

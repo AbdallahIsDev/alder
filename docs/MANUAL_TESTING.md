@@ -1,14 +1,14 @@
 # Manual testing with two accounts
 
-Two Telegram accounts are enough. A is the operator and the manager of
-`alder-demo`; B manages `second-demo`. Tenancy is still visible in both
-directions, and the owner rule is visible when B temporarily joins A's business
-and becomes a staff phone there.
+Two Telegram accounts. **A is the operator only** (not bound to any business);
+**B is the owner of `alder-demo`**. `second-demo` has no phone: isolation between
+two businesses is covered by the automated suite, and testing it by hand needs a
+third account.
 
 | Account | Role | Setup |
 | --- | --- | --- |
-| **A** | operator + manager of `alder-demo` | send `/id` in a private chat with the bot, put that number in `OPERATOR_CHAT_ID`, then restart the deployment |
-| **B** | manager of `second-demo` | A sends `/code second-demo`; B taps the link and presses Start |
+| **A** | operator only | send `/id` in a private chat with the bot, put that number in `OPERATOR_CHAT_ID`, then restart the deployment. The operator chat must never be bound to a business |
+| **B** | owner of `alder-demo` | A sends `/code alder-demo`; B taps the link and presses Start |
 
 `OPERATOR_CHAT_ID` is read on every invocation, so a redeploy is enough. The
 operator chat does not have to belong to a business, and in this setup it also
@@ -57,7 +57,7 @@ summary during this test. That stops when `ops-audience` is deployed.
 | 14c | A fresh operator chat (not bound) presses a client link | "This is the operator chat. Send the link to the client, do not open it yourself." The code is not claimed |
 | 15 | B pastes a wrong, expired or already-used code | "That code didn't work. It may have expired or been used." One answer for all three |
 | 16 | B pastes a valid code with spaces or hyphens | it binds; case does not matter |
-| 17 | B deletes the chat in Telegram, then searches the bot and presses Start | "You're all set". The binding is keyed by chat id, so it survives |
+| 17 | B deletes the bot chat, searches the bot and presses Start | an owner chat is recognised ("You're all set"); the operator chat gets the operator welcome. The binding is keyed by chat id, so it survives |
 | 18 | B blocks the bot, then a lead arrives for `second-demo` | the lead is stored, the owner email still goes, and A gets one "blocked" notice per business per day |
 | 19 | B unblocks the bot and presses Start | the bot answers again; the next lead reaches B |
 | 20 | A sends a lead to a business with no phone | A gets one plain notice with no buttons. No alert with buttons is ever sent to an unbound chat |

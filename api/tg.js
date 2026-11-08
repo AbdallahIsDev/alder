@@ -26,7 +26,7 @@ import {
   TOAST_NOT_FOUND, TOAST_ALREADY_DONE, TOAST_CONTACT_FIRST, TOAST_NOTHING_TO_RETRY, TOAST_GENERIC_ERROR,
   TOAST_ALREADY_UPDATED, TOAST_TOO_MANY_OPENS, TOAST_OWNER_ONLY, leadListKeyboard, alertKeyboard,
   BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_BOUND_ELSEWHERE, BOT_BIND_FAILED, TOAST_LEAD_GONE, BOT_RECIPIENT_SELF,
-  OPERATOR_ALREADY_CONNECTED_CODE, OPERATOR_DO_NOT_OPEN, OPERATOR_CODE_USED, OPERATOR_CODE_EXPIRED, OPERATOR_CODE_UNKNOWN,
+  OPERATOR_ALREADY_CONNECTED_CODE, OPERATOR_DO_NOT_OPEN, OPERATOR_WELCOME, OPERATOR_CODE_USED, OPERATOR_CODE_EXPIRED, OPERATOR_CODE_UNKNOWN,
   BOT_OWNER_ONLY, botForwardText,
   operatorCodeText, operatorCodeResendText, operatorPhonesText, operatorPhonesKeyboard,
   operatorConfirmRemoveText, operatorConfirmRemoveKeyboard, operatorBusinessesText,
@@ -82,13 +82,14 @@ async function finishBind(chatId, code, badText = BOT_CODE_BAD) {
   const business = await getBusinessById(businessId).catch(() => null);
   if (!business) {
     await restoreBindCode(code, businessId).catch(() => {});
-    return reply(chatId, badText);
+    return reply(chatId, isOperatorChat(chatId) ? OPERATOR_WELCOME : badText);
   }
 
   try {
     await bindChat(businessId, chatId);
   } catch (e) {
     await restoreBindCode(code, businessId).catch(() => {});
+    if (e && e.code === 'operator_chat') return reply(chatId, OPERATOR_DO_NOT_OPEN);
     console.error('bind_after_claim_failed', (e && e.code) || 'no_code');
     return reply(chatId, BOT_BIND_FAILED);
   }
@@ -156,10 +157,15 @@ async function handleStart(chatId, arg) {
     if (shaped && isOperatorChat(chatId)) return reply(chatId, await operatorLinkReply(shaped));
     return reply(chatId, shaped ? BOT_ALREADY_CONNECTED_CODE : BOT_ALREADY_CONNECTED);
   }
-  if (!arg) return reply(chatId, BOT_NOT_CONNECTED);
+  if (!arg) return reply(chatId, isOperatorChat(chatId) ? OPERATOR_WELCOME : BOT_NOT_CONNECTED);
   // An unbound operator opening a client link would bind the operator and burn
-  // the code the client needs. Refuse before the claim.
-  if (shaped && isOperatorChat(chatId)) return reply(chatId, OPERATOR_DO_NOT_OPEN);
+  // the code the client needs. A live code gets the do-not-open warning; a dead
+  // one is just an unknown link, so the operator gets the welcome.
+  if (shaped && isOperatorChat(chatId)) {
+    let state = 'unknown';
+    try { state = await getBindCodeState(shaped); } catch { state = 'unknown'; }
+    return reply(chatId, state === 'live' ? OPERATOR_DO_NOT_OPEN : OPERATOR_WELCOME);
+  }
 
   return finishBind(chatId, arg, BOT_BAD_CODE);
 }
@@ -335,7 +341,7 @@ async function handleRecipientCallback({ cb, kind, rowId, binding, answer }) {
     if (!row) { await answer(BOT_RECIPIENT_GONE); return sendRecipients(chatId, binding.business_id, messageId); }
     if (String(row.tg_chat_id) === String(chatId)) { await answer(BOT_RECIPIENT_SELF); return; }
     await answer('');
-    return editMessageText(chatId, messageId, recipientConfirmText(row, index < 0 ? rows.length : index), {
+    return editMessageText(chatId, messageId, recipientConfirmText(row, index < 0 ? rows.length : index, { isLast: rows.length <= 1 }), {
       reply_markup: recipientConfirmKeyboard(rowId),
     }).catch(() => {});
   }
@@ -370,6 +376,7 @@ async function handlePlainText(chatId, binding, text = '') {
     if (isOperatorChat(chatId)) return reply(chatId, OPERATOR_DO_NOT_OPEN);
     return handlePastedCode(chatId, shaped);
   }
+  if (isOperatorChat(chatId)) return reply(chatId, OPERATOR_WELCOME);
   let within;
   try {
     within = await hitRateLimit('tghint:' + chatId, 3600, 3);
