@@ -272,7 +272,7 @@ set, so it cannot be pointed at a fake by accident.
 2. **Remove `MAIL_REDIRECT_TO`** from Production, then confirm
    `/api/health` → `mail_redirect_active: false`.
 3. **Run `npm run tg:commands`** after the first deploy that adds a command. The menu
-   is `/leads`, `/invite`, `/recipients`, `/help`; the script also sets the bot
+   is `/leads`, `/invite`, `/recipients`, `/remove_lead`, `/help`; the script also sets the bot
    description and short description. `npm run tg:commands:info` lists what is live.
 3b. **Re-register the webhook** if this deploy adds an update type the bot has never
    received: `node scripts/tg-webhook.mjs set https://<host>/api/tg`, then

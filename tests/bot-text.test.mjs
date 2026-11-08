@@ -206,6 +206,15 @@ const samples = sampleTelegramTexts();
     `exit=${r.status} bad=${htmlBad.join(',') || 'none'}`);
 }
 
+/* T12: the owner menu lists /remove_lead, and every entry is a legal command. */
+{
+  const { COMMANDS } = await import('../scripts/tg-commands.mjs');
+  const names = COMMANDS.map((c) => c.command);
+  const legal = COMMANDS.every((c) => /^[a-z0-9_]{1,32}$/.test(c.command) && c.description.length <= 256);
+  line(names.includes('remove_lead') && legal, 'T12',
+    'owner menu lists /remove_lead and every command is legal', names.join(','));
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
