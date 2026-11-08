@@ -53,32 +53,39 @@ const samples = sampleTelegramTexts();
     `strings=${samples.length} hits=${hits.slice(0, 4).join(',') || 'none'}`);
 }
 
-/* T2 */
+/* T2: the client message carries the link as an entity, never as visible URL
+   text, and the code appears once, on its own last line, as a code entity. */
 {
   const code = 'K7M2QPX9RT4W';
-  const text = C.botInviteText(code, { username: 'alder_alerts_bot' });
-  const link = `https://t.me/alder_alerts_bot?start=${code}`;
-  const occurrences = text.split(code).length - 1;
-  const ok = text.includes(link)
-    && !text.includes('\\')
-    && !text.includes('//n')
-    && occurrences === 2
-    && /expires in 24 hours/.test(text)
-    && text.split('\n').length === 4;
-  line(ok, 'T2', 'invite: deep link, code twice, expiry, real line breaks',
-    `link=${text.includes(link)} count=${occurrences} lines=${text.split('\n').length} expiry=${/expires in 24 hours/.test(text)}`);
+  const m = C.botInviteText(code, { username: 'alder_alerts_bot' });
+  const link = m.entities.find((e) => e.type === 'text_link');
+  const codeEnt = m.entities.find((e) => e.type === 'code');
+  const linkWords = link ? m.text.slice(link.offset, link.offset + link.length) : '';
+  const occurrences = m.text.split(code).length - 1;
+  const lastLine = m.text.split('\n').pop();
+  const ok = m.text.startsWith('Tap here to connect your lead alerts on Telegram, then press Start.')
+    && !m.text.includes('Hi!') && !m.text.includes('t.me') && !m.text.includes('http')
+    && linkWords === 'connect your lead alerts'
+    && link.url === `https://t.me/alder_alerts_bot?start=${code}`
+    && occurrences === 1 && lastLine === code
+    && !!codeEnt && m.text.slice(codeEnt.offset, codeEnt.offset + codeEnt.length) === code
+    && m.entities.length === 2;
+  line(ok, 'T2', 'client message: link words carry the URL, code once as an entity',
+    `entities=${m.entities.length} link=${linkWords} count=${occurrences}`);
 }
 
-/* T3 */
+/* T3: without a username there is no text_link; /start CODE stays visible. */
 {
-  const text = C.botInviteText('K7M2QPX9RT4W');
-  const ok = text.includes('/start K7M2QPX9RT4W')
-    && !text.includes('\\')
-    && !text.includes('t.me')
-    && text.split('\n').length === 4
-    && /expires in 24 hours/.test(text);
-  line(ok, 'T3', 'invite fallback: /start plus code, real line breaks',
-    `lines=${text.split('\n').length}`);
+  const code = 'K7M2QPX9RT4W';
+  const m = C.botInviteText(code);
+  const types = m.entities.map((e) => e.type);
+  const ent = m.entities[0] || {};
+  const ok = !types.includes('text_link') && types.includes('code')
+    && m.text.includes(`/start ${code}`) && !m.text.includes('t.me')
+    && m.text.slice(ent.offset, ent.offset + ent.length) === `/start ${code}`
+    && m.text.split(code).length - 1 === 1;
+  line(ok, 'T3', 'client fallback: no link, /start CODE as a code entity',
+    `types=${types.join(',')} lines=${m.text.split('\n').length}`);
 }
 
 /* T4 */
@@ -102,34 +109,34 @@ const samples = sampleTelegramTexts();
   line(ok, 'T5', 'sweep keys: suite and canary only, never manual-test or a UUID', `ok=${ok}`);
 }
 
-/* T6: /code's two messages are disjoint. The first may name the slug; the
-   second may not, and must point the code at the BOT ("send it"), never at the
-   operator ("send me"). */
+/* T6: /code's two messages are disjoint. The operator line names the slug and
+   marks the code as an entity; the client message never names the business. */
 {
   const code = 'K7M2QPX9RT4W';
   const first = C.operatorCodeText({ slug: 'alder-demo', code });
   const second = C.botForwardText({ code, username: 'alder_alerts_bot' });
-  const ok = first.includes('alder-demo') && first.includes(code)
-    && /expires in 24 hours/i.test(first) && !first.includes('?start=')
-    && second.includes(`https://t.me/alder_alerts_bot?start=${code}`)
-    && second.includes('send it this code') && !second.includes('send me')
-    && !second.includes('alder-demo') && !second.includes('Alder')
-    && !second.includes('operator');
-  line(ok, 'T6', '/code: operator line names the slug, forward text never does',
-    `firstSlug=${first.includes('alder-demo')} secondSlug=${second.includes('alder-demo')} me=${second.includes('send me')}`);
+  const ent = first.entities[0] || {};
+  const ok = first.text.includes('alder-demo') && first.text.includes(code)
+    && /expires in 24 hours/i.test(first.text)
+    && first.text.slice(ent.offset, ent.offset + ent.length) === code
+    && first.entities.length === 1
+    && !second.text.includes('alder-demo') && !second.text.includes('Alder')
+    && !second.text.includes('operator');
+  line(ok, 'T6', '/code: operator line names the slug, client message never does',
+    `opEntities=${first.entities.length} slugInClient=${second.text.includes('alder-demo')}`);
 }
 
-/* T7: without a username the forward text still tells the client to send the
-   code to the bot, and it carries no dead link. */
+/* T7: without a username the client message still tells the client to send
+   /start plus the code, and it carries no dead link. */
 {
   const code = 'K7M2QPX9RT4W';
-  const text = C.botForwardText({ code });
-  const ok = !text.includes('t.me') && text.includes(code)
-    && /Open the bot and send it this code/.test(text)
-    && !text.includes('send me')
-    && /expires in 24 hours/.test(text);
-  line(ok, 'T7', 'forward fallback: no link, code goes to the bot',
-    `len=${text.length} link=${text.includes('t.me')}`);
+  const m = C.botForwardText({ code });
+  const ok = !m.text.includes('t.me') && m.text.includes(`/start ${code}`)
+    && !m.text.includes('Hi!') && !m.text.includes('send me')
+    && /expires in 24 hours/.test(m.text)
+    && m.entities.every((e) => e.type === 'code');
+  line(ok, 'T7', 'client fallback: no link, /start CODE, no "send me"',
+    `len=${m.text.length} entities=${m.entities.length}`);
 }
 
 console.log('');

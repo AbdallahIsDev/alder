@@ -978,6 +978,77 @@ try {
     }
   }
 
+  // W1-W6: who presses a client link, and what they are told. The code must
+  // survive every refusal, and no reply may name the business that owns it.
+  {
+    const C = await import('../lib/content.js');
+    const OP = FIXTURE_CHATS.webhookOperator;
+    const chatA2 = FIXTURE_CHATS.webhookA2;
+    const savedOp = process.env.OPERATOR_CHAT_ID;
+    process.env.OPERATOR_CHAT_ID = String(OP);
+    const live = mkCode(12), used = mkCode(12), expired = mkCode(12);
+    createdCodes.push(live, used, expired);
+    await createBindCode(live, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
+    await createBindCode(used, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
+    await createBindCode(expired, bindBiz.id, new Date(Date.now() - 60000).toISOString());
+    await svc.from('bind_codes').update({ used_at: new Date().toISOString() }).eq('code', used);
+    const codeState = async (c) => (await svc.from('bind_codes').select('used_at').eq('code', c).single()).data.used_at;
+    const lastText = async () => ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text || '';
+
+    // Unbound operator, /start CODE (a tapped link) and a pasted code.
+    await svc.from('business_chats').delete().eq('tg_chat_id', OP);
+    await reset();
+    await good(msg(OP, '/start ' + live));
+    const w1 = await lastText();
+    await reset();
+    await good(msg(OP, '  ' + live.slice(0, 4).toLowerCase() + '-' + live.slice(4).toLowerCase() + ' '));
+    const w2 = await lastText();
+    line(w1 === C.OPERATOR_DO_NOT_OPEN && w2 === C.OPERATOR_DO_NOT_OPEN && (await codeState(live)) === null,
+      'W1', 'unbound operator: do not open it, code untouched', `start=${w1 === C.OPERATOR_DO_NOT_OPEN} paste=${w2 === C.OPERATOR_DO_NOT_OPEN}`);
+
+    // Bound operator pressing a link: the operator wording, no client advice.
+    await svc.from('business_chats').insert({ business_id: codeBiz.id, tg_chat_id: OP, created_at: new Date().toISOString() });
+    await reset();
+    await good(msg(OP, '/start ' + live));
+    const w3 = await lastText();
+    await svc.from('business_chats').delete().eq('tg_chat_id', OP);
+    line(w3 === C.OPERATOR_ALREADY_CONNECTED_CODE && !/person who set up/i.test(w3) && (await codeState(live)) === null,
+      'W2', 'bound operator: operator wording, code still valid for the client', `ok=${w3 === C.OPERATOR_ALREADY_CONNECTED_CODE}`);
+
+    // Bound client and staff phone: the existing client wording, code untouched.
+    await reset();
+    await good(msg(chatA, '/start ' + live));
+    const w4 = await lastText();
+    await reset();
+    await good(msg(chatB, '/start ' + live));
+    const w5 = await lastText();
+    line(w4 === C.BOT_ALREADY_CONNECTED_CODE && w5 === C.BOT_ALREADY_CONNECTED_CODE && (await codeState(live)) === null,
+      'W3', 'bound client and staff phone: already connected, code untouched',
+      `owner=${w4 === C.BOT_ALREADY_CONNECTED_CODE} staff=${w5 === C.BOT_ALREADY_CONNECTED_CODE}`);
+
+    // A bound chat pasting another business's code: no business name, no claim.
+    await reset();
+    await good(msg(chatA, '  ' + live.slice(0, 4).toLowerCase() + '-' + live.slice(4).toLowerCase() + ' '));
+    const w6 = await lastText();
+    line(w6 === C.BOT_ALREADY_CONNECTED_CODE && !w6.includes('ZZ') && !w6.includes('Alder')
+      && !w6.includes('alder') && (await codeState(live)) === null,
+      'W4', 'pasted another business code: no business name, code untouched', `len=${w6.length} t=${w6.slice(0, 26)}`);
+
+    // Expired and used codes: one generic answer, no oracle.
+    await reset();
+    await good(msg(chatX, '/start ' + expired));
+    const w7 = await lastText();
+    await reset();
+    await good(msg(chatX, '/start ' + used));
+    const w8 = await lastText();
+    line(w7 === C.BOT_BAD_CODE && w8 === C.BOT_BAD_CODE
+      && !w7.includes('ZZ') && !w8.includes('ZZ') && !w7.includes('alder') && !w8.includes('alder'),
+      'W5', 'expired / used code: one generic answer, no business named',
+      `expired=${w7 === C.BOT_BAD_CODE} used=${w8 === C.BOT_BAD_CODE}`);
+
+    if (savedOp === undefined) delete process.env.OPERATOR_CHAT_ID; else process.env.OPERATOR_CHAT_ID = savedOp;
+  }
+
   /* ---------- operator commands, owner role, lead recovery ---------- */
   {
     const OP = FIXTURE_CHATS.webhookOperator;
@@ -1021,19 +1092,24 @@ try {
       // only forwardable text and must not name the business.
       await reset();
       await good(msg(OP, `/code ${CODE_SLUG}`));
-      const pair = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
-      const opLine = pair[0] || '';
-      const forward = pair[1] || '';
+      const pair = (await sent()).filter((x) => x.path.includes('/sendMessage'));
+      const opLine = (pair[0] && pair[0].body.text) || '';
+      const forward = (pair[1] && pair[1].body.text) || '';
       // Take the code from the forward text, then prove the database has it:
       // row order is not guaranteed, so picking "the last row" proved nothing.
-      const theCode = (forward.match(/\?start=([A-Z2-9]{12})/) || [])[1] || '';
+      const linkEnt = ((pair[1] && pair[1].body.entities) || []).find((e) => e.type === 'text_link');
+      const theCode = linkEnt ? ((linkEnt.url.match(/\?start=([A-Z2-9]{12})/) || [])[1] || '') : '';
       const stored = theCode
         ? (await svc.from('bind_codes').select('code, used_at').eq('code', theCode).eq('business_id', codeBiz.id)).data
         : [];
       line(pair.length === 2 && !!theCode && stored.length === 1 && stored[0].used_at === null
         && opLine.includes(CODE_SLUG) && /expires in 24 hours/i.test(opLine)
-        && !opLine.includes('?start=') && forward.includes('send it this code')
-        && !forward.includes(CODE_SLUG) && !forward.includes('send me'),
+        && !opLine.includes('?start=') && forward.includes('send it the code below')
+        && !forward.includes(CODE_SLUG) && !forward.includes('send me')
+        && ((pair[0].body.entities) || []).some((e) => e.type === 'code'
+          && opLine.slice(e.offset, e.offset + e.length) === theCode)
+        && ((pair[1].body.entities) || []).some((e) => e.type === 'code'
+          && forward.slice(e.offset, e.offset + e.length) === theCode),
         'OP2', 'operator /code: two messages, slug only in the first',
         `messages=${pair.length} code=${theCode.slice(0, 4)}… stored=${stored.length}`);
 
@@ -1080,8 +1156,11 @@ try {
       await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
       await good(msg(OP, `/code ${CODE_SLUG}`));
       await good(msg(OP, `/code ${CODE_SLUG}`));
-      const two = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text);
-      const codes = two.map((t) => (t.match(/\?start=([A-Z2-9]{12})/) || [])[1]).filter(Boolean);
+      const two = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body);
+      const codes = two.map((t) => {
+        const e = (t.entities || []).find((x) => x.type === 'text_link');
+        return e ? (e.url.match(/\?start=([A-Z2-9]{12})/) || [])[1] : null;
+      }).filter(Boolean);
       line(codes.length === 2 && codes[0] !== codes[1] && two.length === 4,
         'OP16', 'two /code taps: two distinct codes, two messages each',
         `codes=${codes.length} unique=${new Set(codes).size} messages=${two.length}`);

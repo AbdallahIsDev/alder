@@ -357,7 +357,7 @@ try {
       C.BOT_INVITE_CAPPED, C.botInvitePendingText({ hours: [5, 12, 23] }), C.BOT_INVITE_CANCEL_BUTTON,
       C.BOT_INVITE_CANCELLED, C.BOT_INVITE_CANCEL_ALREADY, C.BOT_INVITE_RATE_LIMIT, C.BOT_RECIPIENT_LAST,
       C.BOT_RECIPIENT_REMOVED, C.BOT_RECIPIENT_GONE, C.BOT_RECIPIENTS_EMPTY,
-      C.botInviteText('K7M2QPX9RT4W'), C.botRecipientsText([{ id: 'a', label: null }]),
+      C.botInviteText('K7M2QPX9RT4W').text, C.botRecipientsText([{ id: 'a', label: null }]),
       C.recipientConfirmText({ id: 'a', label: null }, 0),
     ];
     const banned = /another (roofer|business|compan)|other (roofer|business|compan)|multiple|shared|administrator|provider/i;

@@ -14,6 +14,17 @@ and becomes a staff phone there.
 operator chat does not have to belong to a business, and in this setup it also
 does not have to be a separate person.
 
+**Never press a client's link from the operator account.** The bot refuses, but
+the refusal exists to catch a mistake: opening a link is how a phone joins a
+business. If the operator is already bound, the bot says so and the code stays
+valid for the client; if the operator chat is not bound yet, the bot says "This
+is the operator chat. Send the link to the client, do not open it yourself." and
+does not claim the code. Either way, the code is still there for the client.
+
+The client message itself is plain text with entities: the four words "connect
+your lead alerts" carry the link, and the code sits on its own last line. There
+is no visible URL, so a screenshot of the message does not leak the link.
+
 **Known limitation.** One account can belong to one business at a time, because
 `business_chats.tg_chat_id` is unique. A multi-business owner is a proposal that
 needs a schema change (a join table or a nullable business per chat); it is not
@@ -42,6 +53,8 @@ summary during this test. That stops when `ops-audience` is deployed.
 | 12 | A removes B, then sends `/phones alder-demo` | B is gone; the oldest remaining phone is still `Phone 1 · main phone` |
 | 13 | A sends `/code second-demo`, B taps it | B is back on `second-demo`, and `/leads` shows only that business again |
 | 14 | B pastes a code minted for `alder-demo` | "This phone is already connected to a business. The code was not used." B does not move, and A can still use that code for someone else |
+| 14b | A (operator, already bound to `alder-demo`) presses a client link | the operator wording: "This chat is already connected to a business. The code was not used and is still valid for the client." No client advice, and the code still works for B |
+| 14c | A fresh operator chat (not bound) presses a client link | "This is the operator chat. Send the link to the client, do not open it yourself." The code is not claimed |
 | 15 | B pastes a wrong, expired or already-used code | "That code didn't work. It may have expired or been used." One answer for all three |
 | 16 | B pastes a valid code with spaces or hyphens | it binds; case does not matter |
 | 17 | B deletes the chat in Telegram, then searches the bot and presses Start | "You're all set". The binding is keyed by chat id, so it survives |
