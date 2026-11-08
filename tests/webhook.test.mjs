@@ -378,24 +378,41 @@ try {
 
     // C33: two r: callbacks fired at the same time send exactly one email.
     // Both pass the "done and nothing sent yet" checks before either writes, so
-    // without a compare-and-set both would send. rate_limits is the CAS.
-    const raceLead = await seedLead(bizB.id, 'Race Retry', 'raceretry@example.com');
-    await resendCtrl({ mode: '500' });
-    await good(cb(chatB, 'c:' + raceLead));
-    await good(cb(chatB, 'd:' + raceLead));
-    await good(cb(chatB, 'y:' + raceLead));            // email fails -> error view
-    await resendCtrl({ mode: 'ok' });
-    await resetResend();
-    await svc.from('rate_limits').delete().eq('key', 'retry:' + raceLead);
-    await Promise.all([good(cb(chatB, 'r:' + raceLead)), good(cb(chatB, 'r:' + raceLead))]);
-    const raceEmails = (await resendCalls()).length;
-    const raceRow = (await svc.from('leads').select('status').eq('id', raceLead).single()).data;
-    line(raceEmails === 1 && raceRow.status === 'done',
-      'C33', 'two r: at once -> exactly one send', `emails=${raceEmails} status=${raceRow.status}`);
+    // the claim has to be re-checked after it is taken and kept on success.
+    // C33_LOOP repeats the race with a fresh lead to shake out timing.
+    {
+      const loops = Math.max(1, Number(process.env.C33_LOOP) || 1);
+      let bad = 0, lastEmails = 0, lastStatus = '';
+      for (let i = 0; i < loops; i++) {
+        const raceLead = await seedLead(bizB.id, `Race Retry ${i}`, `raceretry${i}@example.com`);
+        await resendCtrl({ mode: '500' });
+        await good(cb(chatB, 'c:' + raceLead));
+        await good(cb(chatB, 'd:' + raceLead));
+        await good(cb(chatB, 'y:' + raceLead));            // email fails -> error view
+        await resendCtrl({ mode: 'ok' });
+        await resetResend();
+        await svc.from('rate_limits').delete().like('key', 'retry:' + raceLead + '%');
+        if (process.env.C33_BOUNDARY) {
+          // Park just before a 10 s bucket edge, so the two claims can land in
+          // different windows: the exact interleaving that produced the flake.
+          for (;;) {
+            const left = 10000 - (Date.now() % 10000);
+            if (left <= 120) break;
+            await new Promise((r) => setTimeout(r, Math.min(left - 100, 20)));
+          }
+        }
+        await Promise.all([good(cb(chatB, 'r:' + raceLead)), good(cb(chatB, 'r:' + raceLead))]);
+        lastEmails = (await resendCalls()).length;
+        lastStatus = (await svc.from('leads').select('status').eq('id', raceLead).single()).data.status;
+        if (lastEmails !== 1 || lastStatus !== 'done') bad++;
+      }
+      line(bad === 0, 'C33', `two r: at once -> exactly one send (${loops}x)`,
+        `bad=${bad}/${loops} lastEmails=${lastEmails} status=${lastStatus}`);
+    }
 
-    // C34/C35: the retry mutex is a 10 s bucket in rate_limits. A claim left
-    // behind by an invocation that died before its finally block stops blocking
-    // as soon as the clock leaves that bucket, so a stale lock costs at most 10 s.
+    // C34/C35: the retry lock is keyed by the failure generation. A claim left
+    // behind by an invocation that died is cleared once it is 5 minutes old, so
+    // a crash costs at most five minutes, not the lead.
     const mkFailedRetry = async (label, email) => {
       const id = await seedLead(bizB.id, label, email);
       await resendCtrl({ mode: '500' });
@@ -409,10 +426,11 @@ try {
 
     {
       const staleLead = await mkFailedRetry('Stale Lock', 'stalelock@example.com');
-      await svc.from('rate_limits').delete().eq('key', 'retry:' + staleLead);
+      const staleKey = 'retry:' + staleLead + ':1';
+      await svc.from('rate_limits').delete().eq('key', staleKey);
       await svc.from('rate_limits').insert({
-        key: 'retry:' + staleLead,
-        window_start: new Date(Date.now() - 60000).toISOString(),
+        key: staleKey,
+        window_start: new Date(Date.now() - 10 * 60000).toISOString(),
         count: 1,
       });
       await good(cb(chatB, 'r:' + staleLead));
@@ -425,11 +443,11 @@ try {
       // Same guard as db-wall test 6: do not straddle a bucket boundary.
       const msLeft = 10000 - (Date.now() % 10000);
       if (msLeft < 3000) await new Promise((r) => setTimeout(r, msLeft + 50));
-      // Claim through the same RPC the handler uses, so the bucket comes from the
-      // database clock rather than this machine's (they are not the same clock,
-      // and a manual insert landed in a different bucket).
-      await svc.from('rate_limits').delete().eq('key', 'retry:' + lockLead);
-      await svc.rpc('hit_rate_limit', { p_key: 'retry:' + lockLead, p_window_seconds: 10, p_max: 1 });
+      // Claim through the same RPC the handler uses, with the same key shape
+      // (failure generation 1) and the same 5-minute window, so it is live.
+      const lockKey = 'retry:' + lockLead + ':1';
+      await svc.from('rate_limits').delete().eq('key', lockKey);
+      await svc.rpc('hit_rate_limit', { p_key: lockKey, p_window_seconds: 300, p_max: 1 });
       await good(cb(chatB, 'r:' + lockLead));
       const emails = (await resendCalls()).length;
       const sentFlag = await svc.from('lead_events').select('id').eq('lead_id', lockLead).eq('kind', 'review_requested');
@@ -904,6 +922,30 @@ try {
   const directLeadSelect = /\.from\(['"]leads['"]\)\s*\.select\s*\(/.test(all);
   line(!forbidden && !directLeadSelect, 'C10', 'no private schema, no direct lead SELECT',
     `files=${seen.size} forbidden=${forbidden} directSelect=${directLeadSelect}`);
+  // OP21: OPERATOR_CHAT_ID unset (and no TELEGRAM_CHAT_ID fallback) must fail
+  // closed: /code is not a command for anyone, and nothing is minted. This is
+  // the state a fresh deployment is in until the owner sets it.
+  {
+    const savedOp = process.env.OPERATOR_CHAT_ID;
+    const savedTg = process.env.TELEGRAM_CHAT_ID;
+    delete process.env.OPERATOR_CHAT_ID;
+    delete process.env.TELEGRAM_CHAT_ID;
+    try {
+      const C = await import('../lib/content.js');
+      const codesBefore = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      await reset();
+      await good(msg(chatA, '/code alder-demo'));
+      const text = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body.text).join('\n');
+      const codesAfter = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+      line(text === C.BOT_PLAIN_TEXT && codesAfter === codesBefore,
+        'OP21', 'OPERATOR_CHAT_ID unset: /code is not a command, nothing minted',
+        `codes ${codesBefore}->${codesAfter}`);
+    } finally {
+      if (savedOp === undefined) delete process.env.OPERATOR_CHAT_ID; else process.env.OPERATOR_CHAT_ID = savedOp;
+      if (savedTg === undefined) delete process.env.TELEGRAM_CHAT_ID; else process.env.TELEGRAM_CHAT_ID = savedTg;
+    }
+  }
+
   /* ---------- operator commands, owner role, lead recovery ---------- */
   {
     const OP = FIXTURE_CHATS.webhookOperator;

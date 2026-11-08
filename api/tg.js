@@ -8,7 +8,7 @@ import { randomBytes } from 'node:crypto';
 import {
   getChatBinding, bindChat, claimBindCode, restoreBindCode, getBusinessById, clearRateLimit,
   listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
-  countBusinessChats, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes,
+  countBusinessChats, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
   listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
   getActiveBusinessBySlug, listBusinessSlugs, getChatById, removeChatById,
 } from '../lib/db.js';
@@ -576,10 +576,24 @@ async function onRetry(ctx) {
   // a lock for the duration of the send, not a debounce: a later retry after a
   // failure is allowed again. Fails open — a retry the owner asked for matters
   // more than the lock.
+  // The lock is keyed by the failure generation, not by time: two taps for the
+  // same attempt share one key, so exactly one wins even across a clock bucket
+  // edge (the old 10 s bucket let a tap landing just after the edge through).
+  // A failure writes a new event, which moves the next attempt to a new key;
+  // a crash leaves the key behind, so a claim older than 5 minutes is cleared
+  // on the next attempt rather than blocking the lead forever.
+  const failInfo = await getReviewFailureInfo(leadId);
+  const lockKey = `retry:${leadId}:${failInfo.count}`;
   let claimed = true;
-  try { claimed = await hitRateLimit('retry:' + leadId, 10, 1); } catch { claimed = true; }
-  if (!claimed) { await answer(TOAST_NOTHING_TO_RETRY); return; }
   try {
+    await clearStaleRetryLock(lockKey, new Date(Date.now() - 310 * 1000).toISOString());
+    claimed = await hitRateLimit(lockKey, 300, 1);
+  } catch { claimed = true; }
+  if (!claimed) { await answer(TOAST_NOTHING_TO_RETRY); return; }
+  let sentOk = false;
+  try {
+    // Re-check AFTER the claim: the check at the top can be true for both taps.
+    if (await hasReviewSent(leadId)) { await answer(TOAST_NOTHING_TO_RETRY); return; }
     const retry = await getDoneLeadForRetry(leadId, businessId);
     if (!retry || !retry.review_token || !retry.email) { await answer(TOAST_NOTHING_TO_RETRY); return; }
     // Idempotency key: Resend caches per key for 24 h. After a timeout the
@@ -588,7 +602,6 @@ async function onRetry(ctx) {
     // the cached failure must not be replayed, so use a fresh suffixed key
     // named by the earlier failure count. A new suffixed key can never equal
     // an earlier one: earlier suffixes are r1..r(count-1), this one is r<count>.
-    const failInfo = await getReviewFailureInfo(leadId);
     const retryKey = failInfo.lastStatus === 'timeout'
       ? (failInfo.lastKey || `${leadId}:review`)
       : `${leadId}:review:r${failInfo.count}`;
@@ -600,12 +613,18 @@ async function onRetry(ctx) {
       idempotencyKey: retryKey,
     });
     if (r && r.ok) {
+      // Keep the claim: the send succeeded, so no tap needs this lock again.
+      sentOk = true;
       await render('done', { reply_markup: { inline_keyboard: [] } }, 'sent');
     } else {
       await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
     }
   } finally {
-    try { await clearRateLimit('retry:' + leadId); } catch { /* the window expires on its own */ }
+    // Only a failed attempt releases the lock. A success keeps it, and the
+    // lead is done anyway, so no later tap can reach this handler.
+    if (!sentOk) {
+      try { await clearRateLimit(lockKey); } catch { /* the next generation is a new key */ }
+    }
   }
 }
 
