@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EMAIL_BUILDERS } from '../lib/email-builders.js';
-import { LAYOUT_MARKER } from '../lib/email-layout.js';
+import { LAYOUT_MARKER, HEADER_END, fitName } from '../lib/email-layout.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let total = 0;
@@ -48,8 +48,8 @@ const FIXTURES = {
   ownerEmail: [{ business, lead }],
   autoReply: [{ business, lead }],
   reviewEmail: [{ business, token: 'test-token', siteUrl: 'http://127.0.0.1:3000' }],
-  selfCheckEmail: [opsDay, '2026-11-07'],
-  digestEmail: [digestDay, '2026-11-07'],
+  selfCheckEmail: [opsDay, '2026-11-07', business],
+  digestEmail: [digestDay, '2026-11-07', business],
   operatorAlarmEmail: ['⚠️ Needs attention\nalder-demo: 1 alert could not be delivered', '2026-11-07'],
 };
 
@@ -134,31 +134,80 @@ const FIXTURES = {
     bad.length ? bad.join(',') : `${Object.keys(EMAIL_BUILDERS).length} builders clean`);
 }
 
-/* L6: header = logo + brand name as text; footer names the right brand.
-   Owner/operator emails use the platform; customer emails use the company. */
+/* L6: header = the COMPANY's logo + name for every company-facing and
+   customer-facing email; the operator alarm uses the platform. The footer is
+   the only place the two audiences differ. */
 {
   const bad = [];
-  const build = (name) => EMAIL_BUILDERS[name](...FIXTURES[name]);
-  // Everything before the body cell is header: the <style> block is long.
-  const head = (html) => String(html).split('<td style="padding:24px 24px"')[0];
+  const head = (html) => {
+    const at = String(html).indexOf(HEADER_END);
+    return at === -1 ? '' : String(html).slice(0, at);
+  };
   const cases = [
-    ['ownerEmail', 'Lead Alerts', 'Lead Alerts', true],
-    ['selfCheckEmail', 'Lead Alerts', 'Lead Alerts', true],
-    ['digestEmail', 'Lead Alerts', 'Lead Alerts', true],
-    ['operatorAlarmEmail', 'Lead Alerts', 'Lead Alerts', true],
-    ['autoReply', 'Alder Roofing', 'Alder Roofing', false],
-    ['reviewEmail', 'Alder Roofing', 'Alder Roofing', false],
+    ['ownerEmail', 'Alder Roofing', 'Lead Alerts'],
+    ['selfCheckEmail', 'Alder Roofing', 'Lead Alerts'],
+    ['digestEmail', 'Alder Roofing', 'Lead Alerts'],
+    ['operatorAlarmEmail', 'Lead Alerts', 'Lead Alerts'],
+    ['autoReply', 'Alder Roofing', 'Alder Roofing'],
+    ['reviewEmail', 'Alder Roofing', 'Alder Roofing'],
   ];
-  for (const [name, headerName, footerName, platform] of cases) {
-    const out = build(name);
+  for (const [name, headerName, footerName] of cases) {
+    const out = EMAIL_BUILDERS[name](...FIXTURES[name]);
     const h = head(out.html);
     if (!out.html.includes('cid:brand-logo')) bad.push(`${name}:logo`);
     if (!h.includes(`>${headerName}<`)) bad.push(`${name}:header`);
     if (!out.html.includes(`Sent by ${footerName}`)) bad.push(`${name}:footer`);
-    if (platform && h.includes('Alder Roofing')) bad.push(`${name}:company-in-header`);
   }
-  line(bad.length === 0, 'L6', 'every header has logo + name, footer names the right brand',
+  line(bad.length === 0, 'L6', 'company header everywhere, platform only on the operator alarm',
     bad.length ? bad.join(',') : `${cases.length} builders checked`);
+}
+
+/* L7: the header marker exists exactly once, so L6 cannot silently split on
+   nothing and pass. */
+{
+  const bad = [];
+  for (const name of Object.keys(EMAIL_BUILDERS).sort()) {
+    const out = EMAIL_BUILDERS[name](...FIXTURES[name]);
+    const n = (out.html.split(HEADER_END).length - 1);
+    if (n !== 1) bad.push(`${name}:${n}`);
+  }
+  line(bad.length === 0, 'L7', 'every email has exactly one header marker',
+    bad.length ? bad.join(',') : `${Object.keys(EMAIL_BUILDERS).length} builders`);
+}
+
+/* L8: long names. Multi-word names wrap; a single long token is truncated;
+   HTML characters are escaped; non-ASCII survives. */
+{
+  const longWords = 'Northwest Metropolitan Roofing and Exteriors';
+  const oneToken = 'A'.repeat(40);
+  const htmlChars = 'Smith & Sons <Roofing>';
+  const rtl = 'شركة السقوف';
+  const fit = fitName(longWords);
+  const fitOne = fitName(oneToken);
+  const esc1 = fitName(htmlChars);
+  const outHtml = EMAIL_BUILDERS.autoReply({ business: { ...business, name: htmlChars }, lead }).html;
+  const outRtl = EMAIL_BUILDERS.autoReply({ business: { ...business, name: rtl }, lead }).html;
+  const outToken = EMAIL_BUILDERS.autoReply({ business: { ...business, name: oneToken }, lead }).html.split(HEADER_END)[0];
+  const ok = outToken.includes('A'.repeat(27) + '…') && !outToken.includes('A'.repeat(28))
+    && fit === longWords
+    && fitOne.length === 28 && fitOne.endsWith('…')
+    && esc1 === htmlChars
+    && outHtml.includes('Smith &amp; Sons &lt;Roofing&gt;')
+    && outRtl.includes(rtl)
+    && !outHtml.includes('white-space:nowrap');
+  line(ok, 'L8', 'names wrap, long tokens truncate, HTML escapes, non-ASCII survives',
+    `fit=${fit === longWords} token=${fitOne.length} rtl=${outRtl.includes(rtl)}`);
+}
+
+/* L9: stripEmoji removes the emoji and one space, never the indentation that
+   digest and self-check bodies rely on. */
+{
+  const { stripEmoji } = await import('../lib/email-builders.js');
+  const before = '  ❌ 2 alerts failed\n    indented detail\n📨 Alerts delivered: 3';
+  const after = stripEmoji(before);
+  const ok = after === '  2 alerts failed\n    indented detail\nAlerts delivered: 3';
+  line(ok, 'L9', 'stripEmoji keeps intentional indentation',
+    `after=${JSON.stringify(after)}`);
 }
 
 console.log('');
