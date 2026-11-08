@@ -123,6 +123,14 @@ try {
   await sweepTestLeads(svc, [bizA.id, bizB.id], RUN_STARTED).catch(() => 0);
   // Clear anything a killed run left bound, before this run binds its own.
   try { await svc.from('business_chats').delete().in('tg_chat_id', WEBHOOK_CHATS); } catch { /* best effort */ }
+  // A killed run also leaves rate-limit buckets that make the plain-text hints
+  // silent for an hour. Fixture ids all start with 5, so this cannot touch a
+  // real chat's counter.
+  try {
+    for (const p of ['tghint:', 'open:', 'bindtry:', 'invite:', 'retry:', 'invitecancel:']) {
+      await svc.from('rate_limits').delete().like('key', p + '5%');
+    }
+  } catch { /* best effort */ }
   await control({ mode: 'ok' }); await reset(); await resetResend();
 
   // chatA and chatB are bound up front: the bind tests below use their own
@@ -1252,6 +1260,94 @@ try {
           `n=${liveBefore} has=${m1.includes('cancelled')} m1=${m1.slice(60, 130)}`);
       }
 
+      // OP26: the operator chat gets an operator welcome for /start, a dead
+      // link and plain text — never the client "isn't connected" message.
+      {
+        const C2 = await import('../lib/content.js');
+        const lastText = async () => ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text || '';
+        await reset();
+        await good(msg(OP, '/start'));
+        const w1 = await lastText();
+        await reset();
+        await good(msg(OP, '/start ZZZZZZZZZZZZ'));
+        const w2 = await lastText();
+        await reset();
+        await good(msg(OP, 'hello there'));
+        const w3 = await lastText();
+        await reset();
+        await good(msg(chatX, '/start'));
+        const client = await lastText();
+        line(w1 === C2.OPERATOR_WELCOME && w2 === C2.OPERATOR_WELCOME && w3 === C2.OPERATOR_WELCOME
+          && client === C2.BOT_NOT_CONNECTED,
+          'OP26', 'operator welcome for start/dead link/plain text; client message unchanged',
+          `op=${w1 === C2.OPERATOR_WELCOME}/${w2 === C2.OPERATOR_WELCOME}/${w3 === C2.OPERATOR_WELCOME} client=${client === C2.BOT_NOT_CONNECTED}`);
+      }
+
+      // OP27/OP28: /remove_lead. Owner only, five per page, scoped delete,
+      // double tap is idempotent, stale taps are graceful.
+      {
+        const C2 = await import('../lib/content.js');
+        const ids = [];
+        for (let i = 0; i < 6; i++) ids.push(await seedLead(bindBiz.id, `Remove Me ${i + 1}`, `remove${i}@example.com`));
+        const lastText = async () => ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text || '';
+        await reset();
+        await good(msg(bindA, '/remove_lead'));
+        const list = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
+        const kb = (list && list.body.reply_markup && list.body.reply_markup.inline_keyboard) || [];
+        const listText = (list && list.body.text) || '';
+        const nums = kb[0] || [];
+        const nav = kb[1] || [];
+        await reset();
+        await good(cb(bindA, 'rl:' + ids[0]));
+        const confirm = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop();
+        const ckb = (confirm && confirm.body.reply_markup && confirm.body.reply_markup.inline_keyboard[0]) || [];
+        await reset();
+        await good(cb(bindA, 'RL:' + ids[0]));
+        const gone = (await svc.from('leads').select('id').eq('id', ids[0])).data.length;
+        const afterText = ((await sent()).filter((x) => x.path.includes('/editMessageText')).pop() || {}).body?.text || '';
+        await reset();
+        await good(cb(bindA, 'RL:' + ids[0]));
+        const second = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        await reset();
+        await good(cb(bindA, 'rl:' + ids[0]));
+        const stale = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        line(listText.startsWith(C2.REMOVE_LEAD_TITLE) && nums.length === 5 && nav.some((b) => b.text === 'Older')
+          && confirm && confirm.body.text.includes('Remove Me 1') && ckb[0].style === 'danger'
+          && ckb[1].text === 'Cancel' && gone === 0 && afterText === C2.REMOVE_LEAD_DONE
+          && second.includes(C2.REMOVE_LEAD_GONE) && stale.includes(C2.REMOVE_LEAD_GONE),
+          'OP27', '/remove_lead: list, confirm, scoped delete, double/stale taps',
+          `nums=${nums.length} gone=${gone} second=${second.join('/')}`);
+
+        await reset();
+        await good(msg(bindB, '/remove_lead'));
+        const staff = await lastText();
+        await reset();
+        await good(cb(bindB, 'RL:' + ids[1]));
+        const staffTap = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        const stillThere = (await svc.from('leads').select('id').eq('id', ids[1])).data.length;
+        // A forged delete of another business's lead must fail on the scope.
+        const foreign = await seedLead(bizB.id, 'Foreign Remove', 'foreignremove@example.com');
+        await reset();
+        await good(cb(bindA, 'RL:' + foreign));
+        const foreignText = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        const foreignKept = (await svc.from('leads').select('id').eq('id', foreign)).data.length;
+        line(staff === C2.BOT_OWNER_ONLY && staffTap.includes(C2.TOAST_OWNER_ONLY) && stillThere === 1
+          && foreignText.includes(C2.REMOVE_LEAD_GONE) && foreignKept === 1,
+          'OP28', 'staff cannot list or delete; another business lead is out of scope',
+          `staff=${staff === C2.BOT_OWNER_ONLY} kept=${stillThere} foreign=${foreignKept}`);
+      }
+
+      // OP25: the operator chat can never become a business phone, even via a
+      // direct bindChat caller. No row is written.
+      {
+        const { bindChat } = await import('../lib/db.js');
+        let err = null;
+        try { await bindChat(bizA.id, OP); } catch (e) { err = e && e.code; }
+        const rows = (await svc.from('business_chats').select('id').eq('tg_chat_id', OP)).data.length;
+        line(err === 'operator_chat' && rows === 0, 'OP25',
+          'bindChat refuses the operator chat', `code=${err} rows=${rows}`);
+      }
+
       // OP24: pickers. No slug -> names as buttons; the tap runs the same
       // action; a forged or stale id is unknown; a non-operator gets nothing.
       {
@@ -1394,8 +1490,8 @@ try {
       await reset();
       await good(cb(OP, 'P:' + thirdRow));
       const gone = (await svc.from('business_chats').select('id').eq('id', thirdRow)).data.length;
-      line(/Remove it\?/.test(confirmText) && gone === 0, 'OP5',
-        'operator remove: confirm, then the row is gone', `confirm=${/Remove it/.test(confirmText)} gone=${gone}`);
+      line(/It will stop receiving alerts\./.test(confirmText) && gone === 0, 'OP5',
+        'operator remove: confirm, then the row is gone', `confirm=${/stop receiving/.test(confirmText)} gone=${gone}`);
 
       // OP7: /businesses lists both slugs with a phone count.
       await reset();

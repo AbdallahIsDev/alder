@@ -36,6 +36,18 @@ export function reviewLinkOk(v) {
   return googleReviewUrlOk(v);
 }
 
+/** True when the configured operator chat is also a business phone (legacy). */
+export async function operatorChatBound() {
+  const op = operatorChatId();
+  if (!op) return false;
+  const { count, error } = await db()
+    .from('business_chats')
+    .select('id', { count: 'exact', head: true })
+    .eq('tg_chat_id', Number(op));
+  if (error) return false;
+  return (count || 0) > 0;
+}
+
 export function countInvalidReviewLinks(rows) {
   return (rows || []).filter((r) => !reviewLinkOk(r && r.google_review_url)).length;
 }
@@ -93,6 +105,9 @@ export default async function handler(req, res) {
       ok: true,
       last_hour: lastHour,
       review_links_invalid: countInvalidReviewLinks(linkRows),
+      // Legacy state, not a mode: the operator chat must never be a business
+      // phone. A true here is a row to clean up, and it exposes no ids.
+      operator_chat_bound: await operatorChatBound(),
       last_24h: lastDay,
       mail_redirect_active: !!process.env.MAIL_REDIRECT_TO,
       webhook_secret_set: !!process.env.TELEGRAM_WEBHOOK_SECRET,
