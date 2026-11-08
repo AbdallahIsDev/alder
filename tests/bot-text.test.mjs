@@ -170,42 +170,21 @@ const samples = sampleTelegramTexts();
   const file = ' _debug/previews/telegram-invite.txt'.trim();
   const body = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const sample = samples.find((x) => x.name === 'invite:link:rendered');
+  // Same spawn: the HTML previews must show the company header and no emoji.
+  const htmlFiles = ['digest.html', 'selfcheck-active.html', 'owner-email-stress.html', 'review-request.html'];
+  const htmlBad = [];
+  for (const f of htmlFiles) {
+    const html = fs.existsSync('_debug/previews/' + f) ? fs.readFileSync('_debug/previews/' + f, 'utf8') : '';
+    if (!html.includes('Alder Roofing')) htmlBad.push(f + ':name');
+    if (/\p{Extended_Pictographic}/u.test(html)) htmlBad.push(f + ':emoji');
+  }
   const ok = r.status === 0
     && body.includes('[[link:https://t.me/alder_alerts_bot?start=')
     && body.includes('[[code]]K7M2QPX9RT4W[[/code]]')
-    && !!sample && sample.text.includes('[[link:') && sample.text.includes('[[code]]');
-  line(ok, 'T8', 'preview and samples show the link words and the code span',
-    `exit=${r.status} file=${body.length}b`);
-}
-
-/* T11: the regenerated HTML previews show the current builders: no emoji, and
-   every company header carries the company name. */
-{
-  const r = spawnSync(process.execPath, ['scripts/preview.mjs'], { encoding: 'utf8' });
-  const files = ['digest.html', 'selfcheck-active.html', 'owner-email-stress.html', 'review-request.html'];
-  const bad = [];
-  for (const f of files) {
-    const body = fs.existsSync('_debug/previews/' + f) ? fs.readFileSync('_debug/previews/' + f, 'utf8') : '';
-    if (!body.includes('Alder Roofing')) bad.push(f + ':name');
-    if (/\p{Extended_Pictographic}/u.test(body)) bad.push(f + ':emoji');
-  }
-  line(r.status === 0 && bad.length === 0, 'T11', 'preview HTML: no emoji, company name in the header',
-    bad.length ? bad.join(',') : `${files.length} files`);
-}
-
-/* T11: the regenerated HTML previews show the current builders: no emoji, and
-   every company header carries the company name. */
-{
-  const r = spawnSync(process.execPath, ['scripts/preview.mjs'], { encoding: 'utf8' });
-  const files = ['digest.html', 'selfcheck-active.html', 'owner-email-stress.html', 'review-request.html'];
-  const bad = [];
-  for (const f of files) {
-    const body = fs.existsSync('_debug/previews/' + f) ? fs.readFileSync('_debug/previews/' + f, 'utf8') : '';
-    if (!body.includes('Alder Roofing')) bad.push(f + ':name');
-    if (/\p{Extended_Pictographic}/u.test(body)) bad.push(f + ':emoji');
-  }
-  line(r.status === 0 && bad.length === 0, 'T11', 'preview HTML: no emoji, company name in the header',
-    bad.length ? bad.join(',') : `${files.length} files`);
+    && !!sample && sample.text.includes('[[link:') && sample.text.includes('[[code]]')
+    && htmlBad.length === 0;
+  line(ok, 'T8', 'preview: entities, no emoji, company name in the HTML header',
+    `exit=${r.status} bad=${htmlBad.join(',') || 'none'}`);
 }
 
 console.log('');
