@@ -271,7 +271,8 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - `main` = `e981e0c` (deploys to production).
 - `ops-audience` (PR #6): merged to `main` on GitHub (`4348b24`); local `main` = `origin/main`.
 - `fix-code-copy`: merged to `main` as `1e3be74` (PR #8).
-- `operator-ux` (new, from `origin/main`): numeric /leads, phone list, operator names and pickers; head `1c900e2`. Draft PR against `main`. `git merge-tree --write-tree origin/main ops-audience` exits 0: no conflicts against `e981e0c`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
+- `operator-ux`: merged to `main` as `baf15d1` (PR #9).
+- `email-brand` (new, from `origin/main`): no emoji in email, logo + brand name in every header; head `e118554`. Draft PR against `main`. `git merge-tree --write-tree origin/main ops-audience` exits 0: no conflicts against `e981e0c`. GitHub reports it **OPEN and not a draft** (observed 2026-11-07), contrary to the standing instruction that it stays draft; it was not marked ready by this work. Latest: fixture safety `82a0abc`, `/code` two messages `6198e67`, throwaway code business `e11877b`, handoff rewrite `fb1eb8e`.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
 - Review artefact: `_debug/patches/ops-audience-review.diff` (gitignored), single file.
 - Remote: `origin https://github.com/AbdallahIsDev/alder.git`. Never push to `main`, never force, no tags.
@@ -311,3 +312,4 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-08 | `ops-audience` | `fafa5d8` | Client message is text + entities (no parse_mode, no visible URL, code once); link replies are role-aware, and an unbound operator cannot bind itself | T2/T3/T6/T7, OP2/OP16, W1-W5 |
 | 2026-11-08 | `fix-code-copy` | `f710cc7` | No `parse_mode` anywhere (C40); resend is text + entities; fallback drops the link sentence; operator link replies read the code state; preview renders entities | T3/T7/T8, OP14, W2 |
 | 2026-11-08 | `operator-ux` | `1c900e2` | Numeric /leads (5/page), phone list without self-remove, operator names + pickers, /id operator wording, /code cancels older codes, copy audit | OP7/11/12/22/23/24, R8/R10, T9 |
+| 2026-11-08 | `email-brand` | `e118554` | Emails strip emoji at the builder boundary; one lockup renders logo + name (platform for owner/ops, company for customers) | L5, L6 |
