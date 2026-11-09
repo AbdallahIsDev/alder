@@ -273,7 +273,9 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - `fix-code-copy`: merged to `main` as `1e3be74` (PR #8).
 - `operator-ux`: merged to `main` as `baf15d1` (PR #9).
 - `email-brand`: merged to `main` as `fb4680c` (PR #10).
-- `operator-roles` (from `origin/main`): operator never bound, operator welcome, truthful destructive confirms, `/remove_lead`; head `d06d404`. Draft PR #11 against `main`.
+- `operator-roles`: merged to `main` as `a29f36d` (PR #11).
+- `operator-views`: merged to `main` as `6bd7bb4` (PR #12, menu only).
+- `operator-redirects` (from `origin/main`): operator answers for owner commands, `/businesses` paused counts, S4b, test-project prep; head `f7eeb60`. Draft PR against `main`.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
@@ -318,3 +320,15 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-08 | `email-brand` | `e118554` | Emails strip emoji at the builder boundary; one lockup renders logo + name (platform for owner/ops, company for customers) | L5, L6 |
 | 2026-11-08 | `email-brand` | `7a96514` `057f783` `d435dcd` | Company header on every company email; digest targets carry the name; preview uses current builders; OP3 boundary retry | L6b/L7-L9, D-name, T8, OP3 |
 | 2026-11-08 | `operator-roles` | `d06d404` | `/remove_lead` (owner only, scoped, confirm + danger), operator welcome, never bound | OP25-OP28, T10 |
+| 2026-11-09 | `operator-redirects` | `b24aa76` `4da4a0b` `f7eeb60` | Operator answers for /invite /recipients /help /leads /remove_lead; /businesses counts paused phones; self-check email header on its own line (S4b); test-project schema/seed/docs/env-check | OP33/OP34, S4b, T1 |
+
+### Edge cases — operator redirects (R1a) and T1
+| Case | Behaviour |
+|---|---|
+| Operator chat bound or not | the operator answers come from `OPERATOR_CHAT_ID`, never from a binding |
+| `/leads second-demo` from an owner | the slug is ignored; only that chat's business is listed |
+| Unbound non-operator chat | client text (`This chat isn't connected yet`) unchanged |
+| Paused/churned business in `/businesses` | real phone count by id, not 0 |
+| Many businesses | the picker refuses more than 8 with the usage text |
+| Test project missing `.env.test` | runner refuses the production host; `test:env-check` reports `is production host: true` |
+| Test project posture | RLS per table, anon grants and `rls_auto_enable` compared to production (7/7, none, present) |

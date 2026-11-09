@@ -383,9 +383,13 @@ try {
       const opMail = mail1.find((x) => JSON.stringify(x.body.to) === JSON.stringify(['ops@example.com']));
       const ok = r1.code === 200 && r1.body.emailed === 1 && r1.body.sent === 0
         && r1.body.operator === 'email'
-        && mail1.length === 2 && !!opMail && tg1.length === 2 && !!opTg && toOwner && keyOk && countsOnly && headerOk
+        && mail1.length === 2 && !!opMail && tg1.length === 2 && !!opTg && toOwner && keyOk && countsOnly
         && /alder-demo: 1 alert could not be delivered/.test(opTg.body.text)
         && r2.code === 200 && mail2.length === 2 && toRedirect;
+      // The email assertion lives on its own line so a missing business shows
+      // up here, not buried in S12's combined condition.
+      line(!!headerOk, 'S4b', 'selfcheck email: company header, platform footer',
+        `header=${!!headerOk} mail=${mail1.length}`);
       line(ok, 'S12', 'selfcheck: telegram down -> owner email, redirect wins',
         `r1=${r1.code} emailed=${r1.body.emailed} tg=${tg1.length} op=${!!opTg} key=${!!keyOk} counts=${!!countsOnly} header=${!!headerOk} redirect=${!!toRedirect}`);
     } catch (e) {

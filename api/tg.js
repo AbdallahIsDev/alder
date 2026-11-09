@@ -33,7 +33,7 @@ import {
   operatorConfirmRemoveText, operatorConfirmRemoveKeyboard, operatorBusinessesText,
   OPERATOR_USAGE_CODE, OPERATOR_USAGE_PHONES, OPERATOR_UNKNOWN_SLUG, OPERATOR_CAPPED, OPERATOR_NO_PHONES,
   OPERATOR_PHONE_REMOVED, OPERATOR_PHONE_GONE, operatorIdMessage, OPERATOR_HELP,
-  OPERATOR_PICK_TEXT, OPERATOR_NO_BUSINESSES, operatorPickerKeyboard,
+  OPERATOR_PICK_TEXT, OPERATOR_NO_BUSINESSES, operatorPickerKeyboard, OPERATOR_LEADS_HINT, OPERATOR_REMOVE_LEAD,
 } from '../lib/content.js';
 
 const GENERIC_NOT_FOUND = TOAST_NOT_FOUND;
@@ -481,8 +481,9 @@ async function handleOperatorBusinesses(chatId) {
   const slugs = await listBusinessSlugs().catch(() => []);
   const rows = [];
   for (const r of slugs) {
-    const b = await getActiveBusinessBySlug(r.slug).catch(() => null);
-    const phones = b ? await countBusinessChats(b.id).catch(() => 0) : 0;
+    // Count by id: a paused or churned business has phones too, and the
+    // active-only lookup would show 0 for them.
+    const phones = await countBusinessChats(r.id).catch(() => 0);
     rows.push({ slug: r.slug, name: r.name, status: r.status, phones });
   }
   return reply(chatId, operatorBusinessesText(rows));
@@ -941,7 +942,20 @@ export default async function handler(req, res) {
         first = first.slice(0, at);
       }
       const arg = text.slice(token.length).trim();
-      if (first === '/start') {
+      const operator = isOperatorChat(chatId, chat.type);
+      // Operator answers for the owner commands: the role comes from the env,
+      // not from a binding. No new callbacks: the pickers reuse pc:/pb:.
+      if (operator && first === '/invite') {
+        await operatorPick(chatId, 'pc', OPERATOR_USAGE_CODE);
+      } else if (operator && first === '/recipients') {
+        await operatorPick(chatId, 'pb', OPERATOR_USAGE_PHONES);
+      } else if (operator && first === '/help') {
+        await reply(chatId, OPERATOR_HELP);
+      } else if (operator && first === '/remove_lead') {
+        await reply(chatId, OPERATOR_REMOVE_LEAD);
+      } else if (operator && first === '/leads') {
+        await reply(chatId, OPERATOR_LEADS_HINT);
+      } else if (first === '/start') {
         await handleStart(chatId, arg);
       } else if (first === '/leads') {
         await handleLeads(chatId, binding);
@@ -958,7 +972,7 @@ export default async function handler(req, res) {
         // operator learns OPERATOR_CHAT_ID without a third-party bot. Not in
         // the command menu.
         await replyMessage(chatId, operatorIdMessage(chatId, { operator: isOperatorChat(chatId) }));
-      } else if (isOperatorChat(chatId, chat.type)) {
+      } else if (operator) {
         // Operator commands. A non-operator never reaches this branch, so the
         // reply they get is the same as for any unknown text.
         if (first === '/code') await handleOperatorCode(chatId, arg);
