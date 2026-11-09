@@ -1383,6 +1383,35 @@ try {
           '/businesses counts a paused business phone', text.split('\n').find((l) => l.includes('ZZ Paused')) || 'missing');
       }
 
+      // OP35: when the phone-count query fails, /businesses says "?" — never
+      // "0 phones", which would tell the operator a live business has none.
+      {
+        const realFetch = globalThis.fetch;
+        let seen = 0;
+        globalThis.fetch = async (input, init) => {
+          const u = typeof input === 'string' ? input : (input && input.url) || '';
+          const method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+          // countBusinessChats is the HEAD request; a GET on the same table is
+          // the handler's own binding lookup and must keep working.
+          if (method === 'HEAD' && u.includes('/rest/v1/business_chats')) {
+            seen++;
+            return new Response('{"message":"count failed"}', { status: 500, headers: { 'content-type': 'application/json' } });
+          }
+          return realFetch(input, init);
+        };
+        let text = '';
+        try {
+          await reset();
+          await good(msg(OP, '/businesses'));
+          text = ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text || '';
+        } finally {
+          globalThis.fetch = realFetch;
+        }
+        const alder = text.split('\n\n').find((l) => l.startsWith('Alder Roofing')) || '';
+        line(seen > 0 && /·\s\?$/.test(alder.trim()) && !/0 phones/.test(alder),
+          'OP35', '/businesses shows ? when the count fails', `seen=${seen} line=${JSON.stringify(alder)}`);
+      }
+
       // OP25: the operator chat can never become a business phone, even via a
       // direct bindChat caller. No row is written.
       {

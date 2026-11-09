@@ -483,7 +483,8 @@ async function handleOperatorBusinesses(chatId) {
   for (const r of slugs) {
     // Count by id: a paused or churned business has phones too, and the
     // active-only lookup would show 0 for them.
-    const phones = await countBusinessChats(r.id).catch(() => 0);
+    // null, not 0: a failed count is unknown, and the text says "?" for it.
+    const phones = await countBusinessChats(r.id).catch(() => null);
     rows.push({ slug: r.slug, name: r.name, status: r.status, phones });
   }
   return reply(chatId, operatorBusinessesText(rows));

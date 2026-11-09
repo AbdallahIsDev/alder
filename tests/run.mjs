@@ -34,6 +34,7 @@ const DEFAULT_SUITES = [
   { file: 'tests/bot-text.test.mjs', needsHttp: false },
   { file: 'tests/db-wall.test.mjs', needsHttp: false },
   { file: 'tests/migrations.test.mjs', needsHttp: false },
+  { file: 'tests/test-env-check.test.mjs', needsHttp: false },
   { file: 'tests/health.test.mjs', needsHttp: false },
   { file: 'tests/email-layout.test.mjs', needsHttp: false },
   { file: 'tests/digest.test.mjs', needsHttp: false },
@@ -226,7 +227,7 @@ function assertNotProductionProject() {
 /* ---------- seed check (quick, read-only; no tests run) ---------- */
 if (RUN_SEED_CHECK) {
   const seed = {
-    slug: ALDER_DEMO, name: 'Alder Roofing (demo)',
+    slug: ALDER_DEMO, name: 'Alder Roofing',
     owner_email: 'owner@alder-demo.example.com',
     google_review_url: 'https://g.page/r/alder-demo',
     timezone: 'America/Chicago', status: 'demo',
