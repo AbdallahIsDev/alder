@@ -150,8 +150,61 @@ In PowerShell the variable stays set for the rest of the session. To unset it:
 Remove-Item Env:TEST_ENV
 ```
 
-Expected: the same counts as a production run, faster. The projection from the
-measured round-trip difference is roughly 225–235 s against 272 s.
+Expected: the same counts as a production run, faster. Measured on 2026-11-09:
+391 assertions in 241.5 s against 382 in 417.8 s on production.
+
+### Why the suite cannot quietly use production
+
+`vercel dev` reads `.env` and `.env.local` from its project directory, and those
+values beat the environment it was started with. Measured with 48.12.1: a function
+returned the `.env` value, not the one pinned into the parent process. A
+`TEST_ENV=1` run therefore wrote its canary lead into production while every check
+said "test".
+
+The fix is structural, not a file shuffle. Before starting the server the runner
+builds a **dev root** (`tests/dev-root.mjs`): a directory under `_debug/` that has
+the project but no `.env` files. `api/`, `lib/`, `assets/`, `scripts/` and
+`node_modules/` are junctions to the real directories; only `vercel.json`,
+`package.json`, `index.html` and `build-static.js` are copied. `vercel dev` does
+not walk up to a parent directory, so the repo's `.env` is never in scope, and the
+pinned values are the only ones the function can see. The root is removed on exit,
+unlinking the junctions first so a recursive delete can never follow them into
+`api/` or `node_modules/`.
+
+### The canary
+
+Before any suite runs, the runner posts one lead with a random `canary-…` key and
+then checks three things:
+
+1. The fake Telegram server received the alert (the loopback override reached the
+   function).
+2. The row exists in the **test** database, and is deleted there.
+3. The row does **not** exist in the database named by `.env`. If it does, the row
+   is deleted from production and the run aborts with no suite started.
+
+A run that cannot place the canary where it expects stops there. That is the check
+that turns "the tests passed" into "the tests ran where I think they did".
+
+## 6b. The key migration (early 2027)
+
+Supabase retires the legacy JWT `anon` and `service_role` keys in early 2027. The
+replacements are `sb_publishable_…` (public) and `sb_secret_…` (server); they are
+not JWTs. Nothing in this repo decodes a key — every use is
+`createClient(url, key)`, and no migration calls `auth.jwt()` or `auth.role()` —
+so the switch is an env-value change. Do it in this order:
+
+1. In the **test** project, create the two new keys.
+2. Put them in `.env.test` and run `npm run test:env-check` — it accepts a JWT or
+   an `sb_` key, and rejects anything else by name, never by value.
+3. Run `TEST_ENV=1 node tests/run.mjs tests/db-wall.test.mjs`. The wall now fails
+   on a rejected key (401) instead of passing on any error, so a key the gateway
+   does not accept is caught here.
+4. Run the full suite on the test project.
+5. Only then swap the production env values and redeploy.
+6. Keep the old keys until a full production day is clean, then delete them.
+
+Unverified until step 2: whether this project's PostgREST accepts `sb_secret_` in
+the `Authorization: Bearer` header as well as in `apikey`.
 
 ## 7. The free project pauses
 

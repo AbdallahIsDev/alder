@@ -46,6 +46,13 @@ export const FORBIDDEN = ['TELEGRAM_API_BASE', 'RESEND_API_BASE'];
 
 const nonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
 const norm = (v) => String(v || '').trim().replace(/\/+$/, '').toLowerCase();
+const trimmed = (v) => String(v || '').trim();
+/* Shape, never value: these predicates only answer yes/no. */
+const isSupabaseUrl = (v) => /^https:\/\/[a-z0-9]{16,24}\.supabase\.co\/?$/i.test(trimmed(v));
+const isHttpUrl = (v) => /^https?:\/\//i.test(trimmed(v));
+const isPostgresDsn = (v) => /^postgres(ql)?:\/\//i.test(trimmed(v));
+const isJwt = (v) => /^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(trimmed(v));
+const isSbKey = (v, kind) => new RegExp('^sb_' + kind + '_[A-Za-z0-9_-]+$').test(trimmed(v));
 
 /**
  * Readiness of a .env.test against .env. Pure: takes parsed objects, returns
@@ -67,6 +74,27 @@ export function readinessReport({ test, prod = {} }) {
 
   const forbidden = FORBIDDEN.filter((n) => nonEmpty(test[n]));
   if (forbidden.length) bad('must not be set in a file: ' + forbidden.join(', ') + ' — the runner would refuse to start');
+
+  /* Shape. A swapped pair passed every earlier check (both names present, both
+     differ from production) while pointing the whole suite at the dashboard and
+     the pooler the wrong way round. */
+  const swapped = isPostgresDsn(test.SUPABASE_URL) && isHttpUrl(test.DATABASE_URL);
+  if (swapped) {
+    bad('SUPABASE_URL and DATABASE_URL look swapped: a postgres DSN is in the URL field and a URL is in the DSN field');
+  } else {
+    if (nonEmpty(test.SUPABASE_URL) && !isSupabaseUrl(test.SUPABASE_URL)) {
+      bad('SUPABASE_URL is not https://<ref>.supabase.co');
+    }
+    if (nonEmpty(test.DATABASE_URL) && !isPostgresDsn(test.DATABASE_URL)) {
+      bad('DATABASE_URL is not a postgres:// or postgresql:// URI');
+    }
+  }
+  if (nonEmpty(test.SUPABASE_ANON_KEY) && !isJwt(test.SUPABASE_ANON_KEY) && !isSbKey(test.SUPABASE_ANON_KEY, 'publishable')) {
+    bad('SUPABASE_ANON_KEY is neither a JWT (eyJ...) nor an sb_publishable_ key');
+  }
+  if (nonEmpty(test.SUPABASE_SERVICE_ROLE_KEY) && !isJwt(test.SUPABASE_SERVICE_ROLE_KEY) && !isSbKey(test.SUPABASE_SERVICE_ROLE_KEY, 'secret')) {
+    bad('SUPABASE_SERVICE_ROLE_KEY is neither a JWT (eyJ...) nor an sb_secret_ key');
+  }
 
   const url = norm(test.SUPABASE_URL);
   const prodUrl = norm(prod.SUPABASE_URL);

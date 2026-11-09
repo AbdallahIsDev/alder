@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { loadEnv } from '../lib/env.js';
 import { ALDER_DEMO } from './helpers.mjs';
+import { isWallProof, isSchemaProof, classifyAnonDenial } from './denial.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RUN = Math.random().toString(36).slice(2, 8);
@@ -56,31 +57,34 @@ const PUBLIC_TABLES = ['businesses', 'business_chats', 'bind_codes', 'leads', 'l
 /* ---------- 1. anon cannot read or write public tables ---------- */
 for (const t of PUBLIC_TABLES) {
   const { data, error } = await anon.from(t).select('*').limit(1);
-  const ok = !!error || (Array.isArray(data) && data.length === 0);
-  line(ok, '1', `anon SELECT ${t}`.padEnd(34), error ? error.code || error.message : `${data.length} rows`);
+  const ok = isWallProof({ error, rows: data });
+  line(ok, '1', `anon SELECT ${t}`.padEnd(34), error ? classifyAnonDenial(error) : `${data.length} rows`);
 }
 
 {
   const { data, error } = await anon.from('v_client_leads').select('*').limit(1);
-  const ok = !!error || (Array.isArray(data) && data.length === 0);
-  line(ok, '1', 'anon SELECT v_client_leads'.padEnd(34), error ? error.code || error.message : `${data.length} rows`);
+  const ok = isWallProof({ error, rows: data });
+  line(ok, '1', 'anon SELECT v_client_leads'.padEnd(34), error ? classifyAnonDenial(error) : `${data.length} rows`);
 }
 
 {
   const { error } = await anon.from('businesses').insert({ slug: `anon-${RUN}`, name: 'x', owner_email: 'x@example.com' });
-  line(!!error, '1', 'anon INSERT businesses rejected'.padEnd(34), error ? error.code || error.message : 'INSERT SUCCEEDED');
+  line(isWallProof({ error }), '1', 'anon INSERT businesses rejected'.padEnd(34),
+    error ? classifyAnonDenial(error) : 'INSERT SUCCEEDED');
 }
 
 /* ---------- 2. anon cannot call the rate-limit function ---------- */
 {
   const { error } = await anon.rpc('hit_rate_limit', { p_key: `anon-${RUN}`, p_window_seconds: 60, p_max: 3 });
-  line(!!error, '2', 'anon rpc hit_rate_limit denied'.padEnd(34), error ? error.code || error.message : 'RPC SUCCEEDED');
+  line(isWallProof({ error }), '2', 'anon rpc hit_rate_limit denied'.padEnd(34),
+    error ? classifyAnonDenial(error) : 'RPC SUCCEEDED');
 }
 
 /* ---------- 3. anon cannot read private.lead_financials ---------- */
 {
   const { error } = await anon.schema('private').from('lead_financials').select('*').limit(1);
-  line(!!error, '3', 'schema not exposed (weak check)'.padEnd(34), error ? error.code || error.message : 'READ SUCCEEDED');
+  line(isSchemaProof({ error }), '3', 'schema not exposed (weak check)'.padEnd(34),
+    error ? classifyAnonDenial(error) : 'READ SUCCEEDED');
   note('test 3 is weak: PostgREST only proves the private schema is not exposed over HTTP.');
   note('the real proof of that wall was the earlier local Postgres run, where anon held');
   note('no USAGE on schema private and was refused at the parser, not at the HTTP layer.');

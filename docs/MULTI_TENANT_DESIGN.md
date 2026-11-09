@@ -334,7 +334,11 @@ by `site_id`. It must be resized to 32 px on upload, not on send: an email must 
 depend on a network fetch at send time.
 
 **What this fixes.** The deployment drops from ~125 MB to ~15 MB once the six hero
-videos (110.9 MB) leave the repo. That is the same fix as the Vercel storage
+videos (110.9 MB) leave the repo. They are not recompressed and no file is dropped:
+the same six files move to the bucket, byte for byte, and the page points at their
+new URLs. Re-encoding was measured and rejected — at the bitrates that were tried
+the 1080 pair came out larger than today's files, so the only honest saving is the
+move. That is the same fix as the Vercel storage
 problem, and it is a prerequisite for (b) being cheap.
 
 ---
@@ -394,7 +398,7 @@ this repo, not a promise.
 
 | # | Step | Test plan | Effort | When |
 |---|---|---|---|---|
-| 1 | Move the six hero videos and the og image out of `assets/` into storage; reference by URL | build has no `.mp4`; page loads from a cold cache; `dist` < 20 MB | 1 day | before the first client |
+| 1 | Move the six hero videos and the og image out of `assets/` into storage, unchanged bytes; reference by URL | build has no `.mp4`; page loads from a cold cache; `dist` < 20 MB | 1 day | before the first client |
 | 2 | Extract `lib/fill-template.js`; `build-static.js` and the runtime IIFE both call it | golden build: output byte-identical for the same BIZ | 1 day | before the first client |
 | 3 | Add `sites`, `site_domains`, `site_assets` + RLS migration | posture test (RLS on, zero anon grants) mirrors `db-wall` | 0.5 day | before the first client |
 | 4 | Move the copy out of `index.html` into `content` JSON + schema; build reads content | schema tests, golden build with the same content | 2 days | before the first client |
