@@ -337,3 +337,34 @@ those fixture chats as well as the real phones, and a bug in a suite can touch
 real rows. **No suite may run against production once a real client is onboarded.**
 A separate test project (`docs/TEST_PROJECT.md`, `.env.test`) is a hard
 pre-launch requirement, not a nice-to-have.
+
+## 10. Vercel storage
+
+**Why it grows.** Vercel builds a deployment for every push to every branch. Each
+deployment keeps its own copy of the output, so the bill grows with pushes, not with
+how many domains point at the site. This project's output is about 125 MB, and
+110.9 MB of that is six hero video files; a 10 GB allowance is roughly 70
+deployments at that size.
+
+**Where to see it.** Dashboard → the team → **Usage** → *Deployment Storage*, with a
+per-project breakdown. The deployment list shows what each one holds.
+
+**Stop the previews at the source.** `vercel.json` now carries:
+
+```json
+"git": { "deploymentEnabled": { "*": false, "main": true } }
+```
+
+Every branch is skipped; `main` still builds. This is the same mechanism as the
+dashboard **Ignored Build Step** (`[ "$VERCEL_GIT_COMMIT_REF" != "main" ]`) and it
+replaces it: keep one, not two. Once this is live, delete the dashboard step.
+
+**Delete what is already there.** Project Settings → **Deployment Retention**: set
+preview deployments to expire after a few days (or keep the last N). The current
+production deployment is never deleted by retention, and neither is the one a
+custom domain is serving — only previews age out.
+
+**Hobby is not for paying clients.** The Hobby plan is for non-commercial use; a
+client site that takes money needs Pro. Pro also raises the included storage and
+lets retention run across projects, which matters once there is more than one
+client deployment.
