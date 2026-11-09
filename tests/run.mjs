@@ -35,6 +35,8 @@ const DEFAULT_SUITES = [
   { file: 'tests/network-guard.test.mjs', needsHttp: false },
   { file: 'tests/isolation.test.mjs', needsHttp: false },
   { file: 'tests/build-linked-assets.test.mjs', needsHttp: false },
+  { file: 'tests/build-cleanup.test.mjs', needsHttp: false },
+  { file: 'tests/build-cleanup.test.mjs', needsHttp: false },
   { file: 'tests/fixture-safety.test.mjs', needsHttp: false },
   { file: 'tests/housekeeping.test.mjs', needsHttp: false },
   { file: 'tests/bot-text.test.mjs', needsHttp: false },
@@ -193,6 +195,9 @@ async function cleanup(svc) {
   if (devRoot) { removeDevRoot(devRoot); devRoot = null; }
   if (fs.existsSync(MARKER)) { try { fs.unlinkSync(MARKER); } catch {} }
   if (fakes) { try { await fakes.stop(); } catch {} fakes = null; }
+  /* P15 builds into _debug/build-test (about 120 MB). It is a build output, not a
+     fixture, so it goes with the run. Exact path only: no glob, no parent sweep. */
+  try { fs.rmSync(path.join(ROOT, '_debug', 'build-test'), { recursive: true, force: true }); } catch {}
   // Confirm nothing is left listening on port 3000.
   const stillUp = await new Promise((resolve) => {
     const t = setTimeout(() => resolve(false), 4000);
@@ -297,11 +302,16 @@ try {
   }
 
   // Refuse to "reuse" a stale dev server: its env would not point at our fakes.
-  try {
-    const probe = await fetch(API, { method: 'GET', signal: AbortSignal.timeout(1200) });
-    throw new Error(`port 3000 is already answering (${probe.status}) — a stale vercel dev is running. Stop it first.`);
-  } catch (e) {
-    if (e.message && e.message.startsWith('port 3000')) throw e;
+  // Only when this run starts one — a suite set with no HTTP suites never touches
+  // port 3000, and a nested run (tests/build-cleanup.test.mjs) must be able to
+  // run while the outer one holds the port.
+  if (NEEDS_DEV) {
+    try {
+      const probe = await fetch(API, { method: 'GET', signal: AbortSignal.timeout(1200) });
+      throw new Error(`port 3000 is already answering (${probe.status}) — a stale vercel dev is running. Stop it first.`);
+    } catch (e) {
+      if (e.message && e.message.startsWith('port 3000')) throw e;
+    }
   }
 
   // The pinned CLI is required: 65.x needs Windows Developer Mode and gets EPERM
