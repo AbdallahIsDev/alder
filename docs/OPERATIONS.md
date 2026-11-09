@@ -365,6 +365,6 @@ production deployment is never deleted by retention, and neither is the one a
 custom domain is serving — only previews age out.
 
 **Hobby is not for paying clients.** The Hobby plan is for non-commercial use; a
-client site that takes money needs Pro. Pro also raises the included storage and
-lets retention run across projects, which matters once there is more than one
-client deployment.
+site that takes money needs Pro. Pro bills Deployment Storage beyond the included
+allowance at $0.10 per GB-month. Custom domains per project: Hobby 50, Pro
+unlimited (soft limit 100,000).

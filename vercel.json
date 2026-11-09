@@ -3,7 +3,7 @@
   "outputDirectory": "dist",
   "git": {
     "deploymentEnabled": {
-      "*": false,
+      "**": false,
       "main": true
     }
   },

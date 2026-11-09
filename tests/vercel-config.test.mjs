@@ -5,15 +5,18 @@
 // What it proves:
 //   V1  git.deploymentEnabled exists and the only branch enabled is main
 //   V2  a branch name resolves the way Vercel resolves it: a branch matching a
-//       true rule deploys, everything else does not. 'main-preview' must not
-//       match 'main'.
+//       true rule deploys, a branch matching no rule deploys by default, and
+//       'main-preview' must not match 'main'.
+//   V2b a partial config proves the no-rule default without touching the real one
 //   V3  the keys that were already in vercel.json are still there and intact
 //
 // The matcher below models the documented behaviour (minimatch patterns, a
-// branch matching a true rule deploys). The config only uses '*' and an exact
-// name, so the model is unambiguous here — this is not a minimatch clone.
+// branch matching a true rule deploys, no match deploys by default). The config
+// uses '**' and an exact name, so the model is unambiguous here — this is not a
+// minimatch clone.
 //
-// Mutation: delete the "main": true entry and V1/V2 fail.
+// Mutation: delete the "main": true entry and V1/V2 fail; put '*' back instead of
+// '**' and the feature/hero-copy case fails, because '*' does not cross a slash.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -45,39 +48,53 @@ function globToRegExp(pattern) {
   return new RegExp(`^${out}$`);
 }
 
-/** True when `branch` deploys under this deploymentEnabled map. */
+/**
+ * True when `branch` deploys under this deploymentEnabled map, using Vercel's
+ * documented rule: a branch matching at least one rule deploys when any matching
+ * rule is true; a branch matching NO rule deploys by default.
+ */
 function deploys(enabled, branch) {
-  let decision = false;
-  for (const [pattern, value] of Object.entries(enabled)) {
-    if (globToRegExp(pattern).test(branch)) decision = decision || value === true;
-  }
-  return decision;
+  const matching = Object.entries(enabled || {}).filter(([p]) => globToRegExp(p).test(branch));
+  if (!matching.length) return true;
+  return matching.some(([, value]) => value === true);
 }
 
 const enabled = (CONFIG.git && CONFIG.git.deploymentEnabled) || null;
 
-/* V1: the block is there, '*' is off, main is on. */
+/* V1: the block is there, main is the only true rule, and at least one rule
+   turns the rest off. Which glob does that is V2's business. */
 {
-  const ok = !!enabled
-    && enabled['*'] === false
-    && enabled.main === true
-    && Object.keys(enabled).filter((k) => enabled[k] === true).join(',') === 'main';
+  const trues = enabled ? Object.keys(enabled).filter((k) => enabled[k] === true) : [];
+  const falses = enabled ? Object.keys(enabled).filter((k) => enabled[k] === false) : [];
+  const ok = !!enabled && trues.join(',') === 'main' && falses.length >= 1;
   line(ok, 'V1', 'deploymentEnabled: only main is enabled',
-    enabled ? `rules=${Object.keys(enabled).join(',')}` : 'git.deploymentEnabled missing');
+    enabled ? `true=${trues.join(',') || 'none'} false=${falses.join(',') || 'none'}` : 'git.deploymentEnabled missing');
 }
 
-/* V2: resolution, including the prefix trap. */
+/* V2: resolution, including the slash and prefix traps. */
 {
   const cases = [
     ['main', true],
     ['feature/hero-copy', false],
-    ['operator-redirects', false],
+    ['a/b/c', false],
     ['main-preview', false],
+    ['operator-redirects', false],
     ['vercel-storage', false],
   ];
   const bad = enabled ? cases.filter(([b, want]) => deploys(enabled, b) !== want) : cases.map(([b]) => b);
   line(!!enabled && bad.length === 0, 'V2', 'a branch deploys only when a true rule matches',
     bad.length ? `wrong: ${bad.join(',')}` : `${cases.length} branches resolve`);
+}
+
+/* V2b: a config that matches only some branches still deploys the rest. This
+   object exists only inside the test; the real config must match everything. */
+{
+  const partial = { main: true };
+  const ok = deploys(partial, 'feature/hero-copy') === true
+    && deploys(partial, 'a/b/c') === true
+    && deploys(partial, 'main') === true;
+  line(ok, 'V2b', 'a branch matching no rule deploys by default',
+    `partial=${JSON.stringify(partial)}`);
 }
 
 /* V3: nothing that was already in the file was changed. */
