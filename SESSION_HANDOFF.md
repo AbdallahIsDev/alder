@@ -280,6 +280,7 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - `operator-redirects` (PR #13): merged to `main` as `df3a4b8`. The local branch is deleted; its one post-merge commit lives on as `7110a8f`.
 - `operator-redirects-2` (PR #14): merged to `main` as `de2c8fe`; head was `7110a8f`.
 - `vercel-storage` (from `origin/main`): builds `main` only; `**` catches branch names with a slash; head `8366d37`. Draft PR #15.
+- `test-isolation` (from `origin/main`): dev root, production canary, shape checks, strict db-wall; head `6789644`. Draft PR.
 - `multi-tenant-design` (from `origin/main`, not from `vercel-storage`): design doc only; head `67b38f2`. Draft PR #16.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
@@ -330,6 +331,7 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-09 | `vercel-storage` | `7a931f7` | `git.deploymentEnabled` builds `main` only; V1–V3 test; OPERATIONS §10 on deployment storage and retention | PR #15 draft |
 | 2026-11-09 | `multi-tenant-design` | `67b38f2` | One deployment for many clients: inventory, three-table proposal, content schema, rendering comparison and recommendation, assets, commands, migration plan | PR #16 draft, docs only |
 | 2026-11-09 | `vercel-storage` | `8366d37` | `**` catch-all so branch names with a slash are covered; V2b models Vercel's no-rule default; sourced Pro storage and domain facts; Phase C green on the test project; Supabase key-format review added as an open item | PR #15 draft; 391 assertions on the test project |
+| 2026-11-09 | `test-isolation` | `6789644` | `vercel dev` runs from a dev root with no .env; canary checks production and aborts; env shape validation (URL, DSN, key format, swap); db-wall passes only on a real denial; SKIP lines counted in the runner summary | Draft PR; suite counts in the PR |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |
