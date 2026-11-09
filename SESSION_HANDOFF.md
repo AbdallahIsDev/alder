@@ -24,6 +24,16 @@ phone can be connected at any moment. `seed-check` reports the chat count and do
 not require it to be zero. The runner fails a run that adds or removes a chat,
 leaks a test-shaped lead, or grows the live unused bind-code count of a real business.
 
+### Vercel CLI rule (set 2026-11-09)
+
+Never run `vercel dev` or any Vercel CLI command from a directory that has no
+`.vercel` link, and never create or link a remote project while probing. Measured
+the hard way: `vercel dev` in an unlinked directory creates a project on the
+account, and `vercel dev` in a directory with a `.env` gives that file precedence
+over the environment it was started with. The test runner avoids both by starting
+the server from a dev root that has a copied `.vercel/project.json` and no `.env`
+(`tests/dev-root.mjs`).
+
 ### Roles
 | Role | Who | Does |
 |---|---|---|
@@ -110,7 +120,7 @@ Optional: `TELEGRAM_CHAT_ID`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX` (**remo
 
 New in `ops-audience` (not deployed): `OPERATOR_CHAT_ID` (falls back to `TELEGRAM_CHAT_ID`), `OPERATOR_EMAIL`.
 
-Test-only: `.env.test` (**does not exist**), `TEST_ENV=1`, `ALLOW_PROD_TESTS`.
+Test-only: `.env.test` (exists since 2026-11-09), `TEST_ENV=1`. `ALLOW_PROD_TESTS` is gone.
 
 ---
 
@@ -182,7 +192,7 @@ Last full run before this bundle: 385.2 s / 384.4 s / 385.6 s, all green. This b
 
 ## 8. Still missing / not done
 
-1. **Separate test Supabase project (Phase C), DONE 2026-11-09.** `.env.test` exists and the full suite is green on it (391 assertions, 241.5 s against 382 / 417.8 s on production; `delete-scripts` X1-X5 only run there). Still to do: fixtures replace the `alder-demo` literals, make the prod guard absolute, remove `ALLOW_PROD_TESTS` and the backup ritual.
+1. **Separate test Supabase project (Phase C), DONE 2026-11-09.** `.env.test` exists and the full suite is green on it (391 assertions, 241.5 s against 382 / 417.8 s on production; `delete-scripts` X1-X5 only run there). Still to do: fixtures replace the `alder-demo` literals, and the backup ritual can go. The guard is absolute as of 2026-11-09 (`ALLOW_PROD_TESTS` removed).
 2. **Summary schedule** (proposal only, `docs/PROPOSALS.md` §5d): four presets, per-business timezone, one column, hourly cron on Pro.
 3. Self-check is operator-only and not owner-configurable (decision).
 4. Quiet hours / 15-minute reminders: parked; Hobby crons are daily.
@@ -280,7 +290,7 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - `operator-redirects` (PR #13): merged to `main` as `df3a4b8`. The local branch is deleted; its one post-merge commit lives on as `7110a8f`.
 - `operator-redirects-2` (PR #14): merged to `main` as `de2c8fe`; head was `7110a8f`.
 - `vercel-storage` (from `origin/main`): builds `main` only; `**` catches branch names with a slash; head `8366d37`. Draft PR #15.
-- `test-isolation` (from `origin/main`): dev root, production canary, shape checks, strict db-wall; head `6789644`. Draft PR.
+- `test-isolation` (from `origin/main`): dev root, production canary, shape checks, strict db-wall, absolute guard; head `6789644` + this branch. Draft PR #17.
 - `multi-tenant-design` (from `origin/main`, not from `vercel-storage`): design doc only; head `67b38f2`. Draft PR #16.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
@@ -332,6 +342,7 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-09 | `multi-tenant-design` | `67b38f2` | One deployment for many clients: inventory, three-table proposal, content schema, rendering comparison and recommendation, assets, commands, migration plan | PR #16 draft, docs only |
 | 2026-11-09 | `vercel-storage` | `8366d37` | `**` catch-all so branch names with a slash are covered; V2b models Vercel's no-rule default; sourced Pro storage and domain facts; Phase C green on the test project; Supabase key-format review added as an open item | PR #15 draft; 391 assertions on the test project |
 | 2026-11-09 | `test-isolation` | `6789644` | `vercel dev` runs from a dev root with no .env; canary checks production and aborts; env shape validation (URL, DSN, key format, swap); db-wall passes only on a real denial; SKIP lines counted in the runner summary | Draft PR; suite counts in the PR |
+| 2026-11-09 | `test-isolation` | (this branch) | `ALLOW_PROD_TESTS` removed — a suite run needs `TEST_ENV=1` plus `.env.test`; `--seed-check` renamed to `--read-production-seed` with a deprecated alias; `build-static.js` copies assets with `dereference: true`, so the dev root links them | PR #17 draft |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |

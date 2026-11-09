@@ -20,6 +20,7 @@ import { ALDER_DEMO, isFixtureLead, fetchAllRows } from './helpers.mjs';
 import { FIXTURE_ID_BASE } from './fixture-ids.mjs';
 import { createDevRoot, removeDevRoot } from './dev-root.mjs';
 import { countSkips } from './skip-count.mjs';
+import { suiteRunGate } from './gate.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MARKER = path.join(ROOT, '.test-mode');
@@ -32,6 +33,7 @@ const API = 'http://localhost:3000/api/lead';
 const DEFAULT_SUITES = [
   { file: 'tests/network-guard.test.mjs', needsHttp: false },
   { file: 'tests/isolation.test.mjs', needsHttp: false },
+  { file: 'tests/build-linked-assets.test.mjs', needsHttp: false },
   { file: 'tests/fixture-safety.test.mjs', needsHttp: false },
   { file: 'tests/housekeeping.test.mjs', needsHttp: false },
   { file: 'tests/bot-text.test.mjs', needsHttp: false },
@@ -44,6 +46,7 @@ const DEFAULT_SUITES = [
   { file: 'tests/email-layout.test.mjs', needsHttp: false },
   { file: 'tests/digest.test.mjs', needsHttp: false },
   { file: 'tests/recipients.test.mjs', needsHttp: false },
+  { file: 'tests/runner-flags.test.mjs', needsHttp: false },
   { file: 'tests/skip-summary.test.mjs', needsHttp: false },
   { file: 'tests/delete-scripts.test.mjs', needsHttp: false },
   { file: 'tests/lead-api.test.mjs', needsHttp: true },
@@ -55,7 +58,9 @@ const DEFAULT_SUITES = [
   { file: 'tests/outbound.test.mjs', needsHttp: false },
 ];
 const cliArgs = process.argv.slice(2);
-const KNOWN_FLAGS = new Set(['--seed-check']);
+const LEGACY_SEED_FLAG = '--seed-check';
+const SEED_FLAG = '--read-production-seed';
+const KNOWN_FLAGS = new Set([SEED_FLAG, LEGACY_SEED_FLAG]);
 const unknownFlags = cliArgs.filter((a) => a.startsWith('--') && !KNOWN_FLAGS.has(a));
 if (unknownFlags.length) {
   // Unknown flags used to be dropped silently, so `--timing` looked like it worked.
@@ -63,7 +68,8 @@ if (unknownFlags.length) {
   console.log(`      known flags: ${[...KNOWN_FLAGS].join(', ')} — anything else is a typo, not a no-op`);
   process.exit(1);
 }
-const RUN_SEED_CHECK = cliArgs.includes('--seed-check');
+const RUN_SEED_CHECK = cliArgs.includes(SEED_FLAG) || cliArgs.includes(LEGACY_SEED_FLAG);
+const SEED_FLAG_DEPRECATED = cliArgs.includes(LEGACY_SEED_FLAG);
 const suiteFiles = cliArgs.filter((a) => !a.startsWith('--'));
 const SUITES_TO_RUN = (suiteFiles.length ? suiteFiles : DEFAULT_SUITES.map((s) => s.file)).map((f) => {
   const known = DEFAULT_SUITES.find((s) => s.file === f);
@@ -210,30 +216,32 @@ const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-/* Refuse to run suites against the project named in .env. The comparison is by
-   value, and neither URL is ever printed. ALLOW_PROD_TESTS=1 is the opt-out.
-   Deliberately placed AFTER --seed-check: that path runs two SELECTs and exits,
-   and it is the command the handoff tells you to run instead of a full suite. */
-function assertNotProductionProject() {
-  const check = checkNotProduction();
-  if (check.reason === 'no-url') {
-    out('FAIL  runner  SUPABASE_URL is not set — check .env or .env.test');
-    process.exit(1);
-  }
-  if (!check.ok) {
-    if (String(process.env.ALLOW_PROD_TESTS || '') !== '1') {
-      out('FAIL  runner  refusing to run against the production project');
-      out('      SUPABASE_URL matches the value in .env. Put a test project URL in');
-      out('      .env.test and run with TEST_ENV=1, or set ALLOW_PROD_TESTS=1 to run');
-      out('      against production on purpose.');
-      process.exit(1);
-    }
-    out('runner  WARNING: SUPABASE_URL is the project in .env (production), allowed by ALLOW_PROD_TESTS=1');
-  }
+/* Refuse to run suites unless the run is demonstrably pointed at a test project.
+   The comparison is by value, and neither URL is ever printed. There is no
+   opt-out. Deliberately placed AFTER --read-production-seed: that path runs two
+   SELECTs and exits, and it is the only production reader left. */
+/* No escape hatch. A suite run needs TEST_ENV=1 and a .env.test that points at
+   another project; the only production reader left is --read-production-seed,
+   which exits before this is called. */
+function assertTestProject() {
+  const gate = suiteRunGate({
+    testEnv: isTestEnv(),
+    hasEnvTest: fs.existsSync(path.join(ROOT, '.env.test')),
+    prodReason: checkNotProduction().reason,
+  });
+  if (gate.ok) return;
+  out('FAIL  runner  refusing to run a suite');
+  out(`      ${gate.detail}.`);
+  out('      A suite run needs TEST_ENV=1 and a .env.test pointing at a test');
+  out('      project. See docs/TEST_PROJECT.md. There is no override.');
+  process.exit(1);
 }
 
 /* ---------- seed check (quick, read-only; no tests run) ---------- */
 if (RUN_SEED_CHECK) {
+  if (SEED_FLAG_DEPRECATED) {
+    out('runner  --seed-check is deprecated; use --read-production-seed');
+  }
   const seed = {
     slug: ALDER_DEMO, name: 'Alder Roofing',
     owner_email: 'owner@alder-demo.example.com',
@@ -257,7 +265,7 @@ if (RUN_SEED_CHECK) {
   process.exit(0);
 }
 
-assertNotProductionProject();
+assertTestProject();
 
 try {
   /* ---------- refusals ---------- */

@@ -20,15 +20,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * Directories linked into the root. `assets` is NOT here: the build copies it
- * into dist with fs.cpSync, and cpSync recreates a junction as a symlink, which
- * needs a privilege Windows does not grant by default (EPERM). It is copied
- * instead — 124 MB, about a second, and the build copies it again anyway.
+ * Directories linked into the root. `assets` is here too: the build copies it
+ * into dist with fs.cpSync, and that call passes `dereference: true` so a
+ * junction is copied as content instead of being recreated as a link (which
+ * Windows refuses with EPERM).
  */
-export const LINKED = ['api', 'lib', 'scripts', 'node_modules'];
-
-/** Directories copied into the root rather than linked. */
-export const COPIED_DIRS = ['assets'];
+export const LINKED = ['api', 'lib', 'scripts', 'node_modules', 'assets'];
 
 /** Root files the build reads, copied into the root. */
 export const COPIED = ['vercel.json', 'package.json', 'index.html', 'build-static.js'];
@@ -46,10 +43,6 @@ export function createDevRoot({ sourceRoot, name = 'dev-root', debugDir = '_debu
     const target = path.join(sourceRoot, entry);
     if (!fs.existsSync(target)) continue;
     fs.symlinkSync(target, path.join(dir, entry), 'junction');
-  }
-  for (const entry of COPIED_DIRS) {
-    const target = path.join(sourceRoot, entry);
-    if (fs.existsSync(target)) fs.cpSync(target, path.join(dir, entry), { recursive: true });
   }
   for (const file of COPIED) {
     const from = path.join(sourceRoot, file);

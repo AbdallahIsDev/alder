@@ -140,9 +140,12 @@ $env:TEST_ENV = "1"; node tests/run.mjs
 TEST_ENV=1 node tests/run.mjs
 ```
 
-`TEST_ENV=1` switches the loader to `.env.test`; everything else is unchanged. The
-runner still refuses if `SUPABASE_URL` matches `.env`, which it no longer does, so
-`ALLOW_PROD_TESTS` is not needed and can be retired once this works.
+`TEST_ENV=1` switches the loader to `.env.test`; everything else is unchanged.
+
+A suite run now requires **both** `TEST_ENV=1` and a `.env.test` file, and the URL
+in it must differ from `.env`. If any of that is missing the runner exits 1 with a
+names-only line and starts nothing. There is no override: `ALLOW_PROD_TESTS` was
+removed, not defaulted off.
 
 In PowerShell the variable stays set for the rest of the session. To unset it:
 
@@ -225,8 +228,9 @@ the project to a paid plan.
 
 Then, and only then:
 
-1. Delete `ALLOW_PROD_TESTS` from `tests/run.mjs` and make the production guard
-   absolute (decision 7 from the earlier bundle).
+1. ~~Delete `ALLOW_PROD_TESTS` and make the production guard absolute.~~ Done
+   2026-11-09: the gate requires `TEST_ENV=1` plus `.env.test`, and the flag no
+   longer exists.
 2. Replace the hardcoded `alder-demo` fixtures with `tests/fixtures.mjs`, seeding a
    dedicated `test-fixture` business per run.
 3. Remove the backup/reset/restore ritual from `HANDOFF_alder_session.md` and from
