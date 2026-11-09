@@ -21,6 +21,7 @@ import { FIXTURE_ID_BASE } from './fixture-ids.mjs';
 import { createDevRoot, removeDevRoot } from './dev-root.mjs';
 import { countSkips } from './skip-count.mjs';
 import { suiteRunGate } from './gate.mjs';
+import { freeBytes, diskGate, floorFromEnv } from './disk.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MARKER = path.join(ROOT, '.test-mode');
@@ -47,6 +48,8 @@ const DEFAULT_SUITES = [
   { file: 'tests/digest.test.mjs', needsHttp: false },
   { file: 'tests/recipients.test.mjs', needsHttp: false },
   { file: 'tests/runner-flags.test.mjs', needsHttp: false },
+  { file: 'tests/disk-preflight.test.mjs', needsHttp: false },
+  { file: 'tests/disk-preflight.test.mjs', needsHttp: false },
   { file: 'tests/skip-summary.test.mjs', needsHttp: false },
   { file: 'tests/delete-scripts.test.mjs', needsHttp: false },
   { file: 'tests/lead-api.test.mjs', needsHttp: true },
@@ -266,6 +269,25 @@ if (RUN_SEED_CHECK) {
 }
 
 assertTestProject();
+
+/* A full run writes two 124 MB build trees. Running out of space mid-suite looks
+   like a test failure and is not one, so refuse up front. Fail-open only if the
+   platform cannot report free space; the note says so. */
+{
+  const floor = floorFromEnv();
+  let free = null;
+  try { free = freeBytes(ROOT); } catch {}
+  if (free === null) {
+    out('runner  disk preflight skipped: this platform cannot report free space');
+  } else {
+    const gate = diskGate(free, floor);
+    if (!gate.ok) {
+      out(`FAIL  runner  ${gate.detail}`);
+      out('      free space and run again');
+      process.exit(1);
+    }
+  }
+}
 
 try {
   /* ---------- refusals ---------- */
