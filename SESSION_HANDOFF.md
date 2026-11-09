@@ -1,7 +1,7 @@
 # SESSION HANDOFF: Alder roofing lead platform (orchestrator continuation)
 
 > **Purpose.** Give this file to any cloud AI assistant so it can continue as the **orchestrator** for this project without the owner re-explaining anything.
-> **Last updated:** 2026-11-07 (end of the fixture-safety / `/code` bundle).
+> **Last updated:** 2026-11-09 (multi-tenant design bundle).
 > **Rule for the local agent:** after every task, update the change log and any section whose facts changed. Never put secret values in it.
 
 ---
@@ -268,14 +268,17 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 
 ## 12. Git state (as of this report)
 
-- `main` = `e981e0c` (deploys to production).
+- `main` = `de2c8fe` (deploys to production; PR #14 merged 2026-11-09).
 - `ops-audience` (PR #6): merged to `main` on GitHub (`4348b24`); local `main` = `origin/main`.
 - `fix-code-copy`: merged to `main` as `1e3be74` (PR #8).
 - `operator-ux`: merged to `main` as `baf15d1` (PR #9).
 - `email-brand`: merged to `main` as `fb4680c` (PR #10).
 - `operator-roles`: merged to `main` as `a29f36d` (PR #11).
 - `operator-views`: merged to `main` as `6bd7bb4` (PR #12, menu only).
-- `operator-redirects` (from `origin/main`): operator answers for owner commands, `/businesses` paused counts, S4b, test-project prep; head `f7eeb60`. Draft PR against `main`.
+- `operator-redirects` (PR #13): merged to `main` as `df3a4b8`. The local branch is deleted; its one post-merge commit lives on as `7110a8f`.
+- `operator-redirects-2` (PR #14): merged to `main` as `de2c8fe`; head was `7110a8f`.
+- `vercel-storage` (from `origin/main`): builds `main` only; head `7a931f7`. Draft PR #15.
+- `multi-tenant-design` (from `origin/main`, not from `vercel-storage`): design doc only; head `67b38f2`. Draft PR #16.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
@@ -321,6 +324,9 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-08 | `email-brand` | `7a96514` `057f783` `d435dcd` | Company header on every company email; digest targets carry the name; preview uses current builders; OP3 boundary retry | L6b/L7-L9, D-name, T8, OP3 |
 | 2026-11-08 | `operator-roles` | `d06d404` | `/remove_lead` (owner only, scoped, confirm + danger), operator welcome, never bound | OP25-OP28, T10 |
 | 2026-11-09 | `operator-redirects` | `b24aa76` `4da4a0b` `f7eeb60` | Operator answers for /invite /recipients /help /leads /remove_lead; /businesses counts paused phones; self-check email header on its own line (S4b); test-project schema/seed/docs/env-check | OP33/OP34, S4b, T1 |
+| 2026-11-09 | `operator-redirects-2` | `7110a8f` | Env check back to names-only readiness by default with the posture report behind `--db`; docs restored and merged with the SQL-editor route; one seed (`Alder Roofing`) with M5/M6 drift guards; `/businesses` says `?` when the count fails | PR #14 **merged** (`de2c8fe`); 382 assertions green |
+| 2026-11-09 | `vercel-storage` | `7a931f7` | `git.deploymentEnabled` builds `main` only; V1–V3 test; OPERATIONS §10 on deployment storage and retention | PR #15 draft |
+| 2026-11-09 | `multi-tenant-design` | `67b38f2` | One deployment for many clients: inventory, three-table proposal, content schema, rendering comparison and recommendation, assets, commands, migration plan | PR #16 draft, docs only |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |
