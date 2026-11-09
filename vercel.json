@@ -1,6 +1,12 @@
 {
   "buildCommand": "node build-static.js index.html --out dist/index.html",
   "outputDirectory": "dist",
+  "git": {
+    "deploymentEnabled": {
+      "**": false,
+      "main": true
+    }
+  },
   "functions": {
     "api/*.js": {
       "includeFiles": "lib/brand.generated.json"
