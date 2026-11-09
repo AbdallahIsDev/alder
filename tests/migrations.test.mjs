@@ -63,6 +63,53 @@ const line = (ok, id, what, d) => {
     `imports=${importsList} noLiteral=${noLiteral}`);
 }
 
+/* M5: the SQL-editor copy of the seed is the same seed. Two files that must
+   agree are one file with a copy — this is the check that fails when they drift.
+   supabase/seed.sql is the single source. */
+const SEED_FIELDS = ['name', 'owner_email', 'google_review_url', 'timezone', 'status'];
+const parseSqlSeed = (text) => {
+  const rows = {};
+  const re = /\('([^']+)',\s*'([^']*)',\s*'([^']*)',\s*'([^']*)',\s*'([^']*)',\s*'([^']*)'\)/g;
+  let m;
+  while ((m = re.exec(String(text)))) {
+    rows[m[1]] = { name: m[2], owner_email: m[3], google_review_url: m[4], timezone: m[5], status: m[6] };
+  }
+  return rows;
+};
+{
+  const canonical = parseSqlSeed(fs.readFileSync(path.join(ROOT, 'supabase', 'seed.sql'), 'utf8'));
+  const copy = parseSqlSeed(fs.readFileSync(path.join(ROOT, '_debug', 'test-project', 'seed.sql'), 'utf8'));
+  const slugs = Object.keys(canonical);
+  const differing = [];
+  for (const slug of slugs) {
+    if (!copy[slug]) { differing.push(slug + ':missing'); continue; }
+    for (const f of SEED_FIELDS) {
+      if (String(copy[slug][f]) !== String(canonical[slug][f])) differing.push(`${slug}.${f}`);
+    }
+  }
+  line(slugs.length === 2 && differing.length === 0, 'M5',
+    'test-project seed matches supabase/seed.sql',
+    differing.length ? `differing: ${differing.join(',')}` : `${slugs.length} rows, ${SEED_FIELDS.length} fields each`);
+}
+
+/* M6: the runner's --seed-check expectation is the same seed, so the check that
+   guards a production run cannot demand values the seed no longer has. */
+{
+  const canonical = parseSqlSeed(fs.readFileSync(path.join(ROOT, 'supabase', 'seed.sql'), 'utf8'))['alder-demo'];
+  const src = fs.readFileSync(path.join(ROOT, 'tests', 'run.mjs'), 'utf8');
+  const block = /const seed = \{([\s\S]*?)\n  \};/.exec(src);
+  const runner = {};
+  if (block) {
+    const re = /(\w+):\s*'([^']*)'/g;
+    let m;
+    while ((m = re.exec(block[1]))) runner[m[1]] = m[2];
+  }
+  const differing = SEED_FIELDS.filter((f) => String(runner[f]) !== String(canonical[f]));
+  line(!!canonical && !!block && differing.length === 0, 'M6',
+    'runner --seed-check expectation matches supabase/seed.sql',
+    differing.length ? `differing: ${differing.join(',')}` : SEED_FIELDS.map((f) => runner[f]).join('|').slice(0, 60));
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
