@@ -20,6 +20,7 @@ import { ALDER_DEMO, isFixtureLead, fetchAllRows } from './helpers.mjs';
 import { FIXTURE_ID_BASE } from './fixture-ids.mjs';
 import { createDevRoot, removeDevRoot } from './dev-root.mjs';
 import { countSkips } from './skip-count.mjs';
+import { clearCanaryLimits } from './canary-limits.mjs';
 import { suiteRunGate } from './gate.mjs';
 import { freeBytes, diskGate, floorFromEnv } from './disk.mjs';
 
@@ -38,6 +39,8 @@ const DEFAULT_SUITES = [
   { file: 'tests/build-cleanup.test.mjs', needsHttp: false },
   { file: 'tests/build-test-probe.test.mjs', needsHttp: false },
   { file: 'tests/startup-sweep.test.mjs', needsHttp: false },
+  { file: 'tests/canary-limits.test.mjs', needsHttp: false },
+  { file: 'tests/suite-list.test.mjs', needsHttp: false },
   { file: 'tests/fixture-safety.test.mjs', needsHttp: false },
   { file: 'tests/housekeeping.test.mjs', needsHttp: false },
   { file: 'tests/bot-text.test.mjs', needsHttp: false },
@@ -439,6 +442,22 @@ try {
         + `error ${rmErr ? rmErr.code : 'none'}) — the function is writing to a different project`);
     }
     canaryKey = null;
+
+    /* The canary has just proved this host is the test project: the row landed in
+       this database and not in production. Only now may the canary business's
+       rate-limit rows be cleared — a few runs in an hour otherwise make the next
+       canary answer 429 and the runner abort for the wrong reason. */
+    {
+      const { data: canaryBiz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).maybeSingle();
+      if (canaryBiz && canaryBiz.id) {
+        const cleared = await clearCanaryLimits(svc, canaryBiz.id, {
+          host: process.env.SUPABASE_URL,
+          prodHost: readEnvFile('.env').SUPABASE_URL,
+        });
+        if (cleared.skipped) out(`runner  canary rate limits not cleared (${cleared.skipped})`);
+        else out(`runner  canary rate limits cleared: ${cleared.cleared} row(s)`);
+      }
+    }
     await fakes.tg.reset();
   } else {
     out('runner  no selected suite needs HTTP: vercel dev and canary skipped');

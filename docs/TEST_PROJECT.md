@@ -188,6 +188,17 @@ then checks three things:
 A run that cannot place the canary where it expects stops there. That is the check
 that turns "the tests passed" into "the tests ran where I think they did".
 
+### Whenever `tests/run.mjs` changes
+
+Run `npm run test:port-guard`. It binds port 3000, then checks two things: a run
+with an HTTP suite is refused while the port is busy, and a run with only DB
+suites is not. It is standalone on purpose — during a full run the runner itself
+is listening on 3000, so the check cannot live in the suite list.
+
+```bash
+npm run test:port-guard
+```
+
 ## 6b. The key migration (early 2027)
 
 Supabase retires the legacy JWT `anon` and `service_role` keys in early 2027. The
