@@ -1,7 +1,7 @@
 # SESSION HANDOFF: Alder roofing lead platform (orchestrator continuation)
 
 > **Purpose.** Give this file to any cloud AI assistant so it can continue as the **orchestrator** for this project without the owner re-explaining anything.
-> **Last updated:** 2026-11-07 (end of the fixture-safety / `/code` bundle).
+> **Last updated:** 2026-11-09 (multi-tenant design bundle).
 > **Rule for the local agent:** after every task, update the change log and any section whose facts changed. Never put secret values in it.
 
 ---
@@ -169,6 +169,7 @@ Per-business self-check counts, audience rule, shared branded email layout, plai
 | **RESOLVED** | `/invite` at the cap offers one button that expires the old invites and mints a fresh one (owner only, 60 s mutex, budget checked before expiring). `/recipients` states the pending count. |
 | Low | `/businesses` shows 0 phones for paused/churned clients (it re-fetches through `getBusinessActiveBySlug`). |
 | Low | `public.rls_auto_enable()` is SECURITY DEFINER with EXECUTE to `anon`/`authenticated` (event-trigger function, not directly callable). |
+| **High (dated, platform)** | Supabase retires the legacy JWT `anon`/`service_role` keys in early 2027 for `sb_publishable_` / `sb_secret_`. Nothing here decodes a key — every use is `createClient(url, key)`, no migration calls `auth.jwt()` or `auth.role()`, and the anon key never reaches the browser. The switch should be env values only; the gap is `tests/db-wall.test.mjs`, which counts any error as a pass. Detail and steps in §8 item 11. |
 | Resolved | `/invite` message bug: PR #7 is merged (GitHub state observed 2026-11-07). |
 
 ### Production data (verified 2026-11-07)
@@ -181,7 +182,7 @@ Last full run before this bundle: 385.2 s / 384.4 s / 385.6 s, all green. This b
 
 ## 8. Still missing / not done
 
-1. **Separate test Supabase project (Phase C), BLOCKED on the owner.** `.env.test` does not exist. Plan in `docs/TEST_PROJECT.md`: Paris project, migrations with `TEST_ENV=1`, fixtures replace `alder-demo` literals, make the prod guard absolute, remove `ALLOW_PROD_TESTS` and the backup ritual.
+1. **Separate test Supabase project (Phase C), DONE 2026-11-09.** `.env.test` exists and the full suite is green on it (391 assertions, 241.5 s against 382 / 417.8 s on production; `delete-scripts` X1-X5 only run there). Still to do: fixtures replace the `alder-demo` literals, make the prod guard absolute, remove `ALLOW_PROD_TESTS` and the backup ritual.
 2. **Summary schedule** (proposal only, `docs/PROPOSALS.md` §5d): four presets, per-business timezone, one column, hourly cron on Pro.
 3. Self-check is operator-only and not owner-configurable (decision).
 4. Quiet hours / 15-minute reminders: parked; Hobby crons are daily.
@@ -191,6 +192,7 @@ Last full run before this bundle: 385.2 s / 384.4 s / 385.6 s, all green. This b
 8. Known minor: stale handoff lines, `sharp` bump deferred, 13 images without width/height (CLS 0), `--timing` flag.
 9. A5 is done (`scripts/purge-expired.mjs`, dry run default). A2 is done: every bind test runs on `zz-test-bind-<run>` and F8 bans a real-business mint. Keyset paging is report-only. Hostile review: 409 and bind read-error are fixed; `botUsername()` cache (Low) and the retry lock window edge (Low) remain. The retry lock should become a unique index in the next migration proposal — no migration file is added now.
 10. Proposals only, not implemented: `robots.txt` and `sitemap.xml` hard-coded to `alderroof.com` (pre-launch item); one brand per deployment; `/clients` and `/stats <slug>` on `v_client_leads`; retention predicates; `npm run new-client`.
+11. **Supabase key format (read-only review, 2026-11-09).** Legacy JWT keys retire in early 2027; the replacements are `sb_publishable_…` (public) and `sb_secret_…` (server), which are not JWTs. What the code assumes: nothing. There is no JWT decode, no `eyJ` check, no key-length check, no raw `fetch` to `/rest/v1` in app code — `lib/db.js`, `lib/digest-db.js`, `lib/lead-intake.js`, `lib/review-db.js` and `api/health.js` all call `createClient(url, key)` (supabase-js 2.118.0), which sends `apikey` and `Authorization: Bearer` and does not care what the string looks like. No migration calls `auth.jwt()` or `auth.role()`, so RLS does not depend on claims. The anon key is used only by `tests/db-wall.test.mjs`; it never reaches the browser (the page has no Supabase code). **What would break:** `db-wall` treats any error as a pass, so a rejected or retired key would leave it green for the wrong reason; `test:env-check` only checks that a name is present. **Smallest steps:** (1) create the new keys in the dashboard, (2) put them in `.env.test` and run `db-wall` alone, (3) tighten `db-wall` so a 401 "invalid API key" fails while an RLS denial passes, (4) swap the production env values and redeploy, (5) delete the legacy keys, (6) repeat step 2. Unverified: that this project's PostgREST accepts `sb_secret_` in the `Authorization: Bearer` header as well as in `apikey` — test it in step 2 before touching production.
 
 ---
 
@@ -268,14 +270,17 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 
 ## 12. Git state (as of this report)
 
-- `main` = `e981e0c` (deploys to production).
+- `main` = `de2c8fe` (deploys to production; PR #14 merged 2026-11-09).
 - `ops-audience` (PR #6): merged to `main` on GitHub (`4348b24`); local `main` = `origin/main`.
 - `fix-code-copy`: merged to `main` as `1e3be74` (PR #8).
 - `operator-ux`: merged to `main` as `baf15d1` (PR #9).
 - `email-brand`: merged to `main` as `fb4680c` (PR #10).
 - `operator-roles`: merged to `main` as `a29f36d` (PR #11).
 - `operator-views`: merged to `main` as `6bd7bb4` (PR #12, menu only).
-- `operator-redirects` (from `origin/main`): operator answers for owner commands, `/businesses` paused counts, S4b, test-project prep; head `f7eeb60`. Draft PR against `main`.
+- `operator-redirects` (PR #13): merged to `main` as `df3a4b8`. The local branch is deleted; its one post-merge commit lives on as `7110a8f`.
+- `operator-redirects-2` (PR #14): merged to `main` as `de2c8fe`; head was `7110a8f`.
+- `vercel-storage` (from `origin/main`): builds `main` only; `**` catches branch names with a slash; head `8366d37`. Draft PR #15.
+- `multi-tenant-design` (from `origin/main`, not from `vercel-storage`): design doc only; head `67b38f2`. Draft PR #16.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
@@ -321,6 +326,10 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-08 | `email-brand` | `7a96514` `057f783` `d435dcd` | Company header on every company email; digest targets carry the name; preview uses current builders; OP3 boundary retry | L6b/L7-L9, D-name, T8, OP3 |
 | 2026-11-08 | `operator-roles` | `d06d404` | `/remove_lead` (owner only, scoped, confirm + danger), operator welcome, never bound | OP25-OP28, T10 |
 | 2026-11-09 | `operator-redirects` | `b24aa76` `4da4a0b` `f7eeb60` | Operator answers for /invite /recipients /help /leads /remove_lead; /businesses counts paused phones; self-check email header on its own line (S4b); test-project schema/seed/docs/env-check | OP33/OP34, S4b, T1 |
+| 2026-11-09 | `operator-redirects-2` | `7110a8f` | Env check back to names-only readiness by default with the posture report behind `--db`; docs restored and merged with the SQL-editor route; one seed (`Alder Roofing`) with M5/M6 drift guards; `/businesses` says `?` when the count fails | PR #14 **merged** (`de2c8fe`); 382 assertions green |
+| 2026-11-09 | `vercel-storage` | `7a931f7` | `git.deploymentEnabled` builds `main` only; V1–V3 test; OPERATIONS §10 on deployment storage and retention | PR #15 draft |
+| 2026-11-09 | `multi-tenant-design` | `67b38f2` | One deployment for many clients: inventory, three-table proposal, content schema, rendering comparison and recommendation, assets, commands, migration plan | PR #16 draft, docs only |
+| 2026-11-09 | `vercel-storage` | `8366d37` | `**` catch-all so branch names with a slash are covered; V2b models Vercel's no-rule default; sourced Pro storage and domain facts; Phase C green on the test project; Supabase key-format review added as an open item | PR #15 draft; 391 assertions on the test project |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |
