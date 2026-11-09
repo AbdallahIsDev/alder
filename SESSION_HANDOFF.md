@@ -290,7 +290,7 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - `operator-redirects` (PR #13): merged to `main` as `df3a4b8`. The local branch is deleted; its one post-merge commit lives on as `7110a8f`.
 - `operator-redirects-2` (PR #14): merged to `main` as `de2c8fe`; head was `7110a8f`.
 - `vercel-storage` (from `origin/main`): builds `main` only; `**` catches branch names with a slash; head `8366d37`. Draft PR #15.
-- `test-isolation` (from `origin/main`): dev root, production canary, shape checks, strict db-wall, absolute guard, disk preflight; head `8fe7200`. Draft PR #17.
+- `test-isolation` (from `origin/main`): dev root, production canary, shape checks, strict db-wall, absolute guard, disk preflight, build-output cleanup; head `c991e67`. Draft PR #17.
 - `multi-tenant-design` (from `origin/main`, not from `vercel-storage`): design doc only; head `67b38f2`. Draft PR #16.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
@@ -344,6 +344,7 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-09 | `test-isolation` | `6789644` | `vercel dev` runs from a dev root with no .env; canary checks production and aborts; env shape validation (URL, DSN, key format, swap); db-wall passes only on a real denial; SKIP lines counted in the runner summary | Draft PR; suite counts in the PR |
 | 2026-11-09 | `test-isolation` | (this branch) | `ALLOW_PROD_TESTS` removed — a suite run needs `TEST_ENV=1` plus `.env.test`; `--seed-check` renamed to `--read-production-seed` with a deprecated alias; `build-static.js` copies assets with `dereference: true`, so the dev root links them | PR #17 draft |
 | 2026-11-09 | `test-isolation` | `8fe7200` | Disk preflight: the runner refuses to start under 2 GB free, `DISK_MIN_BYTES` can raise the floor but not lower it; `statfsSync` works on Windows, Linux and macOS | PR #17 draft |
+| 2026-11-09 | `test-isolation` | `c991e67` | The runner removes `_debug/build-test` on every exit, exact path only; the port-3000 refusal now applies only to runs that start a server, so a DB-only or nested run can share the machine | PR #17 draft |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |
