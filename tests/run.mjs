@@ -36,7 +36,8 @@ const DEFAULT_SUITES = [
   { file: 'tests/isolation.test.mjs', needsHttp: false },
   { file: 'tests/build-linked-assets.test.mjs', needsHttp: false },
   { file: 'tests/build-cleanup.test.mjs', needsHttp: false },
-  { file: 'tests/build-cleanup.test.mjs', needsHttp: false },
+  { file: 'tests/build-test-probe.test.mjs', needsHttp: false },
+  { file: 'tests/startup-sweep.test.mjs', needsHttp: false },
   { file: 'tests/fixture-safety.test.mjs', needsHttp: false },
   { file: 'tests/housekeeping.test.mjs', needsHttp: false },
   { file: 'tests/bot-text.test.mjs', needsHttp: false },
@@ -50,7 +51,6 @@ const DEFAULT_SUITES = [
   { file: 'tests/digest.test.mjs', needsHttp: false },
   { file: 'tests/recipients.test.mjs', needsHttp: false },
   { file: 'tests/runner-flags.test.mjs', needsHttp: false },
-  { file: 'tests/disk-preflight.test.mjs', needsHttp: false },
   { file: 'tests/disk-preflight.test.mjs', needsHttp: false },
   { file: 'tests/skip-summary.test.mjs', needsHttp: false },
   { file: 'tests/delete-scripts.test.mjs', needsHttp: false },
@@ -293,6 +293,11 @@ assertTestProject();
     }
   }
 }
+
+/* A killed run (SIGKILL, a closed terminal) never reaches cleanup, so P15's build
+   output survives into the next run. Clear it before the first suite: a stale
+   120 MB tree must not be mistaken for this run's. Exact path only. */
+try { fs.rmSync(path.join(ROOT, '_debug', 'build-test'), { recursive: true, force: true }); } catch {}
 
 try {
   /* ---------- refusals ---------- */
