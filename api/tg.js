@@ -25,6 +25,7 @@ import {
   botInvitePendingText, BOT_RECIPIENTS_PENDING, BOT_RECIPIENT_LAST, BOT_RECIPIENT_REMOVED, BOT_RECIPIENT_GONE,
   TOAST_NOT_FOUND, TOAST_ALREADY_DONE, TOAST_CONTACT_FIRST, TOAST_NOTHING_TO_RETRY, TOAST_GENERIC_ERROR,
   TOAST_ALREADY_UPDATED, TOAST_TOO_MANY_OPENS, TOAST_OWNER_ONLY, leadListKeyboard, alertKeyboard,
+  TOAST_NO_OLDER, TOAST_NO_LEADS, TOAST_NO_REMOVE, BOT_INVITE_FORWARD_HINT,
   BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_BOUND_ELSEWHERE, BOT_BIND_FAILED, TOAST_LEAD_GONE, BOT_RECIPIENT_SELF,
   removeLeadListText, removeLeadKeyboard, removeLeadConfirmText, removeLeadConfirmKeyboard, REMOVE_LEAD_DONE, REMOVE_LEAD_GONE,
   OPERATOR_ALREADY_CONNECTED_CODE, OPERATOR_DO_NOT_OPEN, OPERATOR_WELCOME, OPERATOR_CODE_USED, OPERATOR_CODE_EXPIRED, OPERATOR_CODE_UNKNOWN,
@@ -172,7 +173,7 @@ async function handleStart(chatId, arg) {
 }
 
 /* ---------- lead list and lead recovery ----------
-   Newest 8, one Open button each, one Older button when more exist. The page
+   Newest 5, one Open button each, one Older button when more exist. The page
    number is the only thing in the callback, bounded, and the business always
    comes from the binding. */
 
@@ -180,15 +181,24 @@ const LEADS_PAGE = 5;
 const LEADS_PAGE_MAX = 50;
 const OPENS_PER_HOUR = 30;
 
-async function sendLeadsPage(chatId, businessId, page, messageId) {
+/**
+ * A page with nothing on it is never written over the message that is already
+ * there. Editing it would leave a list with no buttons — a dead end, because
+ * the buttons are the only way back — and the owner would lose the page they
+ * were reading. The tap is answered with a toast instead; `answer` is the
+ * callback's once-only responder, absent on the /leads command path.
+ */
+async function sendLeadsPage(chatId, businessId, page, messageId, answer = null) {
   const safePage = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
   const leads = await listClientLeads(businessId, LEADS_PAGE + 1, safePage * LEADS_PAGE);
   const hasOlder = leads.length > LEADS_PAGE;
   const shown = leads.slice(0, LEADS_PAGE);
   if (!shown.length) {
-    const text = safePage === 0 ? 'No requests yet.' : 'No older requests.';
-    if (messageId) return editMessageText(chatId, messageId, text, { reply_markup: { inline_keyboard: [] } }).catch(() => {});
-    return reply(chatId, text);
+    if (messageId) {
+      if (answer) await answer(safePage === 0 ? TOAST_NO_LEADS : TOAST_NO_OLDER);
+      return;
+    }
+    return reply(chatId, safePage === 0 ? 'No requests yet.' : 'No older requests.');
   }
   const text = renderLeadList(shown);
   const markup = leadListKeyboard(shown, safePage, hasOlder);
@@ -203,16 +213,19 @@ async function handleLeads(chatId, binding) {
 
 const REMOVE_PAGE = 5;
 
-/** The /remove_lead list: five per page, numbers only, no actions. */
-async function sendRemovePage(chatId, businessId, page, messageId) {
+/** The /remove_lead list: five per page, numbers only, no actions. Same rule:
+ *  an empty page answers the tap and leaves the message alone. */
+async function sendRemovePage(chatId, businessId, page, messageId, answer = null) {
   const safePage = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
   const leads = await listClientLeads(businessId, REMOVE_PAGE + 1, safePage * REMOVE_PAGE);
   const hasOlder = leads.length > REMOVE_PAGE;
   const shown = leads.slice(0, REMOVE_PAGE);
   if (!shown.length) {
-    const text = safePage === 0 ? 'No requests to remove.' : 'No older requests.';
-    if (messageId) return editMessageText(chatId, messageId, text, { reply_markup: { inline_keyboard: [] } }).catch(() => {});
-    return reply(chatId, text);
+    if (messageId) {
+      if (answer) await answer(safePage === 0 ? TOAST_NO_REMOVE : TOAST_NO_OLDER);
+      return;
+    }
+    return reply(chatId, safePage === 0 ? 'No requests to remove.' : 'No older requests.');
   }
   const markup = removeLeadKeyboard(shown, safePage, hasOlder);
   if (messageId) return editMessageText(chatId, messageId, removeLeadListText(shown), markup).catch(() => {});
@@ -262,7 +275,29 @@ export const invitesMax = () => positiveInt(process.env.INVITES_MAX, INVITES_MAX
 const hoursLeft = (iso) => Math.max(1, Math.ceil((new Date(iso).getTime() - Date.now()) / 3600000));
 
 /**
- * Mint one code and send the invite text. The rate limit is checked here, right
+ * The invite is TWO messages, exactly like the operator's /code. The first is an
+ * instruction to the owner and is never forwarded; the second is the only text a
+ * client may ever see. Sending one message and hoping the owner forwards it
+ * whole is how the instruction ends up in the client's chat.
+ *
+ * The code is already valid when the first send runs, so a failed second send
+ * repeats the code (the no-username form: /start plus the code) rather than
+ * leaving a half-finished flow with nothing to forward.
+ */
+async function sendInvitePair(chatId, code) {
+  // getMe() once per instance; a failure falls back to /start plus the code and
+  // logs bot_username_unavailable rather than failing the invite.
+  const username = await botUsername();
+  await reply(chatId, BOT_INVITE_FORWARD_HINT);
+  const forward = await replyMessage(chatId, botInviteText(code, { username }));
+  if (!forward || !forward.ok) {
+    console.error('invite_forward_send_failed');
+    await replyMessage(chatId, botInviteText(code, { username: null }));
+  }
+}
+
+/**
+ * Mint one code and send the pair. The rate limit is checked here, right
  * before a mint, so listing pending invites does not spend the hourly budget.
  * Fail closed, like the plain-text hint: no reply when the counter is unreachable.
  */
@@ -272,10 +307,7 @@ async function mintAndSendInvite(chatId, businessId) {
   if (!within) return reply(chatId, BOT_INVITE_RATE_LIMIT);
 
   const { code } = await mintBindCode(businessId);
-  // getMe() once per instance; a failure falls back to /start plus the code and
-  // logs bot_username_unavailable rather than failing the invite.
-  const username = await botUsername();
-  return replyMessage(chatId, botInviteText(code, { username }));
+  return sendInvitePair(chatId, code);
 }
 
 /** /invite — mint one single-use code for THIS chat's business. */
@@ -320,8 +352,7 @@ async function handleInviteCancel({ chatId, businessId, answer }) {
   try {
     await expireLiveBindCodes(businessId);
     const { code } = await mintBindCode(businessId);
-    const username = await botUsername();
-    await replyMessage(chatId, botInviteText(code, { username }));
+    await sendInvitePair(chatId, code);
     await answer(BOT_INVITE_CANCELLED);
   } catch (e) {
     console.error('invite_cancel_failed', (e && e.code) || 'no_code');
@@ -830,7 +861,7 @@ async function handleCallback(cb, binding) {
       // Owner only, before any read; the business is always the binding's.
       if (!(await isOwnerChat(binding.business_id, chatId))) { await answer(TOAST_OWNER_ONLY); return; }
       const messageId = cb.message && cb.message.message_id;
-      if (rmPage) { await answer(''); return sendRemovePage(chatId, binding.business_id, Number(rmPage[1]), messageId); }
+      if (rmPage) { return sendRemovePage(chatId, binding.business_id, Number(rmPage[1]), messageId, answer); }
       const leadId = (rmOpen || rmDel || rmCancel)[1];
       if (rmCancel) {
         await answer('');
@@ -849,8 +880,7 @@ async function handleCallback(cb, binding) {
 
     const page = CB_PAGE.exec(data);
     if (page) {
-      await answer('');
-      await sendLeadsPage(chatId, binding.business_id, Number(page[1]), messageId);
+      await sendLeadsPage(chatId, binding.business_id, Number(page[1]), messageId, answer);
       return;
     }
 

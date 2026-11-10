@@ -1478,10 +1478,14 @@ try {
         if (!invBiz) throw new Error('could not create the zz-test invite business');
       }
       {
+        /* An hour and half an hour back, not seconds: bindChat writes created_at
+           with the DATABASE clock while these two use this machine's, and the two
+           differ by a few seconds here. A row written later must not sort as the
+           older phone, or "the main phone" moves between requests. */
         const t0 = Date.now();
         await svc.from('business_chats').insert([
-          { business_id: invBiz.id, tg_chat_id: invOwner, created_at: new Date(t0 - 2000).toISOString() },
-          { business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date(t0 - 1000).toISOString() },
+          { business_id: invBiz.id, tg_chat_id: invOwner, created_at: new Date(t0 - 3600000).toISOString() },
+          { business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date(t0 - 1800000).toISOString() },
         ]);
       }
       const liveInvites = async () => (await svc.from('bind_codes')
@@ -1541,6 +1545,178 @@ try {
       line(claimed === invBiz.id && restored === 1 && reclaimed === invBiz.id,
         'OP20', 'real DB: a claim can be restored and claimed again',
         `claimed=${claimed === invBiz.id} restored=${restored}`);
+
+      // OP36-OP38: the lead list. Field order, and a page with nothing on it is
+      // never written over the message: the buttons are the only way back, so an
+      // empty page answers the tap with a toast and leaves the message alone.
+      {
+        const C2 = await import('../lib/content.js');
+        const sends = async () => (await sent()).filter((x) => x.path.includes('/sendMessage'));
+        const edits = async () => (await sent()).filter((x) => x.path.includes('/editMessageText'));
+        const answers = async () => (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+
+        // Explicit, distinct ages: one INSERT gives every row the same now(),
+        // and the list order would then be arbitrary.
+        const t0 = Date.now();
+        const ids = [];
+        for (let i = 0; i < 7; i++) {
+          const { data } = await svc.from('leads').insert({
+            business_id: invBiz.id, name: `Paging ${i + 1}`, phone: '5155550100', email: `paging${i}@fixture.invalid`,
+            zip: '50265', service: 'repair', home: 'house', timing: 'asap', roof_age: 'Not sure',
+            insurance_claim: false, notes: null, idempotency_key: `${RUN}-pg${i}`,
+            created_at: new Date(t0 - (7 - i) * 60000).toISOString(),
+          }).select('id').single();
+          if (data) { ids.push(data.id); createdLeads.push(data.id); }
+        }
+
+        await reset();
+        await good(msg(invOwner, '/leads'));
+        const first = (await sends()).pop();
+        const lines = String(first.body.text).split('\n');
+        const kb1 = (first.body.reply_markup && first.body.reply_markup.inline_keyboard) || [];
+        line(ids.length === 7 && lines[2] === '1. Paging 7' && lines[3] === 'Repair · +15155550100'
+          && /^\u{1F7E1} New · \d+m ago$/u.test(lines[4])
+          && kb1.length === 2 && kb1[1].some((b) => b.text === 'Older'),
+          'OP36', '/leads rows: name, job type, phone, status, age last',
+          `third=${JSON.stringify(lines[4])}`);
+
+        // Page 1 exists, then it is emptied behind the message's back.
+        await reset();
+        await good(cb(invOwner, 'l:1'));
+        const page1 = (await edits()).pop();
+        const page1Lines = String(page1 && page1.body.text).split('\n');
+        await svc.from('leads').delete().in('id', ids.slice(0, 2));
+        await reset();
+        await good(cb(invOwner, 'l:1'));
+        const staleAnswers = await answers();
+        const staleEdits = (await edits()).length;
+        line(/^1\. Paging 2$/.test(page1Lines[2] || '') && staleEdits === 0
+          && staleAnswers.includes(C2.TOAST_NO_OLDER),
+          'OP37', 'stale Older: toast only, the message and its buttons stay',
+          `edits=${staleEdits} answers=${staleAnswers.join('|')}`);
+
+        // The list shrank to nothing: Newer must not turn the message into a
+        // dead end either.
+        await svc.from('leads').delete().in('id', ids);
+        await reset();
+        await good(cb(invOwner, 'l:0'));
+        const emptyAnswers = await answers();
+        const emptyEdits = (await edits()).length;
+        line(emptyEdits === 0 && emptyAnswers.includes(C2.TOAST_NO_LEADS),
+          'OP38', 'list shrank to nothing: Newer answers, no dead-end message',
+          `edits=${emptyEdits} answers=${emptyAnswers.join('|')}`);
+
+        // The same rule on the /remove_lead list.
+        await reset();
+        await good(msg(invOwner, '/remove_lead'));
+        const emptyList = String(((await sends()).pop() || {}).body?.text);
+        await reset();
+        await good(cb(invOwner, 'rm:1'));
+        const rmAnswers = await answers();
+        const rmEdits = (await edits()).length;
+        line(emptyList === 'No requests to remove.' && rmEdits === 0 && rmAnswers.includes(C2.TOAST_NO_OLDER),
+          'OP39', '/remove_lead: empty page answers the tap, no dead end',
+          `edits=${rmEdits} answers=${rmAnswers.join('|')}`);
+      }
+
+      // OP40: /invite is TWO messages, like the operator's /code. The first is an
+      // instruction the owner must not forward; the second is the only text a
+      // client may see.
+      {
+        const C2 = await import('../lib/content.js');
+        await reset();
+        await good(msg(invOwner, '/invite'));
+        const pair = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body);
+        const hint = pair[0] || {};
+        const forward = pair[1] || {};
+        const codeEnt = ((forward.entities) || []).find((e) => e.type === 'code');
+        const code = codeEnt
+          ? String(forward.text).slice(codeEnt.offset, codeEnt.offset + codeEnt.length).replace(/^\/start\s+/, '')
+          : '';
+        if (code) createdCodes.push(code);
+        const stored = code
+          ? (await svc.from('bind_codes').select('code, used_at').eq('code', code).eq('business_id', invBiz.id)).data
+          : [];
+        line(pair.length === 2
+          && hint.text === C2.BOT_INVITE_FORWARD_HINT
+          && hint.text === 'Forward the next message to the person you want to add. Do not tap it yourself.'
+          && !!code && forward.text !== hint.text
+          && !String(forward.text).includes('Forward the next message')
+          && stored.length === 1 && stored[0].used_at === null,
+          'OP40', '/invite: instruction first, then the forwardable message',
+          `messages=${pair.length} code=${code.slice(0, 3)}… stored=${stored.length}`);
+      }
+
+      // OP41: a bound chat that pastes or taps a code gets ONE sentence, and the
+      // code stays unused.
+      {
+        const C2 = await import('../lib/content.js');
+        const code = mkCode(12); createdCodes.push(code);
+        await createBindCode(code, bizA.id, new Date(Date.now() + 3600000).toISOString());
+        await reset();
+        await good(msg(invStaff, code));
+        const pasted = String(((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text);
+        await reset();
+        await good(msg(invStaff, '/start ' + code));
+        const tapped = String(((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text);
+        const row = (await svc.from('bind_codes').select('used_at').eq('code', code).maybeSingle()).data;
+        line(pasted === C2.BOT_ALREADY_CONNECTED_CODE && tapped === pasted
+          && pasted === 'This chat is already connected to a business, so that code was not used.'
+          && !/To move it/i.test(pasted) && !!row && row.used_at === null,
+          'OP41', 'bound chat: one sentence, no second instruction, code unused',
+          `same=${pasted === tapped} used=${row && row.used_at}`);
+      }
+
+      // OP42/OP43: a staff phone reaches no owner command and no owner callback.
+      // Every command is checked on its own: one refusal says nothing about the
+      // next one.
+      {
+        const C2 = await import('../lib/content.js');
+        const codesBefore = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+        const rowsBefore = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
+        const replies = {};
+        for (const cmd of ['/invite', '/recipients', '/remove_lead', '/code alder-demo', '/phones alder-demo', '/businesses', '/operator']) {
+          // The plain-text hint is capped at three an hour per chat; this is a
+          // test of the command gate, not of the counter.
+          await svc.from('rate_limits').delete().eq('key', 'tghint:' + invStaff);
+          await reset();
+          await good(msg(invStaff, cmd));
+          replies[cmd] = String(((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text);
+        }
+        const codesAfter = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
+        const rowsAfter = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
+        const ownerOnly = ['/invite', '/recipients', '/remove_lead'].every((c) => replies[c] === C2.BOT_OWNER_ONLY);
+        const plain = ['/code alder-demo', '/phones alder-demo', '/businesses', '/operator'].every((c) => replies[c] === C2.BOT_PLAIN_TEXT);
+        line(ownerOnly && plain && codesAfter === codesBefore && rowsAfter === rowsBefore,
+          'OP42', 'staff phone: no owner command answers, nothing minted or removed',
+          `owner=${ownerOnly} plain=${plain} codes=${codesBefore}->${codesAfter}`);
+
+        const ownerRow = (await svc.from('business_chats').select('id, tg_chat_id')
+          .eq('business_id', invBiz.id).order('created_at').order('id')).data[0];
+        const lead = await seedLead(invBiz.id, 'Staff Target', 'stafftarget@example.com');
+        const liveCodes = async () => (await svc.from('bind_codes').select('code').eq('business_id', invBiz.id)
+          .is('used_at', null).gt('expires_at', new Date().toISOString())).data.map((r) => r.code).sort().join(',');
+        const liveBefore = await liveCodes();
+        const rowsAtStart = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
+        const answers = {};
+        for (const data of ['x:' + ownerRow.id, 'X:' + ownerRow.id, 'v:' + ownerRow.id,
+          'rl:' + lead, 'RL:' + lead, 'rc:' + lead, 'rm:1', 'i:c', 'pc:' + bizA.id, 'pb:' + bizA.id]) {
+          await reset();
+          await good(cb(invStaff, data));
+          answers[data.split(':')[0]] = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        }
+        const rowsKept = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
+        const leadKept = (await svc.from('leads').select('id').eq('id', lead)).data.length;
+        const liveAfter = await liveCodes();
+        const refused = ['x', 'X', 'v', 'rl', 'RL', 'rc', 'rm']
+          .every((k) => (answers[k] || []).includes(C2.TOAST_OWNER_ONLY));
+        const inviteRefused = (answers.i || []).includes(C2.BOT_OWNER_ONLY);
+        const pickerRefused = (answers.pc || []).includes(C2.TOAST_NOT_FOUND)
+          && (answers.pb || []).includes(C2.TOAST_NOT_FOUND);
+        line(refused && inviteRefused && pickerRefused && rowsKept === rowsAtStart && leadKept === 1 && liveAfter === liveBefore,
+          'OP43', 'staff forged callbacks: refused, owner row, lead and codes intact',
+          `rows=${rowsKept} lead=${leadKept} live=${liveBefore === liveAfter}`);
+      }
 
       // OP4: /phones marks the owner (oldest) and lists the others.
       await reset();
