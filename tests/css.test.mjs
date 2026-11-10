@@ -41,8 +41,8 @@ try {
   const href = (links[0] && (links[0].match(/href="([^"]+)"/) || [])[1]) || '';
   const noStyle = !/<style[\s>]/i.test(built);
   const carried = fs.existsSync(path.join(OUT_DIR, 'assets', 'css', 'styles.css'));
-  line(r.status === 0 && links.length === 1 && href === 'assets/css/styles.css' && noStyle && carried,
-    'CSS1', 'built page: one relative stylesheet, no <style>, css copied',
+  line(r.status === 0 && links.length === 1 && href === '/assets/css/styles.css' && noStyle && carried,
+    'CSS1', 'built page: one root-absolute stylesheet, no <style>, css copied',
     `exit=${r.status} links=${links.length} href=${href} style=${!noStyle} copied=${carried}`);
 
   /* CSS2: every url() that is not a data: URI must exist on disk. */
@@ -63,6 +63,25 @@ try {
   const relative = fontUrls.length === 2 && fontUrls.every((u) => /^\.\.\/fonts\/[a-z0-9.-]+\.woff2$/i.test(u));
   line(relative, 'CSS3', 'both font urls are ../fonts/, not assets/fonts/',
     `count=${fontUrls.length} ok=${relative}`);
+
+  /* CSS5: every stylesheet link is root-absolute, in Alder and in a second
+     client. A relative href resolves against the page's folder, which is not
+     the site root once the page is served from a nested path. */
+  {
+    const sample = path.join(OUT_DIR, 'example.html');
+    const r2 = spawnSync(process.execPath, ['build-static.js', 'index.html', '--client', 'example', '--out', sample], {
+      cwd: ROOT, encoding: 'utf8',
+    });
+    const pages = [built, fs.existsSync(sample) ? fs.readFileSync(sample, 'utf8') : ''];
+    const bad = [];
+    pages.forEach((html, i) => {
+      const found = [...html.matchAll(/<link[^>]*rel="stylesheet"[^>]*>/gi)].map((m) => (m[0].match(/href="([^"]+)"/) || [])[1] || '');
+      if (!found.length) bad.push(`${i ? 'sample' : 'alder'}:none`);
+      for (const h of found) if (!h.startsWith('/')) bad.push(`${i ? 'sample' : 'alder'}:${h}`);
+    });
+    line(r2.status === 0 && bad.length === 0, 'CSS5',
+      'every stylesheet href is root-absolute, both clients', `bad=${bad.join('|') || 'none'}`);
+  }
 
   /* CSS4: the modal's Call is filled like "Send my request", and the hover rule
      that keeps it filled exists. Without that rule .btn.phone:hover paints a
