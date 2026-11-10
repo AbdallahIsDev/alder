@@ -3247,7 +3247,7 @@
 
     /* Secondary keeps the ghost shape and gains a 5% ground; hover is still 10%. */
     .est-actions .btn.ghost {
-      min-height: 48px;
+      min-height: 52px;
       background: rgb(255 255 255/.05)
     }
 
@@ -3255,8 +3255,22 @@
       background: rgb(255 255 255/.10)
     }
 
+    /* Call takes the same fill and hover as "Send my request" (.btn.est-next).
+       The second rule is required: .btn.phone:hover sets a white 10% ground,
+       which would otherwise win over the accent. */
     .est-actions .btn.phone {
-      min-height: 48px
+      min-height: 52px;
+      padding: 0 24px;
+      background: var(--accent);
+      color: #fff;
+      border-color: transparent;
+      font-weight: 600
+    }
+
+    .est-actions .btn.phone:hover,
+    .est-actions .btn.phone:focus-visible {
+      background: var(--accent);
+      filter: brightness(.9)
     }
 
     @media (max-width: 760px) {

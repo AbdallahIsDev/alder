@@ -63,6 +63,27 @@ try {
   const relative = fontUrls.length === 2 && fontUrls.every((u) => /^\.\.\/fonts\/[a-z0-9.-]+\.woff2$/i.test(u));
   line(relative, 'CSS3', 'both font urls are ../fonts/, not assets/fonts/',
     `count=${fontUrls.length} ok=${relative}`);
+
+  /* CSS4: the modal's Call is filled like "Send my request", and the hover rule
+     that keeps it filled exists. Without that rule .btn.phone:hover paints a
+     white 10% ground over the accent. */
+  const block = (sel) => {
+    const i = css.indexOf(sel);
+    if (i < 0) return '';
+    const open = css.indexOf('{', i);
+    const close = css.indexOf('}', open);
+    return open < 0 || close < 0 ? '' : css.slice(open, close);
+  };
+  const call = block('.est-actions .btn.phone');
+  const hover = block('.est-actions .btn.phone:hover');
+  const ghost = block('.est-actions .btn.ghost');
+  const callOk = /min-height:\s*52px/.test(call) && /padding:\s*0 24px/.test(call)
+    && /background:\s*var\(--accent\)/.test(call) && /color:\s*#fff/.test(call)
+    && /border-color:\s*transparent/.test(call) && /font-weight:\s*600/.test(call);
+  const hoverOk = /background:\s*var\(--accent\)/.test(hover) && /filter:\s*brightness\(\.9\)/.test(hover);
+  const ghostOk = /min-height:\s*52px/.test(ghost) && /rgb\(255 255 255\/\.05\)/.test(ghost);
+  line(callOk && hoverOk && ghostOk, 'CSS4', 'modal Call is filled, hover keeps it filled',
+    `call=${callOk} hover=${hoverOk} close=${ghostOk}`);
 } catch (e) {
   line(false, 'CSS0', 'stylesheet harness ran', e && e.message ? e.message.slice(0, 80) : 'threw');
 } finally {
