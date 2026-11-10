@@ -14,10 +14,15 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { startFakes } from './fakes.mjs';
 import { isLoopback } from '../lib/outbound.js';
-import { loadEnv, isTestEnv, checkNotProduction } from '../lib/env.js';
+import { loadEnv, isTestEnv, checkNotProduction, readEnvFile, sameSupabaseUrl } from '../lib/env.js';
 import { createClient } from '@supabase/supabase-js';
 import { ALDER_DEMO, isFixtureLead, fetchAllRows } from './helpers.mjs';
 import { FIXTURE_ID_BASE } from './fixture-ids.mjs';
+import { createDevRoot, removeDevRoot } from './dev-root.mjs';
+import { countSkips } from './skip-count.mjs';
+import { clearCanaryLimits, limitLine } from './canary-limits.mjs';
+import { suiteRunGate } from './gate.mjs';
+import { freeBytes, diskGate, floorFromEnv } from './disk.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MARKER = path.join(ROOT, '.test-mode');
@@ -29,10 +34,19 @@ const API = 'http://localhost:3000/api/lead';
    behaviour). In-process-only suites skip starting the dev server entirely. */
 const DEFAULT_SUITES = [
   { file: 'tests/network-guard.test.mjs', needsHttp: false },
+  { file: 'tests/isolation.test.mjs', needsHttp: false },
+  { file: 'tests/build-linked-assets.test.mjs', needsHttp: false },
+  { file: 'tests/dev-root-removal.test.mjs', needsHttp: false },
+  { file: 'tests/build-cleanup.test.mjs', needsHttp: false },
+  { file: 'tests/build-test-probe.test.mjs', needsHttp: false },
+  { file: 'tests/startup-sweep.test.mjs', needsHttp: false },
+  { file: 'tests/canary-limits.test.mjs', needsHttp: false },
+  { file: 'tests/suite-list.test.mjs', needsHttp: false },
   { file: 'tests/fixture-safety.test.mjs', needsHttp: false },
   { file: 'tests/housekeeping.test.mjs', needsHttp: false },
   { file: 'tests/bot-text.test.mjs', needsHttp: false },
   { file: 'tests/db-wall.test.mjs', needsHttp: false },
+  { file: 'tests/db-wall-guard.test.mjs', needsHttp: false },
   { file: 'tests/migrations.test.mjs', needsHttp: false },
   { file: 'tests/test-env-check.test.mjs', needsHttp: false },
   { file: 'tests/vercel-config.test.mjs', needsHttp: false },
@@ -40,6 +54,9 @@ const DEFAULT_SUITES = [
   { file: 'tests/email-layout.test.mjs', needsHttp: false },
   { file: 'tests/digest.test.mjs', needsHttp: false },
   { file: 'tests/recipients.test.mjs', needsHttp: false },
+  { file: 'tests/runner-flags.test.mjs', needsHttp: false },
+  { file: 'tests/disk-preflight.test.mjs', needsHttp: false },
+  { file: 'tests/skip-summary.test.mjs', needsHttp: false },
   { file: 'tests/delete-scripts.test.mjs', needsHttp: false },
   { file: 'tests/lead-api.test.mjs', needsHttp: true },
   { file: 'tests/notify.test.mjs', needsHttp: false },
@@ -50,7 +67,9 @@ const DEFAULT_SUITES = [
   { file: 'tests/outbound.test.mjs', needsHttp: false },
 ];
 const cliArgs = process.argv.slice(2);
-const KNOWN_FLAGS = new Set(['--seed-check']);
+const LEGACY_SEED_FLAG = '--seed-check';
+const SEED_FLAG = '--read-production-seed';
+const KNOWN_FLAGS = new Set([SEED_FLAG, LEGACY_SEED_FLAG]);
 const unknownFlags = cliArgs.filter((a) => a.startsWith('--') && !KNOWN_FLAGS.has(a));
 if (unknownFlags.length) {
   // Unknown flags used to be dropped silently, so `--timing` looked like it worked.
@@ -58,7 +77,8 @@ if (unknownFlags.length) {
   console.log(`      known flags: ${[...KNOWN_FLAGS].join(', ')} — anything else is a typo, not a no-op`);
   process.exit(1);
 }
-const RUN_SEED_CHECK = cliArgs.includes('--seed-check');
+const RUN_SEED_CHECK = cliArgs.includes(SEED_FLAG) || cliArgs.includes(LEGACY_SEED_FLAG);
+const SEED_FLAG_DEPRECATED = cliArgs.includes(LEGACY_SEED_FLAG);
 const suiteFiles = cliArgs.filter((a) => !a.startsWith('--'));
 const SUITES_TO_RUN = (suiteFiles.length ? suiteFiles : DEFAULT_SUITES.map((s) => s.file)).map((f) => {
   const known = DEFAULT_SUITES.find((s) => s.file === f);
@@ -84,6 +104,7 @@ function envNames(file) {
 
 let fakes = null;
 let dev = null;
+let devRoot = null;
 let canaryKey = null;
 
 /** Kill the whole dev process tree (on Windows the child outlives the shell otherwise). */
@@ -175,8 +196,12 @@ async function cleanup(svc) {
     killTree(dev);
     dev = null;
   }
+  if (devRoot) { removeDevRoot(devRoot); devRoot = null; }
   if (fs.existsSync(MARKER)) { try { fs.unlinkSync(MARKER); } catch {} }
   if (fakes) { try { await fakes.stop(); } catch {} fakes = null; }
+  /* P15 builds into _debug/build-test (about 120 MB). It is a build output, not a
+     fixture, so it goes with the run. Exact path only: no glob, no parent sweep. */
+  try { fs.rmSync(path.join(ROOT, '_debug', 'build-test'), { recursive: true, force: true }); } catch {}
   // Confirm nothing is left listening on port 3000.
   const stillUp = await new Promise((resolve) => {
     const t = setTimeout(() => resolve(false), 4000);
@@ -203,30 +228,32 @@ const svc = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-/* Refuse to run suites against the project named in .env. The comparison is by
-   value, and neither URL is ever printed. ALLOW_PROD_TESTS=1 is the opt-out.
-   Deliberately placed AFTER --seed-check: that path runs two SELECTs and exits,
-   and it is the command the handoff tells you to run instead of a full suite. */
-function assertNotProductionProject() {
-  const check = checkNotProduction();
-  if (check.reason === 'no-url') {
-    out('FAIL  runner  SUPABASE_URL is not set — check .env or .env.test');
-    process.exit(1);
-  }
-  if (!check.ok) {
-    if (String(process.env.ALLOW_PROD_TESTS || '') !== '1') {
-      out('FAIL  runner  refusing to run against the production project');
-      out('      SUPABASE_URL matches the value in .env. Put a test project URL in');
-      out('      .env.test and run with TEST_ENV=1, or set ALLOW_PROD_TESTS=1 to run');
-      out('      against production on purpose.');
-      process.exit(1);
-    }
-    out('runner  WARNING: SUPABASE_URL is the project in .env (production), allowed by ALLOW_PROD_TESTS=1');
-  }
+/* Refuse to run suites unless the run is demonstrably pointed at a test project.
+   The comparison is by value, and neither URL is ever printed. There is no
+   opt-out. Deliberately placed AFTER --read-production-seed: that path runs two
+   SELECTs and exits, and it is the only production reader left. */
+/* No escape hatch. A suite run needs TEST_ENV=1 and a .env.test that points at
+   another project; the only production reader left is --read-production-seed,
+   which exits before this is called. */
+function assertTestProject() {
+  const gate = suiteRunGate({
+    testEnv: isTestEnv(),
+    hasEnvTest: fs.existsSync(path.join(ROOT, '.env.test')),
+    prodReason: checkNotProduction().reason,
+  });
+  if (gate.ok) return;
+  out('FAIL  runner  refusing to run a suite');
+  out(`      ${gate.detail}.`);
+  out('      A suite run needs TEST_ENV=1 and a .env.test pointing at a test');
+  out('      project. See docs/TEST_PROJECT.md. There is no override.');
+  process.exit(1);
 }
 
 /* ---------- seed check (quick, read-only; no tests run) ---------- */
 if (RUN_SEED_CHECK) {
+  if (SEED_FLAG_DEPRECATED) {
+    out('runner  --seed-check is deprecated; use --read-production-seed');
+  }
   const seed = {
     slug: ALDER_DEMO, name: 'Alder Roofing',
     owner_email: 'owner@alder-demo.example.com',
@@ -250,7 +277,31 @@ if (RUN_SEED_CHECK) {
   process.exit(0);
 }
 
-assertNotProductionProject();
+assertTestProject();
+
+/* A full run writes two 124 MB build trees. Running out of space mid-suite looks
+   like a test failure and is not one, so refuse up front. Fail-open only if the
+   platform cannot report free space; the note says so. */
+{
+  const floor = floorFromEnv();
+  let free = null;
+  try { free = freeBytes(ROOT); } catch {}
+  if (free === null) {
+    out('runner  disk preflight skipped: this platform cannot report free space');
+  } else {
+    const gate = diskGate(free, floor);
+    if (!gate.ok) {
+      out(`FAIL  runner  ${gate.detail}`);
+      out('      free space and run again');
+      process.exit(1);
+    }
+  }
+}
+
+/* A killed run (SIGKILL, a closed terminal) never reaches cleanup, so P15's build
+   output survives into the next run. Clear it before the first suite: a stale
+   120 MB tree must not be mistaken for this run's. Exact path only. */
+try { fs.rmSync(path.join(ROOT, '_debug', 'build-test'), { recursive: true, force: true }); } catch {}
 
 try {
   /* ---------- refusals ---------- */
@@ -260,11 +311,16 @@ try {
   }
 
   // Refuse to "reuse" a stale dev server: its env would not point at our fakes.
-  try {
-    const probe = await fetch(API, { method: 'GET', signal: AbortSignal.timeout(1200) });
-    throw new Error(`port 3000 is already answering (${probe.status}) — a stale vercel dev is running. Stop it first.`);
-  } catch (e) {
-    if (e.message && e.message.startsWith('port 3000')) throw e;
+  // Only when this run starts one — a suite set with no HTTP suites never touches
+  // port 3000, and a nested run (tests/build-cleanup.test.mjs) must be able to
+  // run while the outer one holds the port.
+  if (NEEDS_DEV) {
+    try {
+      const probe = await fetch(API, { method: 'GET', signal: AbortSignal.timeout(1200) });
+      throw new Error(`port 3000 is already answering (${probe.status}) — a stale vercel dev is running. Stop it first.`);
+    } catch (e) {
+      if (e.message && e.message.startsWith('port 3000')) throw e;
+    }
   }
 
   // The pinned CLI is required: 65.x needs Windows Developer Mode and gets EPERM
@@ -301,18 +357,22 @@ try {
     const logFd = fs.openSync(LOG, 'w');
     // Pinned 48.12.1: 65.x needs Windows Developer Mode (symlink EPERM without it).
     //
-    // The resolved DB/secret values are passed explicitly and spread LAST, so they win
-    // even if the CLI's own .env merge order ever changes. Measured 2026-11-06: a
-    // process.env value already beats the .env file inside vercel dev, so this is a
-    // guard against that changing, not a behaviour fix.
+    // The resolved DB/secret values are passed explicitly and spread LAST — but that
+    // alone does NOT make them win. Measured 2026-11-09 with 48.12.1: a .env file in
+    // the project directory beats the inherited environment inside the function, so a
+    // TEST_ENV=1 run wrote its canary into production. What makes these values win is
+    // the dev root: a project directory with no .env files at all (tests/dev-root.mjs).
+    // The earlier note here claimed the opposite; it was wrong.
     const PINNED = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY',
       'IP_HASH_SALT', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_WEBHOOK_SECRET',
       'RESEND_API_KEY', 'MAIL_FROM', 'MAIL_REDIRECT_TO', 'MAIL_REDIRECT_PREFIX', 'SITE_URL'];
     const pinned = {};
     for (const k of PINNED) if (process.env[k]) pinned[k] = process.env[k];
     out(`runner  pinned into dev child: ${Object.keys(pinned).length}/${PINNED.length} keys`);
+    devRoot = createDevRoot({ sourceRoot: ROOT, name: 'dev-root' });
+    out(`runner  dev root: ${path.relative(ROOT, devRoot)} (no .env, so the pinned values cannot be overridden)`);
     dev = spawn('npx', ['vercel@48.12.1', 'dev', '--listen', '3000'], {
-      cwd: ROOT,
+      cwd: devRoot,
       env: { ...process.env, ...bases, ...pinned, VERCEL_ENV: 'development', OUTBOUND_TIMEOUT_MS: '200' },
       shell: true,
       stdio: ['ignore', logFd, logFd],
@@ -350,6 +410,29 @@ try {
       throw new Error(`canary failed: the fake Telegram server received ${tgReqs.length} requests. `
         + 'The loopback override did not reach the function. Aborting before any real send.');
     }
+    /* The row must NOT be in production. This is the check that catches the failure
+       mode the dev root exists to prevent: a function that read .env instead of the
+       pinned values writes there and still returns 200. Clean it up first, then abort,
+       so a failed run does not leave a lead behind. */
+    {
+      const prod = readEnvFile('.env');
+      if (prod.SUPABASE_URL && prod.SUPABASE_SERVICE_ROLE_KEY
+        && !sameSupabaseUrl(prod.SUPABASE_URL, process.env.SUPABASE_URL)) {
+        const prodClient = createClient(prod.SUPABASE_URL, prod.SUPABASE_SERVICE_ROLE_KEY, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const { data: leaked } = await prodClient.from('leads').select('id').eq('idempotency_key', canaryKey);
+        if (leaked && leaked.length) {
+          await prodClient.from('leads').delete().eq('idempotency_key', canaryKey);
+          throw new Error('canary landed in the PRODUCTION database — the function did not see the pinned '
+            + 'SUPABASE_URL. The row was deleted; no suite ran.');
+        }
+        out('runner  canary: not in production');
+      } else {
+        out('runner  canary: production check skipped (.env has no other project to compare)');
+      }
+    }
+
     /* The canary must be in the SAME database the runner reads. If the function was
        pointed somewhere else (a stale .env, a half-applied .env.test), the delete
        finds nothing and every later assertion would be measuring the wrong project. */
@@ -360,6 +443,21 @@ try {
         + `error ${rmErr ? rmErr.code : 'none'}) — the function is writing to a different project`);
     }
     canaryKey = null;
+
+    /* The canary has just proved this host is the test project: the row landed in
+       this database and not in production. Only now may the canary business's
+       rate-limit rows be cleared — a few runs in an hour otherwise make the next
+       canary answer 429 and the runner abort for the wrong reason. */
+    {
+      const { data: canaryBiz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).maybeSingle();
+      if (canaryBiz && canaryBiz.id) {
+        const cleared = await clearCanaryLimits(svc, canaryBiz.id, {
+          host: process.env.SUPABASE_URL,
+          prodHost: readEnvFile('.env').SUPABASE_URL,
+        });
+        out(limitLine(cleared));
+      }
+    }
     await fakes.tg.reset();
   } else {
     out('runner  no selected suite needs HTTP: vercel dev and canary skipped');
@@ -397,6 +495,7 @@ try {
 
   /* ---------- suites ---------- */
   let failed = 0;
+  let skips = 0;
   for (const suite of SUITES_TO_RUN) {
     out('');
     out(`=== ${suite.file} ===`);
@@ -417,8 +516,25 @@ try {
           TELEGRAM_API_BASE: fakes.tg.url,
           RESEND_API_BASE: fakes.resend.url,
         },
-        stdio: 'inherit',
+        // Piped, not inherited: the summary has to count SKIP lines, and a run that
+        // says "all passed" while skipping checks is the thing this count exists for.
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
+      const scan = (stream, outStream) => {
+        let buf = '';
+        return (chunk) => {
+          outStream.write(chunk);
+          buf += chunk.toString('utf8');
+          let i;
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const l = buf.slice(0, i);
+            buf = buf.slice(i + 1);
+            skips += countSkips(l);
+          }
+        };
+      };
+      c.stdout.on('data', scan('stdout', process.stdout));
+      c.stderr.on('data', scan('stderr', process.stderr));
       c.on('exit', (code) => resolve(code || 0));
     });
     out(`runner  ${suite.file} ${((Date.now() - suiteStart) / 1000).toFixed(1)}s`);
@@ -486,6 +602,7 @@ try {
     }
   }
 
+  out(`runner  skips: ${skips}`);
   out(`runner  total ${((Date.now() - TIMING_TOTAL) / 1000).toFixed(1)}s`);
   // exitCode can be set by the business_chats guard without a suite failing.
   const runnerFailed = failed || process.exitCode === 1;

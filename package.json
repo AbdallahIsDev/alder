@@ -17,7 +17,8 @@
     "purge:expired": "node scripts/purge-expired.mjs",
     "delete:lead": "node scripts/delete-lead.mjs",
     "offboard": "node scripts/offboard-business.mjs",
-    "test:env-check": "node scripts/test-env-check.mjs"
+    "test:env-check": "node scripts/test-env-check.mjs",
+    "test:port-guard": "node tests/port-guard.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",

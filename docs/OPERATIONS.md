@@ -294,7 +294,8 @@ set, so it cannot be pointed at a fake by accident.
 - **Hobby crons run once a day.** Both scheduled jobs are daily for that reason. A more
   frequent expression fails the deployment rather than silently skipping runs.
 - **The tests run against the production database** until `.env.test` exists. The
-  runner backs up and restores `alder-demo` around a run; `ALLOW_PROD_TESTS=1` is the
+  runner backs up and restores `alder-demo` around a run. There is no longer an
+`ALLOW_PROD_TESTS` opt-out: a suite run needs `TEST_ENV=1` and `.env.test`, or it
   explicit opt-out of the guard. See `docs/TEST_PROJECT.md`.
 - **WhatsApp is not supported.** Its Business API needs a business account, is paid,
   and only allows free-form messages inside a 24-hour window opened by the customer —
@@ -324,7 +325,8 @@ it stops there. Use the diff to review, the patch only for a linear branch.
 never read for a restore, never deleted and never re-inserted: a phone can be
 connected at any moment, and a blanket "delete every chat, put the backup's rows
 back" silently unbinds a client. That is exactly how the second phone was lost on
-2026-11-07. `seed-check` reports the chat count and does not require it to be zero.
+2026-11-07. `--read-production-seed` reports the chat count and does not require it
+to be zero.
 
 The runner now fails a run that adds or removes a `business_chats` row, so a
 leak is loud instead of silent.

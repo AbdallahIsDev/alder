@@ -242,7 +242,9 @@ fs.mkdirSync(outDir, { recursive: true });
 const assets = path.join(path.dirname(path.resolve(opt.input)), 'assets');
 let copied = '';
 if (fs.existsSync(assets) && path.resolve(outDir) !== path.dirname(path.resolve(opt.input))) {
-  fs.cpSync(assets, path.join(outDir, 'assets'), { recursive: true }); copied = ' (assets/ copied)';
+  // dereference: assets/ may be a junction (the test dev root links it). Without
+  // it cpSync recreates the link and Windows refuses (EPERM).
+  fs.cpSync(assets, path.join(outDir, 'assets'), { recursive: true, dereference: true }); copied = ' (assets/ copied)';
 }
 /* root files the deployment serves next to index.html */
 ['robots.txt', 'sitemap.xml'].forEach(f => {

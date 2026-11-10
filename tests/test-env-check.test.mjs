@@ -32,9 +32,9 @@ const line = (ok, id, what, d) => {
 /** A .env.test that should pass, with a distinct value for every name. */
 function readyEnv() {
   const env = {
-    SUPABASE_URL: 'https://test-ref.supabase.co',
-    SUPABASE_ANON_KEY: 'test-anon-key',
-    SUPABASE_SERVICE_ROLE_KEY: 'test-service-key',
+    SUPABASE_URL: 'https://testrefaaaaaaaaaaaa.supabase.co',
+    SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYW5vbiJ9.fake-signature',
+    SUPABASE_SERVICE_ROLE_KEY: 'eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.fake-signature',
     DATABASE_URL: 'postgresql://postgres.test:pw@aws-0-eu-west-3.pooler.supabase.com:5432/postgres',
     IP_HASH_SALT: 'test-salt',
     TELEGRAM_BOT_TOKEN: '123:test-token',
@@ -49,7 +49,7 @@ function readyEnv() {
   return env;
 }
 const prodEnv = () => ({
-  SUPABASE_URL: 'https://prod-ref.supabase.co',
+  SUPABASE_URL: 'https://prodrefaaaaaaaaaaaa.supabase.co',
   DATABASE_URL: 'postgresql://postgres:pw@aws-0-us-east-1.pooler.supabase.com:5432/postgres',
   TELEGRAM_WEBHOOK_SECRET: 'prod-webhook-secret',
 });
@@ -78,7 +78,7 @@ const problemText = (r) => r.lines.join('\n');
 /* E3: the URL still points at production. Trailing slash and case must not hide it. */
 {
   const env = readyEnv();
-  env.SUPABASE_URL = 'HTTPS://PROD-REF.supabase.co/';
+  env.SUPABASE_URL = 'HTTPS://PRODREFAAAAAAAAAAAA.supabase.co/';
   const r = readinessReport({ test: env, prod: prodEnv() });
   line(r.problems === 1 && problemText(r).includes('SUPABASE_URL is the same project as .env (production)'),
     'E3', 'production SUPABASE_URL fails (slash/case insensitive)', `problems=${r.problems}`);
@@ -108,6 +108,55 @@ const problemText = (r) => r.lines.join('\n');
   `tg=${r1.problems} resend=${r2.problems}`);
 }
 
+/* E11: the exact swap the owner made — a DSN in the URL field, a URL in the DSN
+   field. Both names present, both differ from production, and nothing else
+   complains, so this is the only check that catches it. */
+{
+  const env = readyEnv();
+  env.SUPABASE_URL = 'postgresql://postgres:pw@aws-0-eu-west-3.pooler.supabase.com:5432/postgres';
+  env.DATABASE_URL = 'https://testrefaaaaaaaaaaaa.supabase.co';
+  const r = readinessReport({ test: env, prod: prodEnv() });
+  line(r.problems === 1 && problemText(r).includes('look swapped'),
+    'E11', 'a swapped URL/DSN pair fails with one clear line', `problems=${r.problems}`);
+}
+
+/* E12 / E13: shape of each value on its own. */
+{
+  const a = readyEnv();
+  a.SUPABASE_URL = 'https://example.com';
+  const r1 = readinessReport({ test: a, prod: prodEnv() });
+  const b = readyEnv();
+  b.DATABASE_URL = 'https://testrefaaaaaaaaaaaa.supabase.co';
+  const r2 = readinessReport({ test: b, prod: prodEnv() });
+  line(r1.problems === 1 && problemText(r1).includes('SUPABASE_URL is not https://<ref>.supabase.co')
+    && r2.problems === 1 && problemText(r2).includes('DATABASE_URL is not a postgres'),
+  'E12', 'URL and DSN shapes are checked separately',
+  `url=${r1.problems} dsn=${r2.problems}`);
+}
+
+/* E14 / E15: a key that is neither a JWT nor an sb_ key. */
+{
+  const a = readyEnv();
+  a.SUPABASE_ANON_KEY = 'test-anon-key';
+  const r1 = readinessReport({ test: a, prod: prodEnv() });
+  const b = readyEnv();
+  b.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key';
+  const r2 = readinessReport({ test: b, prod: prodEnv() });
+  line(r1.problems === 1 && problemText(r1).includes('SUPABASE_ANON_KEY is neither')
+    && r2.problems === 1 && problemText(r2).includes('SUPABASE_SERVICE_ROLE_KEY is neither'),
+  'E14', 'both keys must be a JWT or an sb_ key', `anon=${r1.problems} svc=${r2.problems}`);
+}
+
+/* E16: the new key format is accepted, so the early-2027 migration does not have
+   to change this script. */
+{
+  const env = readyEnv();
+  env.SUPABASE_ANON_KEY = 'sb_publishable_abc123';
+  env.SUPABASE_SERVICE_ROLE_KEY = 'sb_secret_xyz789';
+  const r = readinessReport({ test: env, prod: prodEnv() });
+  line(r.problems === 0, 'E16', 'sb_publishable_ / sb_secret_ keys pass', `problems=${r.problems}`);
+}
+
 /* E7: no .env.test at all. */
 {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'envcheck-empty-'));
@@ -123,13 +172,13 @@ const problemText = (r) => r.lines.join('\n');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'envcheck-canary-'));
   const canary = 'CANARY7f3a9c';
   const env = readyEnv();
-  env.SUPABASE_URL = `https://${canary}-host.supabase.co`;
+  env.SUPABASE_URL = `https://${canary}aaaaaaaa.supabase.co`;
   env.DATABASE_URL = `postgresql://postgres:${canary}@${canary}-db.pooler.supabase.com:5432/postgres`;
-  env.SUPABASE_SERVICE_ROLE_KEY = canary + '-service';
+  env.SUPABASE_SERVICE_ROLE_KEY = `eyJhbGciOiJIUzI1NiJ9.${canary}.sig`;
   env.TELEGRAM_WEBHOOK_SECRET = canary + '-hook';
   const writeFile = (name, obj) => fs.writeFileSync(path.join(dir, name),
     Object.entries(obj).map(([k, v]) => `${k}=${v}`).join('\n') + '\n');
-  writeFile('.env', { SUPABASE_URL: 'https://prod-ref.supabase.co', DATABASE_URL: prodEnv().DATABASE_URL });
+  writeFile('.env', { SUPABASE_URL: 'https://prodrefaaaaaaaaaaaa.supabase.co', DATABASE_URL: prodEnv().DATABASE_URL });
   writeFile('.env.test', env);
   let text = '';
   const code = runReadiness({ root: dir, write: (s) => { text += s; } });

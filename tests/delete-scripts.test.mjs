@@ -3,8 +3,8 @@
 //
 // These scripts delete rows. They are only ever exercised against a dedicated
 // test project: a run with TEST_ENV=1 AND a .env.test file present. Without
-// that, the suite prints one SKIP line and exits 0 — it must never point the
-// deletion scripts at production.
+// that, X1-X4 each print a SKIP line and the suite exits 0 — it must never point
+// the deletion scripts at production. X5 only reads a file, so it runs always.
 //
 // What it proves (when it runs):
 //   X1  dry run reports counts and deletes nothing
@@ -17,6 +17,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.mjs';
+import { skipLine } from './skip-count.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HAS_TEST_ENV = String(process.env.TEST_ENV || '') === '1' && fs.existsSync(path.join(ROOT, '.env.test'));
@@ -27,8 +28,21 @@ const line = (ok, id, what, d) => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${String(id).padEnd(4)}${String(what).padEnd(50)}${d ? '  ' + String(d).replace(/\s+/g, ' ').slice(0, 96) : ''}`);
 };
 
+/* X5 reads a script, not a database, so it runs everywhere — including a
+   production-adjacent checkout. The four destructive checks cannot. */
+{
+  const src = fs.readFileSync(path.resolve(ROOT, 'scripts', 'sweep-demo-leads.mjs'), 'utf8');
+  const ok = /idempotency_key like 'canary-%'/.test(src)
+    && /idempotency_key like 'manual-test-%'/.test(src);
+  line(ok, 'X5', 'sweep counts canary- and manual-test- rows as debris', `ok=${ok}`);
+}
+
 if (!HAS_TEST_ENV) {
-  console.log('SKIP  X1-X4  no .env.test with TEST_ENV=1 — the deletion scripts are never run against production.');
+  for (const id of ['X1', 'X2', 'X3', 'X4']) {
+    console.log(skipLine(id, 'no .env.test with TEST_ENV=1 — never run against production'));
+  }
+  console.log('');
+  console.log(`${total - failed}/${total} passed`);
   process.exit(0);
 }
 
@@ -107,15 +121,6 @@ try {
       `exit=${r.status} gone=${gone} before=${before.length} after=${after.length}`);
     if (other) await svc.from('businesses').delete().eq('id', other);
   }
-  /* X5: the debris predicate still recognises both always-safe shapes. A
-     page-minted key is a UUID, so neither prefix can be a real submission. */
-  {
-    const src = fs.readFileSync(path.resolve('scripts', 'sweep-demo-leads.mjs'), 'utf8');
-    const ok = /idempotency_key like 'canary-%'/.test(src)
-      && /idempotency_key like 'manual-test-%'/.test(src);
-    line(ok, 'X5', 'sweep counts canary- and manual-test- rows as debris', `ok=${ok}`);
-  }
-
 } catch (e) {
   line(false, 'X0', 'delete-scripts suite threw', e.message);
 } finally {

@@ -24,6 +24,16 @@ phone can be connected at any moment. `seed-check` reports the chat count and do
 not require it to be zero. The runner fails a run that adds or removes a chat,
 leaks a test-shaped lead, or grows the live unused bind-code count of a real business.
 
+### Vercel CLI rule (set 2026-11-09)
+
+Never run `vercel dev` or any Vercel CLI command from a directory that has no
+`.vercel` link, and never create or link a remote project while probing. Measured
+the hard way: `vercel dev` in an unlinked directory creates a project on the
+account, and `vercel dev` in a directory with a `.env` gives that file precedence
+over the environment it was started with. The test runner avoids both by starting
+the server from a dev root that has a copied `.vercel/project.json` and no `.env`
+(`tests/dev-root.mjs`).
+
 ### Roles
 | Role | Who | Does |
 |---|---|---|
@@ -110,7 +120,7 @@ Optional: `TELEGRAM_CHAT_ID`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX` (**remo
 
 New in `ops-audience` (not deployed): `OPERATOR_CHAT_ID` (falls back to `TELEGRAM_CHAT_ID`), `OPERATOR_EMAIL`.
 
-Test-only: `.env.test` (**does not exist**), `TEST_ENV=1`, `ALLOW_PROD_TESTS`.
+Test-only: `.env.test` (exists since 2026-11-09), `TEST_ENV=1`. `ALLOW_PROD_TESTS` is gone.
 
 ---
 
@@ -182,7 +192,7 @@ Last full run before this bundle: 385.2 s / 384.4 s / 385.6 s, all green. This b
 
 ## 8. Still missing / not done
 
-1. **Separate test Supabase project (Phase C), DONE 2026-11-09.** `.env.test` exists and the full suite is green on it (391 assertions, 241.5 s against 382 / 417.8 s on production; `delete-scripts` X1-X5 only run there). Still to do: fixtures replace the `alder-demo` literals, make the prod guard absolute, remove `ALLOW_PROD_TESTS` and the backup ritual.
+1. **Separate test Supabase project (Phase C), DONE 2026-11-09.** `.env.test` exists and the full suite is green on it (391 assertions, 241.5 s against 382 / 417.8 s on production; `delete-scripts` X1-X5 only run there). Still to do: fixtures replace the `alder-demo` literals, and the backup ritual can go. The guard is absolute as of 2026-11-09 (`ALLOW_PROD_TESTS` removed).
 2. **Summary schedule** (proposal only, `docs/PROPOSALS.md` §5d): four presets, per-business timezone, one column, hourly cron on Pro.
 3. Self-check is operator-only and not owner-configurable (decision).
 4. Quiet hours / 15-minute reminders: parked; Hobby crons are daily.
@@ -192,6 +202,7 @@ Last full run before this bundle: 385.2 s / 384.4 s / 385.6 s, all green. This b
 8. Known minor: stale handoff lines, `sharp` bump deferred, 13 images without width/height (CLS 0), `--timing` flag.
 9. A5 is done (`scripts/purge-expired.mjs`, dry run default). A2 is done: every bind test runs on `zz-test-bind-<run>` and F8 bans a real-business mint. Keyset paging is report-only. Hostile review: 409 and bind read-error are fixed; `botUsername()` cache (Low) and the retry lock window edge (Low) remain. The retry lock should become a unique index in the next migration proposal — no migration file is added now.
 10. Proposals only, not implemented: `robots.txt` and `sitemap.xml` hard-coded to `alderroof.com` (pre-launch item); one brand per deployment; `/clients` and `/stats <slug>` on `v_client_leads`; retention predicates; `npm run new-client`.
+    CI proposal: run `npm run test:port-guard` **before** `tests/run.mjs`. It binds port 3000 and therefore cannot live in the suite list, so a CI job that only runs the suite would silently skip the guard.
 11. **Supabase key format (read-only review, 2026-11-09).** Legacy JWT keys retire in early 2027; the replacements are `sb_publishable_…` (public) and `sb_secret_…` (server), which are not JWTs. What the code assumes: nothing. There is no JWT decode, no `eyJ` check, no key-length check, no raw `fetch` to `/rest/v1` in app code — `lib/db.js`, `lib/digest-db.js`, `lib/lead-intake.js`, `lib/review-db.js` and `api/health.js` all call `createClient(url, key)` (supabase-js 2.118.0), which sends `apikey` and `Authorization: Bearer` and does not care what the string looks like. No migration calls `auth.jwt()` or `auth.role()`, so RLS does not depend on claims. The anon key is used only by `tests/db-wall.test.mjs`; it never reaches the browser (the page has no Supabase code). **What would break:** `db-wall` treats any error as a pass, so a rejected or retired key would leave it green for the wrong reason; `test:env-check` only checks that a name is present. **Smallest steps:** (1) create the new keys in the dashboard, (2) put them in `.env.test` and run `db-wall` alone, (3) tighten `db-wall` so a 401 "invalid API key" fails while an RLS denial passes, (4) swap the production env values and redeploy, (5) delete the legacy keys, (6) repeat step 2. Unverified: that this project's PostgREST accepts `sb_secret_` in the `Authorization: Bearer` header as well as in `apikey` — test it in step 2 before touching production.
 
 ---
@@ -280,6 +291,7 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - `operator-redirects` (PR #13): merged to `main` as `df3a4b8`. The local branch is deleted; its one post-merge commit lives on as `7110a8f`.
 - `operator-redirects-2` (PR #14): merged to `main` as `de2c8fe`; head was `7110a8f`.
 - `vercel-storage` (from `origin/main`): builds `main` only; `**` catches branch names with a slash; head `8366d37`. Draft PR #15.
+- `test-isolation` (from `origin/main`): dev root (hardened removal), production canary, shape checks, strict db-wall, absolute guard, disk preflight, build-output cleanup and startup sweep, port-guard test, canary rate-limit reset; head `5639d3c`. Draft PR #17.
 - `multi-tenant-design` (from `origin/main`, not from `vercel-storage`): design doc only; head `67b38f2`. Draft PR #16.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
@@ -330,6 +342,13 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-09 | `vercel-storage` | `7a931f7` | `git.deploymentEnabled` builds `main` only; V1–V3 test; OPERATIONS §10 on deployment storage and retention | PR #15 draft |
 | 2026-11-09 | `multi-tenant-design` | `67b38f2` | One deployment for many clients: inventory, three-table proposal, content schema, rendering comparison and recommendation, assets, commands, migration plan | PR #16 draft, docs only |
 | 2026-11-09 | `vercel-storage` | `8366d37` | `**` catch-all so branch names with a slash are covered; V2b models Vercel's no-rule default; sourced Pro storage and domain facts; Phase C green on the test project; Supabase key-format review added as an open item | PR #15 draft; 391 assertions on the test project |
+| 2026-11-09 | `test-isolation` | `6789644` | `vercel dev` runs from a dev root with no .env; canary checks production and aborts; env shape validation (URL, DSN, key format, swap); db-wall passes only on a real denial; SKIP lines counted in the runner summary | Draft PR; suite counts in the PR |
+| 2026-11-09 | `test-isolation` | (this branch) | `ALLOW_PROD_TESTS` removed — a suite run needs `TEST_ENV=1` plus `.env.test`; `--seed-check` renamed to `--read-production-seed` with a deprecated alias; `build-static.js` copies assets with `dereference: true`, so the dev root links them | PR #17 draft |
+| 2026-11-09 | `test-isolation` | `8fe7200` | Disk preflight: the runner refuses to start under 2 GB free, `DISK_MIN_BYTES` can raise the floor but not lower it; `statfsSync` works on Windows, Linux and macOS | PR #17 draft |
+| 2026-11-09 | `test-isolation` | `c991e67` | The runner removes `_debug/build-test` on every exit, exact path only; the port-3000 refusal now applies only to runs that start a server, so a DB-only or nested run can share the machine | PR #17 draft |
+| 2026-11-09 | `test-isolation` | `8610a99` | Startup sweep for `_debug/build-test` (a killed run never reaches cleanup); the port-3000 guard is proven by a standalone test that binds the port; the suite list is deduped (two suites were registered twice) | PR #17 draft |
+| 2026-11-10 | `test-isolation` | `c87d1a0` | The runner clears the canary business's rate-limit rows after the canary proves the host (exact key, max 100, never on production or an unknown host); `tests/suite-list` fails on a duplicate registration; `npm run test:port-guard` is the required check when `tests/run.mjs` changes | PR #17 draft |
+| 2026-11-10 | `test-isolation` | `5639d3c` | `removeDevRoot` re-scans after unlinking and refuses the recursive delete if a link survived; one fixed WARN line for every canary-reset skip reason except none; CI proposal recorded | PR #17 draft |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |

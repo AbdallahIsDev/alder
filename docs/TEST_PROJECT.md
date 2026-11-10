@@ -140,9 +140,12 @@ $env:TEST_ENV = "1"; node tests/run.mjs
 TEST_ENV=1 node tests/run.mjs
 ```
 
-`TEST_ENV=1` switches the loader to `.env.test`; everything else is unchanged. The
-runner still refuses if `SUPABASE_URL` matches `.env`, which it no longer does, so
-`ALLOW_PROD_TESTS` is not needed and can be retired once this works.
+`TEST_ENV=1` switches the loader to `.env.test`; everything else is unchanged.
+
+A suite run now requires **both** `TEST_ENV=1` and a `.env.test` file, and the URL
+in it must differ from `.env`. If any of that is missing the runner exits 1 with a
+names-only line and starts nothing. There is no override: `ALLOW_PROD_TESTS` was
+removed, not defaulted off.
 
 In PowerShell the variable stays set for the rest of the session. To unset it:
 
@@ -150,8 +153,72 @@ In PowerShell the variable stays set for the rest of the session. To unset it:
 Remove-Item Env:TEST_ENV
 ```
 
-Expected: the same counts as a production run, faster. The projection from the
-measured round-trip difference is roughly 225–235 s against 272 s.
+Expected: the same counts as a production run, faster. Measured on 2026-11-09:
+391 assertions in 241.5 s against 382 in 417.8 s on production.
+
+### Why the suite cannot quietly use production
+
+`vercel dev` reads `.env` and `.env.local` from its project directory, and those
+values beat the environment it was started with. Measured with 48.12.1: a function
+returned the `.env` value, not the one pinned into the parent process. A
+`TEST_ENV=1` run therefore wrote its canary lead into production while every check
+said "test".
+
+The fix is structural, not a file shuffle. Before starting the server the runner
+builds a **dev root** (`tests/dev-root.mjs`): a directory under `_debug/` that has
+the project but no `.env` files. `api/`, `lib/`, `assets/`, `scripts/` and
+`node_modules/` are junctions to the real directories; only `vercel.json`,
+`package.json`, `index.html` and `build-static.js` are copied. `vercel dev` does
+not walk up to a parent directory, so the repo's `.env` is never in scope, and the
+pinned values are the only ones the function can see. The root is removed on exit,
+unlinking the junctions first so a recursive delete can never follow them into
+`api/` or `node_modules/`.
+
+### The canary
+
+Before any suite runs, the runner posts one lead with a random `canary-…` key and
+then checks three things:
+
+1. The fake Telegram server received the alert (the loopback override reached the
+   function).
+2. The row exists in the **test** database, and is deleted there.
+3. The row does **not** exist in the database named by `.env`. If it does, the row
+   is deleted from production and the run aborts with no suite started.
+
+A run that cannot place the canary where it expects stops there. That is the check
+that turns "the tests passed" into "the tests ran where I think they did".
+
+### Whenever `tests/run.mjs` changes
+
+Run `npm run test:port-guard`. It binds port 3000, then checks two things: a run
+with an HTTP suite is refused while the port is busy, and a run with only DB
+suites is not. It is standalone on purpose — during a full run the runner itself
+is listening on 3000, so the check cannot live in the suite list.
+
+```bash
+npm run test:port-guard
+```
+
+## 6b. The key migration (early 2027)
+
+Supabase retires the legacy JWT `anon` and `service_role` keys in early 2027. The
+replacements are `sb_publishable_…` (public) and `sb_secret_…` (server); they are
+not JWTs. Nothing in this repo decodes a key — every use is
+`createClient(url, key)`, and no migration calls `auth.jwt()` or `auth.role()` —
+so the switch is an env-value change. Do it in this order:
+
+1. In the **test** project, create the two new keys.
+2. Put them in `.env.test` and run `npm run test:env-check` — it accepts a JWT or
+   an `sb_` key, and rejects anything else by name, never by value.
+3. Run `TEST_ENV=1 node tests/run.mjs tests/db-wall.test.mjs`. The wall now fails
+   on a rejected key (401) instead of passing on any error, so a key the gateway
+   does not accept is caught here.
+4. Run the full suite on the test project.
+5. Only then swap the production env values and redeploy.
+6. Keep the old keys until a full production day is clean, then delete them.
+
+Unverified until step 2: whether this project's PostgREST accepts `sb_secret_` in
+the `Authorization: Bearer` header as well as in `apikey`.
 
 ## 7. The free project pauses
 
@@ -172,8 +239,9 @@ the project to a paid plan.
 
 Then, and only then:
 
-1. Delete `ALLOW_PROD_TESTS` from `tests/run.mjs` and make the production guard
-   absolute (decision 7 from the earlier bundle).
+1. ~~Delete `ALLOW_PROD_TESTS` and make the production guard absolute.~~ Done
+   2026-11-09: the gate requires `TEST_ENV=1` plus `.env.test`, and the flag no
+   longer exists.
 2. Replace the hardcoded `alder-demo` fixtures with `tests/fixtures.mjs`, seeding a
    dedicated `test-fixture` business per run.
 3. Remove the backup/reset/restore ritual from `HANDOFF_alder_session.md` and from

@@ -337,7 +337,7 @@ prefix; recipients are still redirected to `MAIL_REDIRECT_TO`), `SITE_URL`,
 ```powershell
 node tests/run.mjs                          # all suites, one shared vercel dev
 node tests/run.mjs tests/lead-api.test.mjs  # one suite
-node tests/run.mjs --seed-check             # read-only: alder-demo == seed?
+node tests/run.mjs --read-production-seed   # read-only: alder-demo == seed?
 ```
 
 Suites that only call handlers in-process (`db-wall`, `notify`, `webhook`,
