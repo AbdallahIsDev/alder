@@ -1638,6 +1638,39 @@ try {
           `edits=${rmEdits.length} kb=${rmKb.length} answers=${rmAnswers.join('|')}`);
       }
 
+      // OP45: an edit that changes nothing is a success. Telegram answers 400
+      // "message is not modified"; the bot must not log it as a failure, retry,
+      // or send a second message.
+      {
+        const C2 = await import('../lib/content.js');
+        const ids = [];
+        for (let i = 0; i < 6; i++) ids.push(await seedLead(invBiz.id, `Repeat ${i + 1}`, `repeat${i}@example.com`));
+        await control({ mode: 'not_modified' });
+        await reset();
+        await good(msg(invOwner, '/leads'));
+        const errors = [];
+        const realError = console.error;
+        console.error = (...args) => { errors.push(args.map(String).join(' ')); };
+        let first;
+        let second;
+        try {
+          await reset();
+          await good(cb(invOwner, 'l:1'));
+          first = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+          await reset();
+          await good(cb(invOwner, 'l:1'));
+          second = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        } finally {
+          console.error = realError;
+          await control({ mode: 'ok' });
+        }
+        const failures = errors.filter((l) => l.includes('tg_edit_failed'));
+        line(first.length === 1 && second.length === 1 && failures.length === 0
+          && !second.some((t) => t === C2.TOAST_GENERIC_ERROR),
+          'OP45', 'identical edit: 400 not-modified is success, no log, no retry',
+          `answers=${second.join('|')} logged=${failures.length}`);
+      }
+
       // OP40: /invite is TWO messages, like the operator's /code. The first is an
       // instruction the owner must not forward; the second is the only text a
       // client may see.

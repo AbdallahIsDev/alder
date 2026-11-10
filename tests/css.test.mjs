@@ -83,7 +83,30 @@ try {
       'every stylesheet href is root-absolute, both clients', `bad=${bad.join('|') || 'none'}`);
   }
 
-  /* CSS4: the modal's Call is filled like "Send my request", and the hover rule
+  /* CSS6/CSS7: the two narrow-width rules. 380 brings the padding in so the row
+     still fits; 353 and below stacks them, Call on top. */
+  {
+    const at = (px) => {
+      const i = css.indexOf(`@media (max-width: ${px}px)`);
+      if (i < 0) return '';
+      const open = css.indexOf('{', i);
+      let depth = 0;
+      for (let j = open; j < css.length; j++) {
+        if (css[j] === '{') depth++;
+        else if (css[j] === '}') { depth--; if (depth === 0) return css.slice(open, j + 1); }
+      }
+      return '';
+    };
+    const narrow = at(380);
+    const stack = at(353);
+    const narrowOk = /\.est-actions \.btn\.phone \{[^}]*padding: 0 16px/.test(narrow);
+    const stackOk = /\.est-actions \{[^}]*flex-direction: column-reverse[^}]*align-items: stretch/.test(stack)
+      && /\.est-actions \.btn \{[^}]*width: 100%/.test(stack);
+    line(narrowOk, 'CSS6', 'up to 380px Call keeps a 16px side padding', `found=${narrowOk}`);
+    line(stackOk, 'CSS7', 'at 353px and below the buttons stack, Call first', `found=${stackOk}`);
+  }
+
+ /* CSS4: the modal's Call is filled like "Send my request", and the hover rule
      that keeps it filled exists. Without that rule .btn.phone:hover paints a
      white 10% ground over the accent. */
   const block = (sel) => {

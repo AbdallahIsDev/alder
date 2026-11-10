@@ -2433,6 +2433,9 @@
       display: flex;
       flex-direction: column;
       width: min(680px, 100%);
+      /* A grid item's min-width is auto, so one long label could stretch the
+         dialog past its own max and past the screen. */
+      min-width: 0;
       max-height: calc(100dvh - 32px);
       background: var(--bg);
       color: var(--fg);
@@ -3271,6 +3274,37 @@
     .est-actions .btn.phone:focus-visible {
       background: var(--accent);
       filter: brightness(.9)
+    }
+
+    /* Up to 380px the padding comes in, so the two buttons still share one row.
+       Call is 220px at 16px padding, so the row needs 72 + 12 + 220 = 304 and the
+       page needs 354. Below that they stack: Call on top, Close underneath, both
+       full width and still 52px. */
+    @media (max-width: 380px) {
+      .est-actions .btn.phone {
+        padding: 0 16px
+      }
+    }
+
+    @media (max-width: 353px) {
+      .est-actions {
+        flex-direction: column-reverse;
+        align-items: stretch;
+        min-width: 0
+      }
+
+      .est-actions .btn {
+        width: 100%;
+        min-width: 0
+      }
+
+      /* A long number must not push the button past the row: the label clips
+         inside its own box (it already has overflow:clip) instead. */
+      .est-actions .btn .bx-l {
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: 100%
+      }
     }
 
     @media (max-width: 760px) {
