@@ -294,6 +294,7 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - `test-isolation` (from `origin/main`): dev root (hardened removal), production canary, shape checks, strict db-wall, absolute guard, disk preflight, build-output cleanup and startup sweep, port-guard test, canary rate-limit reset; head `5639d3c`. Draft PR #17.
 - `client-config` (from `origin/main` at `455245e`): `clients/<slug>.json` drives the build; head `af4cbc8`. Draft PR.
 - `client-identity` (from `origin/main` at `07caea0`): address, sender, unused-key check; head `3eae101`. Draft PR.
+- `owner-ux-fixes` (from `origin/main` at `8c2df50`): paging, row order, invite pair, one-sentence reply, modal buttons, three-account manual script; head `d2e5749`. Draft PR.
 - `multi-tenant-design` (from `origin/main`, not from `vercel-storage`): design doc only; head `67b38f2`. Draft PR #16.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
@@ -354,6 +355,7 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-10 | `client-config` | `af4cbc8` | Alder's page is built from `clients/alder.json`; `--client`/`CLIENT` selects one; the build refuses a missing, invalid, incomplete or unknown-key file with one line; a sample client builds clean; Alder's output is byte-identical | Draft PR |
 | 2026-11-10 | `client-copy` | `876ec81` | The rest of the page copy (66 blocks) moved into the client file; the template BIZ is now a key list with empty values; tag-bearing blocks split around the tag; slugs validated; `sync-brand` reads the client file | Draft PR |
 | 2026-11-10 | `client-identity` | `3eae101` | Unused copy keys fail the build; `robots.txt` and `sitemap.xml` generated from the client's `domain`; optional per-client `sender`; sample builds cannot overwrite the tracked brand file | Draft PR |
+| 2026-11-10 | `owner-ux-fixes` | `d2e5749` | Empty list pages answer the tap instead of replacing the message; /leads puts the age last; /invite sends the instruction then the forwardable message; a bound chat gets one sentence; owner commands re-proved per command and per forged callback; final modal Call/Close row | Draft PR; 462 assertions on the test project |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |

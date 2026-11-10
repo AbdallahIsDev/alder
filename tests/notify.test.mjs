@@ -815,15 +815,15 @@ try {
     '',
     '1. Legacy Phone',
     'Repair · +15550102345',
-    '41m ago · 🔵 Contacted',
+    '🔵 Contacted · 41m ago',
     '',
     '2. ' + 'A'.repeat(27) + '…',
     'Storm damage · +201005408345',
-    '1d ago · ✅ Done',
+    '✅ Done · 1d ago',
     '',
     '3. Unknown Status',
     'Not sure · +15125550100',
-    '3d ago · banana',
+    'banana · 3d ago',
   ].join('\n');
   const maxLeads = Array.from({ length: 10 }, () => ({
     name: 'N'.repeat(80), service: 'S'.repeat(60), phone: '+20100540834533333333333333', status: 'contacted', created_at: at(1),

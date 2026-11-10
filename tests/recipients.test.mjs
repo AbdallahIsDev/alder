@@ -267,7 +267,9 @@ try {
   await call(msg(CHAT_A, '/invite'));
   const r5 = await lastText();
   delete process.env.INVITES_MAX;
-  line(before6 === 5 && store.codes.length === 5 && r5 === C.BOT_INVITE_RATE_LIMIT,
+  /* Two messages per invite (the instruction, then the forwardable one), so
+     five invites are ten sends. The codes are what the cap counts. */
+  line(before6 === 10 && store.codes.length === 5 && r5 === C.BOT_INVITE_RATE_LIMIT,
     'R5', 'invite rate limit: 5 per hour, 6th says so, no code',
     `replies=${before6} codes=${store.codes.length}`);
 

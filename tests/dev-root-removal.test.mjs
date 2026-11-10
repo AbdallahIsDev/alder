@@ -79,10 +79,31 @@ try {
   const survived = fs.existsSync(path.join(target, 'keep.txt'));
   line(true, 'H3', 'bare rmSync on a junction: target survives?',
     `survived=${survived} error=${rmError || 'none'}`);
+  /* H4: the delete itself fails — Windows holds the directory for a moment after
+     the dev server is killed. Cleanup runs after every assertion, so it must
+     report and return, never throw. */
+  const root4 = fresh('root4');
+  const realRm = fs.rmSync;
+  const printed4 = [];
+  const realLog4 = console.log;
+  let r4;
+  try {
+    fs.rmSync = () => { const e = new Error('EBUSY: fake lock'); e.code = 'EBUSY'; throw e; };
+    console.log = (s) => { printed4.push(String(s)); };
+    r4 = removeDevRoot(root4);
+  } finally {
+    fs.rmSync = realRm;
+    console.log = realLog4;
+  }
+  const warn4 = printed4.find((l) => /^WARN {2}dev-root {2}not removed: EBUSY \(a leftover root is harmless\)$/.test(l));
+  line(!!r4 && r4.removed === false && r4.reason === 'busy' && !!warn4 && fs.existsSync(root4),
+    'H4', 'a locked directory is reported, never thrown',
+    `removed=${r4 && r4.removed} reason=${r4 && r4.reason} warn=${!!warn4}`);
+
 } catch (e) {
   line(false, 'H0', 'removal harness ran', e && e.message ? e.message.slice(0, 80) : 'threw');
 } finally {
-  for (const d of ['root1', 'root2', 'root3']) {
+  for (const d of ['root1', 'root2', 'root3', 'root4']) {
     try { fs.rmSync(path.join(BASE, d), { recursive: true, force: true }); } catch {}
   }
   try { fs.rmSync(BASE, { recursive: true, force: true }); } catch {}

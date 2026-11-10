@@ -197,7 +197,9 @@ async function cleanup(svc) {
     killTree(dev);
     dev = null;
   }
-  if (devRoot) { removeDevRoot(devRoot); devRoot = null; }
+  /* removeDevRoot already reports instead of throwing; this is the second belt.
+     A cleanup that throws would fail a run that passed every assertion. */
+  if (devRoot) { try { removeDevRoot(devRoot); } catch {} devRoot = null; }
   if (fs.existsSync(MARKER)) { try { fs.unlinkSync(MARKER); } catch {} }
   if (fakes) { try { await fakes.stop(); } catch {} fakes = null; }
   /* P15 builds into _debug/build-test (about 120 MB). It is a build output, not a

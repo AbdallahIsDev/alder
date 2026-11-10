@@ -25,9 +25,12 @@ import { resolveSender } from '../lib/client.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, '_debug', 'client-build');
 
-/* The build of origin/main (07caea0), before any value moved into a data file.
-   Every file the build writes from client data is pinned. */
-const BASELINE = '64fd608ff69a1055e0a57730c6adcb8d2afb8c6ed6ebc5f8759adbf8d0fc39b6';
+/* The build of origin/main (8c2df50) with the final-modal button change on top
+   (owner-ux-fixes): "Call" is the phone button and "Close" sits at the far left.
+   That is a deliberate visitor-visible change, so the page hash moved with it —
+   64fd608f… before, 20948309… after. The other three files are unchanged and are
+   pinned to the same values as before. */
+const BASELINE = '2094830924a510e4e8ced42d2a2ca39098277219cdc69f1dc22facd07d5c40d6';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = 'dcd93cf0545e1bad61f0218310823424565419e811ba50b74a2e7f7642ce7053';
 const BASELINE_SITEMAP = 'f90e45bdfa569c01cc2c7fe584831cd9e03b212fbac43254454968bcc16c27e8';
