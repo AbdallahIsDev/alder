@@ -12,7 +12,11 @@ import sharp from 'sharp';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PAGE = path.join(ROOT, 'index.html');
-const OUT = path.join(ROOT, 'lib', 'brand.generated.json');
+/* A sample build must not overwrite the tracked brand file: build-static points
+   this elsewhere for any client but the default. */
+const OUT = process.env.BRAND_OUT
+  ? path.resolve(process.env.BRAND_OUT)
+  : path.join(ROOT, 'lib', 'brand.generated.json');
 const LOGO_DIR = path.join(ROOT, 'assets', 'email');
 
 const page = fs.readFileSync(PAGE, 'utf8');

@@ -30,6 +30,17 @@ for the text blocks that were moved out of the page.
 `clients/example.json` is a sample with fake values. It exists so the second-client
 test has something to build.
 
+Three more top-level keys:
+
+- `domain` — the public address, `https://host` with no trailing slash. `robots.txt`
+  and `sitemap.xml` are generated from it, so no client inherits another's address.
+- `lastmod` — `YYYY-MM-DD` for the sitemap.
+- `sender` — optional. The address this client's email comes from. When it is
+  absent the deployment's `MAIL_FROM` is used, which is Alder's case.
+
+A `copy` key that no token uses is a build error naming the key, so a typo cannot
+sit in the file looking like it works.
+
 The `copy` object holds the visible text, keyed by section and number (`services1`,
 `faq3`, `reviews2`). Order follows the page. A block that contains a tag — the hero
 heading has a line break, the services heading has a highlighted span — is split
