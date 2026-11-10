@@ -1,0 +1,53 @@
+{
+  "slug": "alder-demo",
+  "biz": {
+    "slug": "alder-demo",
+    "name": "Alder Roofing",
+    "brand": "Alder",
+    "founder": "[Founder name]",
+    "phone": "(555) 018-4400",
+    "countryCode": "+1",
+    "email": "hello@alder-roofing.vercel.app",
+    "url": "https://alder-roofing.vercel.app/",
+    "address": "123 Main Street, Des Moines, IA",
+    "hours": "Mon to Fri, 7am to 5pm",
+    "area": "Iowa & the Upper Midwest",
+    "base": "Iowa",
+    "reply": "one business day",
+    "seoTitle": "Alder Roofing | Roof replacement in Iowa",
+    "desc": "Roof replacement, storm and hail damage repair and free inspections across {{area}}. Every roof is built by our own crew, never subcontractors.",
+    "keywords": [
+      "roof replacement Iowa",
+      "roofing contractor Des Moines",
+      "storm and hail damage repair",
+      "roof leak repair",
+      "free roof inspection",
+      "shingle roof replacement",
+      "residential roofing Des Moines",
+      "roof replacement estimate",
+      "roof repair Upper Midwest",
+      "roofing company Iowa"
+    ],
+    "ogImage": "assets/images/og-image.jpg",
+    "twitter": "",
+    "hoursSchema": "Mo-Fr 07:00-17:00",
+    "priceRange": "",
+    "rating": "4.8",
+    "reviews": "314",
+    "roofs": "276",
+    "warranty": "20",
+    "facebook": "#",
+    "instagram": "#",
+    "youtube": "#",
+    "google": "#"
+  },
+  "copy": {
+    "heroBadge": "Roof replacement across {{area}}",
+    "aboutP1": "{{brand}} started with one frustration: the person who sells your roof is rarely the person who\n            builds it. So we do both. The people who inspect your roof, write your quote, and nail down the last shingle\n            all work for us, and they’ll be around if you ever need to call.",
+    "aboutP2": "We’re a small crew working out of {{base}}, and the people who answer your call are the\n            same ones who tear off the old roof and set the new one. Most of our work comes from neighbors who watched\n            us on the house next door, which is why we keep the site clean, protect the landscaping, and finish on the\n            day we said we would.",
+    "ctaTitle": "Ready for a roof you won’t think about again?",
+    "ctaSub": "Tell us a little about your roof. We’ll reply within {{reply}} with a clear written price. No obligation.",
+    "footerLine": "Roofs built by our own crew, never subcontractors, with a clear written price up front.",
+    "ogAlt": "A roofer in a hard hat kneeling on a new shingle roof with a nail gun, beside the {{name}} logo and the line Your roof protects everything under it."
+  }
+}

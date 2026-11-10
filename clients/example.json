@@ -1,0 +1,45 @@
+{
+  "slug": "example-demo",
+  "biz": {
+    "slug": "example-demo",
+    "name": "Northline Roofing",
+    "brand": "Northline",
+    "founder": "Sample Founder",
+    "phone": "(555) 010-2200",
+    "countryCode": "+1",
+    "email": "hello@northline.example",
+    "url": "https://northline.example/",
+    "address": "9 Sample Street, Springfield, IL",
+    "hours": "Mon to Sat, 8am to 6pm",
+    "area": "Central Illinois",
+    "base": "Illinois",
+    "reply": "two business days",
+    "seoTitle": "Northline Roofing | Roof replacement in Illinois",
+    "desc": "Roof replacement and storm repair across {{area}}. This is a sample client file, not a real business.",
+    "keywords": [
+      "sample keyword one",
+      "sample keyword two"
+    ],
+    "ogImage": "assets/images/og-image.jpg",
+    "twitter": "",
+    "hoursSchema": "Mo-Sa 08:00-18:00",
+    "priceRange": "$$",
+    "rating": "5.0",
+    "reviews": "12",
+    "roofs": "34",
+    "warranty": "10",
+    "facebook": "",
+    "instagram": "",
+    "youtube": "",
+    "google": ""
+  },
+  "copy": {
+    "heroBadge": "Roof replacement across {{area}}",
+    "aboutP1": "{{brand}} is a sample client used to prove the page is built from a data file. Nothing here is a real business.",
+    "aboutP2": "This text comes from clients/example.json. It exists so the build can be checked against a second client without touching the first client.",
+    "ctaTitle": "Sample heading for a second client",
+    "ctaSub": "This is sample copy. It proves the CTA text comes from the client file, not from the page.",
+    "footerLine": "Sample footer line for the second client.",
+    "ogAlt": "Sample share card for {{name}}."
+  }
+}
