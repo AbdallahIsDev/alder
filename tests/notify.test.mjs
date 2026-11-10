@@ -278,16 +278,24 @@ try {
   const dividerOk = compact.html.includes(divider)
     && compact.html.indexOf('>Customer<') < compact.html.indexOf(divider)
     && compact.html.indexOf(divider) < compact.html.indexOf('>Job<');
-  const label96 = compact.html.includes('width="96"');
-  const mobileOk = compact.html.includes('@media (max-width:480px){.outer{padding:0!important}.card{border-radius:0!important;border:0!important}.px{padding-left:16px!important;padding-right:16px!important}}');
-  line(radii === 2 && dividerOk && label96 && mobileOk, 'G12', 'one radius container, divider, label-96, mobile block',
-    `radius=${radii} divider=${dividerOk} label96=${label96} mobile=${mobileOk}`);
+  /* The label column is 124 wide since 2026-11-10 (96 clipped "Insurance claim"),
+     and the mobile block gained the two stacking rules. Each rule is checked on
+     its own rather than as one exact string. */
+  const label124 = compact.html.includes('width="124"') && !compact.html.includes('width="96"');
+  const mobileParts = ['.outer{padding:0!important}', '.card{border-radius:0!important;border:0!important}',
+    '.px{padding-left:16px!important;padding-right:16px!important}',
+    '.btn-cell{display:block!important;width:100%!important}',
+    '.btn-gap{display:block!important;width:100%!important;height:12px!important;line-height:12px!important}'];
+  const mobileOk = compact.html.includes('@media (max-width:480px)') && mobileParts.every((s2) => compact.html.includes(s2));
+  line(radii === 2 && dividerOk && label124 && mobileOk, 'G12', 'one radius container, divider, label-124, mobile block',
+    `radius=${radii} divider=${dividerOk} label124=${label124} mobile=${mobileOk}`);
 
   /* G11: pinned button colours (from brand tokens) */
   const bc = getBrand().colors;
   const fullHtml = renders.full.html;
-  const callBtn = fullHtml.match(/<td width="49%"[^>]*bgcolor="([^"]+)"[^>]*><a[^>]*style="[^"]*color:([^;"]+)[^"]*">Call /);
-  const mailBtn = fullHtml.match(/<td width="49%"[^>]*bgcolor="([^"]+)"[^>]*><a[^>]*style="[^"]*color:([^;"]+)[^"]*">Email /);
+  /* class="btn-cell" now sits before width, so the cell tag is matched loosely. */
+  const callBtn = fullHtml.match(/<td class="btn-cell"[^>]*bgcolor="([^"]+)"[^>]*><a[^>]*style="[^"]*color:([^;"]+)[^"]*">Call /);
+  const mailBtn = fullHtml.match(/<td class="btn-cell"[^>]*bgcolor="([^"]+)"[^>]*><a[^>]*style="[^"]*color:([^;"]+)[^"]*">Email /);
   const g11Ok = !!(callBtn && mailBtn
     && callBtn[1].toUpperCase() === bc.accent.toUpperCase()
     && callBtn[2].toUpperCase() === bc.accentText.toUpperCase()
