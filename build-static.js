@@ -68,6 +68,10 @@ catch (e) { fail('The BIZ object does not parse: ' + e.message); }
 
 /* ---- the client file: every client value comes from clients/<slug>.json ---- */
 opt.client = String(opt.client || process.env.CLIENT || 'alder').trim();
+/* A slug is a file name. Nothing else reaches the filesystem. */
+if (!/^[a-z0-9][a-z0-9-]*$/.test(opt.client)) {
+  fail('Invalid client slug "' + opt.client + '". Use lowercase letters, digits and hyphens, starting with a letter or digit.');
+}
 const clientPath = path.join(__dirname, 'clients', opt.client + '.json');
 if (!fs.existsSync(clientPath)) {
   fail('clients/' + opt.client + '.json not found. Pass --client <slug> or set CLIENT=<slug>.');
@@ -232,7 +236,7 @@ if (survivors.length) fail('placeholder tokens survived the build:\n' + survivor
    sync-brand.mjs writes lib/brand.generated.json and assets/email/*.png from the
    page's :root block and logo, so the emails always match the landing page. */
 import { spawnSync } from 'node:child_process';
-const sync = spawnSync(process.execPath, [path.join(__dirname, 'scripts', 'sync-brand.mjs')], { cwd: __dirname, stdio: 'inherit' });
+const sync = spawnSync(process.execPath, [path.join(__dirname, 'scripts', 'sync-brand.mjs')], { cwd: __dirname, stdio: 'inherit', env: { ...process.env, CLIENT: opt.client } });
 if (sync.status !== 0) fail('sync-brand.mjs failed; not building with stale brand tokens.');
 
 /* ---- 9b. phone calling-code table, from libphonenumber-js max metadata ----
