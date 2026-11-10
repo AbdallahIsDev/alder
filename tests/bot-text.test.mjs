@@ -215,6 +215,22 @@ const samples = sampleTelegramTexts();
     'owner menu lists /remove_lead and every command is legal', names.join(','));
 }
 
+/* T13: the removal line names the request and nothing else — no phone, no email,
+   no notes, no trailing period. The name is the only thing the owner needs to
+   know which row went, and this line sits in a chat someone may read over a
+   shoulder. */
+{
+  const withName = C.removedText({ name: 'Daniel Whitaker', service: 'repair', phone: '5555012345', email: 'd@example.com', notes: 'gate code 1234' });
+  const blank = C.removedText({ name: '   ', service: 'storm' });
+  const ok = withName === 'Removed: Daniel Whitaker · Repair'
+    && blank === 'Removed: a request · Storm damage'
+    && !withName.endsWith('.')
+    && !/\d/.test(withName) && !withName.includes('@')
+    && !withName.includes('gate');
+  line(ok, 'T13', 'removal line: name and job only, no contact details',
+    JSON.stringify(withName));
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
