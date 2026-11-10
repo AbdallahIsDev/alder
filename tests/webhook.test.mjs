@@ -1652,7 +1652,7 @@ try {
       {
         const C2 = await import('../lib/content.js');
         const code = mkCode(12); createdCodes.push(code);
-        await createBindCode(code, bizA.id, new Date(Date.now() + 3600000).toISOString());
+        await createBindCode(code, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
         await reset();
         await good(msg(invStaff, code));
         const pasted = String(((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text);

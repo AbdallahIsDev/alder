@@ -347,19 +347,22 @@ const logOffset = fs.statSync(LOG).size;
   const m2 = html.includes('grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)')
     && html.includes('min-width: 0') && html.includes('max-width: 100%');
   line(m2, 'M2', 'row2 grid + inputs cannot overflow', `found=${m2}`);
-  // M3: success actions right-aligned (Close/Call one row, Close first, tel: via {{tel}})
+  // M3: the two ends of one row — Close at the far left, Call at the right.
   const m3block = (html.match(/\.est-actions\s*\{[^}]*\}/) || [''])[0];
-  const m3actions = m3block.includes('justify-content: flex-end') && /gap:\s*12px/.test(m3block);
-  const m3order = /<button type="button" class="btn ghost" data-close[^>]*>Close<\/button>\s*<a class="est-call" href="tel:\{\{tel\}\}/.test(html);
-  line(m3actions && m3order, 'M3', 'success Close/Call row right-aligned (gap 12px, Close first)', `align=${m3actions} order=${m3order}`);
+  const m3actions = m3block.includes('justify-content: space-between') && /gap:\s*12px/.test(m3block);
+  const m3order = /<button type="button" class="btn ghost" data-close[^>]*>Close<\/button>\s*<a class="btn phone" href="tel:\{\{tel\}\}/.test(html);
+  line(m3actions && m3order, 'M3', 'success row: Close first at the far left, Call at the right', `align=${m3actions} order=${m3order}`);
   // M3b: both min-height 48px
   const m3b = /\.est-actions\s+\.btn\.ghost\s*\{[^}]*min-height:\s*48px/.test(html)
-    && /\.est-call\s*\{[^}]*min-height:\s*48px/.test(html);
+    && /\.est-actions\s+\.btn\.phone\s*\{[^}]*min-height:\s*48px/.test(html);
   line(m3b, 'M3b', 'success buttons min-height 48px', `found=${m3b}`);
-  // M3c: both 1px solid border, same radius (0), no underline-only
-  const m3cCall = /\.est-call\s*\{[^}]*border:\s*1px solid\s+rgb\(255 255 255\/\.15\)[^}]*border-radius:\s*0/.test(html);
-  const m3cNoUnder = !/\.est-call\s*\{[^}]*border-bottom:/.test(html);
-  line(m3cCall && m3cNoUnder, 'M3c', 'success buttons 1px solid border + radius 0, no underline', `callBorder=${m3cCall} noUnder=${m3cNoUnder}`);
+  // M3c: Call IS the shared phone button — the same component as the header and
+  // the CTA — so the old one-off .est-call style must be gone, not restyled.
+  const m3cShared = /\.btn\.phone\s*\{[^}]*border-color:\s*rgb\(255 255 255\/\.15\)/.test(html)
+    && html.includes('<a class="btn phone" href="tel:{{tel}}" aria-label="Call {{phone}}"');
+  const m3cNoBespoke = !html.includes('est-call');
+  line(m3cShared && m3cNoBespoke, 'M3c', 'Call uses the shared phone button, no bespoke style left',
+    `shared=${m3cShared} noBespoke=${m3cNoBespoke}`);
   // M3d: 375px stacks (media <=760 row2 single column)
   const m3d = /@media\s*\(max-width:\s*760px\)\s*\{[^}]*\.row2\s*\{\s*grid-template-columns:\s*1fr/.test(html);
   line(m3d, 'M3d', '375px Phone/Email stack in one column', `found=${m3d}`);
