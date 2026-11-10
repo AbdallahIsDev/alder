@@ -16,7 +16,11 @@ Every client value comes from one file: `clients/<slug>.json`. It holds a `biz`
 object with the same keys the page template defines, and an optional `copy` object
 for the text blocks that were moved out of the page.
 
-1. Copy `clients/alder.json` to `clients/<slug>.json` and change the values.
+1. Copy `clients/alder.json` to `clients/<slug>.json` and change the values. The
+   slug is a file name: lowercase letters, digits and hyphens, starting with a
+   letter or digit. Anything else is refused before the file is read. The
+   slug is a file name: lowercase letters, digits and hyphens, starting with a
+   letter or digit. Anything else is refused before the file is read.
 2. Build it: `npm run build -- --client <slug>` or `CLIENT=<slug> npm run build`.
    The default is `alder`.
 3. The build refuses, with one line, if the file is missing, is not valid JSON, is
@@ -25,6 +29,18 @@ for the text blocks that were moved out of the page.
 
 `clients/example.json` is a sample with fake values. It exists so the second-client
 test has something to build.
+
+The `copy` object holds the visible text, keyed by section and number (`services1`,
+`faq3`, `reviews2`). Order follows the page. A block that contains a tag — the hero
+heading has a line break, the services heading has a highlighted span — is split
+into `…A`, `…B`, `…C` around the tag instead of being stored as HTML, because token
+values are HTML-escaped.
+
+The `copy` object holds the visible text, keyed by section and number (`services1`,
+`faq3`, `reviews2`). Order follows the page. A block that contains a tag — the hero
+heading has a line break, the services heading has a highlighted span — is split
+into `…A`, `…B`, `…C` around the tag instead of being stored as HTML, because token
+values are HTML-escaped.
 
 ## 1. Onboard a business
 

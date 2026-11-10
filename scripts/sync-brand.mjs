@@ -111,15 +111,19 @@ const colors = {
   tint: '#F4F5F7',     // spec default
 };
 
-/* ---------- BIZ name (for the JSON's name field) ---------- */
-const bizBlock = (page.match(/<script>\s*\/\* =+ BUSINESS CONFIG[\s\S]*?<\/script>/) || [])[0] || '';
-const bizLit = bizBlock.match(/var BIZ = (\{[\s\S]*?\n\});/);
-let bizName = 'Alder';
-if (bizLit) {
-  try {
-    const fakeNameMatch = bizLit[1].match(/name:\s*'([^']+)'/);
-    if (fakeNameMatch) bizName = fakeNameMatch[1];
-  } catch { /* keep the default */ }
+/* ---------- client name (for the JSON's name field) ----------
+   The page template no longer carries values; it only lists the keys. The name
+   comes from clients/<slug>.json, the same file the build reads. CLIENT is set
+   by build-static.js when it spawns this script. */
+const clientSlug = String(process.env.CLIENT || 'alder').trim();
+let bizName = '';
+try {
+  const clientFile = path.join(ROOT, 'clients', clientSlug + '.json');
+  bizName = String(JSON.parse(fs.readFileSync(clientFile, 'utf8')).biz.name || '').trim();
+} catch { /* no file: leave it empty and fail below */ }
+if (!bizName) {
+  console.error('sync-brand: clients/' + clientSlug + '.json has no biz.name');
+  process.exit(1);
 }
 
 /* ---------- logo: two single-colour PNGs from the page's logo SVG ---------- */
