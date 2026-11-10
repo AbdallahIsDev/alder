@@ -7,7 +7,9 @@
 // F2  Every colour is /^#[0-9A-F]{6}$/.
 // F3  Contrast: text/card >= 4.5, muted/card >= 4.5, accentText/accent >= 4.5, onBg/bg >= 4.5.
 // F4  Every font file referenced exists in assets/fonts.
-// F5  Logo PNGs exist, are 72 px high, and have alpha.
+// F5  Logo PNGs exist, are 256x256, and have alpha (they were 72 px until the
+//     mark became two colours; it is shown at 32 px, so 72 was soft on a 2x screen).
+// F8  The mark is two colours: roof and chimney accent, house white or ink.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -76,13 +78,43 @@ async function checkLogo() {
     const abs = path.join(ROOT, rel);
     if (!fs.existsSync(abs)) { results.push(`${key}:missing`); continue; }
     const meta = await sharp(abs).metadata();
-    results.push(`${key}:${meta.height}px alpha=${meta.hasAlpha}`);
-    if (!(meta.height === 72 && meta.hasAlpha)) results.push(`${key}:BAD`);
+    results.push(`${key}:${meta.width}x${meta.height} alpha=${meta.hasAlpha}`);
+    if (!(meta.width === 256 && meta.height === 256 && meta.hasAlpha)) results.push(`${key}:BAD`);
   }
   line(results.length === 2 && !results.some((s) => s.includes('BAD') || s.includes('missing')),
-    'F5', 'logo PNGs 72px high with alpha', results.join(' '));
+    'F5', 'logo PNGs 256x256 with alpha', results.join(' '));
 }
 await checkLogo();
+
+/* F8: the mark is two colours. Roof and chimney take the brand accent, the house
+   takes the colour it sits on. Sampling beats reading the generator: a fill that
+   resolves to the wrong colour still renders.
+
+   The image is the favicon's geometry in viewBox "48 48 416 416" at 256 px, so a
+   point (ux,uy) in user space lands at ((ux-48)*256/416, (uy-48)*256/416). */
+{
+  const px = async (file, x, y) => {
+    const { data, info } = await sharp(file).raw().toBuffer({ resolveWithObject: true });
+    const i = (y * info.width + x) * info.channels;
+    return [data[i], data[i + 1], data[i + 2], data[i + 3]];
+  };
+  const rgb = (v) => v.slice(0, 3).join(',');
+  const accent = String(brand.colors.accent).toUpperCase();
+  const hex = (v) => '#' + v.slice(0, 3).map((n) => n.toString(16).padStart(2, '0')).join('').toUpperCase();
+  const dark = path.join(ROOT, 'assets', 'email', 'logo-on-dark.png');
+  const light = path.join(ROOT, 'assets', 'email', 'logo-on-light.png');
+  const roofDark = await px(dark, 128, 32);      // user 256,100 — the roof band
+  const houseDark = await px(dark, 63, 217);     // user 150,400 — the left wall
+  const roofLight = await px(light, 128, 32);
+  const houseLight = await px(light, 63, 217);
+  const corner = await px(dark, 2, 2);
+  const ok = hex(roofDark) === accent && hex(roofLight) === accent
+    && rgb(houseDark) === '255,255,255'
+    && Math.max(houseLight[0], houseLight[1], houseLight[2]) <= 60
+    && corner[3] === 0;
+  line(ok, 'F8', 'roof is the accent, house is white on dark and ink on light',
+    `roof=${hex(roofDark)}/${hex(roofLight)} house=${rgb(houseDark)}/${hex(houseLight)} cornerA=${corner[3]}`);
+}
 
 /* F6: the module actually loads the logo bytes (the file vercel.json's
    functions.includeFiles guarantees in the deployed bundle). */
@@ -100,17 +132,21 @@ await checkLogo();
    case is a white section behind the modal, which is what this models. The three
    tokens are read from index.html; only the composite chain is hardcoded. */
 {
-  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-  // The .est token block spans a few lines (--ctl-* sits on its own), so take the
-  // line that carries --field plus the three that follow it.
-  const lines = html.split('\n');
-  const at = lines.findIndex((l) => l.includes('--field:') && l.includes('--line:'));
-  const tokenScope = at < 0 ? '' : lines.slice(at, at + 8).join('\n');
+  /* The tokens moved into assets/css/styles.css with the rest of the CSS, and the
+     reformat put one declaration per line. Both broke the old "the line that has
+     --field and --line" lookup, so the first .est { … } block is the anchor now.
+     The assertion itself is unchanged. */
+  const cssPath = path.join(ROOT, 'assets', 'css', 'styles.css');
+  const src = fs.readFileSync(fs.existsSync(cssPath) ? cssPath : path.join(ROOT, 'index.html'), 'utf8');
+  // .est { … } appears more than once (scrollbars, media queries); the token block
+  // is the one that carries --ctl-line.
+  const estBlocks = [...src.matchAll(/\.est \{([^}]*)\}/g)].map((m) => m[1]);
+  const estBlock = estBlocks.find((b) => b.includes('--ctl-line:')) || '';
   const token = (name) => {
-    const m = new RegExp('--' + name + ':\\s*([^;]+);').exec(tokenScope);
+    const m = new RegExp('--' + name + ':\\s*([^;]+);').exec(estBlock);
     return m ? m[1].trim() : null;
   };
-  const scrimBlock = /\.est-scrim \{[^}]*background: ([^;]+);/.exec(html);
+  const scrimBlock = /\.est-scrim \{[^}]*background: ([^;]+);/.exec(src);
   const scrimSpec = scrimBlock ? scrimBlock[1].trim() : null;
 
   const parse = (v) => {

@@ -12,6 +12,10 @@ import sharp from 'sharp';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PAGE = path.join(ROOT, 'index.html');
+/* The tokens and the @font-face rules moved into their own file on 2026-11-10.
+   Read the CSS when it is there; fall back to the page so an older checkout
+   (before the move) still builds. The logo SVG is still in the page. */
+const CSS = path.join(ROOT, 'assets', 'css', 'styles.css');
 /* A sample build must not overwrite the tracked brand file: build-static points
    this elsewhere for any client but the default. */
 const OUT = process.env.BRAND_OUT
@@ -20,12 +24,13 @@ const OUT = process.env.BRAND_OUT
 const LOGO_DIR = path.join(ROOT, 'assets', 'email');
 
 const page = fs.readFileSync(PAGE, 'utf8');
+const styleText = fs.existsSync(CSS) ? fs.readFileSync(CSS, 'utf8') : page;
 
 function fail(msg) { console.error('sync-brand: ' + msg); process.exit(1); }
 
 /* ---------- read :root variables ---------- */
-const rootBlock = (page.match(/:root\s*\{([\s\S]*?)\}/) || [])[1];
-if (!rootBlock) fail('no :root block in index.html');
+const rootBlock = (styleText.match(/:root\s*\{([\s\S]*?)\}/) || [])[1];
+if (!rootBlock) fail('no :root block in ' + (styleText === page ? 'index.html' : 'assets/css/styles.css'));
 const vars = {};
 for (const line of rootBlock.split(/\r?\n/)) {
   const m = /^\s*(--[a-zA-Z0-9-]+)\s*:\s*([^;\r\n]+);?/.exec(line);
@@ -34,12 +39,14 @@ for (const line of rootBlock.split(/\r?\n/)) {
 
 /* ---------- read @font-face rules ---------- */
 const faces = [];
-for (const m of page.matchAll(/@font-face\s*\{([\s\S]*?)\}/g)) {
+for (const m of styleText.matchAll(/@font-face\s*\{([\s\S]*?)\}/g)) {
   const body = m[1];
   const family = /font-family:\s*['"]([^'"]+)['"]/.exec(body);
   const src = /src:\s*url\(([^)]+)\)/.exec(body);
   if (!family || !src) continue;
-  const file = src[1].replace(/['"]/g, '').replace(/^assets\/fonts\//, '');
+  // The url is relative to the CSS file now ("../fonts/x.woff2"); the set of
+  // files on disk is keyed by the bare name either way.
+  const file = src[1].replace(/['"]/g, '').replace(/^(?:\.\.\/|assets\/)?fonts\//, '');
   faces.push({ family: family[1], weight: 700, style: 'normal', file });
 }
 
@@ -130,18 +137,32 @@ if (!bizName) {
   process.exit(1);
 }
 
-/* ---------- logo: two single-colour PNGs from the page's logo SVG ---------- */
+/* ---------- logo: 256×256 PNGs, two colours, from the favicon geometry ----------
+   Roof and chimney take the brand accent; the house takes the colour it sits on.
+   Transparent background and no rounded square: the header band already supplies
+   the ground. The geometry is the favicon's, so the email mark and the browser
+   tab are the same drawing. 256 px because it is shown at 32 px and needs to
+   survive a 2× or 3× screen. */
+const LOGO_SIZE = 256;
+const LOGO_VIEWBOX = '48 48 416 416';
+/* The page's ink ground, not the body text colour: the house has to read as the
+   same dark as the header band on a light surface. */
+const logoInk = hexOf(vars['--ink']) || '#1C1F24';
+function logoSvg(houseFill) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${LOGO_VIEWBOX}" width="${LOGO_SIZE}" height="${LOGO_SIZE}">`
+    + `<path fill="${accent}" d="M64 240L256 80L448 240V296L256 136L64 296Z"/>`
+    + `<rect x="336" y="96" width="56" height="104" fill="${accent}"/>`
+    + `<path fill="${houseFill}" d="M256 172L400 292V432H288V344H224V432H112V292Z"/>`
+    + '</svg>';
+}
 const logoMatch = page.match(/<a class="logo"[^>]*><svg viewBox="0 0 512 512"[\s\S]*?<\/svg>/);
 let logo = null;
 if (logoMatch) {
   fs.mkdirSync(LOGO_DIR, { recursive: true });
-  const svg = logoMatch[0].replace(/<a[^>]*>|<\/a>/g, '');
   const onDarkFile = 'logo-on-dark.png';
   const onLightFile = 'logo-on-light.png';
-  const makeSvg = (fill) => svg.replace(/fill="#[0-9A-Fa-f]{6}"/g, `fill="${fill}"`)
-    .replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72"');
-  await sharp(Buffer.from(makeSvg(onBg))).resize(72, 72, { fit: 'inside' }).png().toFile(path.join(LOGO_DIR, onDarkFile));
-  await sharp(Buffer.from(makeSvg(text))).resize(72, 72, { fit: 'inside' }).png().toFile(path.join(LOGO_DIR, onLightFile));
+  await sharp(Buffer.from(logoSvg(onBg))).resize(LOGO_SIZE, LOGO_SIZE).png().toFile(path.join(LOGO_DIR, onDarkFile));
+  await sharp(Buffer.from(logoSvg(logoInk))).resize(LOGO_SIZE, LOGO_SIZE).png().toFile(path.join(LOGO_DIR, onLightFile));
   // The on-dark PNG bytes, base64, bundled with the serverless function as a
   // CID inline image (lib/mail.js attaches it). The hosted PNG files above
   // stay for the preview gallery only; the function never reads assets/ at

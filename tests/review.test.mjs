@@ -92,6 +92,31 @@ try {
     line(ok, 'D0', 'a "ttps://" typo is repaired; other schemes and hosts rejected', `fixed=${!!fixed}`);
   }
 
+  /* R2: the wrapper. A phone keeps today's page (no card, body gutter only);
+     from 640px the same content sits on a white card. The card styles must live
+     inside the media rule — outside it they would apply everywhere. */
+  {
+    const { reviewPage } = await import('../lib/content.js');
+    const { getBrand } = await import('../lib/brand.js');
+    const c = getBrand().colors;
+    const withStars = reviewPage({ business: { name: 'Alder Roofing' }, token: 't', googleUrl: 'https://g.page/r/x', stars: 0 }).html;
+    const noLink = reviewPage({ business: { name: 'Alder Roofing' }, token: 't', googleUrl: null, stars: 0 }).html;
+    const styleOf = (h) => (h.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+    const split = (h) => {
+      const s = styleOf(h);
+      const at = s.indexOf('@media (min-width: 640px)');
+      return at < 0 ? [s, ''] : [s.slice(0, at), s.slice(at)];
+    };
+    const [base, media] = split(withStars);
+    const baseOk = /\.rv \{ width: 100%; max-width: 420px; margin: 0 auto; box-sizing: border-box \}/.test(base)
+      && !/background:|border:|border-radius|box-shadow/.test(base.replace(/@font-face\s*\{[^}]*\}/g, ''));
+    const mediaOk = media.includes(`.rv { max-width: 468px; padding: 24px; background: ${c.card}; border: 1px solid ${c.border}; border-radius: 10px }`);
+    const wrapper = (h) => h.includes('<main class="rv">') && !/<main style=/.test(h);
+    line(baseOk && mediaOk && wrapper(withStars) && wrapper(noLink), 'R2',
+      'review page: no card on a phone, white card from 640px',
+      `base=${baseOk} media=${mediaOk} both=${wrapper(withStars) && wrapper(noLink)}`);
+  }
+
   /* Token entropy */
   const t0 = token();
   line(t0.length === 32 && /^[A-Za-z0-9_-]+$/.test(t0), 'D1', 'review_token is 192 bits / 32 chars', `${t0.length} chars`);
@@ -310,9 +335,13 @@ try {
     const iconsOk = r1.includes('rel="icon" href="/assets/icons/favicon.svg"')
       && r1.includes('rel="icon" href="/assets/icons/favicon-32x32.png"')
       && r1.includes('rel="apple-touch-icon" href="/assets/icons/apple-touch-icon-v1.png"');
-    const mainTag = /<main style="([^"]*)"/.exec(r1);
-    const noCard = mainTag && !/background:|border:|border-radius|box-shadow|padding:28px/.test(mainTag[1])
-      && mainTag[1].includes('max-width:420px') && /padding:0 24px/.test(r1);
+    /* The wrapper is a class now, not an inline style: the same rule serves both
+       variants and the media query can override it. The no-card assertion moved
+       with it — the base rule must still carry no background or border. */
+    const baseRule = (/\.rv \{([^}]*)\}/.exec(r1) || [])[1] || '';
+    const noCard = r1.includes('<main class="rv">') && !/<main style=/.test(r1)
+      && !/background:|border:|border-radius|box-shadow|padding:28px/.test(baseRule)
+      && baseRule.includes('max-width: 420px') && /padding:0 24px/.test(r1);
     const titleOk = r1.includes('font:600 20px/26px') && r1.includes('text-wrap:balance') && !r1.includes('24px/30px');
     line(fontsOk && iconsOk && noCard && titleOk, 'R1', 'review head: fonts+preload+favicon, no card, 20px title',
       `fonts=${fontsOk} icons=${iconsOk} noCard=${noCard} title=${titleOk}`);

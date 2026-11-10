@@ -25,12 +25,12 @@ import { resolveSender } from '../lib/client.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, '_debug', 'client-build');
 
-/* The build of origin/main (8c2df50) with the final-modal button change on top
-   (owner-ux-fixes): "Call" is the phone button and "Close" sits at the far left.
-   That is a deliberate visitor-visible change, so the page hash moved with it —
-   64fd608f… before, 20948309… after. The other three files are unchanged and are
-   pinned to the same values as before. */
-const BASELINE = '2094830924a510e4e8ced42d2a2ca39098277219cdc69f1dc22facd07d5c40d6';
+/* The build of origin/main (fa6030d) with the CSS moved out of the page
+   (visual-polish): the <style> block is gone and a <link> takes its place, so
+   the page hash moved again — 20948309… before, 23af892b… after. That is the
+   only intended change; the other three files are unchanged and are pinned to
+   the same values as before. */
+const BASELINE = '23af892b50daa65f4bc0ea1033a65c1de3769022abf81a45d57db90cf8e9deb2';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = 'dcd93cf0545e1bad61f0218310823424565419e811ba50b74a2e7f7642ce7053';
 const BASELINE_SITEMAP = 'f90e45bdfa569c01cc2c7fe584831cd9e03b212fbac43254454968bcc16c27e8';

@@ -225,6 +225,36 @@ const FIXTURES = {
     `after=${JSON.stringify(after)}`);
 }
 
+/* L10-L13: the owner email at 375 px. Two buttons stack full width, the label
+   column is wide enough for "Insurance claim", the Notes label has its 6 px,
+   and the Customer/Job sections are separated by 16 px either side of the line. */
+{
+  const { ownerEmail } = await import('../lib/content.js');
+  const { html } = ownerEmail({ business, lead: { ...lead, notes: 'Leak above the kitchen.' } });
+
+  const cells = html.match(/<td class="btn-cell"[^>]*>/g) || [];
+  const gap = (html.match(/<td class="btn-gap"[^>]*>/g) || []).length;
+  const media = html.slice(html.indexOf('@media (max-width:480px)'), html.indexOf('</style>'));
+  line(cells.length === 2 && gap === 1
+    && media.includes('.btn-cell{display:block!important;width:100%!important}')
+    && media.includes('.btn-gap{display:block!important;width:100%!important;height:12px!important;line-height:12px!important}'),
+    'L10', 'two buttons: both cells stack full width on a phone',
+    `cells=${cells.length} gap=${gap} media=${media.includes('.btn-cell')}`);
+
+  const label = html.match(/<td width="(\d+)" valign="top" style="[^"]*white-space:nowrap[^"]*">/);
+  line(!!label && label[1] === '124', 'L11', 'label column is 124 wide and never wraps',
+    `width=${label ? label[1] : 'none'}`);
+
+  line(/color:[^;"]+;padding:0 0 6px">Notes<\/div>/.test(html), 'L12',
+    'the Notes label has 6px above the grey box',
+    `found=${/padding:0 0 6px">Notes/.test(html)}`);
+
+  const spacer = html.match(/<td height="16" style="font-size:0;line-height:0">&nbsp;<\/td><\/tr><\/table><table role="presentation"[^>]*><tr><td height="1"/);
+  line(!!spacer && /padding:16px 0 4px">Job<\/div>/.test(html), 'L13',
+    'Customer rows, 16px, line, 16px, Job',
+    `spacer=${!!spacer} job=${/padding:16px 0 4px">Job/.test(html)}`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);

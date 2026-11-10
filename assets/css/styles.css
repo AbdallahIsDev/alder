@@ -1,0 +1,4439 @@
+    @font-face {
+      font-family: 'Geist';
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: block;
+      src: url(../fonts/geist-var.woff2) format('woff2')
+    }
+
+    @font-face {
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: block;
+      src: url(../fonts/inter-var.woff2) format('woff2')
+    }
+
+    :root {
+      --white: #fff;
+      --ink: #1c1f24;
+      --ink2: #2a2d33;
+      --cream: #f1f1f1;
+      --accent: #d93917;
+      --muted: #a9adb3;
+      --pad: clamp(20px, 4vw, 48px);
+      --gap: clamp(72px, 10vw, 140px);
+      --fs: clamp(14px, .5vw + 8.5px, 18px);
+      --f: 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      --f2: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0
+    }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: 90px
+    }
+
+    body {
+      font-size: var(--fs);
+      font-family: var(--f);
+      font-weight: 450;
+      color: var(--ink2);
+      background: var(--white);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased
+    }
+
+    img {
+      display: block;
+      max-width: 100%
+    }
+
+    a {
+      color: inherit
+    }
+
+    /* --- Preloader ------------------------------------------------------------- */
+    /* Concept: an architectural roof plan draws itself in light-on-ink, the readout
+   climbs to 100, then the two ink halves part along the diagonal to hand over
+   to the page. Swiss: hard geometry, one accent, no decoration.
+
+   DISABLED. Nothing drives it yet - no timeline writes to .pre__panel, .pre__bar
+   or the [data-pre-*] readout - so as written it parks itself at z-index 9999
+   over the whole page and never leaves. The single rule below switches it off.
+   To bring it back: delete that rule and add the exit timeline. The markup is
+   still in the document, search PRELOADER. */
+    .pre {
+      display: none
+    }
+
+    .pre {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: var(--ink);
+      overflow: hidden;
+    }
+
+    .pre__stage {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: clamp(1.5rem, 4vh, 2.75rem);
+      padding: clamp(1.5rem, 5vw, 4rem);
+      width: 100%;
+      max-width: 1100px;
+      margin-inline: auto;
+      pointer-events: none;
+    }
+
+    /* Diagonal seam: the two panels tile the viewport with an 8vw diagonal split. */
+    .pre__panel {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 50%;
+      background: var(--ink);
+      will-change: transform;
+    }
+
+    .pre__panel--t {
+      top: 0;
+      clip-path: polygon(0 0, 100% 0, 100% calc(100% - 8vw), 0 100%);
+    }
+
+    .pre__panel--b {
+      bottom: 0;
+      clip-path: polygon(0 8vw, 100% 0, 100% 100%, 0 100%);
+    }
+
+    /* Blueprint */
+    .pre__plan {
+      width: 100%;
+      height: auto;
+      max-height: 46vh;
+    }
+
+    .pre__plan path {
+      fill: none;
+      stroke: var(--paper);
+      stroke-width: 1.4;
+      vector-effect: non-scaling-stroke;
+      stroke-linecap: square;
+    }
+
+    .pre__plan .thin {
+      stroke: rgba(245, 244, 240, 0.5);
+      stroke-width: 1;
+    }
+
+    .pre__plan .ghost {
+      stroke: rgba(245, 244, 240, 0.26);
+      stroke-width: 1;
+    }
+
+    .pre__plan .center {
+      stroke: rgba(216, 54, 27, 0.55);
+      stroke-width: 1;
+      stroke-dasharray: 9 5 2.5 5;
+    }
+
+    .pre__plan .tick {
+      stroke: var(--accent);
+      stroke-width: 1.7;
+    }
+
+    .pre__plan .solid {
+      fill: var(--paper);
+      stroke: none;
+    }
+
+    /* Readout */
+    .pre__meta {
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+    }
+
+    .pre__row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1.5rem;
+    }
+
+    .pre__lbl {
+      font-family: var(--ff-mono);
+      font-size: var(--t-label);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: rgba(245, 244, 240, 0.72);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pre__count {
+      display: flex;
+      align-items: baseline;
+      gap: 0.15em;
+      flex: none;
+    }
+
+    .pre__num {
+      font-family: var(--ff-display);
+      font-size: clamp(2.5rem, 7vw, 5rem);
+      line-height: 0.82;
+      letter-spacing: -0.05em;
+      color: var(--paper);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .pre__pct {
+      font-family: var(--ff-mono);
+      font-size: 0.9rem;
+      color: var(--accent);
+      letter-spacing: 0.05em;
+    }
+
+    .pre__bar {
+      height: 1px;
+      background: rgba(245, 244, 240, 0.2);
+      overflow: hidden;
+    }
+
+    .pre__bar i {
+      display: block;
+      height: 100%;
+      width: 100%;
+      background: var(--paper);
+      transform: scaleX(0);
+      transform-origin: 0 50%;
+    }
+
+    .pre__note {
+      font-family: var(--ff-mono);
+      font-size: 0.625rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: rgba(245, 244, 240, 0.4);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px
+    }
+
+    .wrap {
+      width: calc(100% - 2*var(--pad));
+      margin-inline: auto
+    }
+
+    .page {
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap);
+      padding-bottom: var(--gap)
+    }
+
+    .ph {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, #3b424b, #1c1f24);
+      overflow: hidden
+    }
+
+    .ph.l {
+      background: linear-gradient(135deg, #d6d0c4, #a9a296)
+    }
+
+    .ph::after {
+      content: attr(data-src);
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      font-size: 12px;
+      color: #fff;
+      opacity: .6;
+      background: rgb(0 0 0/.35);
+      padding: 2px 8px;
+    }
+
+    /* The path label is a placeholder marker, not a caption: it must never sit on top of a
+       real photo. The pseudo-element paints after the absolutely-positioned img, so hide it
+       whenever the box actually holds an image. The fallback script removes the <img> only when
+       every candidate in the <picture> has failed, so the label returns exactly when it is the
+       only thing left to show - not when just the AVIF is missing. */
+    .ph:has(img)::after {
+      display: none
+    }
+
+    .ph picture {
+      display: contents
+    }
+
+    .ph img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover
+    }
+
+    /* BUTTON SIZE: every button gets its height from ONE token, --btn-h (48px; the header buttons drop to 44px, see below).
+       Height is fixed and the content is centred, so primary and secondary buttons are sized the same way.
+       --btn-pad is the gap between the 34px band (arrow square / label / icon) and the button's edge: (height - 2px border - 34px) / 2,
+       so 6px at 48px and 4px at 44px. The primary button uses it on the right (the square keeps the same space on top, right
+       and bottom); its left padding is --btn-pad + 8px (14px at 48px). */
+    .btn {
+      --btn-h: 48px;
+      --btn-pad: calc((var(--btn-h) - 36px) / 2);
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      height: var(--btn-h);
+      padding: 0 var(--btn-pad) 0 calc(var(--btn-pad) + 8px);
+      font: 550 var(--fs) var(--f2);
+      text-decoration: none;
+      border: 1px solid transparent;
+      background: var(--cream);
+      color: var(--ink)
+    }
+
+    /* primary (has the arrow square): the square sits at the right edge, the label takes the left */
+    .btn:not(.ghost):not(.phone):not(.est-next) {
+      justify-content: space-between
+    }
+
+    .btn i {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      background: var(--accent);
+      color: #fff
+    }
+
+    .btn svg {
+      width: 18px;
+      height: 18px
+    }
+
+    .btn.dark {
+      background: var(--ink);
+      color: #fff
+    }
+
+    /* PHONE BUTTON: one component, used in the header, the open menu and the CTA section. Transparent with a
+       hairline border (same as .btn.ghost) so it reads as a button; the icon comes from the sprite at the top of <body>. */
+    .btn.phone {
+      background: transparent;
+      color: #fff;
+      border-color: rgb(255 255 255/.15);
+      height: var(--btn-h);
+      padding: 0 16px;
+      gap: 8px;
+      font-weight: 450;
+      white-space: nowrap;
+      transition: background .2s
+    }
+
+    .btn.phone:hover {
+      background: rgb(255 255 255/.10)
+    }
+
+    .btn.phone svg {
+      width: 22px;
+      height: 22px;
+      flex: none
+    }
+
+    /* header + menu buttons never go below 16px (the shared --fs token bottoms out at 14px) */
+    .bar .btn,
+    .menu-foot .btn,
+    .menu-acts .btn,
+    .btn.phone {
+      font-size: max(16px, var(--fs));
+      white-space: nowrap
+    }
+
+    .btn.ghost {
+      background: transparent;
+      color: #fff;
+      border-color: rgb(255 255 255/.15);
+      padding: 0 16px;
+      height: var(--btn-h);
+      transition: background .2s;
+      font-weight: 450;
+    }
+
+    .btn.ghost:hover {
+      background: rgb(255 255 255/.10)
+    }
+
+    .masthead {
+      background: var(--ink);
+      color: var(--cream);
+      display: flex;
+      flex-direction: column;
+      gap: 0
+    }
+
+    header {
+      position: fixed;
+      z-index: 50;
+      top: 12px;
+      left: 12px;
+      right: 12px
+    }
+
+    /* once the footer starts showing, the header lifts away. It uses the independent `translate`
+       property rather than `transform`, because the load animation (hdrIn) owns transform and
+       keeps applying its last keyframe. */
+    header {
+      transition: translate .55s cubic-bezier(.4, 0, .2, 1)
+    }
+
+    html.at-ft header {
+      translate: 0 calc(-100% - 24px);
+      pointer-events: none
+    }
+
+    .bar {
+      display: grid;
+      /* Normal header behaviour: logo and actions size to their content, the navigation takes
+         whatever is left over and centres itself in that space. Below 1440 the two 1fr columns
+         of the centred layout get too narrow for the phone and the CTA, and the CTA label breaks
+         onto two lines. */
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 24px;
+      padding: 12px 12px 12px 20px;
+      background: rgb(28 31 36/.92);
+      backdrop-filter: blur(10px)
+    }
+
+    /* From 1600 up there is room to pin the navigation to the true centre of the bar, whatever
+       the logo and the actions happen to measure. (Was 1440: the 16px buttons and the bordered phone button
+       make the actions wider than a 1fr column there, so the labels wrapped.) */
+    @media (min-width: 1600px) {
+      .bar {
+        grid-template-columns: 1fr auto 1fr
+      }
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      color: #fff;
+      grid-column: 1;
+      justify-self: start
+    }
+
+    .logo svg {
+      width: 40px;
+      height: 40px
+    }
+
+    .logo .word {
+      font-weight: 500;
+      font-size: 26px;
+      letter-spacing: -.03em;
+      line-height: 1
+    }
+
+    .logo .word b {
+      color: var(--accent);
+      font-weight: 500
+    }
+
+    .links {
+      display: flex;
+      gap: 30px;
+      font-size: var(--fs);
+      grid-column: 2;
+      justify-self: center
+    }
+
+    .links a {
+      white-space: nowrap;
+      text-decoration: none;
+      opacity: .88;
+      font-weight: 350;
+      letter-spacing: .015em;
+      font-size: 16px;
+    }
+
+    .links a:hover {
+      opacity: 1
+    }
+
+    .right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      grid-column: 3;
+      justify-self: end
+    }
+
+    .hero {
+      position: relative;
+      min-height: 100svh;
+      display: flex;
+      align-items: flex-end;
+      overflow: hidden;
+      /* clip-path (not just overflow) is what clips the position:fixed slides to the hero box:
+         the photos stay put while the hero scrolls away and the next section slides up over them */
+      clip-path: inset(0)
+    }
+
+    .slide {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100vh;
+      height: max(100lvh, var(--hero-h, 0px));
+      /* --hero-h is set by script so a hero taller than the window is still fully covered */
+      opacity: 0;
+      transition: opacity 1.5s ease
+    }
+
+    .slide.on {
+      opacity: 1
+    }
+
+    img[data-src]:not([src]) {
+      visibility: hidden
+    }
+
+    /* held back by the load-order script: no alt-text flash while waiting */
+
+    html:not(.js) .slide:first-child {
+      opacity: 1
+    }
+
+    /* HERO VIDEO (HERO_MODE = 'video'). Same box and same stacking order as .slide: position:fixed inside the
+       clipped .hero, so the footage stays put while the next section slides up over it. The still is the video's
+       own poster, which is what stays on screen when autoplay is blocked or playback is suppressed. */
+    .hero-video {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100vh;
+      height: max(100lvh, var(--hero-h, 0px));
+      z-index: 0;
+      pointer-events: none
+    }
+
+    .hero-video video,
+    .hero-video picture {
+      position: absolute;
+      inset: 0;
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center
+    }
+
+    /* the still is behind the footage and is never hidden; the footage is invisible until it has a frame to show,
+       so the gap between poster and first frame is the poster, not a black box */
+    .hero-video picture {
+      z-index: 0
+    }
+
+    /* object-fit on the <picture> itself does nothing (it is not a replaced element), and the global img rule only
+       caps the width, so the still used to paint at its own aspect and anchor top-left: 1426x802 of a 1426x900
+       box at 1440px, 376x470 of a 376x599 box on a phone. The still has to fill the box exactly like the footage
+       does, or the handover is a visible zoom. */
+    .hero-video picture img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center
+    }
+
+    .hero-video video {
+      z-index: 1;
+      opacity: 0;
+      transition: opacity .45s ease
+    }
+
+    .hero-video.is-playing video {
+      opacity: 1
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hero-video video {
+        transition: none
+      }
+    }
+
+    .slide .ph {
+      transform: scale(1);
+      transition: transform 0s 1.6s
+    }
+
+    .slide.on .ph {
+      transform: scale(1.05);
+      transition: transform 12s linear
+    }
+
+    .slide.out .ph {
+      transform: scale(1.05)
+    }
+
+    .slide.out.on .ph {
+      transform: scale(1)
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      background: linear-gradient(to top, var(--ink) 0, var(--ink) 10%, rgb(28 31 36 / .75) 25%, transparent 40%)
+    }
+
+    .hero-in {
+      position: relative;
+      z-index: 2;
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: clamp(24px, 5vw, 64px);
+      align-items: end;
+      padding: 140px 0 clamp(32px, 5vh, 56px)
+    }
+
+    .hero-in>div {
+      display: flex;
+      flex-direction: column;
+      gap: 12px
+    }
+
+    .badge {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      color: #d9dce0
+    }
+
+    .badge::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      background: var(--accent)
+    }
+
+    h1 {
+      font-weight: 400;
+      font-size: clamp(36px, 3.5vw, 56px);
+      line-height: 1.2;
+      letter-spacing: -.03em;
+      color: #fff
+    }
+
+    .sub {
+      font-size: var(--fs);
+      line-height: 1.5;
+      color: #e4e6e9;
+      max-width: 66ch;
+      text-wrap: balance;
+    }
+
+    .cta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px
+    }
+
+    .micro {
+      font-size: 14px;
+      color: #b9bdc3
+    }
+
+    .stats {
+      border-top: 1px solid rgb(255 255 255/.12)
+    }
+
+    .stats ul {
+      list-style: none;
+      padding: 0;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr))
+        /* minmax(0,...): a long label can never make one column wider than the others */
+    }
+
+    .stats li {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 10px;
+      padding: 30px clamp(8px, 2vw, 24px)
+    }
+
+    .stats li+li {
+      border-left: 1px solid rgb(255 255 255/.12)
+    }
+
+    .num {
+      font-size: clamp(38px, 4.6vw, 60px);
+      font-weight: 500;
+      letter-spacing: -.04em;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      color: #fff
+    }
+
+    .num i {
+      font-style: normal;
+      color: var(--accent)
+    }
+
+    .stats p {
+      font-size: 13px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--muted)
+    }
+
+    .about {
+      display: grid;
+      grid-template-columns: 4fr 8fr;
+      gap: clamp(32px, 5vw, 72px);
+      align-items: start
+    }
+
+    .photo {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4/5;
+      background: var(--cream);
+      margin: 0
+    }
+
+    .about-text {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 32px;
+      height: 100%
+    }
+
+    .about-text>div {
+      display: flex;
+      flex-direction: column;
+      gap: 32px
+    }
+
+    .label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--ink)
+    }
+
+    .label::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      background: var(--accent)
+    }
+
+    .reveal {
+      font-size: clamp(22px, 2.2vw, 28px);
+      line-height: 1.28;
+      letter-spacing: -.02em;
+      color: var(--ink);
+      font-weight: 500;
+      max-width: 30em;
+      text-wrap: balance;
+    }
+
+    .about-sub {
+      font-size: 18px;
+      line-height: 1.65;
+      color: #5a5e66;
+      max-width: 36em
+    }
+
+    .sign {
+      flex-direction: row !important;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 20px !important;
+      padding-top: 24px;
+      border-top: 1px solid #e3e0da
+    }
+
+    .sign p {
+      font-size: var(--fs);
+      color: var(--ink)
+    }
+
+    .sign .role {
+      color: #5a5e66
+    }
+
+    .services {
+      display: flex;
+      flex-direction: column;
+      gap: 32px
+    }
+
+    .services h2 {
+      font-size: clamp(32px, 3.6vw, 44px);
+      font-weight: 450;
+      letter-spacing: -.035em;
+      line-height: 1.05;
+      color: var(--ink);
+      max-width: 16em
+    }
+
+    .services .intro {
+      max-width: 46ch;
+      color: #4a4e56
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: clamp(32px, 4vw, 56px) clamp(20px, 2.5vw, 40px);
+    }
+
+    .card {
+      display: flex;
+      flex-direction: column;
+      gap: 20px
+    }
+
+    .card .photo {
+      aspect-ratio: 3/2;
+      overflow: hidden;
+    }
+
+    .card .ph img {
+      transition: transform .8s ease
+    }
+
+    .card-text {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-width: 52ch
+    }
+
+    .card h3 {
+      font-size: clamp(18px, 1.6vw, 24px);
+      font-weight: 600;
+      letter-spacing: -.02em;
+      line-height: 1.15;
+      color: var(--ink)
+    }
+
+    .card p {
+      font-size: var(--fs);
+      color: #4a4e56
+    }
+
+    @media (hover: hover) {
+      .card:hover .ph img {
+        transform: scale(1.04)
+      }
+    }
+
+    .more {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 16px 28px;
+      padding-top: clamp(16px, 3vw, 40px)
+    }
+
+    .more p {
+      font-size: clamp(18px, 1.6vw, 22px);
+      font-weight: 500;
+      letter-spacing: -.02em;
+      color: var(--ink)
+    }
+
+
+    /* split-text */
+    html.split-pending :is(.hero h1, .sub, .about-text .reveal, .about-sub, .sign p, .services h2, .services .intro, .card h3, .card p, .more p, .hws h2, .sec-head h2, .cta-sec h2, .cta-sub, .sec-head .sum, .sh-r p, .sub2, .hws .intro, .step h3, .step p) {
+      visibility: hidden
+    }
+
+    .hl {
+      color: var(--accent)
+    }
+
+    /* the one or two words a heading wants you to land on */
+    .sw {
+      display: inline
+    }
+
+    .w {
+      display: inline-block;
+      overflow: hidden;
+      vertical-align: top;
+      padding-block: .1em;
+      margin-block: -.1em
+    }
+
+    .wi {
+      display: inline-block;
+      will-change: transform
+    }
+
+    .sr {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap
+    }
+
+    /* ===== HOW WE WORK (final): numbered squares on a progress line ===== */
+    .hws-in {
+      display: flex;
+      flex-direction: column;
+      gap: clamp(48px, 6vw, 88px);
+      --g: clamp(24px, 3vw, 48px)
+    }
+
+    .hws-head {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      text-align: center
+    }
+
+    .hws .label {
+      justify-content: center
+    }
+
+    .hws h2 {
+      font-size: clamp(32px, 3.6vw, 44px);
+      font-weight: 450;
+      letter-spacing: -.035em;
+      line-height: 1.05;
+      color: var(--ink);
+      max-width: 14em
+    }
+
+    .steps {
+      list-style: none;
+      padding: 0;
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--g)
+    }
+
+    /* The connector is a pseudo-element, not a child: a <ol> may only contain <li>,
+       and the span made the list invalid (Lighthouse 'list'). Same box, same paint
+       order — ::before is the track, ::after the accent fill that reads --p. */
+    .steps::before {
+      content: "";
+      position: absolute;
+      z-index: 0;
+      left: calc((100% - 2*var(--g))/6);
+      top: 27px;
+      width: calc(66.6667% + .6667*var(--g));
+      height: 2px;
+      background: var(--cream)
+    }
+
+    .steps::after {
+      content: "";
+      display: block;
+      position: absolute;
+      z-index: 0;
+      left: calc((100% - 2*var(--g))/6);
+      top: 27px;
+      width: calc(66.6667% + .6667*var(--g));
+      height: 2px;
+      background: var(--accent);
+      transform: scaleX(var(--p, 1));
+      transform-origin: left
+    }
+
+    .step {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 28px
+    }
+
+    .steps {
+      --sq: 56px
+    }
+
+    /* size of the numbered square; the stacked layout reads it for the column and the line */
+    .step .n {
+      display: grid;
+      place-items: center;
+      width: var(--sq);
+      height: var(--sq);
+      background: var(--cream);
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 500;
+      border: 1px solid #0000001a;
+      transition: background .45s ease, color .45s ease, border-color .45s ease
+    }
+
+    .step.on .n,
+    html:not(.js) .step .n {
+      background: var(--accent);
+      color: #fff;
+      border-color: rgb(0 0 0 / 0)
+    }
+
+    .step div {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      width: 100%
+    }
+
+    .step h3 {
+      font-size: clamp(20px, 1.8vw, 26px);
+      font-weight: 550;
+      letter-spacing: -.02em;
+      line-height: 1.15;
+      color: var(--ink)
+    }
+
+    .step p {
+      color: #4a4e56;
+      max-width: 34ch
+    }
+
+    @media (max-width: 900px) {
+      .steps {
+        grid-template-columns: 1fr;
+        gap: 36px
+      }
+
+      .steps::before,
+      .steps::after {
+        left: calc(var(--sq) / 2 - 1px);
+        top: calc(var(--sq) / 2);
+        bottom: calc(var(--last, var(--sq) / 2) - var(--sq) / 2);
+        width: 2px;
+        height: auto
+      }
+
+      /* --last = height of step 3, set by script: the line stops at the centre of its square */
+      .steps::after {
+        transform: scaleY(var(--p, 1));
+        transform-origin: top
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: var(--sq) 1fr;
+        gap: 20px;
+        align-items: start;
+        text-align: left
+      }
+
+      .step div {
+        width: auto;
+        align-items: flex-start
+      }
+    }
+
+    @media (max-width: 560px) {
+      .steps {
+        --sq: 40px;
+        gap: 28px
+      }
+
+      .step {
+        gap: 16px
+      }
+
+      .step .n {
+        font-size: 17px
+      }
+
+      .step div {
+        gap: 6px
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .step .n {
+        transition: none
+      }
+    }
+
+    /* ===== FOOTER (final) ===== */
+    .ft {
+      background: var(--ink);
+      color: #c9ccd1;
+      font-size: var(--fs);
+      text-align: left
+    }
+
+    .ft a {
+      text-decoration: none
+    }
+
+    .ft a:hover {
+      color: #fff
+    }
+
+    .ft-in {
+      display: flex;
+      flex-direction: column;
+      gap: clamp(40px, min(6vw, 6vh), 80px);
+      padding-block: clamp(40px, min(7vw, 8vh), 100px) 28px
+    }
+
+    /* on a big screen the footer takes the whole window, so the page ends on a full screen of it
+       and the last scroll is one clean reveal. space-between keeps the brand row at the top, the
+       wordmark in the middle and the legal line on the floor. */
+    @media (min-width: 1025px) {
+      .ft-in {
+        min-height: 100vh;
+        justify-content: space-between
+      }
+    }
+
+    .ft-top {
+      display: grid;
+      grid-template-columns: 1.4fr repeat(3, 1fr);
+      gap: clamp(28px, 4vw, 64px)
+    }
+
+    .ft-brand {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-width: 34ch
+    }
+
+    .ft .logo {
+      color: #fff
+    }
+
+    .ft-col {
+      display: flex;
+      flex-direction: column;
+      gap: 14px
+    }
+
+    .ft-col h3 {
+      font-size: 14px;
+      font-weight: 500;
+      color: #fff
+    }
+
+    .ft-col ul {
+      list-style: none;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px
+    }
+
+    /* the wordmark is sized by height as well as width: if it only followed the viewport width it
+       pushed the footer past one screen on short laptops, which silently killed the sticky reveal
+       (html.ft-tall drops the footer back into normal flow). 34vh keeps it inside the window. */
+    .ft-word {
+      display: block;
+      text-align: center;
+      font-size: clamp(96px, min(30vw, 50vh), 460px);
+      font-weight: 600;
+      letter-spacing: -.06em;
+      line-height: .9;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      margin-bottom: -.04em
+    }
+
+    .ft-word b {
+      color: var(--accent);
+      font-weight: 600
+    }
+
+    .ft-legal {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 12px 24px;
+      padding-top: 24px;
+      border-top: 1px solid rgb(255 255 255/.14);
+      font-size: 14px;
+      color: #9a9ea5
+    }
+
+    .ft-legal>span {
+      display: flex;
+      align-items: center;
+      gap: 12px 24px;
+      flex-wrap: wrap
+    }
+
+    /* the legal cluster (trust labels, Privacy, Terms) steps in from the right edge while the
+       back-to-top square is over it, so the button can stay exactly where it is instead of jumping
+       up out of the way. Only the cluster moves; the copyright keeps its margin. --legal-shift is
+       set by the back-to-top script, which moves it only when one of those items would be covered.
+       The step is a class-level change, not a scroll-tracked value, which is what lets it play as
+       one clean CSS transition instead of twitching with every frame. */
+    .ft-legal>span {
+      translate: calc(var(--legal-shift, 0px) * -1) 0;
+      transition: translate .45s cubic-bezier(.2, .7, .2, 1)
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .ft-legal>span {
+        transition: none
+      }
+    }
+
+    @media (max-width: 900px) {
+      .ft-top {
+        grid-template-columns: 1fr 1fr
+      }
+
+      .ft-brand {
+        grid-column: 1 / -1
+      }
+    }
+
+    @media (max-width: 560px) {
+      .ft-top {
+        grid-template-columns: 1fr
+      }
+    }
+
+    .dbg {
+      max-height: calc(100dvh - 104px);
+      overflow: auto
+    }
+
+    /* ===== shared section head ===== */
+    .sec-head {
+      display: flex;
+      flex-direction: column;
+      gap: 8px
+    }
+
+    .sec-head h2 {
+      font-size: clamp(32px, 3.6vw, 44px);
+      font-weight: 450;
+      letter-spacing: -.035em;
+      line-height: 1.05;
+      color: var(--ink);
+      max-width: 16em
+    }
+
+    .sec-head .sum {
+      color: #4a4e56
+    }
+
+    .ba,
+    .faq-in,
+    .rvs>.wrap {
+      display: flex;
+      flex-direction: column;
+      gap: clamp(24px, 4vw, 32px)
+    }
+
+    /* ===== BEFORE & AFTER (final): one slider at a time + arrows ===== */
+    .ba-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 24px;
+      flex-wrap: wrap
+    }
+
+    .ba-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    .pair {
+      display: none;
+      flex-direction: column;
+      gap: 14px;
+      margin: 0
+    }
+
+    .pair.active {
+      display: flex
+    }
+
+    .ba {
+      gap: clamp(20px, 2.5vw, 32px)
+    }
+
+    .pair {
+      gap: 10px
+    }
+
+    /* FRAME SIZE (fix): the block must fit one screen: header + title row + frame + caption.
+       Everything except the frame measures ~220px at desktop, the fixed header ~90px, plus 30px of air at the bottom,
+       so the frame gets whatever is left: 100svh - 300px. The old 16/9 + max-height:78vh ignored that chrome and
+       never really kept 16/9 on wide screens (it capped to ~2.4:1 and cropped with object-fit: cover anyway).
+       Width stays 100%. 21/9 is the natural ratio; the height cap only shortens it on short screens (the photo is
+       cropped top/bottom, so keep the subject in the centre band). Generate the six images at 21:9 (2520x1080). */
+    .frame {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 3/2;
+      overflow: hidden;
+      touch-action: pan-y;
+      user-select: none;
+      cursor: ew-resize
+    }
+
+    /* Before/After never shows a placeholder: no gradient, no path label. Nothing in the frame is visible until the first
+       pair has loaded and decoded (the loader script adds .ba-ready), then it fades in. */
+    .ba .ph {
+      background: none
+    }
+
+    .ba .ph::after {
+      display: none
+    }
+
+    .ba img:not([src]) {
+      visibility: hidden
+    }
+
+    .ba .frame>* {
+      transition: opacity .4s ease
+    }
+
+    html.js .ba:not(.ba-ready) .frame>* {
+      opacity: 0
+    }
+
+    .pic {
+      position: absolute;
+      inset: 0
+    }
+
+    .pic.after {
+      clip-path: inset(0 0 0 var(--x, 50%))
+    }
+
+    /* a real <img> starts a native drag on mousedown, which fires pointercancel and stops the slider
+       dead after the first move; taking the image out of hit-testing leaves the frame in charge */
+    .pic img {
+      pointer-events: none
+    }
+
+    .tag {
+      position: absolute;
+      z-index: 3;
+      top: 12px;
+      padding: 4px 10px;
+      font-size: 13px;
+      font-weight: 500;
+      background: rgb(28 31 36/.85);
+      color: #fff
+    }
+
+    .t-b {
+      left: 12px
+    }
+
+    .t-a {
+      right: 12px;
+      background: var(--accent)
+    }
+
+    .handle {
+      position: absolute;
+      z-index: 2;
+      top: 0;
+      bottom: 0;
+      left: var(--x, 50%);
+      width: 1px;
+      background: #fff;
+      box-shadow: 0 0 6px rgb(0 0 0/.35);
+      pointer-events: none
+    }
+
+    .handle::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 10px;
+      height: 40px;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      box-shadow: 0 0 6px rgb(0 0 0/.35)
+    }
+
+    .handle::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 56px;
+      height: 16px;
+      transform: translate(-50%, -50%);
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 56 16' fill='none' stroke='white' stroke-width='1.8'%3E%3Cpath d='M11 4 7 8l4 4'/%3E%3Cpath d='M45 4l4 4-4 4'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+      filter: drop-shadow(0 0 2px rgb(0 0 0/.5))
+    }
+
+    .pair figcaption {
+      font-size: var(--fs);
+      color: var(--ink);
+      font-weight: 500
+    }
+
+
+    /* ===== REVIEWS (final): 2 feature cards over 3 cards (image / text only / image). Every review image is 3:2. Feature cards put the image on the left
+       only on very wide screens (>= 1800px), where a 3:2 image is as tall as the text beside it; below that the image sits on top, like the row below. ===== */
+    .rv-list {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 16px
+    }
+
+    .rv {
+      display: flex;
+      flex-direction: column;
+      gap: clamp(20px, 2vw, 28px);
+      padding: clamp(16px, 1.6vw, 24px);
+      background: var(--cream);
+      min-width: 0
+    }
+
+    .rv-std {
+      grid-column: span 2
+    }
+
+    .rv-feat {
+      grid-column: span 3
+    }
+
+    .rv-body {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 32px;
+      flex: 1;
+      min-width: 0
+    }
+
+    .rv-top,
+    .rv-foot {
+      display: flex;
+      flex-direction: column;
+      gap: 16px
+    }
+
+    .stars {
+      color: var(--accent);
+      letter-spacing: .12em;
+      font-size: 22px;
+      line-height: 1
+    }
+
+    .rv blockquote {
+      font-size: clamp(16px, 1.3vw, 19px);
+      line-height: 1.5;
+      color: var(--ink);
+      margin: 0
+    }
+
+    .rv-feat blockquote,
+    .rv-text blockquote {
+      font-size: clamp(20px, 1.9vw, 28px);
+      line-height: 1.3;
+      letter-spacing: -.02em;
+      font-weight: 500
+    }
+
+    .rv-meta {
+      display: flex;
+      align-items: center;
+      gap: 14px
+    }
+
+    .av {
+      display: grid;
+      place-items: center;
+      flex: none;
+      width: 48px;
+      height: 48px;
+      border-radius: 3rem;
+      background: var(--c);
+      color: #fff;
+      font-size: 20px;
+      font-weight: 600
+    }
+
+    .who2 {
+      display: flex;
+      flex-direction: column
+    }
+
+    .who2 strong {
+      color: var(--ink)
+    }
+
+    .who2 span {
+      font-size: 14px;
+      color: #6a6e76
+    }
+
+    .rv-text {
+      min-height: 320px
+    }
+
+    /* no photo: give the quote room so the card does not look squeezed next to the photo cards */
+    .rv-media {
+      position: relative;
+      flex: none
+    }
+
+    /* no placeholder: the box stays empty until the clip-path reveal brings the photo in */
+    .rv-media img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover
+    }
+
+    .rv-feat .rv-media,
+    .rv-hasimg .rv-media {
+      width: 100%;
+      aspect-ratio: 3/2
+    }
+
+    @media (min-width: 1800px) {
+      .rv-feat {
+        flex-direction: row;
+        align-items: stretch
+      }
+
+      .rv-feat .rv-media {
+        width: 50%;
+        align-self: start
+      }
+    }
+
+    @media (max-width: 900px) {
+      .rv-list {
+        grid-template-columns: 1fr
+      }
+
+      .rv-std,
+      .rv-feat {
+        grid-column: auto
+      }
+
+      .rv-feat {
+        flex-direction: column
+      }
+
+      .rv-feat .rv-media {
+        width: 100%;
+        align-self: auto
+      }
+    }
+
+    /* ===== FAQ (final): sticky list-style heading + single-open accordion ===== */
+    .faq-in {
+      display: grid !important;
+      grid-template-columns: 5fr 7fr;
+      gap: clamp(32px, 6vw, 96px);
+      align-items: start
+    }
+
+    .faq .sec-head {
+      position: sticky;
+      top: 120px
+    }
+
+    .sub2 {
+      max-width: 34ch;
+      margin-top: 8px;
+      color: #4a4e56
+    }
+
+    .faq-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px
+    }
+
+    .fi {
+      background: var(--cream);
+      padding: 4px clamp(20px, 2.4vw, 32px)
+    }
+
+    .q {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 24px;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: 0;
+      padding: 20px 0;
+      font: 500 clamp(18px, 1.6vw, 22px) var(--f);
+      letter-spacing: -.01em;
+      color: var(--ink);
+      cursor: pointer
+    }
+
+    .q::after {
+      content: "+";
+      font-weight: 450;
+      font-size: 28px;
+      line-height: 1;
+      color: var(--accent);
+      transition: transform .3s
+    }
+
+    .fi.open .q::after {
+      transform: rotate(45deg)
+    }
+
+    .a {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows .4s ease
+    }
+
+    .a>div {
+      overflow: hidden
+    }
+
+    .a p {
+      padding-bottom: 20px;
+      max-width: 62ch;
+      color: #4a4e56
+    }
+
+    .fi.open .a {
+      grid-template-rows: 1fr
+    }
+
+    @media (max-width: 900px) {
+      .faq-in {
+        grid-template-columns: 1fr
+      }
+
+      .faq .sec-head {
+        position: static
+      }
+    }
+
+    /* ===== CTA =====
+       One row, two flex items: the image and ONE content column (title, text, buttons share a single gap, so
+       nothing floats apart). Flexbox is enough here: there is only one dimension to lay out. The old grid put the
+       title and the text in two separate rows that each took half the image height, which is what stretched them apart. */
+    .cta-sec {
+      position: relative;
+      overflow: hidden;
+      overflow: clip;
+      margin-bottom: calc(-1*var(--gap));
+      background: var(--accent);
+      color: #fff
+    }
+
+    /* clip, not hidden: hidden would turn the section into a scroll container */
+    .cta-in {
+      display: flex;
+      align-items: center;
+      gap: clamp(32px, 5vw, 80px);
+      padding-block: clamp(64px, 8vw, 128px)
+    }
+
+    .cta-img {
+      order: -1;
+      flex: 1 1 0;
+      min-width: 0;
+      position: relative;
+      aspect-ratio: 5/3;
+      background: rgb(255 255 255/.18)
+    }
+
+    .cta-body {
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: clamp(20px, 2vw, 28px);
+      text-align: left
+    }
+
+    .cta-sec h2 {
+      font-size: clamp(32px, 4vw, 64px);
+      font-weight: 450;
+      letter-spacing: -.025em;
+      line-height: 1;
+      max-width: 14em;
+      color: #fff
+    }
+
+    .cta-sub {
+      max-width: 46ch;
+      font-weight: 400
+    }
+
+    .cta-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px
+    }
+
+    .cta-micro {
+      width: 100%;
+      font-size: 14px;
+      text-align: inherit
+    }
+
+    .cta-sec .label {
+      color: #fff
+    }
+
+    .cta-sec .label::before {
+      background: #fff
+    }
+
+    .cta-sec .cta-micro {
+      color: #ffe3da
+    }
+
+    .cta-sec .btn i {
+      background: var(--ink)
+    }
+
+    @media (max-width: 900px) {
+      .cta-in {
+        flex-direction: column;
+        align-items: stretch
+      }
+
+      .cta-img {
+        order: 0;
+        flex: none
+      }
+
+      .cta-body {
+        flex: none
+      }
+    }
+
+    /* footer socials */
+    .ft {
+      border-top: 1px solid rgb(255 255 255/.12)
+    }
+
+    .ft-social {
+      display: flex;
+      gap: 10px
+    }
+
+    .ft-social a {
+      display: grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      border: 1px solid rgb(255 255 255/.15);
+      color: #fff;
+      transition: background .2s, border-color .2s
+    }
+
+    .ft-social a:hover {
+      background: var(--accent);
+      border-color: var(--accent)
+    }
+
+    .ft-social svg {
+      width: 18px;
+      height: 18px
+    }
+
+    /* ===== MOBILE MENU ===== */
+    /* ONE size for the open button and the close button (they swap in the same spot): 44px, or 36px once the header holds only the
+       logo and the menu button (<= 520px, where the estimate button has left the header). Both read the same token, so they can't differ. */
+    :root {
+      --mb: 44px
+    }
+
+    @media (max-width: 520px) {
+      :root {
+        --mb: 36px
+      }
+    }
+
+    .menu-btn {
+      display: none;
+      width: var(--mb);
+      height: var(--mb);
+      place-items: center;
+      background: none;
+      border: 1px solid rgb(255 255 255/.15);
+      color: #fff;
+      cursor: pointer
+    }
+
+    .menu-btn svg,
+    .menu-close svg {
+      width: 16px;
+      height: 9px;
+      overflow: visible
+    }
+
+    /* two lines -> X. Each line rotates about its own centre, then shifts half the gap (3.5) so both cross
+       on the middle of the 16x9 box. overflow:visible keeps the 45deg arms from being clipped by the viewBox. */
+    .menu-btn svg path,
+    .menu-close svg path {
+      transform-box: fill-box;
+      transform-origin: 50% 50%;
+      transition: transform .5s cubic-bezier(.4, 0, .2, 1)
+    }
+
+    html:has(.menu.open) :is(.menu-btn, .menu-close) svg path:first-of-type {
+      transform: translateY(3.5px) rotate(45deg)
+    }
+
+    html:has(.menu.open) :is(.menu-btn, .menu-close) svg path:last-of-type {
+      transform: translateY(-3.5px) rotate(-45deg)
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      .menu-btn svg path,
+      .menu-close svg path {
+        transition: none
+      }
+    }
+
+    .menu {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: none;
+      flex-direction: column;
+      background: var(--ink);
+      color: #fff;
+      padding: 12px 12px 32px;
+      overflow-y: auto;
+      visibility: hidden;
+      clip-path: inset(0 0 100% 0);
+      transition: clip-path .6s cubic-bezier(.7, 0, .2, 1), visibility 0s .6s
+    }
+
+    .menu.open {
+      visibility: visible;
+      clip-path: inset(0);
+      transition-delay: 0s
+    }
+
+    /* same side padding as the header bar at this size (16 left, 12 right), so the close button sits exactly where the open button was */
+    .menu-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 12px 12px 12px
+    }
+
+    @media (min-width: 521px) {
+      .menu-top {
+        min-height: 68px
+      }
+    }
+
+    /* the header bar is 68px tall while it holds the 44px header buttons (12px padding each side), so the logo, the buttons and the close button line up with it */
+    /* The overlay covers the header, so a button that is visible in the header is drawn again here, in the same place and with the
+       same breakpoints as the header (phone leaves at 760, estimate at 520). It is a copy, so it is only ever on screen while the
+       header's own is hidden underneath. */
+    .menu-acts {
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    @media (max-width: 760px) {
+      .menu-acts .btn.phone {
+        display: none
+      }
+    }
+
+    @media (max-width: 520px) {
+      .menu-acts .btn:not(.phone) {
+        display: none
+      }
+    }
+
+    .menu-close {
+      width: var(--mb);
+      height: var(--mb);
+      display: grid;
+      place-items: center;
+      background: none;
+      border: 1px solid rgb(255 255 255/.15);
+      color: #fff;
+      cursor: pointer
+    }
+
+    .menu nav {
+      display: flex;
+      flex-direction: column;
+      margin-top: clamp(24px, 5vh, 56px)
+    }
+
+    .menu nav a {
+      padding: 16px 20px;
+      font-size: clamp(30px, 8vw, 44px);
+      font-weight: 500;
+      letter-spacing: -.035em;
+      line-height: 1.1;
+      text-decoration: none;
+      color: #fff;
+    }
+
+    /* the rule under the last link is drawn left to right when the menu opens, after the links have slid in */
+    .menu nav a:last-child {
+      position: relative
+    }
+
+    .menu nav a:last-child::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 1px;
+      background: rgb(255 255 255/.15);
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 0s .65s
+    }
+
+    .menu.open nav a:last-child::after {
+      transform: scaleX(1);
+      transition: transform .9s cubic-bezier(.65, 0, .35, 1) .75s
+    }
+
+    .menu-foot {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 16px;
+      margin-top: 28px;
+      padding-inline: 20px
+    }
+
+    /* ===== HEADER ACTIONS: they leave one at a time as the window narrows =====
+       1141px and up   links + phone + estimate in the header
+       <= 1140px       links go, menu button appears; both buttons stay
+                       (was 1024: with the 16px buttons and the bordered phone button the links no longer fit between 1025 and ~1140)
+       <= 760px        phone leaves the header (it moves into the menu)
+       <= 520px        estimate leaves too (the menu then holds both)
+       Rule for the open menu: a button that is visible in the header is never repeated in the menu, and the line
+       under the last link disappears when the menu has no buttons. If a client's brand or phone number is much
+       longer, raise 760 / 520 here and in the three menu rules (keep them in step). */
+    @media (max-width: 1140px) {
+      .links {
+        display: none
+      }
+
+      .menu-btn {
+        display: grid
+      }
+
+      .menu {
+        display: flex
+      }
+
+      .bar {
+        padding-left: 12px
+      }
+    }
+
+    @media (max-width: 1140px) {
+
+      .bar .btn,
+      .menu-acts .btn {
+        --btn-h: 44px
+      }
+    }
+
+    /* header CTAs, and their copies in the open menu's top row beside the 44px close button; the buttons lower in the menu (.menu-foot) and in the page stay 48px */
+    @media (max-width: 760px) {
+      .bar .btn.phone {
+        display: none
+      }
+    }
+
+    @media (max-width: 520px) {
+      .bar .btn:not(.phone) {
+        display: none
+      }
+    }
+
+    @media (min-width: 761px) {
+      .menu-foot {
+        display: none
+      }
+
+      .menu nav a:last-child::after {
+        display: none
+      }
+    }
+
+    /* both buttons in the header: none in the menu */
+    @media (min-width: 521px) and (max-width: 760px) {
+      .menu-foot .menu-est {
+        display: none
+      }
+    }
+
+    /* only estimate in the header: just the phone in the menu */
+    @media (prefers-reduced-motion: reduce) {
+      .menu {
+        transition: none !important
+      }
+    }
+
+    /* PHONES: the header sits 8px from the top, left and right instead of 12. The open menu takes the same
+       inset, so the logo and the button do not move by a single pixel when it opens: header 8 + .bar's own
+       16/12 padding, menu 8 + .menu-top's own 16/12 padding - the same numbers on both sides. */
+    @media (max-width: 767px) {
+      header {
+        top: 8px;
+        left: 8px;
+        right: 8px
+      }
+
+      .menu {
+        padding: 8px 8px 32px
+      }
+    }
+
+    /* ===== MOBILE MENU LINK HOVER: accent slider, locked =====
+       The accent wipes in from the left behind the label. It hangs off a pseudo element on the
+       <a> itself, so the plane covers the 18px/20px padding as well as the text; .mk is lifted to
+       z-index 1 so the label stays on top. White on #e0401e measures 4.3:1, comfortable for
+       30-44px type. Leaving reverses from whatever percentage it had reached, because a CSS
+       transition always interpolates from the current computed value, and the next link starts
+       from zero because that is its idle state. No script is involved. */
+    .menu nav a {
+      position: relative
+    }
+
+    .menu nav a>.mk {
+      position: relative;
+      z-index: 1
+    }
+
+    .menu nav a::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      background: var(--accent);
+      clip-path: inset(0 100% 0 0);
+      transition: clip-path .55s cubic-bezier(.65, 0, .35, 1);
+    }
+
+    .menu nav a:hover::before {
+      clip-path: inset(0)
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .menu nav a::before {
+        transition: none !important
+      }
+    }
+
+    /* text balance everywhere */
+    * {
+      text-wrap: balance
+    }
+
+    /* header intro: slides down on load */
+    header {
+      animation: hdrIn .9s cubic-bezier(.2, .7, .2, 1) .1s both
+    }
+
+    @keyframes hdrIn {
+      from {
+        transform: translateY(calc(-100% - 24px))
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      header {
+        animation: none
+      }
+    }
+
+    /* section heading layouts: .split (50/50), .center, .list (two-line title) */
+    .sec-head.split {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: clamp(24px, 5vw, 80px);
+      align-items: end
+    }
+
+    .sh-l,
+    .sh-r {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 8px
+    }
+
+    .sh-r {
+      gap: 24px
+    }
+
+    .sh-r p {
+      color: #4a4e56;
+      max-width: 46ch
+    }
+
+    .sec-head.list h2 {
+      max-width: none
+    }
+
+    @media (max-width: 900px) {
+      .sec-head.split {
+        grid-template-columns: 1fr;
+        align-items: start
+      }
+
+      .sec-head.split {
+        gap: 16px
+      }
+    }
+
+    /* before/after arrows: cream pair, next one in ink, both accent on hover */
+    .ba-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    .ba-nav button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-width: 52px;
+      height: 52px;
+      border: 1px solid #0000001a;
+      cursor: pointer;
+      font: 500 var(--fs) var(--f);
+      background: var(--cream);
+      color: var(--ink);
+      transition: background .25s, color .25s, border-color .25s
+    }
+
+    .ba-nav svg {
+      width: 20px;
+      height: 20px;
+      transition: transform .25s
+    }
+
+    .ba-nav .bt {
+      display: none
+    }
+
+    @media (max-width: 900px) {
+      .ba-nav button {
+        min-width: 40px;
+        height: 40px
+      }
+
+      .ba-nav svg {
+        width: 16px;
+        height: 16px
+      }
+    }
+
+    .ba-nav button[data-d="1"] {
+      background: var(--ink);
+      color: #fff
+    }
+
+    .ba-nav button:hover {
+      background: var(--accent);
+      color: #fff;
+      border-color: rgb(0 0 0 / 0)
+    }
+
+    /* ===== BEFORE & AFTER (v3): the frame is 3:2 on every screen and only scales, so the image is never cropped differently ===== */
+    .ba {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: end;
+      gap: clamp(20px, 2.5vw, 32px) 16px
+    }
+
+    .ba>.sec-head {
+      grid-column: 1;
+      grid-row: 1
+    }
+
+    .ba>.ba-nav {
+      grid-column: 2;
+      grid-row: 1
+    }
+
+    .ba>.pairs {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      width: 100%
+    }
+
+    @media (min-width: 901px) {
+      .ba {
+        --w: clamp(490px, calc((100svh - 380px) * 1.63), min(1061px, calc(100vw - 2 * var(--pad) - 168px)));
+        grid-template-columns: auto var(--w) auto;
+        justify-content: center;
+        align-items: start;
+        column-gap: clamp(16px, 2vw, 32px)
+      }
+
+      .ba>.sec-head {
+        grid-column: 1 / -1;
+        justify-self: center;
+        align-items: center;
+        text-align: center
+      }
+
+      .ba .sec-head .label {
+        justify-content: center
+      }
+
+      .ba>.ba-nav {
+        display: contents
+      }
+
+      .ba>.ba-nav button {
+        grid-row: 2;
+        margin-top: calc(var(--w) / 3 - 26px)
+      }
+
+      .ba>.ba-nav button[data-d="-1"] {
+        grid-column: 1
+      }
+
+      .ba>.ba-nav button[data-d="1"] {
+        grid-column: 3
+      }
+
+      .ba>.pairs {
+        grid-column: 2;
+        grid-row: 2
+      }
+
+      .ba .pair figcaption {
+        text-align: center
+      }
+    }
+
+    /* ===== type scale: small text 18px max, subtitles 12-18px ===== */
+    html {
+      scrollbar-gutter: stable
+    }
+
+    html.biz-pending body {
+      visibility: hidden
+    }
+
+    .sub,
+    .cta-sub,
+    .intro,
+    .sum,
+    .sub2,
+    .sh-r p {
+      font-size: var(--fs)
+    }
+
+    .label,
+    .cta-micro {
+      font-size: var(--fs)
+    }
+
+    /* ===== SCROLLBARS: square (no radius), in the site colors =====
+       Page + mobile menu: ink track, grey thumb, accent on hover/drag. Modal body: transparent track,
+       frosted thumb. Blink/WebKit use the ::-webkit-scrollbar rules (they keep the hover colour);
+       Firefox falls back to scrollbar-color. scrollbar-gutter: stable (above) keeps the width fixed. */
+    :root {
+      --sb-track: var(--ink);
+      --sb-thumb: #5b6068;
+      --sb-hover: var(--accent)
+    }
+
+    /* html paints the scrollbar gutter even while the page is scroll-locked, and the iOS overscroll area, in brand ink.
+       body keeps its own white background, so nothing else changes. */
+    html {
+      background: var(--ink)
+    }
+
+    ::-webkit-scrollbar {
+      width: 14px;
+      height: 14px;
+      background: var(--sb-track)
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--sb-track)
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--sb-thumb);
+      background-clip: padding-box;
+      border: 3px solid var(--sb-track);
+      border-radius: 0;
+      min-height: 56px
+    }
+
+    ::-webkit-scrollbar-thumb:hover,
+    ::-webkit-scrollbar-thumb:active {
+      background: var(--sb-hover);
+      background-clip: padding-box
+    }
+
+    ::-webkit-scrollbar-corner {
+      background: var(--sb-track)
+    }
+
+    .est-body::-webkit-scrollbar,
+    .est textarea::-webkit-scrollbar {
+      width: 10px;
+      height: 10px
+    }
+
+    .est-body::-webkit-scrollbar-thumb,
+    .est textarea::-webkit-scrollbar-thumb {
+      border: 2px solid transparent
+    }
+
+    @supports not selector(::-webkit-scrollbar) {
+
+      html,
+      .est {
+        scrollbar-color: var(--sb-thumb) var(--sb-track)
+      }
+
+      .est-body,
+      .est textarea,
+      .est .sel-list,
+      .menu,
+      .dbg {
+        scrollbar-width: thin
+      }
+    }
+
+    /* ===== ESTIMATE MODAL: dark overlay + blur, frosted-glass dialog, segmented progress ===== */
+    html.est-open {
+      overflow: hidden
+    }
+
+    .dbg {
+      z-index: 300
+    }
+
+    .est {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+      visibility: hidden;
+      transition: visibility 0s .45s;
+      color-scheme: dark;
+      --bg: rgb(28 31 36/.74);
+      --fg: #f7f4ef;
+      --mut: #b9bdc3;
+      --line: rgb(255 255 255/.18);
+      --card: rgb(255 255 255/.07);
+      --card-h: rgb(255 255 255/.12);
+      --field: rgb(255 255 255/.07);
+      --sel: var(--accent);
+      --err: #ff8a7a;
+      /* Form-control borders only (WCAG 1.4.11): >=3:1 against the field fill and
+         the dialog ground in the worst case (a white section behind the scrim).
+         --line stays for cards and decorative edges. */
+      --ctl-line: #9aa0a8;
+      --ctl-focus: #fff;
+      --ctl-err: #ffb3a6;
+      --sb-track: transparent;
+      --sb-thumb: rgb(255 255 255/.28);
+      --sb-hover: var(--accent)
+    }
+
+    .est.open {
+      visibility: visible;
+      transition-delay: 0s
+    }
+
+    .est-scrim {
+      position: absolute;
+      inset: 0;
+      background: rgb(28 31 36/.5);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+      opacity: 0;
+      transition: opacity .35s
+    }
+
+    .est.open .est-scrim {
+      opacity: 1
+    }
+
+    .est-dialog {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      width: min(680px, 100%);
+      max-height: calc(100dvh - 32px);
+      background: var(--bg);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      -webkit-backdrop-filter: blur(26px);
+      backdrop-filter: blur(26px);
+      box-shadow: 0 30px 90px rgb(0 0 0/.35);
+      opacity: 0;
+      transform: translateY(18px);
+      transition: opacity .35s, transform .45s cubic-bezier(.2, .7, .2, 1);
+      outline: 0
+    }
+
+    .est.open .est-dialog {
+      opacity: 1;
+      transform: none
+    }
+
+    .est .label {
+      color: var(--fg)
+    }
+
+    .est :focus-visible {
+      outline: 2px solid var(--sel);
+      outline-offset: 2px
+    }
+
+    /* header: step text + four segments + close */
+    .est-top {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 22px 24px 0
+    }
+
+    .est-prog {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0
+    }
+
+    .est-step {
+      font-size: var(--fs);
+      color: var(--mut)
+    }
+
+    .est-dots {
+      display: flex;
+      gap: 6px;
+      list-style: none;
+      padding: 0;
+      margin: 0
+    }
+
+    .est-dots li {
+      flex: 1;
+      height: 4px;
+      background: rgb(255 255 255/.2);
+      transition: background .3s
+    }
+
+    .est-dots li.on,
+    .est-dots li.done {
+      background: var(--accent)
+    }
+
+    .est-dots li.busy {
+      animation: estPulse 1s ease-in-out infinite
+    }
+
+    @keyframes estPulse {
+      50% {
+        opacity: .35
+      }
+    }
+
+    .est-x {
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      background: none;
+      border: 1px solid var(--line);
+      color: var(--fg);
+      cursor: pointer;
+      flex: none;
+      transition: background .2s, transform .15s
+    }
+
+    .est-x:hover {
+      background: var(--card-h)
+    }
+
+    .est-x:active {
+      transform: scale(.94)
+    }
+
+    .est-x svg {
+      width: 18px;
+      height: 18px
+    }
+
+    /* body: scrolls on its own when a step is tall */
+    .est-form {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      flex: 0 1 auto
+    }
+
+    .est-body {
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      padding: 24px;
+      flex: 0 1 auto;
+      min-height: 0
+    }
+
+    .est.anim .est-form,
+    .est.anim .est-body {
+      overflow: hidden
+    }
+
+    /* while a step or the height is animating */
+    .est-pane {
+      display: flex;
+      flex-direction: column;
+      gap: 20px
+    }
+
+    .est-pane[hidden] {
+      display: none
+    }
+
+    .est-pane {
+      transform-origin: 50% 0
+    }
+
+    /* step changes: opacity + scale + blur (script) */
+    .est-head {
+      display: flex;
+      flex-direction: column;
+      gap: 8px
+    }
+
+    .est-pane h3 {
+      font-size: clamp(24px, 2.6vw, 32px);
+      font-weight: 500;
+      letter-spacing: -.03em;
+      line-height: 1.1
+    }
+
+    .est-done .lead {
+      color: var(--mut);
+      font-size: var(--fs)
+    }
+
+    .est-pane a {
+      color: inherit
+    }
+
+    /* choice cards (square marker top right, accent when chosen) */
+    .opts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px
+    }
+
+    .opt {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 16px 46px 16px 16px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      cursor: pointer;
+      transition: background .2s, border-color .2s, transform .15s
+    }
+
+    .opt:hover {
+      background: var(--card-h)
+    }
+
+    .opt:active {
+      transform: scale(.992)
+    }
+
+    .opt input {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      margin: 0
+    }
+
+    .opt b {
+      font-weight: 600;
+      font-size: var(--fs)
+    }
+
+    .opt small {
+      color: var(--mut);
+      font-size: var(--fs)
+    }
+
+    .opt::after {
+      content: "";
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      width: 18px;
+      height: 18px;
+      border: 1.5px solid rgb(255 255 255/.4);
+      transition: background-color .2s, border-color .2s
+    }
+
+    .opt:has(input:checked) {
+      background: var(--card-h);
+      border-color: var(--sel);
+      box-shadow: inset 0 0 0 1px var(--sel)
+    }
+
+    .opt:has(input:checked)::after {
+      border-color: var(--accent);
+      background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18' fill='none' stroke='%23fff' stroke-width='2'%3E%3Cpath d='M4.5 9.5l3 3 6-7'/%3E%3C/svg%3E") center / 100% no-repeat
+    }
+
+    .opt:has(input:focus-visible) {
+      outline: 2px solid var(--sel);
+      outline-offset: 2px
+    }
+
+    /* fields */
+    .f {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 0
+    }
+
+    .f>label,
+    .f>.lab {
+      font-weight: 500;
+      font-size: var(--fs)
+    }
+
+    .f input[type="text"],
+    .f input[type="tel"],
+    .f input[type="email"] {
+      height: 52px;
+      padding: 0 14px;
+      border: 1px solid var(--ctl-line);
+      background: var(--field);
+      color: var(--fg);
+      font: 400 var(--fs) var(--f);
+      border-radius: 0;
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box
+    }
+
+    /* themed dropdown (replaces the browser's native select list) */
+    .sel {
+      position: relative
+    }
+
+    .sel-native {
+      display: none
+    }
+
+    .sel-btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
+      height: 52px;
+      padding: 0 14px;
+      border: 1px solid var(--ctl-line);
+      background: var(--field);
+      color: var(--fg);
+      font: 400 var(--fs) var(--f);
+      text-align: left;
+      cursor: pointer;
+      border-radius: 0;
+      transition: border-color .2s, background .2s
+    }
+
+    .sel-btn:hover {
+      background: var(--card-h)
+    }
+
+    .sel-btn.empty .sel-val {
+      color: rgb(255 255 255/.55)
+    }
+
+    .sel-btn svg {
+      width: 16px;
+      height: 16px;
+      flex: none;
+      transition: transform .25s cubic-bezier(.2, .7, .2, 1)
+    }
+
+    .sel.open .sel-btn {
+      border-color: var(--ctl-focus)
+    }
+
+    .sel.open .sel-btn svg {
+      transform: rotate(180deg)
+    }
+
+    .sel-list {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: calc(100% + 6px);
+      z-index: 5;
+      margin: 0;
+      padding: 6px;
+      list-style: none;
+      max-height: 260px;
+      overflow-y: auto;
+      background: rgb(32 35 41/.96);
+      -webkit-backdrop-filter: blur(18px);
+      backdrop-filter: blur(18px);
+      border: 1px solid var(--line);
+      box-shadow: 0 18px 40px rgb(0 0 0/.45);
+      transform-origin: top;
+      animation: estMenu .18s cubic-bezier(.2, .7, .2, 1) both
+    }
+
+    .sel-list[hidden] {
+      display: none
+    }
+
+    .sel.up .sel-list {
+      top: auto;
+      bottom: calc(100% + 6px);
+      transform-origin: bottom;
+      animation-name: estMenuUp
+    }
+
+    @keyframes estMenu {
+      from {
+        opacity: 0;
+        transform: translateY(-6px) scale(.98)
+      }
+    }
+
+    @keyframes estMenuUp {
+      from {
+        opacity: 0;
+        transform: translateY(6px) scale(.98)
+      }
+    }
+
+    /* closing: the same move played backwards, a little quicker; the script hides the list when it ends */
+    .sel.closing .sel-list {
+      animation: estMenuOut .14s cubic-bezier(.4, 0, 1, 1) both;
+      pointer-events: none
+    }
+
+    .sel.up.closing .sel-list {
+      animation-name: estMenuOutUp
+    }
+
+    @keyframes estMenuOut {
+      to {
+        opacity: 0;
+        transform: translateY(-6px) scale(.98)
+      }
+    }
+
+    @keyframes estMenuOutUp {
+      to {
+        opacity: 0;
+        transform: translateY(6px) scale(.98)
+      }
+    }
+
+    .sel-list li {
+      position: relative;
+      padding: 12px 42px 12px 14px;
+      font-size: var(--fs);
+      color: var(--fg);
+      cursor: pointer;
+      transition: background .15s
+    }
+
+    .sel-list li.on {
+      background: var(--card-h)
+    }
+
+    .sel-list li[aria-selected="true"] {
+      font-weight: 600;
+      box-shadow: inset 3px 0 0 var(--accent)
+    }
+
+    .sel-list li[aria-selected="true"]::after {
+      content: "";
+      position: absolute;
+      right: 14px;
+      top: 50%;
+      width: 16px;
+      height: 16px;
+      margin-top: -8px;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18' fill='none' stroke='%23f7f4ef' stroke-width='2'%3E%3Cpath d='M4.5 9.5l3 3 6-7'/%3E%3C/svg%3E") center / 100% no-repeat
+    }
+
+    .sel-list::-webkit-scrollbar {
+      width: 10px
+    }
+
+    .sel-list::-webkit-scrollbar-thumb {
+      border: 2px solid transparent
+    }
+
+    .f textarea {
+      min-height: 96px;
+      padding: 12px 14px;
+      border: 1px solid var(--ctl-line);
+      background: var(--field);
+      color: var(--fg);
+      font: 400 var(--fs) var(--f);
+      resize: vertical;
+      border-radius: 0
+    }
+
+    .f input:focus,
+    .f textarea:focus {
+      border-color: var(--ctl-focus)
+    }
+
+    .f ::placeholder {
+      color: rgb(255 255 255/.55)
+    }
+
+    .f input:-webkit-autofill {
+      -webkit-text-fill-color: var(--fg);
+      caret-color: var(--fg);
+      box-shadow: 0 0 0 100px #2a2d33 inset
+    }
+
+    .f [aria-invalid="true"] {
+      border-color: var(--ctl-err)
+    }
+
+    .f.grp.bad .opt {
+      border-color: rgb(255 138 122/.55)
+    }
+
+    .err {
+      color: var(--err);
+      font-size: var(--fs)
+    }
+
+    .err:empty {
+      display: none
+    }
+
+    .err:not(:empty) {
+      animation: estFade .28s ease both
+    }
+
+    @keyframes estFade {
+      from {
+        opacity: 0;
+        transform: translateY(-4px)
+      }
+    }
+
+    .row2 {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 12px
+    }
+
+    .fine {
+      font-size: var(--fs);
+      color: var(--mut)
+    }
+
+    .hp {
+      position: absolute !important;
+      left: -10000px;
+      top: auto;
+      width: 1px;
+      height: 1px;
+      overflow: hidden
+    }
+
+    /* honeypot: off-screen, not display:none (some bots skip hidden fields) */
+    .chk {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 14px 16px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      cursor: pointer;
+      font-size: var(--fs);
+      transition: background .2s, border-color .2s, transform .15s
+    }
+
+    .chk:hover {
+      background: var(--card-h)
+    }
+
+    .chk:active {
+      transform: scale(.992)
+    }
+
+    .chk:has(input:checked) {
+      border-color: var(--sel)
+    }
+
+    .chk input {
+      appearance: none;
+      -webkit-appearance: none;
+      flex: none;
+      width: 22px;
+      height: 22px;
+      margin: 0;
+      border: 1.5px solid rgb(255 255 255/.4);
+      background: transparent center / 100% no-repeat;
+      cursor: pointer;
+      border-radius: 0
+    }
+
+    .chk input:checked {
+      background-color: var(--accent);
+      border-color: var(--accent);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18' fill='none' stroke='%23fff' stroke-width='2'%3E%3Cpath d='M4.5 9.5l3 3 6-7'/%3E%3C/svg%3E")
+    }
+
+    /* send failed: answers stay, button becomes "Try again" */
+    .est-alert {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 20px;
+      padding: 14px 16px;
+      border: 1px solid var(--err);
+      background: rgb(255 138 122/.08);
+      font-size: var(--fs);
+      outline: 0;
+      animation: estFade .3s ease both
+    }
+
+    .est-alert[hidden] {
+      display: none
+    }
+
+    .est-alert b {
+      color: var(--err);
+      font-weight: 600
+    }
+
+    .est-alert a {
+      color: inherit
+    }
+
+    /* nav */
+    .est-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 24px 24px
+    }
+
+    .est-nav[hidden] {
+      display: none
+    }
+
+    .est-back {
+      height: 46px;
+      padding: 0 8px;
+      background: none;
+      border: 0;
+      color: var(--mut);
+      font: 500 var(--fs) var(--f);
+      cursor: pointer;
+      transition: color .2s
+    }
+
+    .est-back:hover {
+      color: var(--fg)
+    }
+
+    .est-back[hidden] {
+      display: block;
+      visibility: hidden
+    }
+
+    .btn.est-next {
+      --est-btn: var(--accent);
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 52px;
+      padding: 0 22px 0 26px;
+      background: var(--est-btn);
+      color: #fff;
+      border: 1px solid transparent;
+      font-weight: 600;
+      cursor: pointer;
+      transition: filter .2s, transform .15s, opacity .2s
+    }
+
+    .est-next svg {
+      width: 18px;
+      height: 18px;
+      flex: none;
+      transition: transform .25s cubic-bezier(.2, .7, .2, 1)
+    }
+
+    .est-next:hover:not(:disabled) {
+      filter: brightness(.9)
+    }
+
+    .est-next:hover:not(:disabled) svg {
+      transform: translateX(3px)
+    }
+
+    .est-next:active:not(:disabled) {
+      transform: scale(.98)
+    }
+
+    .est .est-next:focus-visible {
+      outline: 2px solid #fff;
+      outline-offset: 3px
+    }
+
+    .est-next:disabled {
+      opacity: .8;
+      cursor: progress
+    }
+
+    .est-next.busy svg {
+      display: none
+    }
+
+    .est-next.busy::after {
+      content: "";
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgb(255 255 255/.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: estSpin .7s linear infinite
+    }
+
+    @keyframes estSpin {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    /* thank-you */
+    .est-done {
+      align-items: flex-start;
+      gap: 22px
+    }
+
+    .est-done[hidden] {
+      display: none
+    }
+
+    .est-ok {
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      background: var(--accent);
+      color: #fff
+    }
+
+    .est-ok svg {
+      width: 26px;
+      height: 26px
+    }
+
+    .est-done:not([hidden]) .est-ok {
+      animation: estPop .55s cubic-bezier(.2, .9, .3, 1.2) .05s both
+    }
+
+    .est-done:not([hidden]) .est-ok path {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+      animation: estDraw .45s ease .35s forwards
+    }
+
+    .est-done:not([hidden])> :nth-child(n+2) {
+      animation: estRise .55s cubic-bezier(.2, .7, .2, 1) both;
+      animation-delay: calc(var(--i, 0) * 80ms + 160ms)
+    }
+
+    .est-done> :nth-child(2) {
+      --i: 0
+    }
+
+    .est-done> :nth-child(3) {
+      --i: 1
+    }
+
+    .est-done> :nth-child(4) {
+      --i: 2
+    }
+
+    .est-done> :nth-child(5) {
+      --i: 3
+    }
+
+    @keyframes estPop {
+      from {
+        transform: scale(.55);
+        opacity: 0
+      }
+    }
+
+    @keyframes estDraw {
+      to {
+        stroke-dashoffset: 0
+      }
+    }
+
+    @keyframes estRise {
+      from {
+        opacity: 0;
+        transform: translateY(12px)
+      }
+    }
+
+    .est-recap {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      margin: 0;
+      border-top: 1px solid var(--line);
+      font-size: var(--fs)
+    }
+
+    .est-recap div {
+      display: grid;
+      grid-template-columns: 7.5em 1fr;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--line)
+    }
+
+    .est-recap dt {
+      color: var(--mut)
+    }
+
+    .est-recap dd {
+      margin: 0;
+      overflow-wrap: anywhere
+    }
+
+    .est-after {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%
+    }
+
+    .est-steps {
+      list-style: none;
+      counter-reset: s;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: var(--fs)
+    }
+
+    .est-steps li {
+      counter-increment: s;
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 12px;
+      align-items: start
+    }
+
+    .est-steps li::before {
+      content: counter(s);
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      background: var(--card-h);
+      font-weight: 500
+    }
+
+    /* Close sits at the far left, Call at the right: the two ends of one row, so
+       the eye lands on the action and the escape hatch is still where it was. */
+    .est-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      justify-content: space-between
+    }
+
+    /* Secondary keeps the ghost shape and gains a 5% ground; hover is still 10%. */
+    .est-actions .btn.ghost {
+      min-height: 52px;
+      background: rgb(255 255 255/.05)
+    }
+
+    .est-actions .btn.ghost:hover {
+      background: rgb(255 255 255/.10)
+    }
+
+    /* Call takes the same fill and hover as "Send my request" (.btn.est-next).
+       The second rule is required: .btn.phone:hover sets a white 10% ground,
+       which would otherwise win over the accent. */
+    .est-actions .btn.phone {
+      min-height: 52px;
+      padding: 0 24px;
+      background: var(--accent);
+      color: #fff;
+      border-color: transparent;
+      font-weight: 600
+    }
+
+    .est-actions .btn.phone:hover,
+    .est-actions .btn.phone:focus-visible {
+      background: var(--accent);
+      filter: brightness(.9)
+    }
+
+    @media (max-width: 760px) {
+
+      .opts,
+      .row2 {
+        grid-template-columns: 1fr
+      }
+
+      .est {
+        padding: 8px
+      }
+
+      .est-dialog {
+        max-height: calc(100dvh - 16px)
+      }
+
+      .est-top {
+        padding: 16px 16px 0
+      }
+
+      .est-body {
+        padding: 16px
+      }
+
+      .est-nav {
+        padding: 12px 16px 16px
+      }
+
+      .est-recap div {
+        grid-template-columns: 6em 1fr
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      .est,
+      .est-scrim,
+      .est-dialog,
+      .est-dots li,
+      .opt,
+      .chk,
+      .est-next,
+      .est-next svg {
+        transition: none
+      }
+
+      .est *,
+      .est-dots li.busy {
+        animation: none !important
+      }
+
+      .est-done path {
+        stroke-dashoffset: 0 !important
+      }
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      .est {
+        --bg: #1c1f24
+      }
+
+      .est-scrim,
+      .est-dialog {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none
+      }
+
+      .est-scrim {
+        background: rgb(8 10 12/.85)
+      }
+    }
+
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      .est {
+        --bg: rgb(28 31 36/.96)
+      }
+
+      .est-scrim {
+        background: rgb(8 10 12/.8)
+      }
+    }
+
+    /* ===== MOBILE MENU: mask reveal. Text starts BELOW its final position inside an overflow mask (opacity stays 1),
+       so nothing is visible in its final place before the animation; it slides up into view when the menu opens ===== */
+    .mk {
+      display: block;
+      overflow: hidden;
+      padding-bottom: .14em;
+      margin-bottom: -.14em
+    }
+
+    .mi {
+      display: block;
+      transform: translateY(115%);
+      transition: transform 0s .65s
+    }
+
+    .menu.open .mi {
+      transform: none;
+      transition: transform .85s cubic-bezier(.2, .7, .2, 1) calc(var(--i, 0)*70ms + .3s)
+    }
+
+    .menu-foot .mk {
+      padding: 6px;
+      margin: -6px
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .mi {
+        transform: none !important;
+        transition: none !important
+      }
+    }
+
+    /* footer legal row: same two points as the hero (squares + text) */
+    .ft-trust {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 20px
+    }
+
+    .ft-trust>span {
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    .ft-trust>span::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      background: var(--cream)
+    }
+
+    .fw,
+    .fl {
+      display: inline-block
+    }
+
+    /* ===== REVEAL EXPLORATIONS. Every group is now locked: cards (blur and rise), flags (blur
+       in), buttons (fade up) and before/after (clip down) all carry no data attribute and no
+       debug-panel row.
+       Rules: split-text is only for titles and subtitles. Every other element uses one of these.
+       A reveal animates the WHOLE component (a flag's square and text move together).
+       Clip-path options never combine with opacity or blur. The hidden state exists only after the script marks an
+       element with data-rv; the mark is removed when the reveal ends, so hover styles are untouched afterwards.
+       No JS or reduced motion: nothing is ever marked, everything is visible. ===== */
+    html.rv-ready [data-rv].rv-run {
+      transition: opacity .8s cubic-bezier(.2, .7, .2, 1) var(--d, 0ms), transform .9s cubic-bezier(.2, .7, .2, 1) var(--d, 0ms), filter .9s cubic-bezier(.2, .7, .2, 1) var(--d, 0ms), clip-path 1.05s cubic-bezier(.7, 0, .2, 1) var(--d, 0ms), color .6s ease calc(var(--d, 0ms) + 260ms)
+    }
+
+    /* flags and labels: blur in (locked). The square and the text are one element, so the focus
+       pull carries both. No movement: a label is a mark, it should resolve where it sits. */
+    html.rv-ready [data-rv="flag"]:not(.rv-run) {
+      opacity: 0;
+      filter: blur(8px)
+    }
+
+    /* CTA buttons: fade up (locked) */
+    html.rv-ready [data-rv="btn"]:not(.rv-run) {
+      opacity: 0;
+      transform: translateY(16px)
+    }
+
+    /* testimonial and FAQ cards: blur and rise (locked). The card arrives out of focus and a
+       little low, then resolves. */
+    html.rv-ready [data-rv="card"]:not(.rv-run) {
+      opacity: 0;
+      filter: blur(10px);
+      transform: translateY(20px)
+    }
+
+    /* FIRST PAINT. The marks above only exist once the reveal script (end of <body>) has run, so anything on screen before then
+       was visible, got hidden, and was then revealed: a flash. The <head> script sets html.rv-pre (like split-pending does for
+       the titles) and this hides the same elements the script is going to mark, from the first frame. The reveal script drops
+       rv-pre in the same task in which it adds the marks, so there is no frame where an element is neither. Not set for
+       reduced motion; a 3s timer in the <head> script removes it if the reveal script never runs. */
+    html.rv-pre :is(.rv, .fi, main .btn, .ba-nav button, .label, .badge, .trust > span, .micro, .cta-micro, .stats p, .tag, .pair figcaption, .who2 span, .stars):not(:is(.est, .menu, .dbg, header) *) {
+      opacity: 0
+    }
+
+    html.rv-pre .ba .pairs {
+      clip-path: inset(0 0 100% 0)
+    }
+
+    /* before and after: clip down, same as the Services images (locked) */
+    html.rv-ready [data-rv="ba"]:not(.rv-run) {
+      clip-path: inset(0 0 100% 0)
+    }
+
+    html.rv-ready [data-rv="ba"].rv-run {
+      clip-path: inset(0 0 0 0)
+    }
+
+    /* footer: sticky, locked. The footer waits behind the page and is uncovered as the page ends.
+       Children (words, wordmark letters, logo, socials, flags) are driven by the script. */
+    html.rv-ready:not(.ft-tall) body {
+      padding-bottom: var(--ft-h, 0px)
+    }
+
+    html.rv-ready:not(.ft-tall) .page {
+      position: relative;
+      z-index: 1;
+      background: #fff
+    }
+
+    html.rv-ready:not(.ft-tall) .ft {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 0
+    }
+
+    /* clip-path image reveal (GSAP). Hidden only when GSAP loaded, so no-JS / CDN failure shows the images. */
+    html.gsap-ok .reveal-img {
+      clip-path: inset(0 0 100% 0)
+    }
+
+    footer {
+      text-align: center;
+      font-size: 13px;
+      color: #7a7e86
+    }
+
+    /* ===== BACK TO TOP (final: hairline square, accent ring traces the scroll) =====
+       The 1px frame is the same hairline the secondary buttons use, but it is an inset shadow and
+       not a border. A border paints outside the padding box, so the accent ring - which runs on
+       the very edge of the box - could never cover it and the hairline stayed visible on the
+       outside of the fill. An inset shadow sits inside the box, exactly where the ring travels,
+       so the ring erases it as it passes. The 2px accent ring is the progress readout: an SVG
+       path with pathLength="100", so it fills along the perimeter instead of four sides at once.
+       On hover the ring closes to a full frame - the "reached the bottom" state - and the arrow
+       picks up the accent. The box never fills: it keeps the same pale ground in every state, so
+       it never becomes a second CTA.
+       The ring's path starts and ends on the top-left corner, and the stroke is square-capped. A
+       dash that begins on a corner with butt caps leaves the outer 1px corner square unpainted, so
+       the frame showed through there in every state, even at full progress. Starting the path 3
+       units down the left edge fixed that but put a visible stub of line below the corner, which
+       read as the ring starting twice. A square cap extends a dash half a stroke-width along the
+       path, so the start fills the corner on its own and the end bridges the last unit of the left
+       edge - the line now begins exactly on the corner and nowhere else.
+       html.tot-dark (set by the script once the page edge has passed the button) swaps the ground
+       to the footer's own ink, so the square reads as part of the dark section rather than as a
+       white card floating on top of it. */
+    .tot {
+      position: fixed;
+      z-index: 62;
+      right: 16px;
+      bottom: 16px;
+      width: 48px;
+      height: 48px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      background: rgb(255 255 255/.25);
+      box-shadow: inset 0 0 0 1px rgb(28 31 36/.18);
+      border: 0;
+      color: var(--ink);
+      cursor: pointer;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translateY(12px);
+      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px);
+      transition: opacity .3s ease, transform .45s cubic-bezier(.2, .7, .2, 1), color .25s ease,
+        background-color .35s ease, box-shadow .35s ease, visibility 0s linear .45s
+    }
+
+    /* visibility is held for the length of the exit so the fade actually plays; the .on rule
+       cancels that delay, which is what makes the button appear the instant the class lands */
+    .tot.on {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transform: none;
+      transition-delay: 0s
+    }
+
+    .tot .ring {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none
+    }
+
+    .tot .ring path {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 2;
+      stroke-linecap: square;
+      stroke-dasharray: 100px;
+      stroke-dashoffset: calc(100px - var(--p, 0) * 100px);
+      transition: stroke-dashoffset .12s linear, stroke .25s ease
+    }
+
+    .tot .arrow {
+      position: relative;
+      z-index: 2;
+      width: 18px;
+      height: 18px
+    }
+
+    .tot:is(:hover, :focus-visible) {
+      color: var(--accent)
+    }
+
+    .tot:is(:hover, :focus-visible) .ring path {
+      stroke-dashoffset: 0;
+      transition: stroke-dashoffset .45s cubic-bezier(.2, .7, .2, 1)
+    }
+
+    /* CTA section (accent background): arrow and progress ring turn white. The ground gets a light ink tint so white reads on the orange.
+       Footer (html.tot-dark): ring back to accent, arrow stays white. These come after the rule above so the footer wins if both ever apply. */
+    html.tot-cta .tot {
+      background: rgba(255, 255, 255, 0.1);
+      box-shadow: inset 0 0 0 1px rgb(255 255 255/.35);
+      color: #fff
+    }
+
+    html.tot-cta .tot .ring path {
+      stroke: #fff
+    }
+
+    html.tot-cta .tot:is(:hover, :focus-visible) {
+      color: #fff
+    }
+
+    html.tot-dark .tot {
+      background: var(--ink);
+      box-shadow: inset 0 0 0 1px rgb(255 255 255/.2);
+      color: #fff
+    }
+
+    html.tot-dark .tot .ring path {
+      stroke: var(--accent)
+    }
+
+    /* (0,3,1) beats html.tot-dark .tot at (0,2,1); without it the dark ground keeps the arrow pale
+       on hover, because the plain hover rule is only (0,2,0) and loses to the dark skin */
+    html.tot-dark .tot:is(:hover, :focus-visible) {
+      color: var(--accent)
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      .tot,
+      .tot .ring path {
+        transition: none
+      }
+    }
+
+    @media (max-width: 700px) {
+      .tot {
+        right: 16px;
+        bottom: 16px;
+        width: 44px;
+        height: 44px
+      }
+    }
+
+    /* DEBUG PANEL - prototype only, safe to delete */
+    .dbg {
+      position: fixed;
+      z-index: 61;
+      right: 16px;
+      bottom: 88px;
+      /* clear of the back-to-top button (48px + 24px + 16px gap) */
+      display: grid;
+      gap: 6px;
+      padding: 10px;
+      background: var(--ink);
+      box-shadow: 0 4px 18px rgb(0 0 0/.3);
+      color: #fff
+    }
+
+    .dbg-row {
+      display: flex;
+      align-items: center;
+      gap: 4px
+    }
+
+    .dbg-row>span {
+      min-width: 48px;
+      font: 600 10px var(--f);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      opacity: .55
+    }
+
+    .dbg button {
+      font: 500 12px var(--f);
+      color: #fff;
+      background: rgb(255 255 255/.12);
+      border: 0;
+      padding: 6px 10px;
+      cursor: pointer
+    }
+
+    .dbg button:hover {
+      background: rgb(255 255 255/.15)
+    }
+
+    .dbg button[aria-pressed="true"] {
+      background: var(--accent)
+    }
+
+    /* collapse toggle: the footer row stays, every row above it folds away */
+    .dbg-head {
+      gap: 12px
+    }
+
+    .dbg-head>span {
+      min-width: 0;
+      white-space: nowrap
+    }
+
+    .dbg .dbg-toggle {
+      display: grid;
+      place-items: center;
+      width: 26px;
+      height: 20px;
+      margin: -2px -4px -2px auto;
+      padding: 0;
+      background: rgb(255 255 255/.15);
+      border: 0;
+      color: #fff;
+      cursor: pointer
+    }
+
+    .dbg .dbg-toggle svg {
+      transition: transform .3s cubic-bezier(.4, 0, .2, 1)
+    }
+
+    .dbg:not(.collapsed) .dbg-toggle svg {
+      transform: rotate(180deg)
+    }
+
+    .dbg-body {
+      display: grid;
+      gap: 6px
+    }
+
+    .dbg.collapsed .dbg-body {
+      display: none
+    }
+
+    .dbg-read {
+      font: 500 11px ui-monospace, monospace;
+      opacity: .6;
+      padding-left: 52px
+    }
+
+    /* ===== DEBUG (temporary) - hero type / video source / slider audit =====
+       Remove this block together with the .dbg markup and the DEBUG PANEL script. */
+    /* The panel is markup in every build but only renders on a development origin (see the DEBUG GATE script
+       in <head>). Hiding it here as well as removing the node keeps it out of the first paint on a slow
+       connection, where the end-of-body script can run after the browser has already drawn. */
+    html.no-dev .dbg {
+      display: none !important
+    }
+
+    .dbg-row[hidden] {
+      display: none
+    }
+
+    .dbg-read {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%
+    }
+
+    /* "Slider: Off" really freezes the frame: no crossfade and no Ken Burns drift while it is off */
+    html.dbg-noslide .slide,
+    html.dbg-noslide .slide .ph {
+      transition: none !important;
+      transform: none !important
+    }
+
+    /* TABLET (up to 1024px): the hero stacks here (the header collapses to the menu button earlier, at 1140).
+       At ~940px two columns squeezed the headline and a paragraph + two buttons into ~350px each and the buttons wrapped into a stack of unequal widths. */
+    @media (max-width: 1024px) {
+      .hero-in {
+        grid-template-columns: 1fr;
+        gap: 28px;
+        padding-top: 120px
+      }
+    }
+
+    @media(max-width:900px) {
+      .links {
+        display: none
+      }
+
+      .hero-in {
+        grid-template-columns: 1fr;
+        gap: 28px;
+        padding-top: 120px
+      }
+
+      .stats ul {
+        grid-template-columns: 1fr 1fr
+      }
+
+      .stats li:nth-child(3) {
+        border-left: 0
+      }
+
+      /* row divider: drawn by a pseudo-element so it can run past the .wrap padding to both window edges, like the top border */
+      .stats li:nth-child(n+3) {
+        position: relative
+      }
+
+      .stats li:nth-child(n+3)::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: rgb(255 255 255/.12)
+      }
+
+      .stats li:nth-child(3)::before {
+        left: calc(-1 * var(--pad))
+      }
+
+      .stats li:nth-child(4)::before {
+        right: calc(-1 * var(--pad))
+      }
+
+      .about,
+      .grid {
+        grid-template-columns: 1fr
+      }
+
+      .about-sub {
+        font-size: 16px
+      }
+
+    }
+
+    @media(max-width:560px) {
+      .logo .word {
+        font-size: 24px;
+        padding-top: 4px;
+      }
+    }
+
+    /* HERO ON PHONES: keep one message and one action.
+       Kept: headline, the two trust points, the main button, the "free, no obligation" line.
+       Hidden: the eyebrow (the headline already says it), the paragraph (the trust row and the sections below carry it),
+       and the second button (the menu already links to Projects). Stronger bottom fade so the text stays readable. */
+    @media (max-width: 640px) {
+      .hero-in {
+        gap: 0;
+        padding-top: 110px;
+        padding-bottom: 20px
+      }
+
+      .hero-in>div {
+        gap: 12px
+      }
+
+      .hero-in>div+div {
+        margin-top: 16px
+      }
+
+      .hero .badge,
+      .hero .sub,
+      .hero .cta .btn.ghost,
+      .hero h1 br {
+        display: none
+      }
+
+      .hero h1 {
+        font-size: clamp(32px, 8.8vw, 40px);
+        line-height: 1.12;
+        text-wrap: balance
+      }
+
+      .cta {
+        flex-direction: column
+      }
+
+      .cta .btn {
+        width: 100%;
+        justify-content: space-between;
+        padding-left: 18px
+      }
+
+      .micro {
+        font-size: 12px;
+        line-height: 1.35
+      }
+
+      .hero::after {
+        background: linear-gradient(to top, var(--ink) 0, rgb(28 31 36/.92) 30%, rgb(28 31 36/.6) 52%, transparent 78%)
+      }
+    }
+
+    /* VERY NARROW SCREENS (about 400px and below, down to ~260px): nothing may be wider than the window.
+       Grid columns could not shrink below their text, so the stats band and the Before/After header pushed past the edge. */
+    @media (max-width: 900px) {
+      .stats ul {
+        grid-template-columns: repeat(2, minmax(0, 1fr))
+      }
+    }
+
+    @media (max-width: 400px) {
+      .stats li {
+        padding: 24px 8px
+      }
+
+      .stats .num {
+        font-size: clamp(30px, 11vw, 38px)
+      }
+
+      .stats p {
+        font-size: 11px;
+        letter-spacing: .04em;
+        overflow-wrap: break-word
+      }
+
+      .ba {
+        grid-template-columns: minmax(0, 1fr)
+      }
+
+      .ba>.sec-head,
+      .ba>.ba-nav,
+      .ba>.pairs {
+        grid-column: 1;
+        min-width: 0
+      }
+
+      .ba>.sec-head {
+        grid-row: 1
+      }
+
+      .ba>.ba-nav {
+        grid-row: 2;
+        justify-self: end
+      }
+
+      .ba>.pairs {
+        grid-row: 3
+      }
+
+      .ba .sec-head h2 {
+        overflow-wrap: anywhere
+      }
+    }
+
+    @media (max-width: 300px) {
+      .stats li {
+        padding-inline: 4px
+      }
+
+      .stats p {
+        font-size: 10px;
+        letter-spacing: .02em
+      }
+    }
+
+    /* PARALLAX: the script moves the <img> with the independent translate / scale properties, so the clip-path reveal on
+       the box, the card hover zoom (transform) and the before/after clip are all untouched. The frame clips the overscan. */
+    .px-img {
+      will-change: translate;
+      scale: var(--px-s, 1.11)
+    }
+
+    /* ===== BUTTON HOVER: fill + roll (locked) =====
+       The <html> tag carries a static class "bx"; it is only there to raise these selectors above .btn.dark and friends.
+       The script wraps the label text in <span class="bx-l"> and, for the phone button, the icon in <span class="bx-ic">.
+       Both are exactly 34px tall, the band between the button's vertical padding (6px, or 4px in the 44px header buttons), with
+       overflow clipped, so they are the clip box. Inside, the real text is transparent (it only sizes the box) and the label is drawn
+       by the span's ::before (the visible copy) and ::after (the copy waiting below), from its data-label. Because the clip box does
+       not move and the copies only translate, the copies start to disappear as soon as they reach the padding area and nothing
+       can drift out of step. The arrow square (<i>) is its own 34px clip box. All of them leave at the same line.
+       On hover the arrow square's fill grows until it floods the whole button and the label and arrow roll up, each replaced by
+       a copy entering from below. The leaving copy keeps its colour and the entering copy is already white: no colour, opacity or
+       blur transition anywhere.
+       Primary = arrow square (.bx-p). Secondary = ghost, no icon (.bx-s). Phone = icon + number (.bx-ph).
+       Secondary and phone buttons keep the header phone button's hover as it is (a background fades in); only the roll
+       is added on top. */
+    svg.bx-2 {
+      display: none
+    }
+
+    html.bx {
+      --bx-ease: cubic-bezier(.65, 0, .35, 1);
+      --bx-d: .4s
+    }
+
+    html.bx .bx-p {
+      --bx-c: var(--ink);
+      --bx-fill: var(--accent)
+    }
+
+    html.bx .bx-p.dark {
+      --bx-c: #fff
+    }
+
+    html.bx .cta-sec .bx-p {
+      --bx-fill: var(--ink)
+    }
+
+    /* ===== CTA INVERSION =====
+       The accent leaves the arrow square and becomes the button's own ground; the square turns white and takes the
+       arrow with it. Hover is the same mechanism as before - the square still floods the button - but the flood is
+       white now, so the label and the arrow roll into ink instead of into white.
+       Scoped to .bar / .menu / .hero and .cta-sec: the two .btn.dark buttons mid-page keep ink ground + accent chip.
+       The `html.bx` prefix is what lifts these above html.bx .bx-p (0,2,1) and html.bx .cta-sec .bx-p (0,3,1). */
+    html.bx :is(.bar, .menu, .hero) .bx-p {
+      background-color: var(--accent);
+      --bx-c: #fff;
+      --bx-fill: #fff;
+      --bx-hc: var(--ink)
+    }
+
+    html.bx :is(.bar, .menu, .hero) .bx-p i {
+      color: var(--accent)
+    }
+
+    html.bx :is(.bar, .menu, .hero) .bx-p i>svg.bx-2 {
+      color: var(--ink)
+    }
+
+    html.bx .cta-sec .bx-p {
+      background-color: var(--ink);
+      --bx-c: #fff;
+      --bx-fill: #fff;
+      --bx-hc: var(--ink)
+    }
+
+    html.bx .cta-sec .bx-p i {
+      color: var(--ink)
+    }
+
+    html.bx :is(.bx-s, .bx-ph) {
+      --bx-c: #fff
+    }
+
+    /* the label clip box: 34px band; 3px of side room (padding + equal negative margin) so overflow clipping never trims a glyph */
+    html.bx .bx-l {
+      position: relative;
+      display: block;
+      flex: none;
+      height: 34px;
+      line-height: 34px;
+      white-space: nowrap;
+      padding-inline: 3px;
+      margin-inline: -3px;
+      color: transparent;
+      overflow: hidden;
+      overflow: clip
+    }
+
+    /* ::before = the visible copy, ::after = the copy waiting below. Both pinned to the band's top-left (3px = the side room) */
+    html.bx .bx-l::before,
+    html.bx .bx-l::after {
+      content: attr(data-label);
+      content: attr(data-label) / "";
+      position: absolute;
+      left: 3px;
+      top: 0;
+      height: 34px;
+      line-height: 34px;
+      white-space: nowrap;
+      pointer-events: none;
+      transition: transform var(--bx-d) var(--bx-ease)
+    }
+
+    html.bx .bx-l::before {
+      color: var(--bx-c)
+    }
+
+    html.bx .bx-l::after {
+      color: var(--bx-hc, #fff);
+      transform: translateY(34px)
+    }
+
+    html.bx :is(.bx-p, .bx-s, .bx-ph):is(:hover, :focus-visible) .bx-l::before {
+      transform: translateY(-34px)
+    }
+
+    html.bx :is(.bx-p, .bx-s, .bx-ph):is(:hover, :focus-visible) .bx-l::after {
+      transform: none
+    }
+
+    /* phone icon: same 34px band */
+    html.bx .bx-ic {
+      position: relative;
+      display: block;
+      flex: none;
+      width: 22px;
+      height: 34px;
+      overflow: hidden;
+      overflow: clip
+    }
+
+    html.bx .bx-ic>svg {
+      display: block;
+      width: 22px;
+      height: 34px;
+      transition: transform var(--bx-d) var(--bx-ease)
+    }
+
+    html.bx .bx-ic>svg.bx-2 {
+      position: absolute;
+      inset: 0;
+      transform: translateY(34px)
+    }
+
+    html.bx .bx-ph:is(:hover, :focus-visible) .bx-ic>svg:not(.bx-2) {
+      transform: translateY(-34px)
+    }
+
+    html.bx .bx-ph:is(:hover, :focus-visible) .bx-ic>svg.bx-2 {
+      transform: none
+    }
+
+    /* arrow: the square (<i>) clips, both arrows are placed inside it */
+    html.bx .bx-p i {
+      position: relative;
+      overflow: hidden
+    }
+
+    html.bx .bx-p i>svg {
+      position: absolute;
+      inset: 0;
+      margin: auto;
+      transition: transform var(--bx-d) var(--bx-ease)
+    }
+
+    html.bx .bx-p i>svg.bx-2 {
+      display: block;
+      transform: translateY(34px)
+    }
+
+    html.bx .bx-p:is(:hover, :focus-visible) i>svg:not(.bx-2) {
+      transform: translateY(-34px)
+    }
+
+    html.bx .bx-p:is(:hover, :focus-visible) i>svg.bx-2 {
+      transform: none
+    }
+
+    /* the square's colour moves from <i> into the button's own background, a 34px square pinned where the square is
+       (1px border + --btn-pad from the right edge, centred vertically), which grows to the full box on hover */
+    html.bx .bx-p i {
+      background: transparent
+    }
+
+    html.bx .bx-p {
+      background-image: linear-gradient(var(--bx-fill), var(--bx-fill));
+      background-repeat: no-repeat;
+      background-origin: border-box;
+      background-clip: border-box;
+      background-size: 34px 34px;
+      background-position: calc(100% - 1px - var(--btn-pad)) 50%;
+      transition: background-size var(--bx-d) var(--bx-ease), background-position var(--bx-d) var(--bx-ease)
+    }
+
+    /* The position keeps 100% on the horizontal axis and only the px offset changes (the square's inset -> 1px past the edge), so the
+       square's RIGHT edge is anchored to the button's right edge and never moves left: it grows leftward from the arrow's own
+       edge (and 1px of overscan on every side so a fractional button width never leaves a hairline). Interpolating 100% -> 50%
+       instead would drag the right edge across the arrow halfway through, which is what cut the white arrow in half. */
+    html.bx .bx-p:is(:hover, :focus-visible) {
+      background-size: calc(100% + 2px) calc(100% + 2px);
+      background-position: calc(100% + 1px) 50%
+    }
+
+    /* No transitions until the script has tagged the buttons AND a frame has painted in their final state (html.bx-on).
+       Tagging swaps the arrow square from the <i>'s own background to the button's 34px gradient; without this gate the browser
+       animates that gradient from its default spot (left edge) to the right, which is visible on the header button
+       because it has no fade-in to hide it. */
+    html.bx:not(.bx-on) :is(.bx-p, .bx-s, .bx-ph),
+    html.bx:not(.bx-on) :is(.bx-p, .bx-s, .bx-ph) *,
+    html.bx:not(.bx-on) .bx-l::before,
+    html.bx:not(.bx-on) .bx-l::after {
+      transition: none !important
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+
+      html.bx :is(.bx-p, .bx-s, .bx-ph),
+      html.bx :is(.bx-p, .bx-s, .bx-ph) *,
+      html.bx .bx-l::before,
+      html.bx .bx-l::after {
+        transition: none !important
+      }
+    }
+
+    @media(prefers-reduced-motion:reduce) {
+      html {
+        scroll-behavior: auto
+      }
+
+      .slide,
+      .slide .ph,
+      .card .ph img,
+      .btn.ghost,
+      .btn.phone {
+        transition: none !important
+      }
+
+    }
+
+    /* LENIS SMOOTH SCROLL (library styles, required) */
+    html.lenis,
+    html.lenis body {
+      height: auto
+    }
+
+    .lenis.lenis-smooth {
+      scroll-behavior: auto !important
+    }
+
+    .lenis.lenis-smooth [data-lenis-prevent] {
+      overscroll-behavior: contain
+    }
+
+    .lenis.lenis-stopped {
+      overflow: hidden
+    }
+
+    .lenis.lenis-scrolling iframe {
+      pointer-events: none
+    }
+
+    /* ===== INTER: body copy, labels, subtitles, small print =====
+       Display type (h1-h3, nav, buttons, numbers, wordmark, FAQ questions) stays in Geist.
+       Keep this list in sync with the split-text SEL list further up. */
+    :is(.badge, .trust, .sub, .micro, .stats p, .label, .about-sub, .sign .role,
+      .services .intro, .card p, .more p, .step p, .sec-head .sum, .sh-r p, .sub2,
+      .tag, .pair figcaption, .rv blockquote p, .who2 span, .a p, .cta-sub, .cta-micro,
+      .ft-brand p, .ft-col h3, .ft-col li, .ft-legal) {
+      font-family: var(--f2)
+    }
+
+    /* reading weight for running text; the labels above keep their own 500 */
+    :is(.sub, .micro, .trust, .about-sub, .services .intro, .card p, .more p, .step p,
+      .sec-head .sum, .sh-r p, .sub2, .rv blockquote p, .who2 span, .a p, .cta-sub,
+      .cta-micro, .ft-brand p, .ft-col li, .ft-legal) {
+      font-weight: 450
+    }
+
+    /* ===== TEXT SELECTION + KEYBOARD (TAB) FOCUS, in the site colours =====
+       Selection: accent block with white text on the white/cream/ink surfaces, ink block on the accent
+       call-to-action band (accent on accent would vanish). Same colours inside the estimate modal.
+       Tab focus on smaller screens (<= 900px, where the layout is the stacked one): :focus-visible only fires for keyboard
+       / switch / assistive navigation, never for a tap or mouse click, so touch users see no ring.
+       --tab is the ring colour for the surface the element sits on: accent on light, white on ink and on the
+       accent band. The tint behind plain links is the same colour at low alpha. */
+    :root {
+      --sel-bg: var(--accent);
+      --sel-fg: #fff;
+      --tab: var(--accent);
+      --tab-bg: rgb(217 57 23/.12)
+    }
+
+    :is(header, .hero, .masthead, .ft, .menu, .tot) {
+      --tab: #fff;
+      --tab-bg: rgb(255 255 255/.16)
+    }
+
+    .est {
+      --tab: var(--accent);
+      --tab-bg: rgb(217 57 23/.22)
+    }
+
+    .cta-sec {
+      --sel-bg: var(--ink);
+      --sel-fg: #fff;
+      --tab: #fff;
+      --tab-bg: rgb(255 255 255/.2)
+    }
+
+    /* tap / tab highlight: the browser's default light-blue flash is replaced by the surface's tint (accent on light, white on ink,
+       white on the accent band). The FAQ question rows also hold the tint while keyboard-focused. */
+    * {
+      -webkit-tap-highlight-color: var(--tab-bg)
+    }
+
+    .q:focus-visible {
+      background: var(--tab-bg);
+      outline-offset: -3px
+    }
+
+    /* the call-to-action buttons have their own hover/press animation, so they get no tap tint */
+    .btn,
+    .btn * {
+      -webkit-tap-highlight-color: transparent
+    }
+
+    ::selection {
+      background: var(--sel-bg);
+      color: var(--sel-fg);
+      text-shadow: none
+    }
+
+    ::-moz-selection {
+      background: var(--sel-bg);
+      color: var(--sel-fg);
+      text-shadow: none
+    }
+
+    /* the accent-coloured words (.hl, stars, footer dot) keep a readable colour while selected */
+    :is(.hl, .stars, .ft-word b)::selection {
+      color: var(--sel-fg)
+    }
+
+    /* images never show the selection tint (Chrome/Safari paint it over a selected <img>), and they can't be picked up by a drag-select */
+    :is(img, picture, video, canvas, svg)::selection,
+    :is(img, picture, video, canvas, svg) ::selection {
+      background: transparent
+    }
+
+    :is(img, picture, video, canvas)::-moz-selection {
+      background: transparent
+    }
+
+    img,
+    picture,
+    video,
+    canvas {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-user-drag: none
+    }
+
+    .cta-sec ::selection {
+      background: var(--ink);
+      color: #fff
+    }
+
+    .cta-sec ::-moz-selection {
+      background: var(--ink);
+      color: #fff
+    }
+
+    @media (max-width: 900px) {
+      :root :focus-visible {
+        outline: 3px solid var(--tab);
+        outline-offset: 3px
+      }
+
+      /* plain text links (footer, FAQ, body copy) get a soft tint so the focused link reads as a block, not just a line */
+      :root :where(p, li, dd, .ft-legal, .ft-top) a:not([class]):focus-visible {
+        background: var(--tab-bg);
+        box-shadow: 0 0 0 3px var(--tab-bg);
+        outline-offset: 3px
+      }
+
+      /* mobile menu: the accent plane that wipes in on hover also marks the tab position; the ring goes inside the row, in white */
+      .menu nav a:focus-visible {
+        outline: 3px solid #fff;
+        outline-offset: -6px
+      }
+
+      .menu nav a:focus-visible::before {
+        clip-path: inset(0)
+      }
+
+      /* form controls in the modal: keep the field border in the accent and add a thicker ring */
+      .est :is(input, textarea, button, [tabindex]):focus-visible {
+        outline-width: 3px;
+        outline-offset: 2px
+      }
+
+      .f input:focus-visible,
+      .f textarea:focus-visible {
+        background: var(--tab-bg)
+      }
+
+      /* before/after slider handle */
+      [role="slider"]:focus-visible {
+        outline-offset: 4px
+      }
+    }
+
+    @media (max-width: 900px) and (prefers-reduced-motion: reduce) {
+      .menu nav a:focus-visible::before {
+        transition: none !important
+      }
+    }
+
+    /* ===== HERO LAYOUT: STACKED (tablet and phone, <= 900px, always on) =====
+       Desktop is never touched. Instead of a full-bleed photo that is cropped to a tall, narrow window (and then covered by
+       the text and a heavy overlay), the photo gets its own box at the top, --hm tall, and the text block sits underneath it
+       on the ink background. The media becomes an ordinary absolutely placed box inside the hero (no longer fixed behind it),
+       so it scrolls away with the page. A short fade at the bottom of the photo blends it into the text area; there is no
+       overlay over the picture itself. --hm is roughly a 4:5 box (128vw) but never more than 66% of the screen height, so the
+       text block always starts in the first screen. The video and the slider share the box: below 900px .hero-video stops
+       being a full-viewport fixed layer and becomes the same --hm-tall frame, with the footage cropped to it. */
+    @media (max-width: 900px) {
+
+      /* FALLBACK ONLY. The band is measured by the script at the bottom of the page ("one screen minus the
+         text block") and written over this as an inline --hm on .hero; these terms only decide what the page
+         looks like if that script never runs. They keep the old reserve so the block still fits the window:
+         128vw is the 4:5 crop, 66svh stops the picture eating a tall screen, and the last term leaves room
+         for a headline and a button. The video's file, object-fit and playback are untouched at every width -
+         only the height of the frame it is cropped into moves. */
+      :root {
+        --hm: max(240px, min(128vw, 66svh, calc(100svh - 290px)))
+      }
+
+      .hero {
+        min-height: 100svh;
+        align-items: flex-end;
+        background: var(--ink)
+      }
+
+      .slide {
+        position: absolute;
+        inset: 0 0 auto 0;
+        width: 100%;
+        height: var(--hm);
+        overflow: hidden
+      }
+
+      .hero-video {
+        position: absolute;
+        inset: 0 0 auto 0;
+        width: 100%;
+        height: var(--hm);
+        overflow: hidden
+      }
+
+      .hero-video video {
+        object-fit: cover
+      }
+
+      .hero::after {
+        inset: 0 0 auto 0;
+        height: var(--hm);
+        background: linear-gradient(to top, var(--ink) 0, rgb(28 31 36/0) 30%)
+      }
+
+      /* The text block is pinned to the bottom of the hero, the same way the desktop one is, and the band above
+         it is then stretched down to meet it - the script at the bottom of the page writes --hm as "hero height
+         minus the text block", so there is no dead ink between the picture and the headline at any window height.
+         Everything that draws the band reads the same variable (.slide, .hero-video, .hero::after), which is why
+         the video and the photo slider stay in step. The value below is only the pre-JS fallback. */
+      .hero-in {
+        padding-top: 0;
+        padding-bottom: 20px
+      }
+    }
+
+    /* The stacked order is fixed: band on top, copy underneath, fade at the band's bottom edge. */
+
+    /* A window wider than 640 brings the paragraph back (it is hidden on phones) but can still be short -
+       a tablet in landscape, a split screen. The text block is then ~140px taller, so the reserve has to
+       grow with it or the last line lands under the fold. Portrait tablets are untouched: 768x1024 never
+       matches this. */
+    @media (min-width: 641px) and (max-width: 900px) and (max-height: 820px) {
+      :root {
+        --hm: max(240px, min(128vw, 66svh, calc(100svh - 440px)))
+      }
+    }
