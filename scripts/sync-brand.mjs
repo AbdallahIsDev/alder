@@ -6,6 +6,7 @@
 // be run standalone: `node scripts/sync-brand.mjs`.
 // Reads NO env, opens NO network connection, touches NO database.
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
@@ -168,7 +169,15 @@ if (logoMatch) {
   // stay for the preview gallery only; the function never reads assets/ at
   // run time, it reads this field via lib/brand.js.
   const onDarkB64 = fs.readFileSync(path.join(LOGO_DIR, onDarkFile)).toString('base64');
-  logo = { onDark: '/assets/email/' + onDarkFile, onLight: '/assets/email/' + onLightFile, height: 36, onDarkB64 };
+  /* The URL carries the first 8 hex of the file's own hash. The file name never
+     changes, so without this a browser that cached the old mark keeps showing it
+     after a re-render. A query string is ignored by the static route. */
+  const logoSha = (file) => createHash('sha256').update(fs.readFileSync(path.join(LOGO_DIR, file))).digest('hex').slice(0, 8);
+  logo = {
+    onDark: '/assets/email/' + onDarkFile + '?v=' + logoSha(onDarkFile),
+    onLight: '/assets/email/' + onLightFile + '?v=' + logoSha(onLightFile),
+    height: 36, onDarkB64,
+  };
 }
 
 /* ---------- font faces: only .woff2 that exist on disk, max 4 ---------- */
