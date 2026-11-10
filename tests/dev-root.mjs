@@ -66,8 +66,16 @@ export function createDevRoot({ sourceRoot, name = 'dev-root', debugDir = '_debu
  * locked handle, a permission error), removing the root could follow it into the
  * real api/, lib/ or node_modules/ — so it refuses and says so.
  *
+ * The delete itself is retried briefly and then given up on. Windows keeps a
+ * directory handle for a moment after the dev server is killed, and an EBUSY
+ * thrown from cleanup would fail a run that already passed every assertion.
+ *
  * @returns {{removed: boolean, reason: string|null, survivors: number}}
  */
+const RM_TRIES = 5;
+const RM_WAIT_MS = 100;
+const sleepSync = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch {} };
+
 export function removeDevRoot(dir) {
   if (!dir || !fs.existsSync(dir)) return { removed: false, reason: 'missing', survivors: 0 };
 
@@ -88,6 +96,18 @@ export function removeDevRoot(dir) {
     return { removed: false, reason: 'links-remain', survivors: survivors.length };
   }
 
-  fs.rmSync(dir, { recursive: true, force: true });
-  return { removed: true, reason: null, survivors: 0 };
+  for (let attempt = 1; attempt <= RM_TRIES; attempt++) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { removed: true, reason: null, survivors: 0 };
+    } catch (e) {
+      if (attempt === RM_TRIES) {
+        /* Names only, and never the error text: it carries an absolute path. */
+        console.log(`WARN  dev-root  not removed: ${(e && e.code) || 'error'} (a leftover root is harmless)`);
+        return { removed: false, reason: 'busy', survivors: 0 };
+      }
+      sleepSync(RM_WAIT_MS);
+    }
+  }
+  return { removed: false, reason: 'busy', survivors: 0 };
 }
