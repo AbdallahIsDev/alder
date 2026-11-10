@@ -607,7 +607,7 @@
       inset: 0;
       z-index: 1;
       pointer-events: none;
-      background: linear-gradient(to top, var(--ink) 0, var(--ink) 10%, rgb(28 31 36 / .75) 25%, transparent 40%)
+      background: linear-gradient(to top, var(--ink) 10%, var(--ink) 15%, rgb(28 31 36 / .75) 25%, transparent 35%)
     }
 
     .hero-in {
