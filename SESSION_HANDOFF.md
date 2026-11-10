@@ -352,7 +352,7 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-10 | `test-isolation` | `c87d1a0` | The runner clears the canary business's rate-limit rows after the canary proves the host (exact key, max 100, never on production or an unknown host); `tests/suite-list` fails on a duplicate registration; `npm run test:port-guard` is the required check when `tests/run.mjs` changes | PR #17 draft |
 | 2026-11-10 | `test-isolation` | `5639d3c` | `removeDevRoot` re-scans after unlinking and refuses the recursive delete if a link survived; one fixed WARN line for every canary-reset skip reason except none; CI proposal recorded | PR #17 draft |
 | 2026-11-10 | `client-config` | `af4cbc8` | Alder's page is built from `clients/alder.json`; `--client`/`CLIENT` selects one; the build refuses a missing, invalid, incomplete or unknown-key file with one line; a sample client builds clean; Alder's output is byte-identical | Draft PR |
-| 2026-11-10 | `client-copy` | `HEAD` | The rest of the page copy (66 blocks) moved into the client file; the template BIZ is now a key list with empty values; tag-bearing blocks split around the tag; slugs validated; `sync-brand` reads the client file | Draft PR |
+| 2026-11-10 | `client-copy` | `876ec81` | The rest of the page copy (66 blocks) moved into the client file; the template BIZ is now a key list with empty values; tag-bearing blocks split around the tag; slugs validated; `sync-brand` reads the client file | Draft PR |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |
