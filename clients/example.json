@@ -112,5 +112,8 @@
     "servicesTitleA": "Sample ways we ",
     "servicesTitleB": "sample care",
     "servicesTitleC": " of a sample roof"
-  }
+  },
+  "domain": "https://northline.example",
+  "lastmod": "2026-01-01",
+  "sender": "alerts@northline.example"
 }

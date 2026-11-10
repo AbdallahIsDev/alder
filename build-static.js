@@ -96,13 +96,23 @@ if (extraBizKeys.length) {
   fail('clients/' + opt.client + '.json biz has unknown key(s): ' + extraBizKeys.join(', ')
     + '. Remove them or add them to the template BIZ.');
 }
-const allowedExtra = new Set(['copy']);
+const allowedExtra = new Set(['copy', 'domain', 'lastmod', 'sender']);
 const unknownKeys = Object.keys(clientFile).filter(k => k !== 'slug' && k !== 'biz' && !allowedExtra.has(k));
 if (unknownKeys.length) fail('clients/' + opt.client + '.json has unknown key(s): ' + unknownKeys.join(', ') + '.');
 const copy = clientFile.copy && typeof clientFile.copy === 'object' ? clientFile.copy : {};
 const copyKeys = Object.keys(copy);
 const clash = copyKeys.filter(k => k in template);
 if (clash.length) fail('clients/' + opt.client + '.json copy key(s) collide with BIZ: ' + clash.join(', ') + '.');
+
+/* A copy key no token uses is a typo or a leftover: it would sit in the file
+   looking like it does something. The reverse (a token with no key) already fails. */
+{
+  const used = new Set([...html.matchAll(/\{\{(\w+)\}\}/g)].map(m => m[1]));
+  const unused = copyKeys.filter(k => !used.has(k));
+  if (unused.length) {
+    fail('clients/' + opt.client + '.json copy key(s) not used by the page: ' + unused.join(', ') + '.');
+  }
+}
 
 /* ---- merge client overrides ---- */
 let biz = Object.assign({}, template, clientFile.biz, copy);
@@ -236,7 +246,16 @@ if (survivors.length) fail('placeholder tokens survived the build:\n' + survivor
    sync-brand.mjs writes lib/brand.generated.json and assets/email/*.png from the
    page's :root block and logo, so the emails always match the landing page. */
 import { spawnSync } from 'node:child_process';
-const sync = spawnSync(process.execPath, [path.join(__dirname, 'scripts', 'sync-brand.mjs')], { cwd: __dirname, stdio: 'inherit', env: { ...process.env, CLIENT: opt.client } });
+const sync = spawnSync(process.execPath, [path.join(__dirname, 'scripts', 'sync-brand.mjs')], {
+  cwd: __dirname, stdio: 'inherit',
+  env: {
+    ...process.env,
+    CLIENT: opt.client,
+    /* Only the default client writes the tracked brand file. A sample build goes
+       to _debug/ so it cannot change what the next commit contains. */
+    ...(opt.client === 'alder' ? {} : { BRAND_OUT: path.join(__dirname, '_debug', 'brand-' + opt.client + '.json') }),
+  },
+});
 if (sync.status !== 0) fail('sync-brand.mjs failed; not building with stale brand tokens.');
 
 /* ---- 9b. phone calling-code table, from libphonenumber-js max metadata ----
@@ -285,11 +304,30 @@ if (fs.existsSync(assets) && path.resolve(outDir) !== path.dirname(path.resolve(
   // it cpSync recreates the link and Windows refuses (EPERM).
   fs.cpSync(assets, path.join(outDir, 'assets'), { recursive: true, dereference: true }); copied = ' (assets/ copied)';
 }
-/* root files the deployment serves next to index.html */
-['robots.txt', 'sitemap.xml'].forEach(f => {
-  const src = path.join(path.dirname(path.resolve(opt.input)), f);
-  if (fs.existsSync(src) && path.resolve(outDir) !== path.dirname(path.resolve(opt.input))) fs.copyFileSync(src, path.join(outDir, f));
-});
+/* robots.txt and sitemap.xml are generated from the client's own address, in the
+   same CRLF form the static files used. Nothing here is shared between clients. */
+{
+  const domain = String(clientFile.domain || '').replace(/\/+$/, '');
+  if (!/^https:\/\/[a-z0-9.-]+$/i.test(domain)) {
+    fail('clients/' + opt.client + '.json domain must be https://<host> with no trailing slash.');
+  }
+  const lastmod = String(clientFile.lastmod || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(lastmod)) {
+    fail('clients/' + opt.client + '.json lastmod must be YYYY-MM-DD.');
+  }
+  const robots = 'User-agent: *\r\nAllow: /\r\n\r\nSitemap: ' + domain + '/sitemap.xml\r\n';
+  const sitemap = '<?xml version="1.0" encoding="UTF-8"?>\r\n'
+    + '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\r\n'
+    + '  <url>\r\n'
+    + '    <loc>' + domain + '/</loc>\r\n'
+    + '    <lastmod>' + lastmod + '</lastmod>\r\n'
+    + '    <changefreq>weekly</changefreq>\r\n'
+    + '    <priority>1.0</priority>\r\n'
+    + '  </url>\r\n'
+    + '</urlset>\r\n';
+  fs.writeFileSync(path.join(outDir, 'robots.txt'), robots);
+  fs.writeFileSync(path.join(outDir, 'sitemap.xml'), sitemap);
+}
 
 /* ---- 10. the web app manifest, generated from BIZ ----
    site.webmanifest is a template: name, short_name and description are BIZ values, so the same
