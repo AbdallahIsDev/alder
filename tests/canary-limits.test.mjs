@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { loadEnv, isTestEnv, readEnvFile } from '../lib/env.js';
-import { canClearLimits, clearCanaryLimits } from './canary-limits.mjs';
+import { canClearLimits, clearCanaryLimits, limitLine } from './canary-limits.mjs';
 
 loadEnv();
 /* This suite writes rate_limits rows. It must never run against production, and
@@ -46,6 +46,23 @@ const line = (ok, id, what, d) => {
   });
   line(bad.length === 0, 'L1', 'the host gate refuses production and unknown hosts',
     bad.length ? `wrong: ${bad.length}` : `${cases.length} cases`);
+}
+
+/* L4/L5: the one line the runner prints. */
+{
+  const cleared = limitLine({ cleared: 2, skipped: null });
+  const none = limitLine({ cleared: 0, skipped: 'none' });
+  const prod = limitLine({ cleared: 0, skipped: 'production' });
+  const many = limitLine({ cleared: 0, skipped: 'too-many' });
+  const ok = cleared === 'runner  canary rate limits cleared: 2 row(s)'
+    && none === 'runner  canary rate limits cleared: 0 row(s)'
+    && prod === 'WARN  runner  canary rate limits not cleared: production'
+    && many === 'WARN  runner  canary rate limits not cleared: too-many';
+  line(ok, 'L4', 'none is not a warning; every other skip is', `prod=${prod.startsWith('WARN')} none=${none.startsWith('runner')}`);
+
+  const all = [cleared, none, prod, many].join('\n');
+  const leaks = /https?:|supabase|\.co\b|[A-Za-z0-9_-]{20,}/.test(all);
+  line(!leaks, 'L5', 'the line carries no host, key or path', `leaks=${leaks}`);
 }
 
 const host = process.env.SUPABASE_URL;

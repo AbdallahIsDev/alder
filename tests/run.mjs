@@ -20,7 +20,7 @@ import { ALDER_DEMO, isFixtureLead, fetchAllRows } from './helpers.mjs';
 import { FIXTURE_ID_BASE } from './fixture-ids.mjs';
 import { createDevRoot, removeDevRoot } from './dev-root.mjs';
 import { countSkips } from './skip-count.mjs';
-import { clearCanaryLimits } from './canary-limits.mjs';
+import { clearCanaryLimits, limitLine } from './canary-limits.mjs';
 import { suiteRunGate } from './gate.mjs';
 import { freeBytes, diskGate, floorFromEnv } from './disk.mjs';
 
@@ -36,6 +36,7 @@ const DEFAULT_SUITES = [
   { file: 'tests/network-guard.test.mjs', needsHttp: false },
   { file: 'tests/isolation.test.mjs', needsHttp: false },
   { file: 'tests/build-linked-assets.test.mjs', needsHttp: false },
+  { file: 'tests/dev-root-removal.test.mjs', needsHttp: false },
   { file: 'tests/build-cleanup.test.mjs', needsHttp: false },
   { file: 'tests/build-test-probe.test.mjs', needsHttp: false },
   { file: 'tests/startup-sweep.test.mjs', needsHttp: false },
@@ -454,8 +455,7 @@ try {
           host: process.env.SUPABASE_URL,
           prodHost: readEnvFile('.env').SUPABASE_URL,
         });
-        if (cleared.skipped) out(`runner  canary rate limits not cleared (${cleared.skipped})`);
-        else out(`runner  canary rate limits cleared: ${cleared.cleared} row(s)`);
+        out(limitLine(cleared));
       }
     }
     await fakes.tg.reset();

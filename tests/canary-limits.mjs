@@ -25,6 +25,18 @@ export function canClearLimits({ host, prodHost }) {
 }
 
 /**
+ * The one line the runner prints. `none` is not a warning — there was simply
+ * nothing to clear — and every other skip reason is. Names only: the reasons are
+ * fixed tokens, never a host or a key.
+ */
+export function limitLine({ cleared, skipped }) {
+  if (!skipped || skipped === 'none') {
+    return `runner  canary rate limits cleared: ${cleared} row(s)`;
+  }
+  return `WARN  runner  canary rate limits not cleared: ${skipped}`;
+}
+
+/**
  * Delete the rate-limit rows for one business. Returns the number removed.
  * Never throws: a failure here must not take down a run that has already passed
  * its canary.

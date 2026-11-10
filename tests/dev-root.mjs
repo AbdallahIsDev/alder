@@ -61,16 +61,33 @@ export function createDevRoot({ sourceRoot, name = 'dev-root', debugDir = '_debu
 }
 
 /**
- * Remove a dev root. Junctions are unlinked first: a recursive delete would
- * follow them into the real api/, lib/ and node_modules/.
+ * Remove a dev root. Junctions are unlinked first, then the directory is scanned
+ * again: a recursive delete is only safe when no link survived. If one did (a
+ * locked handle, a permission error), removing the root could follow it into the
+ * real api/, lib/ or node_modules/ — so it refuses and says so.
+ *
+ * @returns {{removed: boolean, reason: string|null, survivors: number}}
  */
 export function removeDevRoot(dir) {
-  if (!dir || !fs.existsSync(dir)) return;
+  if (!dir || !fs.existsSync(dir)) return { removed: false, reason: 'missing', survivors: 0 };
+
   for (const entry of fs.readdirSync(dir)) {
     const p = path.join(dir, entry);
     let stat;
     try { stat = fs.lstatSync(p); } catch { continue; }
     if (stat.isSymbolicLink()) { try { fs.unlinkSync(p); } catch {} }
   }
+
+  const survivors = fs.readdirSync(dir).filter((entry) => {
+    try { return fs.lstatSync(path.join(dir, entry)).isSymbolicLink(); } catch { return false; }
+  });
+
+  if (survivors.length) {
+    /* Names only: a path here would leak the machine's layout into test output. */
+    console.log(`WARN  dev-root  not removed: ${survivors.length} link(s) still present`);
+    return { removed: false, reason: 'links-remain', survivors: survivors.length };
+  }
+
   fs.rmSync(dir, { recursive: true, force: true });
+  return { removed: true, reason: null, survivors: 0 };
 }
