@@ -10,6 +10,22 @@ Related: `docs/ONBOARDING.md` (the long version of step 1), `docs/TEST_PROJECT.m
 
 ---
 
+## 0. Add a client page
+
+Every client value comes from one file: `clients/<slug>.json`. It holds a `biz`
+object with the same keys the page template defines, and an optional `copy` object
+for the text blocks that were moved out of the page.
+
+1. Copy `clients/alder.json` to `clients/<slug>.json` and change the values.
+2. Build it: `npm run build -- --client <slug>` or `CLIENT=<slug> npm run build`.
+   The default is `alder`.
+3. The build refuses, with one line, if the file is missing, is not valid JSON, is
+   missing a key, or carries a key the template does not know. It never writes a
+   half-built page.
+
+`clients/example.json` is a sample with fake values. It exists so the second-client
+test has something to build.
+
 ## 1. Onboard a business
 
 The full walkthrough is `docs/ONBOARDING.md`. The short version:

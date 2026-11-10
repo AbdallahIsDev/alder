@@ -37,10 +37,11 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /* ---- arguments ---- */
-const args = process.argv.slice(2), opt = { input: null, config: null, out: null };
+const args = process.argv.slice(2), opt = { input: null, config: null, out: null, client: null };
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a === '--config') opt.config = args[++i];
+  else if (a === '--client') opt.client = args[++i];
   else if (a === '--out') opt.out = args[++i];
   else if (a === '-h' || a === '--help') { console.log(fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('*/')[0].replace(/^[^\n]*\n/, '')); process.exit(0); }
   else if (a.startsWith('--')) fail('Unknown option ' + a);
@@ -65,8 +66,42 @@ let template;
 try { template = vm.runInNewContext('(' + lit[1] + ')', Object.create(null), { timeout: 1000 }); }
 catch (e) { fail('The BIZ object does not parse: ' + e.message); }
 
+/* ---- the client file: every client value comes from clients/<slug>.json ---- */
+opt.client = String(opt.client || process.env.CLIENT || 'alder').trim();
+const clientPath = path.join(__dirname, 'clients', opt.client + '.json');
+if (!fs.existsSync(clientPath)) {
+  fail('clients/' + opt.client + '.json not found. Pass --client <slug> or set CLIENT=<slug>.');
+}
+let clientFile;
+try { clientFile = JSON.parse(fs.readFileSync(clientPath, 'utf8')); }
+catch (e) { fail('clients/' + opt.client + '.json is not valid JSON: ' + e.message); }
+if (!clientFile || typeof clientFile !== 'object' || !clientFile.biz || typeof clientFile.biz !== 'object') {
+  fail('clients/' + opt.client + '.json needs a "biz" object.');
+}
+
+/* Every template key must be present, so no value can silently fall back to the
+   template's client. Unknown keys are a typo, not a feature. */
+const templateKeys = Object.keys(template);
+const missingKeys = templateKeys.filter(k => !(k in clientFile.biz));
+if (missingKeys.length) {
+  fail('clients/' + opt.client + '.json is missing: ' + missingKeys.join(', ')
+    + '. Every key the template defines must be present, or a value would come from another client.');
+}
+const extraBizKeys = Object.keys(clientFile.biz).filter(k => !templateKeys.includes(k));
+if (extraBizKeys.length) {
+  fail('clients/' + opt.client + '.json biz has unknown key(s): ' + extraBizKeys.join(', ')
+    + '. Remove them or add them to the template BIZ.');
+}
+const allowedExtra = new Set(['copy']);
+const unknownKeys = Object.keys(clientFile).filter(k => k !== 'slug' && k !== 'biz' && !allowedExtra.has(k));
+if (unknownKeys.length) fail('clients/' + opt.client + '.json has unknown key(s): ' + unknownKeys.join(', ') + '.');
+const copy = clientFile.copy && typeof clientFile.copy === 'object' ? clientFile.copy : {};
+const copyKeys = Object.keys(copy);
+const clash = copyKeys.filter(k => k in template);
+if (clash.length) fail('clients/' + opt.client + '.json copy key(s) collide with BIZ: ' + clash.join(', ') + '.');
+
 /* ---- merge client overrides ---- */
-let biz = Object.assign({}, template);
+let biz = Object.assign({}, template, clientFile.biz, copy);
 if (opt.config) {
   if (!fs.existsSync(opt.config)) fail('Config file not found: ' + opt.config);
   let over; try { over = JSON.parse(fs.readFileSync(opt.config, 'utf8')); } catch (e) { fail('Config is not valid JSON: ' + e.message); }

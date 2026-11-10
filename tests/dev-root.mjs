@@ -25,7 +25,7 @@ import path from 'node:path';
  * junction is copied as content instead of being recreated as a link (which
  * Windows refuses with EPERM).
  */
-export const LINKED = ['api', 'lib', 'scripts', 'node_modules', 'assets'];
+export const LINKED = ['api', 'lib', 'scripts', 'node_modules', 'assets', 'clients'];
 
 /** Root files the build reads, copied into the root. */
 export const COPIED = ['vercel.json', 'package.json', 'index.html', 'build-static.js'];
