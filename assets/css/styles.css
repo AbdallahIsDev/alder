@@ -3,7 +3,7 @@
       font-style: normal;
       font-weight: 100 900;
       font-display: block;
-      src: url(assets/fonts/geist-var.woff2) format('woff2')
+      src: url(../fonts/geist-var.woff2) format('woff2')
     }
 
     @font-face {
@@ -11,7 +11,7 @@
       font-style: normal;
       font-weight: 100 900;
       font-display: block;
-      src: url(assets/fonts/inter-var.woff2) format('woff2')
+      src: url(../fonts/inter-var.woff2) format('woff2')
     }
 
     :root {

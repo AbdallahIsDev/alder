@@ -12,6 +12,10 @@ import sharp from 'sharp';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PAGE = path.join(ROOT, 'index.html');
+/* The tokens and the @font-face rules moved into their own file on 2026-11-10.
+   Read the CSS when it is there; fall back to the page so an older checkout
+   (before the move) still builds. The logo SVG is still in the page. */
+const CSS = path.join(ROOT, 'assets', 'css', 'styles.css');
 /* A sample build must not overwrite the tracked brand file: build-static points
    this elsewhere for any client but the default. */
 const OUT = process.env.BRAND_OUT
@@ -20,12 +24,13 @@ const OUT = process.env.BRAND_OUT
 const LOGO_DIR = path.join(ROOT, 'assets', 'email');
 
 const page = fs.readFileSync(PAGE, 'utf8');
+const styleText = fs.existsSync(CSS) ? fs.readFileSync(CSS, 'utf8') : page;
 
 function fail(msg) { console.error('sync-brand: ' + msg); process.exit(1); }
 
 /* ---------- read :root variables ---------- */
-const rootBlock = (page.match(/:root\s*\{([\s\S]*?)\}/) || [])[1];
-if (!rootBlock) fail('no :root block in index.html');
+const rootBlock = (styleText.match(/:root\s*\{([\s\S]*?)\}/) || [])[1];
+if (!rootBlock) fail('no :root block in ' + (styleText === page ? 'index.html' : 'assets/css/styles.css'));
 const vars = {};
 for (const line of rootBlock.split(/\r?\n/)) {
   const m = /^\s*(--[a-zA-Z0-9-]+)\s*:\s*([^;\r\n]+);?/.exec(line);
@@ -34,12 +39,14 @@ for (const line of rootBlock.split(/\r?\n/)) {
 
 /* ---------- read @font-face rules ---------- */
 const faces = [];
-for (const m of page.matchAll(/@font-face\s*\{([\s\S]*?)\}/g)) {
+for (const m of styleText.matchAll(/@font-face\s*\{([\s\S]*?)\}/g)) {
   const body = m[1];
   const family = /font-family:\s*['"]([^'"]+)['"]/.exec(body);
   const src = /src:\s*url\(([^)]+)\)/.exec(body);
   if (!family || !src) continue;
-  const file = src[1].replace(/['"]/g, '').replace(/^assets\/fonts\//, '');
+  // The url is relative to the CSS file now ("../fonts/x.woff2"); the set of
+  // files on disk is keyed by the bare name either way.
+  const file = src[1].replace(/['"]/g, '').replace(/^(?:\.\.\/|assets\/)?fonts\//, '');
   faces.push({ family: family[1], weight: 700, style: 'normal', file });
 }
 

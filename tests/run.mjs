@@ -36,6 +36,7 @@ const DEFAULT_SUITES = [
   { file: 'tests/network-guard.test.mjs', needsHttp: false },
   { file: 'tests/isolation.test.mjs', needsHttp: false },
   { file: 'tests/build-linked-assets.test.mjs', needsHttp: false },
+  { file: 'tests/css.test.mjs', needsHttp: false },
   { file: 'tests/client-config.test.mjs', needsHttp: false },
   { file: 'tests/dev-root-removal.test.mjs', needsHttp: false },
   { file: 'tests/build-cleanup.test.mjs', needsHttp: false },
