@@ -474,6 +474,57 @@ try {
     'B12', 'both down: lead saved, one retry per channel', `tg=${tg} mail=${mail} fallback=${fb} tgFailed=${failedTg}`);
 } catch (e) { line(false, 'B12', 'both down', e.message); }
 
+/* ====== B6 — a timeout is "unknown", and the fallback reuses the key ======
+   A send whose answer was lost may have been accepted. Retrying it under a fresh
+   idempotency key is exactly how one alert becomes two, so a timeout is never
+   retried, and the fallback email goes out under the primary attempt's key: the
+   provider then answers 409 and sendMail() reads that as delivered. */
+
+/* B6a: the owner email hangs (status timeout from the 200 ms send budget) and
+   Telegram is down. Nothing may be re-sent to Resend. */
+try {
+  await clean();
+  await control(TG, { mode: '500' });
+  await control(RS, { mode: 'hang_once', hangMs: 2500 });
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const ownerMails = (await requests(RS))
+    .filter((r) => r.path === '/emails' && r.headers && /:owner/.test(String(r.headers['idempotency-key'] || '')));
+  const failed = evs.find((e) => e.kind === 'email_owner_failed');
+  // The Telegram retry is correct (500 is a definite failure); the EMAIL must not
+  // have a second attempt, and must not have one under a different key.
+  const emailFallback = evs.some((e) => (e.kind === 'email_owner_sent' || e.kind === 'email_owner_failed')
+    && e.meta && e.meta.fallback === true);
+  line(res.code === 200 && rows.length === 1 && ownerMails.length === 1 && !emailFallback
+    && !!failed && failed.meta.status === 'timeout',
+    'B6a', 'email timeout: one attempt, nothing re-sent',
+    `ownerMails=${ownerMails.length} emailFallback=${emailFallback} meta=${JSON.stringify(failed && failed.meta)}`);
+} catch (e) { line(false, 'B6a', 'timeout is unknown', e.message); }
+
+/* B6b: both channels fail with a definite status, so the fallback round runs. The
+   second owner email must carry the same Idempotency-Key as the first. */
+try {
+  await clean();
+  await control(TG, { mode: '500' });
+  await control(RS, { mode: 'fail_nth', nth: 1 }); // attempt 1 -> 500, attempt 2 -> ok
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const keys = (await requests(RS))
+    .filter((r) => r.path === '/emails' && r.headers && /:owner/.test(String(r.headers['idempotency-key'] || '')))
+    .map((r) => String(r.headers['idempotency-key']));
+  const sentAgain = evs.some((e) => e.kind === 'email_owner_sent' && e.meta && e.meta.fallback === true);
+  line(res.code === 200 && rows.length === 1 && keys.length === 2 && keys[0] === keys[1]
+    && /:owner$/.test(keys[0]) && sentAgain,
+    'B6b', 'fallback email reuses the primary idempotency key',
+    `keys=${keys.length} same=${keys.length === 2 && keys[0] === keys[1]} sentAgain=${sentAgain}`);
+} catch (e) { line(false, 'B6b', 'fallback key reuse', e.message); }
+
 /* B13: the per-business daily cap applies to the customer auto-reply only.
    Two leads, cap of 1: the second auto-reply is skipped, but its lead is saved
    and the owner still gets both the email and the Telegram alert. */
