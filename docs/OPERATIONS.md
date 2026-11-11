@@ -192,9 +192,12 @@ immediately.
 | `/api/health` → `mail_redirect_active: true` | `MAIL_REDIRECT_TO` is set, in **any** environment | if production, remove it |
 | `/api/health` → `webhook_secret_set: false` | `TELEGRAM_WEBHOOK_SECRET` missing → `/api/tg` answers 503 | set it (§6) |
 | `/api/health` → `salt_set: false` | `IP_HASH_SALT` missing → `/api/lead` answers 500 | set it (§6) |
-| Log line `owner_alert_fallback` | both owner channels failed and each was retried once | check Telegram and Resend |
+| Log line `owner_alert_fallback` | both owner channels failed with a **definite** status and each was retried once | check Telegram and Resend |
 | Log line `autoreply_capped` | the business hit `AUTOREPLY_DAILY_CAP` (default 40) | expected on a flood; raise the cap or the plan |
 | Log line `mail_redirect_active` | first send in production with a redirect configured | remove the redirect |
+| Log line `lead_notify_claim_failed` / `lead_notify_release_failed` | the per-lead notification claim could not be read or cleared; the alert still went out (the claim fails open) | usually a Supabase blip; repeated lines mean the `rate_limits` table is unreachable |
+| `tg_failed` with `meta.abandoned` | the notification round hit its 6 s deadline; N phones never answered and were left to their own 3 s timeout | phones are slow or many; see §4c |
+| `email_owner_failed` with `meta.status: "timeout"` | Resend did not answer inside the 3 s send budget — **unknown**, not failed | not retried on purpose (§4c); check Resend before assuming the email was lost |
 
 **Who receives what.** Every message carries only the counts of the business that
 receives it. A business with status `demo` is the operator's own: it also gets the
@@ -207,6 +210,67 @@ one message per run, not two — the one with more failures wins, and the respon
 `/api/health` and `/api/selfcheck` and `/api/digest` all answer **503 when
 `HEALTH_SECRET` is unset**, even if `CRON_SECRET` is set. `/api/health` takes
 `x-health-secret`; the other two also accept `Authorization: Bearer $CRON_SECRET`.
+
+## 4c. How one lead is announced
+
+The order is fixed: **save first, notify second**, and nothing after the save can
+change the HTTP response. Within that:
+
+1. **The lead is stored**, then a per-lead claim is taken (`rate_limits`, keyed by
+the lead id, 10 s bucket — the same atomic primitive the review retry uses). Only
+one notifier runs per lead. The claim is released in a `finally`, and it fails
+open: a claim that cannot be read means the alert is sent, not dropped.
+2. **A replay announces a silent lead.** When `POST /api/lead` sees an
+idempotency key that already exists, it reads the lead's events first. If no
+channel ever delivered, it re-drives the whole notification from the stored row
+(writing the missing `created` event too) and still answers `200` as before. A
+delivered lead is left alone and the response is unchanged.
+3. **Both channels run at once**, and the Telegram fan-out sends to every bound
+phone in one round (`Promise.allSettled`) instead of one after another. If a
+phone returns 400 with a keyboard, the send is retried once without buttons.
+4. **One deadline covers the round: 6000 ms,** shared by the primary attempt and
+the fallback, so the fallback cannot start a second six seconds of work after the
+first one spent it. `api/lead.js` and `api/tg.js` declare `maxDuration: 10` in
+`vercel.json`; the per-send timeout stays 3000 ms (`lib/outbound.js`). A phone the
+deadline abandons is recorded as `tg_failed` with `meta.abandoned`, and it is
+still on its own 3 s timeout, so nothing outlives the request.
+5. **A timeout is unknown, not failed.** A send whose answer was lost may have
+been accepted, so it is never retried. Only a definite answer (4xx/5xx) is
+eligible for the one fallback attempt, and only while less than 2000 ms of the
+round have been used.
+6. **One idempotency key per lead per channel.** The fallback owner email reuses
+`<leadId>:owner`, so if Resend had in fact accepted the first attempt it answers
+409 and that counts as delivered. (The old `:owner:fallback` key is why one lead
+could put two identical emails in the owner's inbox.)
+
+**Finding a lead that was stored but never announced** (the case the replay above
+repairs):
+
+```sql
+select l.id, l.created_at
+  from public.leads l
+ where l.business_id = '<business-id>'
+   and not exists (select 1 from public.lead_events e
+                    where e.lead_id = l.id
+                      and e.kind in ('tg_sent', 'email_owner_sent'));
+```
+
+Re-posting the same `idempotencyKey` to `/api/lead` is the supported repair: it
+re-drives the notification and cannot store a second lead.
+
+## 4d. The form on the visitor's phone
+
+The modal posts to `/api/lead` with a 12000 ms abort timeout per attempt. That is
+deliberately longer than the function's 10 s limit: a browser that gave up sooner
+would throw away a lead the server was still storing. On **no answer at all**
+(timeout, dropped connection, DNS) it retries exactly once after 700 ms, under the
+same idempotency key, so the server's dedupe makes the retry harmless. An HTTP
+error is final: it shows the field errors (400) or the generic panel (5xx).
+
+With `navigator.onLine === false` the form posts nothing at all and says
+"You're offline" immediately. Pressing send twice within 30 s shows the "already
+sent" panel rather than a failure, because the server dropped the duplicate on
+purpose.
 
 ## 4b. Rate limits are fixed windows
 
@@ -345,7 +409,13 @@ set, so it cannot be pointed at a fake by accident.
   a lead alert arrives outside that window, so it would need pre-approved templates.
   Telegram has none of those constraints.
 - **No queue for alerts.** If both Telegram and email fail for a lead, the lead is
-  still stored and both failures are recorded as events; nothing retries later.
+  still stored and both failures are recorded as events, and a replay of the same
+  idempotency key re-drives the notification. Nothing retries **later** on its own:
+  after the in-request attempt and one fallback there is no further try. The design
+  for a durable outbox is in `docs/proposals/notification-outbox.md`.
+- **The exit code of a failed cron is only in the logs.** A self-check or drain run
+  that fails is visible in the Vercel log and nowhere else. The external check that
+  would catch it is proposed in `docs/proposals/uptime-check.md`.
 - **A shared inbox gets one message.** Two businesses with the same `owner_email` are
   de-duplicated per run, worst-first. The second business's numbers are not merged into
   the message, so its counts are missing from that run. Distinct inboxes are the normal

@@ -298,6 +298,11 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - `visual-polish` (from `origin/main` at `fa6030d`): CSS file, modal button, email layout and logo, review card, list paging, removal line, absolute href, logo cache; head `8a6523d`. Draft PR.
 - `polish-followup` (from `origin/main` at `78f1827`, five commits cherry-picked): narrow modal widths, not-modified edit; head `835f3ee`. Draft PR.
 - `multi-tenant-design` (from `origin/main`, not from `vercel-storage`): design doc only; head `67b38f2`. Draft PR #16.
+- `lead-safety` (from `origin/main` at `aab66e4`, PR #23 verified merged before starting): stored-but-silent
+  leads are re-announced on an idempotent replay, one claim per lead, one bounded notification round with a
+  6 s deadline, parallel phone fan-out, a timeout treated as unknown, one idempotency key for the owner email,
+  a form that cannot hang, and a shared redirect predicate for health and the daily check; outbox and
+  uptime-check proposals only. Page hash `be79571b` -> `aa71755b`. Draft PR (this bundle).
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
@@ -361,6 +366,13 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-10 | `visual-polish` | `69bb14c` | CSS moved to `assets/css/styles.css` and linked; modal Call filled at 52px; owner email stacks its buttons on a phone, 124px labels, 16px around the divider; logo is two colours at 256px from the favicon; review page is a card from 640px | Draft PR; page hash 20948309 → 23af892b |
 | 2026-11-11 | `visual-polish` | `8a6523d` | A stale list page is rewritten after the toast (numbers now, Older only when real, empty text with no buttons); the removal line names the request and the job; the stylesheet href is root-absolute; both logo URLs carry the file hash | Draft PR; page hash 23af892b → be79571b |
 | 2026-11-11 | `polish-followup` | `835f3ee` | Modal buttons share one row down to 354px and stack below; the dialog no longer stretches past the screen on a long label; the fake can answer 400 not-modified and the bot treats it as success | Draft PR; CSS hash 4b24ccda → 7ecc159a |
+| 2026-11-11 | `lead-safety` | `c674d03` | A replay of an idempotent lead re-announces it when no channel delivered; per-lead claim in `rate_limits` (10 s bucket, released in a finally, fails open); the missing `created` event is written once | B1a-B1f, 51/51 |
+| 2026-11-11 | `lead-safety` | `9fd9919` | Telegram fan-out is `Promise.allSettled` over every bound phone, one 6000 ms round deadline shared with the fallback, abandoned phones recorded as `timeout` + `abandoned`; `maxDuration: 10` for `api/lead.js` and `api/tg.js` | B5p/B5d, notify 53/53, vercel-config 5/5 |
+| 2026-11-11 | `lead-safety` | `f771b5a` | A timeout is unknown, not failed: never retried; the fallback owner email reuses `<leadId>:owner`, so a lost answer cannot double-alert | B6a/B6b, notify 55/55 |
+| 2026-11-11 | `lead-safety` | `48e0c4a` | The form aborts each attempt at 12 s, retries once after 700 ms under the same key, posts nothing when offline and says so, and shows the already-received panel for an in-page duplicate (B19) | 12c-12e, B19, lead-api 49/49; page hash `be79571b` -> `aa71755b` |
+| 2026-11-11 | `lead-safety` | `c3529ce` | `mailRedirectConfigured()` / `mailRedirectInProduction()` in `lib/mail.js` are the one answer for `/api/health`'s flag, the production log line and the daily operator line | B12a/B12b, health 31/31 |
+| 2026-11-11 | `lead-safety` | `cf85761` | `docs/proposals/notification-outbox.md` (0005 SQL as text, claim/drain design, independent alarm channel) and `docs/proposals/uptime-check.md` | Docs only; `supabase/migrations/` untouched |
+| 2026-11-11 | `lead-safety` | (this commit) | `docs/OPERATIONS.md` §4c/§4d/§8: how one lead is announced, how to find a silent lead, the form's retry rules, the timeout and redirect semantics | Docs only |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |
