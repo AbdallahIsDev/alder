@@ -107,6 +107,59 @@ try {
       `counts=${numeric.length} bools=${boolsOk} strings=${!noStrings}`);
   }
 
+  /* B12a: the redirect flag is the CONFIG state, in any environment, and the
+     address itself never reaches the body (the task's alternative to a
+     deploy-blocking hard fail: make the state impossible to miss). */
+  {
+    const before = process.env.MAIL_REDIRECT_TO;
+    process.env.MAIL_REDIRECT_TO = 'b12-inbox@example.invalid';
+    const r = await call({ secret: 'health-test-secret-value' });
+    const body = r.body || {};
+    const text = JSON.stringify(body);
+    const flagged = body.mail_redirect_active === true;
+    const noAddress = !text.includes('b12-inbox') && !text.includes('MAIL_REDIRECT_TO') && !/@/.test(text);
+    if (before === undefined) delete process.env.MAIL_REDIRECT_TO; else process.env.MAIL_REDIRECT_TO = before;
+    line(r.code === 200 && flagged && noAddress, 'B12a',
+      'health: mail_redirect_active true, the address never leaves',
+      `code=${r.code} flag=${body.mail_redirect_active} leak=${!noAddress}`);
+  }
+
+  /* B12b: one predicate answers "is customer mail being swallowed right now",
+     and it is the one the daily operator line is built from. Production only:
+     a preview or a test run redirecting to a test inbox is not an incident. */
+  {
+    const { mailRedirectConfigured, mailRedirectInProduction } = await import('../lib/mail.js');
+    const before = { redirect: process.env.MAIL_REDIRECT_TO, env: process.env.VERCEL_ENV };
+    process.env.MAIL_REDIRECT_TO = 'b12-inbox@example.invalid';
+    process.env.VERCEL_ENV = 'production';
+    const prodSet = mailRedirectInProduction();
+    process.env.VERCEL_ENV = 'preview';
+    const previewSet = mailRedirectInProduction();
+    process.env.VERCEL_ENV = 'development';
+    const devSet = mailRedirectInProduction();
+    delete process.env.MAIL_REDIRECT_TO;
+    process.env.VERCEL_ENV = 'production';
+    const prodUnset = mailRedirectInProduction();
+    const configuredWhenUnset = mailRedirectConfigured();
+    if (before.redirect === undefined) delete process.env.MAIL_REDIRECT_TO; else process.env.MAIL_REDIRECT_TO = before.redirect;
+    if (before.env === undefined) delete process.env.VERCEL_ENV; else process.env.VERCEL_ENV = before.env;
+
+    // The alarm the handler builds while the predicate is true: the fixed line,
+    // exactly once, with no address in it.
+    const alarm = operatorAlarm({
+      businesses: [], counts: new Map(), chatsByBusiness: new Map(),
+      recentLeadBusinesses: new Set(), redirectActive: prodSet,
+    });
+    const lineCount = alarm && alarm.body ? (alarm.body.match(/Test mode is on/g) || []).length : 0;
+    const alarmsOk = !!alarm && lineCount === 1 && alarm.body.includes('Setting: MAIL_REDIRECT_TO')
+      && !alarm.body.includes('b12-inbox');
+    const matrixOk = prodSet === true && previewSet === false && devSet === false
+      && prodUnset === false && configuredWhenUnset === false;
+    line(matrixOk && alarmsOk, 'B12b',
+      'redirect predicate: production only; alarm carries one fixed line',
+      `prod=${prodSet} preview=${previewSet} dev=${devSet} unset=${prodUnset} line=${lineCount}`);
+  }
+
   /* H5: GET only */
   {
     const r = await call({ method: 'POST', secret: 'health-test-secret-value' });

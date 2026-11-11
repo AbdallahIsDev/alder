@@ -22,7 +22,7 @@
 import { secretMatches } from '../lib/request.js';
 import { listBusinessChats, listActiveBusinesses, sweepExpired } from '../lib/db.js';
 import { sendMessage } from '../lib/tg.js';
-import { sendMail } from '../lib/mail.js';
+import { sendMail, mailRedirectInProduction } from '../lib/mail.js';
 import { deliverToBusinesses } from '../lib/ops-delivery.js';
 import { selfCheckEmail, operatorAlarmEmail } from '../lib/email-builders.js';
 import { eventCountsByBusiness } from '../lib/digest-db.js';
@@ -126,7 +126,9 @@ export default async function handler(req, res) {
 
   try {
     const since = new Date(Date.now() - DAY).toISOString();
-    const redirectActive = !!process.env.MAIL_REDIRECT_TO && process.env.VERCEL_ENV === 'production';
+    // Swallowing customer mail is a production problem: the same predicate the
+    // warning in lib/mail.js uses, so the daily line cannot drift from the log.
+    const redirectActive = mailRedirectInProduction();
 
     const active = await listActiveBusinesses();
     const counts = await eventCountsByBusiness({ sinceIso: since, kinds: KINDS });

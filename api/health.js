@@ -11,6 +11,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { secretMatches } from '../lib/request.js';
+import { mailRedirectConfigured } from '../lib/mail.js';
 import { operatorChatId, operatorEmail, operatorReachable } from '../lib/operator.js';
 import { googleReviewUrlOk } from '../lib/content.js';
 
@@ -109,7 +110,9 @@ export default async function handler(req, res) {
       // phone. A true here is a row to clean up, and it exposes no ids.
       operator_chat_bound: await operatorChatBound(),
       last_24h: lastDay,
-      mail_redirect_active: !!process.env.MAIL_REDIRECT_TO,
+      // A boolean, never the address: this endpoint is reachable with a shared
+      // secret and its body must stay free of env values (see lib/mail.js).
+      mail_redirect_active: mailRedirectConfigured(),
       webhook_secret_set: !!process.env.TELEGRAM_WEBHOOK_SECRET,
       salt_set: !!process.env.IP_HASH_SALT,
       // The operator alarm has nowhere to go when both are unset, which is the
