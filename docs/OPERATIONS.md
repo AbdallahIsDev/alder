@@ -234,6 +234,13 @@ first one spent it. `api/lead.js` and `api/tg.js` declare `maxDuration: 10` in
 `vercel.json`; the per-send timeout stays 3000 ms (`lib/outbound.js`). A phone the
 deadline abandons is recorded as `tg_failed` with `meta.abandoned`, and it is
 still on its own 3 s timeout, so nothing outlives the request.
+
+**NOT VERIFIED — check this before changing it.** 10 s is the platform default
+for the plan this project is on as understood when the branch was written; this
+repository contains no copy of the provider's limit. Confirm the current maximum
+in the Vercel dashboard (Project → Settings → Functions) before raising
+`maxDuration`, and keep the notification deadline (`DEADLINE_DEFAULT_MS`, 6000 ms)
+and the browser's attempt timeout (12000 ms) inside it.
 5. **A timeout is unknown, not failed.** A send whose answer was lost may have
 been accepted, so it is never retried. Only a definite answer (4xx/5xx) is
 eligible for the one fallback attempt, and only while less than 2000 ms of the

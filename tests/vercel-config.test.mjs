@@ -9,8 +9,10 @@
 //       'main-preview' must not match 'main'.
 //   V2b a partial config proves the no-rule default without touching the real one
 //   V3  the keys that were already in vercel.json are still there and intact
-//   V4  api/lead.js and api/tg.js declare maxDuration 10 (the Hobby default) and
-//       every function entry still carries the brand includeFiles
+//   V4  api/lead.js and api/tg.js declare maxDuration 10 (the Hobby default as
+//       the branch author understood it - NOT VERIFIED against the provider's
+//       current docs, so the value is the conservative one) and every function
+//       entry still carries the brand includeFiles
 //
 // The matcher below models the documented behaviour (minimatch patterns, a
 // branch matching a true rule deploys, no match deploys by default). The config
@@ -112,8 +114,11 @@ const enabled = (CONFIG.git && CONFIG.git.deploymentEnabled) || null;
     `rewrites=${(CONFIG.rewrites || []).length} crons=${(CONFIG.crons || []).length} headers=${(CONFIG.headers || []).length}`);
 }
 
-/* V4: the two functions that send alerts declare a maxDuration the Hobby plan
-   allows (10 s, the plan default), and nothing else in `functions` changed:
+/* V4: the two functions that send alerts declare a maxDuration the Hobby plan is
+   understood to allow (10 s, the plan default). NOT VERIFIED: this repository
+   contains no copy of the provider's limit, so the owner must confirm the current
+   maximum in the Vercel dashboard before raising it. Nothing else in `functions`
+   changed:
    every key keeps includeFiles. A number, not a string: a string is rejected at
    deploy time, which is exactly the kind of mistake this catches before a push. */
 {
