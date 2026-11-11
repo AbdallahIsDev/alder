@@ -27,7 +27,7 @@ import {
   TOAST_ALREADY_UPDATED, TOAST_TOO_MANY_OPENS, TOAST_OWNER_ONLY, leadListKeyboard, alertKeyboard,
   TOAST_NO_OLDER, TOAST_NO_LEADS, TOAST_NO_REMOVE, BOT_INVITE_FORWARD_HINT,
   BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_BOUND_ELSEWHERE, BOT_BIND_FAILED, TOAST_LEAD_GONE, BOT_RECIPIENT_SELF,
-  removeLeadListText, removeLeadKeyboard, removeLeadConfirmText, removeLeadConfirmKeyboard, REMOVE_LEAD_DONE, REMOVE_LEAD_GONE,
+  removeLeadListText, removeLeadKeyboard, removeLeadConfirmText, removeLeadConfirmKeyboard, removedText, REMOVE_LEAD_GONE,
   OPERATOR_ALREADY_CONNECTED_CODE, OPERATOR_DO_NOT_OPEN, OPERATOR_WELCOME, OPERATOR_CODE_USED, OPERATOR_CODE_EXPIRED, OPERATOR_CODE_UNKNOWN,
   BOT_OWNER_ONLY, botForwardText,
   operatorCodeText, operatorCodeResendText, operatorPhonesText, operatorPhonesKeyboard,
@@ -182,10 +182,27 @@ const LEADS_PAGE_MAX = 50;
 const OPENS_PER_HOUR = 30;
 
 /**
- * A page with nothing on it is never written over the message that is already
- * there. Editing it would leave a list with no buttons — a dead end, because
- * the buttons are the only way back — and the owner would lose the page they
- * were reading. The tap is answered with a toast instead; `answer` is the
+ * Telegram refuses an edit that changes nothing with 400 "message is not
+ * modified". That is the state we asked for, so it counts as success. Any other
+ * failure is logged by status only: the body can echo the message text, and the
+ * text holds a customer's name.
+ */
+async function editList(chatId, messageId, text, markup) {
+  const r = await editMessageText(chatId, messageId, text, markup, { parse: 'description' });
+  if (r && r.ok) return r;
+  if (/message is not modified/i.test(String((r && r.description) || ''))) {
+    return { ok: true, status: 'not_modified' };
+  }
+  console.error('tg_edit_failed', (r && r.status) || 'no_status');
+  return r;
+}
+
+/**
+ * A page with nothing on it is never left as it was: the message is rewritten
+ * from current data, because a button that answers with a toast and then does
+ * nothing is a button that lies. The toast explains the tap, the edit repairs
+ * the message — numbers for what is there now, Older only when it is real, and
+ * the empty text with no buttons when the page is gone. `answer` is the
  * callback's once-only responder, absent on the /leads command path.
  */
 async function sendLeadsPage(chatId, businessId, page, messageId, answer = null) {
@@ -193,16 +210,14 @@ async function sendLeadsPage(chatId, businessId, page, messageId, answer = null)
   const leads = await listClientLeads(businessId, LEADS_PAGE + 1, safePage * LEADS_PAGE);
   const hasOlder = leads.length > LEADS_PAGE;
   const shown = leads.slice(0, LEADS_PAGE);
-  if (!shown.length) {
-    if (messageId) {
-      if (answer) await answer(safePage === 0 ? TOAST_NO_LEADS : TOAST_NO_OLDER);
-      return;
-    }
-    return reply(chatId, safePage === 0 ? 'No requests yet.' : 'No older requests.');
+  const empty = !shown.length;
+  const text = empty ? 'No requests yet.' : renderLeadList(shown);
+  const markup = empty ? { reply_markup: { inline_keyboard: [] } } : leadListKeyboard(shown, safePage, hasOlder);
+  if (messageId) {
+    if (answer) await answer(empty ? (safePage === 0 ? TOAST_NO_LEADS : TOAST_NO_OLDER) : '');
+    return editList(chatId, messageId, text, markup);
   }
-  const text = renderLeadList(shown);
-  const markup = leadListKeyboard(shown, safePage, hasOlder);
-  if (messageId) return editMessageText(chatId, messageId, text, markup).catch(() => {});
+  if (empty) return reply(chatId, safePage === 0 ? 'No requests yet.' : 'No older requests.');
   return sendMessage(chatId, text, markup);
 }
 
@@ -214,22 +229,21 @@ async function handleLeads(chatId, binding) {
 const REMOVE_PAGE = 5;
 
 /** The /remove_lead list: five per page, numbers only, no actions. Same rule:
- *  an empty page answers the tap and leaves the message alone. */
+ *  an empty page is rewritten, never left with a button that does nothing. */
 async function sendRemovePage(chatId, businessId, page, messageId, answer = null) {
   const safePage = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
   const leads = await listClientLeads(businessId, REMOVE_PAGE + 1, safePage * REMOVE_PAGE);
   const hasOlder = leads.length > REMOVE_PAGE;
   const shown = leads.slice(0, REMOVE_PAGE);
-  if (!shown.length) {
-    if (messageId) {
-      if (answer) await answer(safePage === 0 ? TOAST_NO_REMOVE : TOAST_NO_OLDER);
-      return;
-    }
-    return reply(chatId, safePage === 0 ? 'No requests to remove.' : 'No older requests.');
+  const empty = !shown.length;
+  const text = empty ? 'No requests to remove.' : removeLeadListText(shown);
+  const markup = empty ? { reply_markup: { inline_keyboard: [] } } : removeLeadKeyboard(shown, safePage, hasOlder);
+  if (messageId) {
+    if (answer) await answer(empty ? (safePage === 0 ? TOAST_NO_REMOVE : TOAST_NO_OLDER) : '');
+    return editList(chatId, messageId, text, markup);
   }
-  const markup = removeLeadKeyboard(shown, safePage, hasOlder);
-  if (messageId) return editMessageText(chatId, messageId, removeLeadListText(shown), markup).catch(() => {});
-  return sendMessage(chatId, removeLeadListText(shown), markup);
+  if (empty) return reply(chatId, safePage === 0 ? 'No requests to remove.' : 'No older requests.');
+  return sendMessage(chatId, text, markup);
 }
 
 /** Owner only, like /invite: staff get the same toast as any owner command. */
@@ -874,8 +888,11 @@ async function handleCallback(cb, binding) {
         return editMessageText(chatId, messageId, removeLeadConfirmText(lead), removeLeadConfirmKeyboard(leadId)).catch(() => {});
       }
       const removed = await deleteLeadScoped(leadId, binding.business_id).catch(() => 0);
-      await answer(removed ? REMOVE_LEAD_DONE : REMOVE_LEAD_GONE);
-      return editMessageText(chatId, messageId, removed ? REMOVE_LEAD_DONE : REMOVE_LEAD_GONE, { reply_markup: { inline_keyboard: [] } }).catch(() => {});
+      // The name comes from the row read before the delete: after it there is
+      // nothing left to name.
+      const done = removed ? removedText(lead) : REMOVE_LEAD_GONE;
+      await answer(done);
+      return editList(chatId, messageId, done, { reply_markup: { inline_keyboard: [] } });
     }
 
     const page = CB_PAGE.exec(data);

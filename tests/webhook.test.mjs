@@ -1305,6 +1305,7 @@ try {
         await good(cb(bindA, 'RL:' + ids[0]));
         const gone = (await svc.from('leads').select('id').eq('id', ids[0])).data.length;
         const afterText = ((await sent()).filter((x) => x.path.includes('/editMessageText')).pop() || {}).body?.text || '';
+        const removedToast = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
         await reset();
         await good(cb(bindA, 'RL:' + ids[0]));
         const second = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
@@ -1313,10 +1314,11 @@ try {
         const stale = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
         line(listText.startsWith(C2.REMOVE_LEAD_TITLE) && nums.length === 5 && nav.some((b) => b.text === 'Older')
           && confirm && confirm.body.text.includes('Remove Me 1') && ckb[0].style === 'danger'
-          && ckb[1].text === 'Cancel' && gone === 0 && afterText === C2.REMOVE_LEAD_DONE
+          && ckb[1].text === 'Cancel' && gone === 0
+          && afterText === 'Removed: Remove Me 1 · Repair' && removedToast.includes(afterText)
           && second.includes(C2.REMOVE_LEAD_GONE) && stale.includes(C2.REMOVE_LEAD_GONE),
           'OP27', '/remove_lead: list, confirm, scoped delete, double/stale taps',
-          `nums=${nums.length} gone=${gone} second=${second.join('/')}`);
+          `nums=${nums.length} gone=${gone} text=${JSON.stringify(afterText)}`);
 
         await reset();
         await good(msg(bindB, '/remove_lead'));
@@ -1546,9 +1548,9 @@ try {
         'OP20', 'real DB: a claim can be restored and claimed again',
         `claimed=${claimed === invBiz.id} restored=${restored}`);
 
-      // OP36-OP38: the lead list. Field order, and a page with nothing on it is
-      // never written over the message: the buttons are the only way back, so an
-      // empty page answers the tap with a toast and leaves the message alone.
+      // OP36-OP39: the lead list. Field order, and a page with nothing on it is
+      // rewritten from current data: the toast explains the tap, the edit
+      // repairs the message so no button is left that does nothing.
       {
         const C2 = await import('../lib/content.js');
         const sends = async () => (await sent()).filter((x) => x.path.includes('/sendMessage'));
@@ -1556,15 +1558,16 @@ try {
         const answers = async () => (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
 
         // Explicit, distinct ages: one INSERT gives every row the same now(),
-        // and the list order would then be arbitrary.
+        // and the list order would then be arbitrary. Twelve rows: page 1 has a
+        // full five AND an older page, which is the case that must keep Older.
         const t0 = Date.now();
         const ids = [];
-        for (let i = 0; i < 7; i++) {
+        for (let i = 0; i < 12; i++) {
           const { data } = await svc.from('leads').insert({
             business_id: invBiz.id, name: `Paging ${i + 1}`, phone: '5155550100', email: `paging${i}@fixture.invalid`,
             zip: '50265', service: 'repair', home: 'house', timing: 'asap', roof_age: 'Not sure',
             insurance_claim: false, notes: null, idempotency_key: `${RUN}-pg${i}`,
-            created_at: new Date(t0 - (7 - i) * 60000).toISOString(),
+            created_at: new Date(t0 - (12 - i) * 60000).toISOString(),
           }).select('id').single();
           if (data) { ids.push(data.id); createdLeads.push(data.id); }
         }
@@ -1574,37 +1577,49 @@ try {
         const first = (await sends()).pop();
         const lines = String(first.body.text).split('\n');
         const kb1 = (first.body.reply_markup && first.body.reply_markup.inline_keyboard) || [];
-        line(ids.length === 7 && lines[2] === '1. Paging 7' && lines[3] === 'Repair · +15155550100'
+        line(ids.length === 12 && lines[2] === '1. Paging 12' && lines[3] === 'Repair · +15155550100'
           && /^\u{1F7E1} New · \d+m ago$/u.test(lines[4])
           && kb1.length === 2 && kb1[1].some((b) => b.text === 'Older'),
           'OP36', '/leads rows: name, job type, phone, status, age last',
           `third=${JSON.stringify(lines[4])}`);
 
-        // Page 1 exists, then it is emptied behind the message's back.
+        // A page that still has an older one keeps the button after the tap.
         await reset();
         await good(cb(invOwner, 'l:1'));
         const page1 = (await edits()).pop();
         const page1Lines = String(page1 && page1.body.text).split('\n');
+        const kb2 = (page1 && page1.body.reply_markup && page1.body.reply_markup.inline_keyboard) || [];
+        line(/^1\. Paging 7$/.test(page1Lines[2] || '')
+          && kb2.length === 2 && kb2[1].some((b) => b.text === 'Older'),
+          'OP37', 'a page with older rows keeps the Older button',
+          `first=${JSON.stringify(page1Lines[2])} nav=${(kb2[1] || []).map((b) => b.text).join(',')}`);
+
+        // The last page is deleted behind the message's back, then Older is
+        // tapped: toast, then the message itself is rewritten with no buttons.
         await svc.from('leads').delete().in('id', ids.slice(0, 2));
         await reset();
-        await good(cb(invOwner, 'l:1'));
+        await good(cb(invOwner, 'l:2'));
         const staleAnswers = await answers();
-        const staleEdits = (await edits()).length;
-        line(/^1\. Paging 2$/.test(page1Lines[2] || '') && staleEdits === 0
+        const staleEdits = await edits();
+        const stale = staleEdits[0] || {};
+        const staleKb = (stale.body && stale.body.reply_markup && stale.body.reply_markup.inline_keyboard) || [];
+        line(staleEdits.length === 1 && stale.body && stale.body.text === 'No requests yet.' && staleKb.length === 0
           && staleAnswers.includes(C2.TOAST_NO_OLDER),
-          'OP37', 'stale Older: toast only, the message and its buttons stay',
-          `edits=${staleEdits} answers=${staleAnswers.join('|')}`);
+          'OP38', 'stale Older: toast, then the message is rewritten empty',
+          `edits=${staleEdits.length} text=${JSON.stringify(stale.body && stale.body.text)} kb=${staleKb.length}`);
 
-        // The list shrank to nothing: Newer must not turn the message into a
-        // dead end either.
+        // The list shrank to nothing: Newer answers, and the message is rewritten.
         await svc.from('leads').delete().in('id', ids);
         await reset();
         await good(cb(invOwner, 'l:0'));
         const emptyAnswers = await answers();
-        const emptyEdits = (await edits()).length;
-        line(emptyEdits === 0 && emptyAnswers.includes(C2.TOAST_NO_LEADS),
-          'OP38', 'list shrank to nothing: Newer answers, no dead-end message',
-          `edits=${emptyEdits} answers=${emptyAnswers.join('|')}`);
+        const emptyEdits = await edits();
+        const empty = emptyEdits[0] || {};
+        const emptyKb = (empty.body && empty.body.reply_markup && empty.body.reply_markup.inline_keyboard) || [];
+        line(emptyEdits.length === 1 && empty.body && empty.body.text === 'No requests yet.' && emptyKb.length === 0
+          && emptyAnswers.includes(C2.TOAST_NO_LEADS),
+          'OP39', 'list shrank to nothing: Newer rewrites the message empty',
+          `edits=${emptyEdits.length} text=${JSON.stringify(empty.body && empty.body.text)}`);
 
         // The same rule on the /remove_lead list.
         await reset();
@@ -1613,10 +1628,47 @@ try {
         await reset();
         await good(cb(invOwner, 'rm:1'));
         const rmAnswers = await answers();
-        const rmEdits = (await edits()).length;
-        line(emptyList === 'No requests to remove.' && rmEdits === 0 && rmAnswers.includes(C2.TOAST_NO_OLDER),
-          'OP39', '/remove_lead: empty page answers the tap, no dead end',
-          `edits=${rmEdits} answers=${rmAnswers.join('|')}`);
+        const rmEdits = await edits();
+        const rm = rmEdits[0] || {};
+        const rmKb = (rm.body && rm.body.reply_markup && rm.body.reply_markup.inline_keyboard) || [];
+        line(emptyList === 'No requests to remove.' && rmEdits.length === 1
+          && rm.body && rm.body.text === 'No requests to remove.' && rmKb.length === 0
+          && rmAnswers.includes(C2.TOAST_NO_OLDER),
+          'OP44', '/remove_lead: stale page is rewritten with no buttons',
+          `edits=${rmEdits.length} kb=${rmKb.length} answers=${rmAnswers.join('|')}`);
+      }
+
+      // OP45: an edit that changes nothing is a success. Telegram answers 400
+      // "message is not modified"; the bot must not log it as a failure, retry,
+      // or send a second message.
+      {
+        const C2 = await import('../lib/content.js');
+        const ids = [];
+        for (let i = 0; i < 6; i++) ids.push(await seedLead(invBiz.id, `Repeat ${i + 1}`, `repeat${i}@example.com`));
+        await control({ mode: 'not_modified' });
+        await reset();
+        await good(msg(invOwner, '/leads'));
+        const errors = [];
+        const realError = console.error;
+        console.error = (...args) => { errors.push(args.map(String).join(' ')); };
+        let first;
+        let second;
+        try {
+          await reset();
+          await good(cb(invOwner, 'l:1'));
+          first = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+          await reset();
+          await good(cb(invOwner, 'l:1'));
+          second = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        } finally {
+          console.error = realError;
+          await control({ mode: 'ok' });
+        }
+        const failures = errors.filter((l) => l.includes('tg_edit_failed'));
+        line(first.length === 1 && second.length === 1 && failures.length === 0
+          && !second.some((t) => t === C2.TOAST_GENERIC_ERROR),
+          'OP45', 'identical edit: 400 not-modified is success, no log, no retry',
+          `answers=${second.join('|')} logged=${failures.length}`);
       }
 
       // OP40: /invite is TWO messages, like the operator's /code. The first is an

@@ -74,7 +74,8 @@ async function checkLogo() {
   const results = [];
   for (const key of ['onDark', 'onLight']) {
     const url = brand.logo[key];
-    const rel = String(url).replace(/^https?:\/\/[^/]+/, '').replace(/^\//, '');
+    // The URL carries ?v=<hash> now; the file on disk does not.
+    const rel = String(url).replace(/^https?:\/\/[^/]+/, '').split('?')[0].replace(/^\//, '');
     const abs = path.join(ROOT, rel);
     if (!fs.existsSync(abs)) { results.push(`${key}:missing`); continue; }
     const meta = await sharp(abs).metadata();
@@ -114,6 +115,26 @@ await checkLogo();
     && corner[3] === 0;
   line(ok, 'F8', 'roof is the accent, house is white on dark and ink on light',
     `roof=${hex(roofDark)}/${hex(roofLight)} house=${rgb(houseDark)}/${hex(houseLight)} cornerA=${corner[3]}`);
+}
+
+/* F9: the hosted logo URL carries a version, and the version is the file's own
+   hash. The file name never changes, so without it a browser that cached the old
+   mark keeps showing it after a re-render. */
+{
+  const crypto = await import('node:crypto');
+  const results = [];
+  for (const key of ['onDark', 'onLight']) {
+    const url = String((brand.logo && brand.logo[key]) || '');
+    const m = /\?v=([0-9a-f]{8})$/.exec(url);
+    const rel = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0].replace(/^\//, '');
+    const abs = path.join(ROOT, rel);
+    const sha = fs.existsSync(abs)
+      ? crypto.createHash('sha256').update(fs.readFileSync(abs)).digest('hex').slice(0, 8)
+      : 'missing';
+    results.push(`${key}:${m ? m[1] : 'none'}/${sha}`);
+    if (!m || m[1] !== sha) results.push(`${key}:BAD`);
+  }
+  line(!results.some((x) => x.includes('BAD')), 'F9', 'logo URL version is the file hash', results.join(' '));
 }
 
 /* F6: the module actually loads the logo bytes (the file vercel.json's

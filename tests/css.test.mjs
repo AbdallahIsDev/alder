@@ -41,8 +41,8 @@ try {
   const href = (links[0] && (links[0].match(/href="([^"]+)"/) || [])[1]) || '';
   const noStyle = !/<style[\s>]/i.test(built);
   const carried = fs.existsSync(path.join(OUT_DIR, 'assets', 'css', 'styles.css'));
-  line(r.status === 0 && links.length === 1 && href === 'assets/css/styles.css' && noStyle && carried,
-    'CSS1', 'built page: one relative stylesheet, no <style>, css copied',
+  line(r.status === 0 && links.length === 1 && href === '/assets/css/styles.css' && noStyle && carried,
+    'CSS1', 'built page: one root-absolute stylesheet, no <style>, css copied',
     `exit=${r.status} links=${links.length} href=${href} style=${!noStyle} copied=${carried}`);
 
   /* CSS2: every url() that is not a data: URI must exist on disk. */
@@ -64,7 +64,49 @@ try {
   line(relative, 'CSS3', 'both font urls are ../fonts/, not assets/fonts/',
     `count=${fontUrls.length} ok=${relative}`);
 
-  /* CSS4: the modal's Call is filled like "Send my request", and the hover rule
+  /* CSS5: every stylesheet link is root-absolute, in Alder and in a second
+     client. A relative href resolves against the page's folder, which is not
+     the site root once the page is served from a nested path. */
+  {
+    const sample = path.join(OUT_DIR, 'example.html');
+    const r2 = spawnSync(process.execPath, ['build-static.js', 'index.html', '--client', 'example', '--out', sample], {
+      cwd: ROOT, encoding: 'utf8',
+    });
+    const pages = [built, fs.existsSync(sample) ? fs.readFileSync(sample, 'utf8') : ''];
+    const bad = [];
+    pages.forEach((html, i) => {
+      const found = [...html.matchAll(/<link[^>]*rel="stylesheet"[^>]*>/gi)].map((m) => (m[0].match(/href="([^"]+)"/) || [])[1] || '');
+      if (!found.length) bad.push(`${i ? 'sample' : 'alder'}:none`);
+      for (const h of found) if (!h.startsWith('/')) bad.push(`${i ? 'sample' : 'alder'}:${h}`);
+    });
+    line(r2.status === 0 && bad.length === 0, 'CSS5',
+      'every stylesheet href is root-absolute, both clients', `bad=${bad.join('|') || 'none'}`);
+  }
+
+  /* CSS6/CSS7: the two narrow-width rules. 380 brings the padding in so the row
+     still fits; 353 and below stacks them, Call on top. */
+  {
+    const at = (px) => {
+      const i = css.indexOf(`@media (max-width: ${px}px)`);
+      if (i < 0) return '';
+      const open = css.indexOf('{', i);
+      let depth = 0;
+      for (let j = open; j < css.length; j++) {
+        if (css[j] === '{') depth++;
+        else if (css[j] === '}') { depth--; if (depth === 0) return css.slice(open, j + 1); }
+      }
+      return '';
+    };
+    const narrow = at(380);
+    const stack = at(353);
+    const narrowOk = /\.est-actions \.btn\.phone \{[^}]*padding: 0 16px/.test(narrow);
+    const stackOk = /\.est-actions \{[^}]*flex-direction: column-reverse[^}]*align-items: stretch/.test(stack)
+      && /\.est-actions \.btn \{[^}]*width: 100%/.test(stack);
+    line(narrowOk, 'CSS6', 'up to 380px Call keeps a 16px side padding', `found=${narrowOk}`);
+    line(stackOk, 'CSS7', 'at 353px and below the buttons stack, Call first', `found=${stackOk}`);
+  }
+
+ /* CSS4: the modal's Call is filled like "Send my request", and the hover rule
      that keeps it filled exists. Without that rule .btn.phone:hover paints a
      white 10% ground over the accent. */
   const block = (sel) => {
