@@ -1655,17 +1655,34 @@ var BIZ = {
      duplicate instead of storing the same lead twice. */
   window.estimateReset = function () { key = newKey(); };
 
-  window.estimateDeliver = function (data) {
-    if (!key) key = newKey();
-    var body = {};
-    for (var k in data) if (Object.prototype.hasOwnProperty.call(data, k)) body[k] = data[k];
-    body.slug = slug;
-    body.idempotencyKey = key;
-    return fetch('/api/lead', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).then(function (r) {
+  /* How long one attempt may wait for an answer, and the gap before the single
+     automatic retry. 12 s sits ABOVE the API function's own limit (maxDuration
+     10 in vercel.json, which has to cover the 6 s owner-alert deadline and the
+     customer auto-reply): a shorter browser timeout would throw away a lead the
+     server was still storing correctly. This is the ceiling a hung request can
+     reach — 12 s, one retry, 0.7 s gap — so "Sending..." is always bounded. */
+  var ATTEMPT_MS = 12000, RETRY_GAP_MS = 700;
+
+  function noAnswer(offline) {
+    var e = new Error(offline ? 'offline' : 'send failed: no answer');
+    e.network = true; e.offline = !!offline;
+    return e;
+  }
+
+  /* One attempt. Resolves with the parsed body, rejects with either an HTTP
+     error (carries status + the field-error body) or noAnswer(). The abort is
+     what keeps a hung request from pinning the button on "Sending...". */
+  function attempt(body) {
+    var ctl = null, timer = null;
+    try { if (window.AbortController) ctl = new AbortController(); } catch (e) {}
+    var opts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    if (ctl) {
+      opts.signal = ctl.signal;
+      timer = setTimeout(function () { try { ctl.abort(); } catch (e) {} }, ATTEMPT_MS);
+    }
+    var done = function () { if (timer) { clearTimeout(timer); timer = null; } };
+    return fetch('/api/lead', opts).then(function (r) {
+      done();
       if (!r.ok) {
         /* Carry the status and the (field-error) body to the modal: a 400 that
            names a field is shown under that field; anything else (network
@@ -1677,8 +1694,35 @@ var BIZ = {
           throw e;
         });
       }
-      key = '';                                                  /* next open is a new submission */
       return r.json().catch(function () { return {}; });
+    }, function () {
+      done();
+      throw noAnswer(false);
+    });
+  }
+
+  /* Bounded delivery: at most two attempts, both under the SAME idempotency key,
+     and the second one only when there was no answer at all (a timeout or a
+     dropped connection). An HTTP error is final — the server answered, the modal
+     shows the field errors or its generic panel. With no connection at all there
+     is nothing to retry: reject straight away so the visitor is told now. */
+  window.estimateDeliver = function (data) {
+    if (!key) key = newKey();
+    var body = {};
+    for (var k in data) if (Object.prototype.hasOwnProperty.call(data, k)) body[k] = data[k];
+    body.slug = slug;
+    body.idempotencyKey = key;
+    var offline = false;
+    try { offline = window.navigator && window.navigator.onLine === false; } catch (e) {}
+    if (offline) return Promise.reject(noAnswer(true));
+    return attempt(body).catch(function (err) {
+      if (!err || !err.network) throw err;
+      return new Promise(function (ok, fail) {
+        setTimeout(function () { attempt(body).then(ok, fail); }, RETRY_GAP_MS);
+      });
+    }).then(function (out) {
+      key = '';                                                  /* next open is a new submission */
+      return out;
     });
   };
 })();
@@ -1966,7 +2010,7 @@ var BIZ = {
     var data = collect(); data.elapsed = Date.now() - openedAt;
     reflow(function () { alertBox.hidden = true; }, 260); setBusy(true);
     if (data.website || data.elapsed < 2000) { setTimeout(function () { showSent(data); }, 1000); return; }
-    if (Date.now() - lastSent < 30000) { setTimeout(showError, 400); return; }
+    if (Date.now() - lastSent < 30000) { setTimeout(function () { showSent(data, true); }, 400); return; }
     deliver(data).then(function () { lastSent = Date.now(); openedAt = lastSent; showSent(data); }, showError);
   }
   function labelOf(n) { var r = form.querySelector('input[name="' + n + '"]:checked'); return r ? r.closest('.opt').querySelector('b').textContent : ''; }
@@ -1974,11 +2018,14 @@ var BIZ = {
     var rows = [['Service', labelOf('service')], ['Property', labelOf('home') + ' · ZIP ' + data.zip], ['Roof age', E.age.value], ['Start', labelOf('timing') + (data.claim ? ' · insurance claim' : '')], ['Phone', data.phone]], dl = done.querySelector('.est-recap');
     dl.textContent = ''; rows.forEach(function (r) { var w = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = r[0]; dd.textContent = r[1]; w.appendChild(dt); w.appendChild(dd); dl.appendChild(w); });
   }
-  function showSent(data) {
+  /* `already` is the in-page duplicate: the same visitor pressed send twice within
+     30 s. The server dropped the second one, so the honest answer is "we already
+     have this", not the generic "we couldn't send it" panel. */
+  function showSent(data, already) {
     setBusy(false); state = 'sent';
     swap(done, 1, function () {
-      var first = (data.name || '').split(/\s+/)[0]; done.querySelector('#est-thanks').textContent = first ? 'Thanks, ' + first + '. We got your request.' : 'Thanks, we got your request.';
-      recap(data); alertBox.hidden = true; nav.hidden = true; label.textContent = 'Request sent';
+      var first = (data.name || '').split(/\s+/)[0]; done.querySelector('#est-thanks').textContent = already ? 'You already sent this request — we have it.' : (first ? 'Thanks, ' + first + '. We got your request.' : 'Thanks, we got your request.');
+      recap(data); alertBox.hidden = true; nav.hidden = true; label.textContent = already ? 'Request already received' : 'Request sent';
       dots.forEach(function (d) { d.classList.remove('on', 'busy'); d.classList.add('done'); }); body.scrollTop = 0;
     }).then(function () { if (root.classList.contains('open')) done.focus({ preventScroll: true }); });
   }
@@ -2013,8 +2060,15 @@ var BIZ = {
     return best < 0 ? null : { step: best, field: bestKey };
   }
   window.estimateFirstErrorStep = firstErrorStep;
+  /* The alert panel's headline. The span under it already says what to do, so an
+     offline visitor only needs the reason named: "check your connection" is the
+     right advice, "we couldn't send" implies the form broke. */
+  var alertTitle = alertBox.querySelector('b');
+  var alertTitleDefault = alertTitle ? alertTitle.textContent : '';
+  function setAlertTitle(t) { if (alertTitle) alertTitle.textContent = t || alertTitleDefault; }
   function showError(err) {
     setBusy(false);
+    setAlertTitle(err && err.offline ? 'You’re offline.' : '');
     var ui = {
       setField: function (k, msg) {
         var f = form.querySelector('[data-f="' + k + '"]');
