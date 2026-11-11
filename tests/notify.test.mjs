@@ -565,6 +565,162 @@ try {
     `alerts=${alerts.length} flagged=${!!flagged} meta=${!!metaOk} saved=${allSaved}`);
 } catch (e) { line(false, 'B14', 'duplicate detection', e.message); }
 
+/* ================= B1 — a stored lead is never silent =================
+   A retry with the same idempotency key used to answer "ok" and stop there. If
+   the first invocation died after the insert and before (or during) the alert,
+   the lead was stored and nobody was told. A retry now re-drives the alert
+   exactly once, never re-sends a lead that already reached the owner, and a
+   concurrent second request cannot start a second alert set. */
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/* The claim is a 10 s rate-limit bucket on the DATABASE clock, so two claims on
+   opposite sides of a bucket edge do not see each other (tests/db-wall.test.mjs
+   demonstrates the same for the RPC). A test that asserts mutual exclusion has to
+   start away from the edge: same guard as tests/webhook.test.mjs, 3 s margin. */
+async function awayFromClaimEdge() {
+  const msLeft = 10000 - (Date.now() % 10000);
+  if (msLeft < 3000) await sleep(msLeft + 50);
+}
+async function seedSilentLead(key, over, withCreated = true) {
+  const { data: biz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
+  const { data, error } = await svc.from('leads').insert({
+    business_id: biz.id, name: 'Replay Tester', phone: nextPhone(), email: nextEmail(),
+    zip: '50265', service: 'repair', home: 'house', timing: 'asap',
+    roof_age: 'Not sure', insurance_claim: false, notes: '', source: 'form',
+    idempotency_key: key, ...(over || {}),
+  }).select('id').single();
+  if (error) throw error;
+  // The first invocation got as far as the created event, then died. With
+  // withCreated = false it died one step earlier: after the insert only.
+  if (withCreated) await svc.from('lead_events').insert({ lead_id: data.id, kind: 'created', meta: { source: 'form', slug: ALDER_DEMO } });
+  return data.id;
+}
+
+/* B1a: stored, created event written, nothing delivered -> the retry announces
+   it once, from the STORED row (the retry payload says a different name). */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const key = `${RUN}-replay-a`;
+  const id = await seedSilentLead(key);
+  const { res } = await post({ idempotencyKey: key });
+  const rows = await leadFor(key);
+  const evs = await events(id);
+  const kinds = evs.map((e) => e.kind);
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const texts = (await requests(TG))
+    .filter((r) => r.path.includes('/sendMessage') && String(r.body.chat_id) === String(FIXTURE_CHAT))
+    .map((r) => r.body.text || '');
+  const storedText = texts.length === 1 && texts[0].includes('Name: Replay Tester');
+  line(res.code === 200 && res.body && res.body.ok === true && rows.length === 1 && tg === 1 && mail === 2
+    && kinds.filter((k) => k === 'created').length === 1
+    && kinds.filter((k) => k === 'tg_sent').length === 1
+    && kinds.filter((k) => k === 'email_owner_sent').length === 1
+    && storedText,
+    'B1a', 'silent stored lead: retry announces it exactly once',
+    `code=${res.code} rows=${rows.length} tg=${tg} mail=${mail} kinds=${kinds.join(',')} stored=${storedText}`);
+} catch (e) { line(false, 'B1a', 'silent lead replay', e.message); }
+
+/* B1b: the same key again, now delivered -> nothing is sent a second time. */
+try {
+  await reset(TG); await reset(RS);
+  const key = `${RUN}-replay-a`;
+  const rows = await leadFor(key);
+  const before = rows.length ? (await events(rows[0].id)).length : -1;
+  const { res } = await post({ idempotencyKey: key });
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const tg = await sendMessageCount(), mail = await emailCount();
+  line(res.code === 200 && res.body && res.body.ok === true && tg === 0 && mail === 0 && evs.length === before,
+    'B1b', 'delivered lead: retry sends nothing, response unchanged',
+    `code=${res.code} tg=${tg} mail=${mail} events=${before}->${evs.length}`);
+} catch (e) { line(false, 'B1b', 'delivered replay', e.message); }
+
+/* B1c: two requests with the same key at the same time -> one lead, one set.
+   Both can pass the duplicate check and the "nothing delivered" read; the claim
+   is what makes exactly one of them send. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  await awayFromClaimEdge();
+  const key = `${RUN}-replay-c`;
+  const [a, b] = await Promise.all([post({ idempotencyKey: key }), post({ idempotencyKey: key })]);
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const kinds = evs.map((e) => e.kind);
+  const tg = await sendMessageCount(), mail = await emailCount();
+  line(a.res.code === 200 && b.res.code === 200 && rows.length === 1 && tg === 1 && mail === 2
+    && kinds.filter((k) => k === 'created').length === 1
+    && kinds.filter((k) => k === 'tg_sent').length === 1
+    && kinds.filter((k) => k === 'email_owner_sent').length === 1,
+    'B1c', 'two same-key requests at once: one lead, one alert set',
+    `codes=${a.res.code}/${b.res.code} rows=${rows.length} tg=${tg} mail=${mail} kinds=${kinds.join(',')}`);
+} catch (e) { line(false, 'B1c', 'concurrent same-key', e.message); }
+
+/* B1d: a live claim blocks the retry, and releasing it lets the same retry
+   through: the claim is a lock for the duration of the send, not a debounce. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const key = `${RUN}-replay-d`;
+  const id = await seedSilentLead(key);
+  await awayFromClaimEdge();
+  // Some other invocation is announcing this lead right now.
+  await svc.rpc('hit_rate_limit', { p_key: 'notify:' + id, p_window_seconds: 10, p_max: 1 });
+  const held = await post({ idempotencyKey: key });
+  const heldTg = await sendMessageCount(), heldMail = await emailCount();
+  await svc.from('rate_limits').delete().eq('key', 'notify:' + id);
+  const after = await post({ idempotencyKey: key });
+  const afterTg = await sendMessageCount(), afterMail = await emailCount();
+  line(held.res.code === 200 && held.res.body && held.res.body.ok === true && heldTg === 0 && heldMail === 0
+    && after.res.code === 200 && afterTg === 1 && afterMail === 2,
+    'B1d', 'live claim blocks the send; released claim lets it through',
+    `held=${heldTg}/${heldMail} after=${afterTg}/${afterMail}`);
+} catch (e) { line(false, 'B1d', 'claim held', e.message); }
+
+/* B1e: a claim left behind by a killed invocation lives in its own 10 s bucket,
+   so it stops matching without any timestamp arithmetic here. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const key = `${RUN}-replay-e`;
+  const id = await seedSilentLead(key);
+  await svc.from('rate_limits').insert({
+    key: 'notify:' + id, window_start: new Date(Date.now() - 10 * 60000).toISOString(), count: 1,
+  });
+  const { res } = await post({ idempotencyKey: key });
+  const tg = await sendMessageCount(), mail = await emailCount();
+  line(res.code === 200 && tg === 1 && mail === 2,
+    'B1e', 'claim from a dead invocation expires with its bucket',
+    `code=${res.code} tg=${tg} mail=${mail}`);
+} catch (e) { line(false, 'B1e', 'stale claim bucket', e.message); }
+
+/* B1f: the first invocation died between the insert and its first event. The
+   retry has to write the missing created row as well as send the alert, and it
+   must write each of them once. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const key = `${RUN}-replay-f`;
+  const id = await seedSilentLead(key, null, false);
+  const { res } = await post({ idempotencyKey: key });
+  const evs = await events(id);
+  const kinds = evs.map((e) => e.kind);
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const created = evs.filter((e) => e.kind === 'created');
+  const metaOk = created.length === 1 && created[0].meta && created[0].meta.slug === ALDER_DEMO
+    && !created[0].meta.duplicate_of;
+  line(res.code === 200 && tg === 1 && mail === 2 && metaOk
+    && kinds.filter((k) => k === 'tg_sent').length === 1
+    && kinds.filter((k) => k === 'email_owner_sent').length === 1,
+    'B1f', 'death before the first event: retry writes it and announces once',
+    `code=${res.code} tg=${tg} mail=${mail} kinds=${kinds.join(',')} meta=${!!metaOk}`);
+} catch (e) { line(false, 'B1f', 'missing created event', e.message); }
+
 /* Redirect off + default sender -> no HTTP call */
 try {
   await clean();
