@@ -20,6 +20,10 @@ export const fixtureId = (n) => FIXTURE_ID_BASE + n;
 export const FIXTURE_CHATS = Object.freeze({
   notifyOwner: fixtureId(1),      // notify: the one bound phone
   notifySecond: fixtureId(2),     // notify: the second-phone ownership case
+  notifyFan1: fixtureId(3),       // notify: extra phones for the parallel fan-out test
+  notifyFan2: fixtureId(4),
+  notifyFan3: fixtureId(5),
+  notifyFan4: fixtureId(6),
   leadApiAlert: fixtureId(10),    // lead-api: delivery target
   webhookA: fixtureId(20),        // webhook: business A owner
   webhookB: fixtureId(21),        // webhook: business B owner

@@ -9,6 +9,8 @@
 //       'main-preview' must not match 'main'.
 //   V2b a partial config proves the no-rule default without touching the real one
 //   V3  the keys that were already in vercel.json are still there and intact
+//   V4  api/lead.js and api/tg.js declare maxDuration 10 (the Hobby default) and
+//       every function entry still carries the brand includeFiles
 //
 // The matcher below models the documented behaviour (minimatch patterns, a
 // branch matching a true rule deploys, no match deploys by default). The config
@@ -108,6 +110,23 @@ const enabled = (CONFIG.git && CONFIG.git.deploymentEnabled) || null;
     && Array.isArray(CONFIG.headers) && CONFIG.headers.length >= 4;
   line(ok, 'V3', 'existing keys are intact',
     `rewrites=${(CONFIG.rewrites || []).length} crons=${(CONFIG.crons || []).length} headers=${(CONFIG.headers || []).length}`);
+}
+
+/* V4: the two functions that send alerts declare a maxDuration the Hobby plan
+   allows (10 s, the plan default), and nothing else in `functions` changed:
+   every key keeps includeFiles. A number, not a string: a string is rejected at
+   deploy time, which is exactly the kind of mistake this catches before a push. */
+{
+  const lead = CONFIG.functions && CONFIG.functions['api/lead.js'];
+  const tg = CONFIG.functions && CONFIG.functions['api/tg.js'];
+  const allInclude = Object.values(CONFIG.functions || {})
+    .every((f) => f && f.includeFiles === 'lib/brand.generated.json');
+  const ok = !!lead && !!tg
+    && lead.maxDuration === 10 && tg.maxDuration === 10
+    && Number.isInteger(lead.maxDuration) && Number.isInteger(tg.maxDuration)
+    && allInclude;
+  line(ok, 'V4', 'lead and tg: maxDuration 10, every function keeps includeFiles',
+    `lead=${lead && lead.maxDuration} tg=${tg && tg.maxDuration} includeFiles=${allInclude}`);
 }
 
 console.log('');

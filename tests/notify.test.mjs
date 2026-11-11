@@ -67,7 +67,8 @@ let SEED_NAME = '';
   const { data: seedBiz } = await svc.from('businesses').select('id, name').eq('slug', ALDER_DEMO).single();
   SEED_NAME = (seedBiz && seedBiz.name) || '';
   // A killed run leaves the row behind; clear both fixture ids before binding.
-  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond]);
+  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond,
+    FIXTURE_CHATS.notifyFan1, FIXTURE_CHATS.notifyFan2, FIXTURE_CHATS.notifyFan3, FIXTURE_CHATS.notifyFan4]);
   await svc.from('business_chats').upsert(
     { business_id: seedBiz.id, tg_chat_id: FIXTURE_CHAT }, { onConflict: 'tg_chat_id' },
   );
@@ -721,6 +722,83 @@ try {
     `code=${res.code} tg=${tg} mail=${mail} kinds=${kinds.join(',')} meta=${!!metaOk}`);
 } catch (e) { line(false, 'B1f', 'missing created event', e.message); }
 
+/* ================= B5 — one bounded round for every bound phone =============
+   Five phones used to be five sequential sends at up to 3 s each, then a
+   fallback round on top: the request could outlast the function. All sends are
+   fanned out at once and the whole round has one deadline; a phone that never
+   answers is recorded as a timeout, once. */
+
+const FAN = [FIXTURE_CHAT, FIXTURE_CHATS.notifyFan1, FIXTURE_CHATS.notifyFan2,
+  FIXTURE_CHATS.notifyFan3, FIXTURE_CHATS.notifyFan4];
+async function bindFan() {
+  const { data: biz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
+  await svc.from('business_chats').delete().in('tg_chat_id', FAN);
+  await svc.from('business_chats').upsert(
+    FAN.map((id) => ({ business_id: biz.id, tg_chat_id: id })), { onConflict: 'tg_chat_id' },
+  );
+}
+async function unbindFan() {
+  await svc.from('business_chats').delete().in('tg_chat_id', FAN.slice(1));
+}
+
+/* B5p: five phones, every send slow. All five are attempted in one round, so the
+   request costs one outbound timeout, not five.
+
+   Wall-clock is useless here: the in-process suite pays the Supabase REST
+   round-trip (about 1 s) inside the same request, so `ms` swings by more than
+   the difference between parallel and sequential sends. The proof is the
+   arrival window instead: every send is issued in the same tick, so the five
+   requests reach the fake within a fraction of one 200 ms send timeout, while
+   sequential sends would sit one full timeout apart (a ~800 ms window). */
+try {
+  await clean();
+  await bindFan();
+  await control(TG, { mode: 'hang', hangMs: 2500 });
+  await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const { res, key, ms } = await post({});
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const f = evs.find((e) => e.kind === 'tg_failed');
+  const reqs = (await requests(TG)).filter((r) => r.path.includes('/sendMessage'));
+  const chats = new Set(reqs.map((r) => String(r.body.chat_id)));
+  const times = reqs.map((r) => r.at).filter((t) => typeof t === 'number');
+  const window = times.length ? Math.max(...times) - Math.min(...times) : -1;
+  await control(TG, { mode: 'ok', hangChat: null, failChat: null });
+  line(res.code === 200 && window >= 0 && window < 200 && chats.size === FAN.length && reqs.length === FAN.length
+    && !!f && f.meta.status === 'timeout' && f.meta.abandoned === undefined,
+    'B5p', 'five phones: one round, each tried once, one timeout event',
+    `window=${window}ms ms=${ms} reqs=${reqs.length} chats=${chats.size} meta=${JSON.stringify(f && f.meta)}`);
+} catch (e) { line(false, 'B5p', 'parallel fan-out', e.message); } finally { await unbindFan(); }
+
+/* B5d: one phone never answers. The round stops at the deadline instead of
+   waiting for it, and says so: abandoned count in the event, one attempt only. */
+const savedDeadline = process.env.NOTIFY_DEADLINE_MS;
+try {
+  await clean();
+  await bindFan();
+  process.env.NOTIFY_DEADLINE_MS = '150';
+  const hangChat = String(FIXTURE_CHATS.notifyFan2);
+  await control(TG, { mode: 'ok', hangChat, hangMs: 2500 });
+  await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const { res, key, ms } = await post({});
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const f = evs.find((e) => e.kind === 'tg_failed');
+  const reqs = (await requests(TG)).filter((r) => r.path.includes('/sendMessage'));
+  const hangTries = reqs.filter((r) => String(r.body.chat_id) === hangChat).length;
+  await control(TG, { mode: 'ok', hangChat: null, failChat: null });
+  // abandoned=1 is itself the proof the deadline fired: this phone's own send
+  // timeout is 200 ms, so only a round that stopped at 150 ms can abandon it.
+  line(res.code === 200 && ms < 2500 && reqs.length === FAN.length && hangTries === 1
+    && !!f && f.meta.status === 'timeout' && f.meta.abandoned === 1,
+    'B5d', 'deadline: hanging phone abandoned after one attempt',
+    `ms=${ms} reqs=${reqs.length} hang=${hangTries} meta=${JSON.stringify(f && f.meta)}`);
+} catch (e) { line(false, 'B5d', 'notify deadline', e.message); } finally { await unbindFan();
+  if (savedDeadline === undefined) delete process.env.NOTIFY_DEADLINE_MS; else process.env.NOTIFY_DEADLINE_MS = savedDeadline;
+}
+
 /* Redirect off + default sender -> no HTTP call */
 try {
   await clean();
@@ -1025,7 +1103,8 @@ try {
 
 /* cleanup */
 try {
-  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond]);
+  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond,
+    FIXTURE_CHATS.notifyFan1, FIXTURE_CHATS.notifyFan2, FIXTURE_CHATS.notifyFan3, FIXTURE_CHATS.notifyFan4]);
   if (activeId) {
     await svc.from('leads').delete().eq('business_id', activeId);
     await svc.from('businesses').delete().eq('id', activeId);

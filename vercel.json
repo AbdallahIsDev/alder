@@ -8,6 +8,14 @@
     }
   },
   "functions": {
+    "api/lead.js": {
+      "maxDuration": 10,
+      "includeFiles": "lib/brand.generated.json"
+    },
+    "api/tg.js": {
+      "maxDuration": 10,
+      "includeFiles": "lib/brand.generated.json"
+    },
     "api/*.js": {
       "includeFiles": "lib/brand.generated.json"
     }

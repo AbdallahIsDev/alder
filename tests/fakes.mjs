@@ -21,6 +21,10 @@ function start(name) {
         if (c.nth !== undefined) state.nth = Number(c.nth);
         if (c.status !== undefined) state.status = Number(c.status);
         if (c.hangMs !== undefined) state.hangMs = Number(c.hangMs);
+        // Per-chat control, for the fan-out and per-phone failure tests. A null
+        // clears the seat; anything else is compared as a string to chat_id.
+        if ('hangChat' in c) state.hangChat = c.hangChat == null ? null : String(c.hangChat);
+        if ('failChat' in c) state.failChat = c.failChat == null ? null : String(c.failChat);
       } catch {}
       return send(200, { ok: true, mode: state.mode });
     }
@@ -67,6 +71,10 @@ function start(name) {
     // fail_nth: fail exactly the nth request after the last control call.
     if (mode === 'fail_nth') { state.calls = (state.calls || 0) + 1; mode = state.calls === Number(state.nth || 1) ? '500' : 'ok'; }
     if (mode === 'hang' && state.mode === 'hang_once') state.hangUsed = true;
+    /* One chat can be singled out without touching the others: the fan-out test
+       needs four phones answering and one that never does. */
+    if (parsed && state.hangChat != null && String(parsed.chat_id) === state.hangChat) mode = 'hang';
+    if (parsed && state.failChat != null && String(parsed.chat_id) === state.failChat) mode = '503';
 
     if (mode === 'hang') {
       setTimeout(() => { try { send(200, { ok: true }); } catch {} }, state.hangMs);
