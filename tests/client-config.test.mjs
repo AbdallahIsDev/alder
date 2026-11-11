@@ -28,10 +28,15 @@ const OUT = path.join(ROOT, '_debug', 'client-build');
 /* The build of origin/main (fa6030d) with the CSS moved out of the page and
    linked root-absolute (visual-polish): the <style> block is gone and a <link>
    takes its place, so the page hash moved — 20948309… before, 23af892b… with a
-   relative href, be79571b… with /assets/css/styles.css. That is the only
-   intended change; the other three files are unchanged and are pinned to the
-   same values as before. */
-const BASELINE = 'be79571b36651b1a633dcf7de165e8be7e6721b4a28d715f341f9a0d1d52276d';
+   relative href, be79571b… with /assets/css/styles.css.
+
+   lead-safety moved it once more, on purpose:  be79571b… -> aa71755b…
+   (index.html only). The form now aborts an attempt at 12 s, retries once under
+   the same idempotency key, posts nothing when offline, and shows the
+   already-received panel for an in-page duplicate. The other three files the
+   build writes from client data are byte-identical — that is what the pinned
+   manifest/robots/sitemap hashes below still assert. */
+const BASELINE = 'aa71755bf242ae8a7a9af32833d29bb52abfe5731e74ee05a3069a40ef4d20d5';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = 'dcd93cf0545e1bad61f0218310823424565419e811ba50b74a2e7f7642ce7053';
 const BASELINE_SITEMAP = 'f90e45bdfa569c01cc2c7fe584831cd9e03b212fbac43254454968bcc16c27e8';
