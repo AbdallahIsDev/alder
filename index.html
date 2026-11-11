@@ -1656,11 +1656,11 @@ var BIZ = {
   window.estimateReset = function () { key = newKey(); };
 
   /* How long one attempt may wait for an answer, and the gap before the single
-     automatic retry. 12 s sits ABOVE the API function's own limit (maxDuration
-     10 in vercel.json, which has to cover the 6 s owner-alert deadline and the
-     customer auto-reply): a shorter browser timeout would throw away a lead the
-     server was still storing correctly. This is the ceiling a hung request can
-     reach — 12 s, one retry, 0.7 s gap — so "Sending..." is always bounded. */
+     automatic retry. The API allows 30 s; its configured outbound work is bounded
+     to about 9 s (6 s owner alerts + 3 s auto-reply), while database calls have no
+     explicit deadline. Keep 12 s as the visitor-facing ceiling rather than making
+     someone wait 30 s for a stuck database. A no-answer retry uses the same key,
+     so a server that finishes later still cannot store the lead twice. */
   var ATTEMPT_MS = 12000, RETRY_GAP_MS = 700;
 
   function noAnswer(offline) {
@@ -2025,7 +2025,12 @@ var BIZ = {
     setBusy(false); state = 'sent';
     swap(done, 1, function () {
       var first = (data.name || '').split(/\s+/)[0]; done.querySelector('#est-thanks').textContent = already ? 'You already sent this request — we have it.' : (first ? 'Thanks, ' + first + '. We got your request.' : 'Thanks, we got your request.');
-      recap(data); alertBox.hidden = true; nav.hidden = true; label.textContent = already ? 'Request already received' : 'Request sent';
+      var recapBox = done.querySelector('.est-recap');
+      // An in-page duplicate may contain edited values that were never posted.
+      // Hide the recap rather than presenting those new values as received.
+      recapBox.hidden = !!already;
+      if (!already) recap(data);
+      alertBox.hidden = true; nav.hidden = true; label.textContent = already ? 'Request already received' : 'Request sent';
       dots.forEach(function (d) { d.classList.remove('on', 'busy'); d.classList.add('done'); }); body.scrollTop = 0;
     }).then(function () { if (root.classList.contains('open')) done.focus({ preventScroll: true }); });
   }
@@ -2047,6 +2052,7 @@ var BIZ = {
     return 'generic';
   }
   window.estimateHandleError = handleLeadError;
+  window.estimateShowSent = showSent; // JSDOM can verify the duplicate-panel recap rule.
   /* Step that holds the first errored field (in step order, not object order).
      Fields not in STEPS (notes) live on the last step. Exposed for tests. */
   function firstErrorStep(errors) {

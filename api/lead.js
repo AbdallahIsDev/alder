@@ -47,10 +47,10 @@ function htmlPage(title, message, businessName) {
 /**
  * Announce a stored lead, at most once at a time.
  *
- * The claim (lib/db.js) is what keeps two requests for the same lead from both
- * sending: the first one takes it, the other sends nothing. It is released when
- * this attempt finishes — success or failure — so a retry after a failed alert
- * is allowed again. Fails open: an owner alert matters more than the lock.
+ * The fixed-window claim (lib/db.js) stops most overlapping sends, but two calls
+ * straddling a bucket edge can both win. It is released when this attempt finishes
+ * — success or failure — so a retry after a failed alert is allowed again. Fails
+ * open: an owner alert matters more than the best-effort claim.
  *
  * `recheck` is for the replay path: two requests can both read "nothing has been
  * delivered" before either takes the claim, so the holder looks once more before
@@ -66,7 +66,13 @@ async function announceLead(ctx, recheck) {
   }
   if (!claimed) return;
   try {
-    if (recheck && (await getLeadDeliveryState(ctx.leadId)).delivered) return;
+    if (recheck) {
+      const state = await getLeadDeliveryState(ctx.leadId);
+      const partialTelegram = state.delivered && state.failedChatHashes.length > 0;
+      if (state.delivered && !partialTelegram) return;
+      ctx.deliveredChatHashes = state.deliveredChatHashes;
+      ctx.retryTelegramOnly = partialTelegram;
+    }
     await notifyAllAfterLead(ctx);
   } finally {
     try {
@@ -269,9 +275,10 @@ export default async function handler(req, res) {
   // Already stored under this key. This is a retry, and it is the last chance to
   // announce a lead whose first invocation was killed before (or while) alerting:
   // the old code returned "ok" here and the owner never heard about that lead.
-  // Only a retry that finds NOTHING delivered sends again, so a delivered lead is
-  // never announced twice. A read that fails is not a reason to guess: log a code,
-  // answer exactly as before, and leave the lead for the next attempt.
+  // A retry sends only when nothing was delivered, or when recorded per-chat
+  // outcomes identify phones still missing a partial Telegram alert. Confirmed
+  // chats and an already-delivered owner email are not repeated. A failed read is
+  // not a reason to guess: log a code and leave the lead for the next attempt.
   if (leadId === null) {
     try {
       const stored = await getLeadForReplay(business.id, idem);
@@ -294,9 +301,11 @@ export default async function handler(req, res) {
             console.error('lead_event_created_failed', (e && e.code) || 'no_code');
           }
         }
-        if (!state.delivered) {
+        if (!state.delivered || state.failedChatHashes.length) {
           await announceLead({
             leadId: stored.id, business, duplicate: !!duplicateOf,
+            deliveredChatHashes: state.deliveredChatHashes,
+            retryTelegramOnly: state.delivered && state.failedChatHashes.length > 0,
             lead: {
               name: stored.name, phone: stored.phone, email: stored.email || '', zip: stored.zip,
               service: stored.service, home: stored.home, timing: stored.timing,
@@ -330,8 +339,8 @@ export default async function handler(req, res) {
     console.error('lead_event_created_failed', (e && e.code) || 'no_code');
   }
 
-  // Save first, notify second. Nothing below can change the response. The claim
-  // keeps a concurrent retry of this same request from sending a second set.
+  // Save first, notify second. Nothing below can change the response. The
+  // fixed-window claim reduces concurrent duplicate sends (see announceLead).
   await announceLead({
     leadId, business, duplicate: !!duplicateOf,
     lead: { name, phone: phoneE164, email, zip, service, home, timing, roof_age: age, insurance_claim: b.claim === true, notes },

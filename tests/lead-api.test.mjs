@@ -364,6 +364,25 @@ const logOffset = fs.statSync(LOG).size;
   }
 }
 
+/* 12f: no graphical browser is needed for this DOM rule. An edited second send
+   is not posted, so its new values must not appear in the already-received recap. */
+{
+  const page = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const dom = new JSDOM(page, {
+    runScripts: 'dangerously', pretendToBeVisual: true, url: ORIGIN,
+    beforeParse(window) { window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} }); },
+  });
+  const recap = dom.window.document.querySelector('.est-recap');
+  recap.innerHTML = '<div><dt>Phone</dt><dd>actually-sent-value</dd></div>';
+  dom.window.estimateShowSent({ name: 'Edited Name', phone: '+15559999999', zip: '99999' }, true);
+  await new Promise((r) => setTimeout(r, 500));
+  line(recap.hidden === true && recap.textContent.includes('actually-sent-value')
+    && !recap.textContent.includes('15559999999'),
+    '12f', 'already-received panel hides unsent edited recap values',
+    `hidden=${recap.hidden} newValue=${recap.textContent.includes('15559999999')}`);
+  dom.window.close();
+}
+
 /* ---------- 13. logs carry no personal data ---------- */
 {
   const text = fs.readFileSync(LOG, 'utf8').slice(logOffset);

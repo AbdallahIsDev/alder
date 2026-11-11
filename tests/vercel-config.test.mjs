@@ -9,10 +9,9 @@
 //       'main-preview' must not match 'main'.
 //   V2b a partial config proves the no-rule default without touching the real one
 //   V3  the keys that were already in vercel.json are still there and intact
-//   V4  api/lead.js and api/tg.js declare maxDuration 10 (the Hobby default as
-//       the branch author understood it - NOT VERIFIED against the provider's
-//       current docs, so the value is the conservative one) and every function
-//       entry still carries the brand includeFiles
+//   V4  api/lead.js declares maxDuration 30 (inside the owner's verified 300 s
+//       project ceiling), api/tg.js has no unrequested override, and every
+//       function entry still carries the brand includeFiles
 //
 // The matcher below models the documented behaviour (minimatch patterns, a
 // branch matching a true rule deploys, no match deploys by default). The config
@@ -114,24 +113,21 @@ const enabled = (CONFIG.git && CONFIG.git.deploymentEnabled) || null;
     `rewrites=${(CONFIG.rewrites || []).length} crons=${(CONFIG.crons || []).length} headers=${(CONFIG.headers || []).length}`);
 }
 
-/* V4: the two functions that send alerts declare a maxDuration the Hobby plan is
-   understood to allow (10 s, the plan default). NOT VERIFIED: this repository
-   contains no copy of the provider's limit, so the owner must confirm the current
-   maximum in the Vercel dashboard before raising it. Nothing else in `functions`
-   changed:
-   every key keeps includeFiles. A number, not a string: a string is rejected at
+/* V4: 30 s comfortably covers the configured 6 s owner round plus the 3 s
+   auto-reply and ordinary DB work, while staying far below the owner's verified
+   300 s project setting. tg.js has no evidence-based need for its own override.
+   Every key keeps includeFiles. A number, not a string: a string is rejected at
    deploy time, which is exactly the kind of mistake this catches before a push. */
 {
   const lead = CONFIG.functions && CONFIG.functions['api/lead.js'];
   const tg = CONFIG.functions && CONFIG.functions['api/tg.js'];
   const allInclude = Object.values(CONFIG.functions || {})
     .every((f) => f && f.includeFiles === 'lib/brand.generated.json');
-  const ok = !!lead && !!tg
-    && lead.maxDuration === 10 && tg.maxDuration === 10
-    && Number.isInteger(lead.maxDuration) && Number.isInteger(tg.maxDuration)
+  const ok = !!lead && tg === undefined
+    && lead.maxDuration === 30 && Number.isInteger(lead.maxDuration)
     && allInclude;
-  line(ok, 'V4', 'lead and tg: maxDuration 10, every function keeps includeFiles',
-    `lead=${lead && lead.maxDuration} tg=${tg && tg.maxDuration} includeFiles=${allInclude}`);
+  line(ok, 'V4', 'lead: maxDuration 30; no tg override; includeFiles everywhere',
+    `lead=${lead && lead.maxDuration} tgOverride=${tg !== undefined} includeFiles=${allInclude}`);
 }
 
 console.log('');

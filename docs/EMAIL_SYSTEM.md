@@ -229,11 +229,13 @@ the UI):
     **Retry idempotency key:** every review send uses a Resend idempotency key
     (`<leadId>:review` for the first send), and each `review_request_failed`
     event records `{ status, key }` for the attempt that failed. A retry after
-    a timeout reuses the exact key of the timed-out attempt (it may have been
-    delivered, so Resend must dedupe); a retry after any other failure uses a
-    brand-new `<leadId>:review:r<count>` key (`count` = number of earlier
-    failures), so a cached failure is never replayed and no new key can equal
-    an earlier one.
+    a timeout or `concurrent_idempotent_requests` reuses the exact key of that
+    attempt (its outcome is unknown, so a later manual retry must be a true
+    replay); neither case is automatically retried. A retry after a definite
+    failure uses a brand-new `<leadId>:review:r<count>` key (`count` = number of
+    earlier failures), so no new key can equal an earlier one. Same-key,
+    same-payload replays return Resend's original response; neither concurrent
+    nor payload-mismatch 409 means delivered.
 
 Button colours use the Bot API `style` field (only `primary`, `success`,
 `danger` exist). `callback_data`, labels and the flow are unchanged. Older

@@ -4,12 +4,15 @@
 import http from 'node:http';
 
 function start(name) {
-  const state = { mode: 'ok', status: 200, hangMs: 2500, hangUsed: false, requests: [], all: [] };
+  const state = { mode: 'ok', status: 200, hangMs: 2500, hangUsed: false, requests: [], all: [], idempotency: new Map() };
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
     const raw = Buffer.concat(chunks).toString('utf8');
+    let idem = null;
+    let replay = false;
     const send = (code, obj) => {
+      if (idem && !replay) { idem.response = { code, obj }; idem.pending = false; }
       res.writeHead(code, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(obj));
     };
@@ -25,6 +28,7 @@ function start(name) {
         // clears the seat; anything else is compared as a string to chat_id.
         if ('hangChat' in c) state.hangChat = c.hangChat == null ? null : String(c.hangChat);
         if ('failChat' in c) state.failChat = c.failChat == null ? null : String(c.failChat);
+        if ('failChats' in c) state.failChats = Array.isArray(c.failChats) ? c.failChats.map(String) : [];
       } catch {}
       return send(200, { ok: true, mode: state.mode });
     }
@@ -49,6 +53,28 @@ function start(name) {
     const entry = { method: req.method, path: req.url, headers: req.headers, body: parsed, raw, at: Date.now() };
     state.requests.push(entry);
     state.all.push(entry);
+
+    /* Resend's three documented idempotency behaviours. A true replay returns
+       the original status/body without another send; an in-flight original gives
+       concurrent 409; different bytes under the same key give invalid 409. */
+    if (name === 'resend' && req.url === '/emails') {
+      const key = req.headers['idempotency-key'];
+      if (key) {
+        const previous = state.idempotency.get(key);
+        if (previous && previous.raw !== raw) {
+          return send(409, { statusCode: 409, name: 'invalid_idempotent_request', message: 'fake payload mismatch' });
+        }
+        if (previous && previous.pending) {
+          return send(409, { statusCode: 409, name: 'concurrent_idempotent_requests', message: 'fake concurrent request' });
+        }
+        if (previous && previous.response) {
+          replay = true;
+          return send(previous.response.code, previous.response.obj);
+        }
+        idem = { raw, pending: true, response: null };
+        state.idempotency.set(key, idem);
+      }
+    }
 
     /* Telegram refuses an edit that changes nothing. The bot has to treat that
        400 as success, so the fake has to be able to produce it: remember the
@@ -75,10 +101,18 @@ function start(name) {
        needs four phones answering and one that never does. */
     if (parsed && state.hangChat != null && String(parsed.chat_id) === state.hangChat) mode = 'hang';
     if (parsed && state.failChat != null && String(parsed.chat_id) === state.failChat) mode = '503';
+    if (parsed && Array.isArray(state.failChats) && state.failChats.includes(String(parsed.chat_id))) mode = '503';
 
     if (mode === 'hang') {
       setTimeout(() => { try { send(200, { ok: true }); } catch {} }, state.hangMs);
       return;
+    }
+    if (name === 'resend' && (mode === 'concurrent' || mode === 'invalid')) {
+      return send(409, {
+        statusCode: 409,
+        name: mode === 'concurrent' ? 'concurrent_idempotent_requests' : 'invalid_idempotent_request',
+        message: 'fake idempotency error',
+      });
     }
     if (mode === 'ok') return send(state.status, name === 'tg' ? { ok: true, result: { message_id: 1 } } : { id: 'fake-id' });
     const code = Number(mode) || 500;

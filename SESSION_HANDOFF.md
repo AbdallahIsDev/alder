@@ -1,7 +1,7 @@
 # SESSION HANDOFF: Alder roofing lead platform (orchestrator continuation)
 
 > **Purpose.** Give this file to any cloud AI assistant so it can continue as the **orchestrator** for this project without the owner re-explaining anything.
-> **Last updated:** 2026-11-09 (multi-tenant design bundle).
+> **Last updated:** 2026-11-11 (lead-safety independent-review follow-up).
 > **Rule for the local agent:** after every task, update the change log and any section whose facts changed. Never put secret values in it.
 
 ---
@@ -302,7 +302,12 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
   leads are re-announced on an idempotent replay, one claim per lead, one bounded notification round with a
   6 s deadline, parallel phone fan-out, a timeout treated as unknown, one idempotency key for the owner email,
   a form that cannot hang, and a shared redirect predicate for health and the daily check; outbox and
-  uptime-check proposals only. Page hash `be79571b` -> `aa71755b`. Draft PR (this bundle).
+  uptime-check proposals only. Independent-review follow-up: lead `maxDuration` 30 with no tg override;
+  truthful Resend replay/409 handling; salted per-chat outcomes and targeted partial retries; honest
+  fixed-window claim docs; duplicate-panel recap hidden; built page `aa71755b` -> `80d6281c`, other output
+  hashes unchanged. Arena working branch `arena/9c9b4995-alder`, intended for draft PR #24 (`lead-safety`).
+  Static checks and standalone mutations green; DB-backed/full suite blocked because test env has no
+  `SUPABASE_URL`. No schema change, no merge.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
@@ -373,6 +378,7 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-11 | `lead-safety` | `c3529ce` | `mailRedirectConfigured()` / `mailRedirectInProduction()` in `lib/mail.js` are the one answer for `/api/health`'s flag, the production log line and the daily operator line | B12a/B12b, health 31/31 |
 | 2026-11-11 | `lead-safety` | `cf85761` | `docs/proposals/notification-outbox.md` (0005 SQL as text, claim/drain design, independent alarm channel) and `docs/proposals/uptime-check.md` | Docs only; `supabase/migrations/` untouched |
 | 2026-11-11 | `lead-safety` | (this commit) | `docs/OPERATIONS.md` §4c/§4d/§8: how one lead is announced, how to find a silent lead, the form's retry rules, the timeout and redirect semantics | Docs only |
+| 2026-11-11 | `lead-safety` review | (this wrap-up) | Lead `maxDuration` 30; truthful Resend replay/409 outcomes; partial Telegram retries by salted chat hash; claim/browser/recap honesty; stale docs and tests corrected | Draft PR #24; no schema. Static/mutations green; DB/full suite blocked by unset `SUPABASE_URL` |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |

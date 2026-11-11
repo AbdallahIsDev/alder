@@ -204,8 +204,9 @@ receives it. A business with status `demo` is the operator's own: it also gets t
 redirect warning and, in a clearly separated last line, the setting name. A business
 with status `active` is a client: it hears from us only when one of its own sends
 failed, and it never sees operator text. Two businesses that share an owner email get
-one message per run, not two — the one with more failures wins, and the response's
-`deduped` count records the suppressed copy.
+one message per business, even when two businesses share an inbox; suppressing the
+second would hide that business's own counts. The responses report `sent`, `emailed`,
+and failure/skip counts; there is no `deduped` response field.
 
 `/api/health` and `/api/selfcheck` and `/api/digest` all answer **503 when
 `HEALTH_SECRET` is unset**, even if `CRON_SECRET` is set. `/api/health` takes
@@ -216,39 +217,63 @@ one message per run, not two — the one with more failures wins, and the respon
 The order is fixed: **save first, notify second**, and nothing after the save can
 change the HTTP response. Within that:
 
-1. **The lead is stored**, then a per-lead claim is taken (`rate_limits`, keyed by
-the lead id, 10 s bucket — the same atomic primitive the review retry uses). Only
-one notifier runs per lead. The claim is released in a `finally`, and it fails
-open: a claim that cannot be read means the alert is sent, not dropped.
-2. **A replay announces a silent lead.** When `POST /api/lead` sees an
-idempotency key that already exists, it reads the lead's events first. If no
-channel ever delivered, it re-drives the whole notification from the stored row
-(writing the missing `created` event too) and still answers `200` as before. A
-delivered lead is left alone and the response is unchanged.
-3. **Both channels run at once**, and the Telegram fan-out sends to every bound
-phone in one round (`Promise.allSettled`) instead of one after another. If a
-phone returns 400 with a keyboard, the send is retried once without buttons.
-4. **One deadline covers the round: 6000 ms,** shared by the primary attempt and
-the fallback, so the fallback cannot start a second six seconds of work after the
-first one spent it. `api/lead.js` and `api/tg.js` declare `maxDuration: 10` in
-`vercel.json`; the per-send timeout stays 3000 ms (`lib/outbound.js`). A phone the
-deadline abandons is recorded as `tg_failed` with `meta.abandoned`, and it is
-still on its own 3 s timeout, so nothing outlives the request.
+1. **The lead is stored**, then a best-effort per-lead claim is taken (`rate_limits`,
+keyed by lead id). This is a fixed 10 s bucket, **not a hard lock or a 10 s
+lifetime**. A claim may match for nearly 10 s or almost 0 s. For two overlapping
+calls whose claim attempts are `d` seconds apart (`d < 10`), uniform bucket-edge
+timing gives approximately `d / 10` chance that they land on opposite sides and
+both win (100 ms → 1%; 1 s → 10%). The replay's post-claim recheck catches a
+success already written to `lead_events`; it cannot catch another request that
+has claimed but not yet written an outcome. The claim is released in `finally`
+and fails open. A durable cross-bucket claim needs the proposed outbox/locking
+work, not wording that implies certainty this primitive cannot provide.
+2. **A replay announces only what is missing.** With no confirmed delivery it
+re-drives the notification from the stored row and writes a missing `created`
+event. Telegram events record per-chat outcomes in `lead_events.meta` as
+`chat_outcomes: [{ chat_hash, delivered }]`; `chat_hash` uses the existing
+IP-hash salt and SHA-256 helper with a Telegram namespace. Raw chat ids are never
+stored. If three phones succeeded and two failed, fallback and replay target only
+those two. Once any owner channel succeeded, replay does not add an owner email.
+3. **Both channels run at once**, and Telegram fans out to every eligible bound
+phone with `Promise.allSettled`. A 400 response to a message with a keyboard gets
+one retry without buttons. Successful phones are excluded from a partial retry.
+4. **One 6000 ms deadline covers the owner round**, shared by primary and fallback;
+the per-send timeout is 3000 ms (`lib/outbound.js`). `api/lead.js` declares
+`maxDuration: 30`, comfortably above that work and far below the owner's verified
+300 s project setting (Fluid Compute, Hobby, iad1). There is no code evidence for
+an `api/tg.js` override, so it has none. Every function entry keeps
+`includeFiles`. A phone abandoned by the deadline is recorded with
+`meta.abandoned`; its own request still has the 3 s timeout.
 
-**NOT VERIFIED — check this before changing it.** 10 s is the platform default
-for the plan this project is on as understood when the branch was written; this
-repository contains no copy of the provider's limit. Confirm the current maximum
-in the Vercel dashboard (Project → Settings → Functions) before raising
-`maxDuration`, and keep the notification deadline (`DEADLINE_DEFAULT_MS`, 6000 ms)
-and the browser's attempt timeout (12000 ms) inside it.
+   **Worst-case configured server timeline for `POST /api/lead`:** request parsing
+and validation (no explicit budget) → IP/business rate-limit RPCs (no explicit DB
+deadline) → business lookup (no explicit DB deadline) → insert and duplicate
+lookup concurrently (no explicit DB deadline) → `created` event and claim
+(no explicit DB deadline) → post-claim replay recheck when applicable
+(no explicit DB deadline) → primary owner email + Telegram (within the shared
+6000 ms owner deadline) → eligible fallback within that same 6000 ms, not another
+6000 ms → customer auto-reply (up to 3000 ms) → claim release (no explicit DB
+deadline). Configured outbound work is therefore at most about **9 s**, but total
+request time is **not strictly bounded in code** because Supabase calls have no
+per-call deadline. The 30 s Vercel ceiling limits a hung invocation; it does not
+promise a response by 30 s.
 5. **A timeout is unknown, not failed.** A send whose answer was lost may have
 been accepted, so it is never retried. Only a definite answer (4xx/5xx) is
-eligible for the one fallback attempt, and only while less than 2000 ms of the
-round have been used.
-6. **One idempotency key per lead per channel.** The fallback owner email reuses
-`<leadId>:owner`, so if Resend had in fact accepted the first attempt it answers
-409 and that counts as delivered. (The old `:owner:fallback` key is why one lead
-could put two identical emails in the owner's inbox.)
+eligible for one fallback attempt, and only while less than 2000 ms of the owner
+round have elapsed. Resend `concurrent_idempotent_requests` is also unknown and
+is not retried immediately. A payload-mismatch 409 is a fixed-key programming or
+configuration error, so immediate identical retries cannot repair it either.
+6. **One idempotency key per lead per channel.** Primary and fallback owner email
+have byte-identical subject, HTML, text, attachments and headers under
+`<leadId>:owner`. Within Resend's 24 h window, the same key and same payload
+returns the **original response without another send**. A 409
+`concurrent_idempotent_requests` means the original is still in progress (outcome
+unknown); a 409 `invalid_idempotent_request` means the key was reused with
+different content. Neither means delivered. Both are recorded as failures, with
+fixed log events `mail_idempotency_concurrent` or
+`mail_idempotency_payload_mismatch`. **NOT VERIFIED:** Resend's documentation does
+not say whether a request that returned 5xx is stored for later replay; the code
+does not assume either outcome.
 
 **Finding a lead that was stored but never announced** (the case the replay above
 repairs):
@@ -263,21 +288,42 @@ select l.id, l.created_at
 ```
 
 Re-posting the same `idempotencyKey` to `/api/lead` is the supported repair: it
-re-drives the notification and cannot store a second lead.
+re-drives missing delivery and cannot store a second lead. For partial Telegram
+delivery, use the per-chat hashes in recent `tg_failed` / `tg_sent` events rather
+than assuming the SQL above finds the lead.
 
 ## 4d. The form on the visitor's phone
 
-The modal posts to `/api/lead` with a 12000 ms abort timeout per attempt. That is
-deliberately longer than the function's 10 s limit: a browser that gave up sooner
-would throw away a lead the server was still storing. On **no answer at all**
-(timeout, dropped connection, DNS) it retries exactly once after 700 ms, under the
-same idempotency key, so the server's dedupe makes the retry harmless. An HTTP
-error is final: it shows the field errors (400) or the generic panel (5xx).
+The modal posts to `/api/lead` with a **12000 ms abort timeout per attempt**. Keep
+that number: configured outbound work is about 9 s, while 30 s would make a
+visitor wait unnecessarily for a stuck database, whose calls have no explicit
+deadline. A browser timeout does not cancel server work already underway. On **no
+answer at all** (timeout, dropped connection, DNS) the form retries exactly once
+after 700 ms under the same idempotency key, so the server cannot store a second
+lead. An HTTP error is final: it shows field errors (400) or the generic panel
+(5xx).
 
-With `navigator.onLine === false` the form posts nothing at all and says
-"You're offline" immediately. Pressing send twice within 30 s shows the "already
-sent" panel rather than a failure, because the server dropped the duplicate on
-purpose.
+With `navigator.onLine === false` the form posts nothing and says "You're offline"
+immediately. Pressing send twice within 30 s shows the "already sent" panel rather
+than a failure, because the server dropped the duplicate on purpose. If the
+visitor edited fields before that second press, those new values were **not**
+sent, so the recap is hidden in this state instead of displaying them as received.
+
+## What the visitor sees
+
+| Failure | Visitor | Owner | Operator |
+|---|---|---|---|
+| Save fails | HTTP 500 generic failure panel; no success recap | Nothing new | `lead_insert_failed`; no local buffer exists |
+| Save succeeds, both owner alerts fail | HTTP 200 success panel: the request was stored | No alert unless a later same-key replay succeeds | Failure events and `owner_alert_fallback` when eligible; replay can repair missing delivery |
+| Browser is offline | Immediate "You're offline"; no POST | Nothing new from that attempt | No server event because no request reached it |
+| Attempt times out, then visitor retries | One automatic retry after 700 ms with the same key; success or generic failure according to that answer | At most one stored lead; missing alerts may be re-driven | First attempt may still finish server-side; events reveal actual outcomes |
+
+**A visitor can see a bot-decoy success without storage**: the honeypot and
+under-2-second checks deliberately return `{ ok: true }` before insertion
+(`api/lead.js:131-139`). For a genuine validated submission, success is returned
+only after `insertLead` succeeds or finds the same stored idempotency key
+(`api/lead.js:264-282`, `api/lead.js:321`, `api/lead.js:349`). Notification failure
+never changes that stored-lead success into a failure.
 
 ## 4b. Rate limits are fixed windows
 
@@ -423,10 +469,9 @@ set, so it cannot be pointed at a fake by accident.
 - **The exit code of a failed cron is only in the logs.** A self-check or drain run
   that fails is visible in the Vercel log and nowhere else. The external check that
   would catch it is proposed in `docs/proposals/uptime-check.md`.
-- **A shared inbox gets one message.** Two businesses with the same `owner_email` are
-  de-duplicated per run, worst-first. The second business's numbers are not merged into
-  the message, so its counts are missing from that run. Distinct inboxes are the normal
-  case; this only bites an operator running several demo businesses on one address.
+- **A shared inbox gets one message per business.** Two businesses with the same
+  `owner_email` each get their own counts; neither is de-duplicated or merged, because
+  suppressing one would hide that business's only warning.
 - **The self-check is per business but its window is global.** Each message counts the
   last 24 h for that business only, so two messages can cover slightly different
   windows if the run takes long enough to cross a second boundary. At this size it does
