@@ -29,12 +29,22 @@ import { fakeRes, ALDER_DEMO, sweepTestLeads, fixtureEmail } from './helpers.mjs
 import { FIXTURE_CHATS } from './fixture-ids.mjs';
 loadEnv();
 const FAKE_TG_URL = process.env.FAKE_TG_URL;
+const FAKE_RESEND_URL = process.env.FAKE_RESEND_URL;
 async function fakeTg(cfg) {
   if (!FAKE_TG_URL) throw new Error('FAKE_TG_URL is not set — run through tests/run.mjs');
   const r = await fetch(FAKE_TG_URL + '/__control', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
   });
   return r.json();
+}
+async function fakeResendRequests() {
+  if (!FAKE_RESEND_URL) throw new Error('FAKE_RESEND_URL is not set — run through tests/run.mjs');
+  const r = await fetch(FAKE_RESEND_URL + '/__requests');
+  return (await r.json()).requests;
+}
+async function resetFakeResend() {
+  if (!FAKE_RESEND_URL) throw new Error('FAKE_RESEND_URL is not set — run through tests/run.mjs');
+  await fetch(FAKE_RESEND_URL + '/__reset', { method: 'POST' });
 }
 
 /* ---------- printer ---------- */
@@ -227,6 +237,37 @@ const logOffset = fs.statSync(LOG).size;
   const created = evs.filter((e) => e.kind === 'created').length;
   line(a.status === 200 && b.status === 200 && rows.length === 1 && created === 1,
     '8', 'same key twice -> one row, one event', `${a.status},${b.status} rows=${rows.length} created=${created}`);
+}
+
+/* ---------- 8b. structural owner-email failure is not retried ---------- */
+{
+  await resetLimits();
+  const key = `${RUN}-t8b`;
+  await resetFakeResend();
+  const first = await post(payload({ idempotencyKey: key }));
+  const row = (await leadFor(key))[0];
+  const firstEvents = row ? await eventsFor(row.id) : [];
+  let removed = { error: new Error('lead missing') };
+  let seeded = { error: new Error('lead missing') };
+  if (row) {
+    removed = await svc.from('lead_events').delete().eq('lead_id', row.id)
+      .in('kind', ['email_owner_sent', 'email_owner_failed']);
+    seeded = await svc.from('lead_events').insert({
+      lead_id: row.id, kind: 'email_owner_failed', meta: { status: 'no_verified_sender' },
+    });
+  }
+  await resetFakeResend();
+  const replay = await post(payload({ idempotencyKey: key }));
+  const ownerAttempts = (await fakeResendRequests()).filter((r) => r.path === '/emails'
+    && String(r.headers['idempotency-key'] || '').endsWith(':owner'));
+  const replayEvents = row ? await eventsFor(row.id) : [];
+  const ownerFailures = replayEvents.filter((e) => e.kind === 'email_owner_failed');
+  const ownerSent = replayEvents.some((e) => e.kind === 'email_owner_sent');
+  const ok = first.status === 200 && !!row && firstEvents.some((e) => e.kind === 'tg_sent')
+    && !removed.error && !seeded.error && replay.status === 200
+    && ownerAttempts.length === 0 && ownerFailures.length === 1 && !ownerSent;
+  line(ok, '8b', 'structural email failure: replay does not retry owner email',
+    `first=${first.status} replay=${replay.status} ownerAttempts=${ownerAttempts.length} failures=${ownerFailures.length} sent=${ownerSent}`);
 }
 
 /* ---------- 9. per-IP rate limit ---------- */

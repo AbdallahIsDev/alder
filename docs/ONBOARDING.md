@@ -1,7 +1,49 @@
 # Onboarding a roofer
 
 How a new business gets a lead page, a Telegram link, and the first test lead.
-No secrets, no pricing — only the steps and the env var names.
+No secrets or customer data belong in this document.
+
+> **Current status:** setup is manual, and the repo is not ready for a second
+> real client. The site build supports one selected client, but the lead API
+> still accepts the business slug in the request body (A1). The server must
+> derive the tenant from the chosen architecture before using this as a live
+> second-client checklist. Phone/postal rules and legal links are not yet
+> configurable end to end. Retention, export, and request-deletion workflows
+> are not implemented.
+
+## Current manual steps
+
+Until the architecture decision is implemented, these are the repo's current
+setup tasks, not a safe self-service flow:
+
+1. Choose one deployment/client and its domain. Do not take payment on Vercel
+   Hobby; its current terms restrict it to personal, non-commercial use. Choose
+   Vercel Pro or another host whose commercial terms fit.
+2. Add one `public.businesses` row with the client's slug, name, owner email,
+   timezone, and review URL. `timezone` exists in the schema; country, phone
+   region, site URL, sender, legal text, and retention settings do not.
+3. Add `clients/<slug>.json` and build the selected page with that client. This
+   currently controls static copy and the optional email sender; it does not
+   resolve the API tenant securely.
+4. Configure the deployment's environment names listed below, its email sender,
+   domain, database, and outbound services. Use TEST credentials in previews.
+5. Deploy the page and check its canonical URL, legal links, sender, and form.
+   Legal links remain placeholders until approved client-specific URLs/text are
+   implemented. Current postal validation is US ZIP-only.
+6. Mint a bind code with `npm run bind -- <slug>` and have the owner connect a
+   Telegram account to the bot.
+7. Bind each additional recipient with a separate Telegram account using the
+   existing invite flow. **One Telegram account/chat belongs to one business
+   only.** `business_chats.tg_chat_id` is unique; the same account cannot receive
+   alerts for two businesses.
+8. Submit a test lead and verify owner email, Telegram alert, customer auto-
+   reply, and review email/link. Do not use a real customer's data for a test.
+9. Before signing, settle the host plan and ask a lawyer to approve legal text
+   and retention. The current offboard script deletes immediately; it does not
+   provide a 30-day grace period.
+
+The architecture comparison and second-client gates are in
+[`docs/proposals/multi-client-architecture.md`](proposals/multi-client-architecture.md).
 
 - **Create the business row** — one row per roofer.
 - **Mint a bind code** — `npm run bind -- <slug>`.
