@@ -401,6 +401,7 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-11 | `lead-safety` | `cf85761` | `docs/proposals/notification-outbox.md` (0005 SQL as text, claim/drain design, independent alarm channel) and `docs/proposals/uptime-check.md` | Docs only; `supabase/migrations/` untouched |
 | 2026-11-11 | `lead-safety` | (this commit) | `docs/OPERATIONS.md` §4c/§4d/§8: how one lead is announced, how to find a silent lead, the form's retry rules, the timeout and redirect semantics | Docs only |
 | 2026-11-11 | `lead-safety` review | (this wrap-up) | Lead `maxDuration` 30; truthful Resend replay/409 outcomes; partial Telegram retries by salted chat hash; claim/browser/recap honesty; stale docs and tests corrected | Draft PR #24; no schema. Static/mutations green; DB/full suite blocked by unset `SUPABASE_URL` |
+| 2026-11-12 | `arena/9c9b4995-alder` | `2173631` | Re-verified partial-chat retries and concurrent 409 handling; suppressed owner-email retries after uncertain Resend 5xx, corrected delayed-500 fake support, isolated digest fake idempotency state, and recorded decisions | B1a–B1f, B5p/B5d/B5r, B6a/B6b, C38/C39 passed; touched suites 245/0/0 in 254.6s; full 502/0/0 in 320.6s (baseline 496); mutations failed as intended; no schema |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |
