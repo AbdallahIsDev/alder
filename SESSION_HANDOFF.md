@@ -1,7 +1,7 @@
 # SESSION HANDOFF: Alder roofing lead platform (orchestrator continuation)
 
 > **Purpose.** Give this file to any cloud AI assistant so it can continue as the **orchestrator** for this project without the owner re-explaining anything.
-> **Last updated:** 2026-11-12 (Architecture A tenant seam; TEST apply still pending).
+> **Last updated:** 2026-11-13 (PR #27 TEST migration verification and fixture fixes).
 > **Rule for the local agent:** after every task, update the change log and any section whose facts changed. Never put secret values in it.
 
 ---
@@ -349,6 +349,15 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 - `multi-client-prep` is based directly on the merged `origin/main` above. Commit `dd34ba9`
   contains the architecture comparison, replay fix, and onboarding/handoff updates. It was
   pushed after a successful dry-run; draft PR #26 targets `main`.
+- PR #27 (`arena/a12e637c-alder`) remains a draft against `main`; this branch now has
+  idempotent migration `0005` (`0d81188`), the tenant-host fixture fixes (`6b59157`), and
+  clearer B6g failure diagnostics (`af26707`). The final TEST run passed 525 assertions
+  across 36 suites with 0 failures and 0 skips in 317.5 s. No production database was queried.
+- **Host rollout gate:** docs identify `alder-roofing.vercel.app` as live. `clients/alder.json`
+  configures `www.alderroof.com`, while the README says to set the real canonical/OG domain
+  before launch; custom-domain attachment is unverified locally. Every Host that production
+  will serve needs a `businesses.site_host` value before merge. That column stores one host per
+  business, so serving both independently needs a redirect or an explicit alias design.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
@@ -426,7 +435,7 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-12 | `arena/9c9b4995-alder` | `e01b7e4` | Restored owner-email 5xx fallback and replay retries with one attempt per replay; replay now retries both missing paths after partial Telegram delivery; operator alarms claim each problem with fail-open behavior; documented digest claim outcomes; assessed sharp High and deferred non-lockfile upgrade; corrected stale test, cron, self-check, and build docs | D5 strict and B12 restored to baseline strength; interim D5/B12 suppression was weaker and is fixed. Touched 170/0/0 in 131.7s plus notify rerun 62/0/0 in 67.3s; full 506/0/0 in 313.2s (prior 502/0/0 in 320.6s); mutations failed as intended; PR #25 merged to `main` on 2026-11-12; no schema |
 | 2026-11-12 | `multi-client-prep` | `dd34ba9` | Added A/B architecture decision memo, honest manual onboarding limits, owner decisions, and replay guard for recorded structural email failures | B8b added; no assertions weakened. Touched suites: lead-api 51/51 + notify 62/62, 136s. Full TEST project: 507/0/0 across 34 suites in 329.6s (+16.4s vs baseline 506/0/0 in 313.2s). B8b mutation: 50/51, failed as expected (ownerAttempts=1). No schema. Pushed after dry-run; draft PR #26 targets main. Review diff: 49,243 bytes / 572 lines, zero secret-pattern hits; apply-check passed on fresh `origin/main` worktree |
 | 2026-11-12 | `arena/a12e637c-alder` | `85f5486` | Chose Architecture A; later replay retries missing env/sender and all failures except `blocked_test_mode`; same-request suppression unchanged. Added real-path replay recovery/5xx tests. | Decision record 82 lines; replay policy 3/3 and old-guard mutation failed R1; DB integration unrun because `.env.test` is absent |
-| 2026-11-12 | `arena/a12e637c-alder` | (next) | Added Host-only tenant resolution, nullable unique `site_host`, wrong-business token denial, optional single-business daily-job filters, two-tenant lead/review cases, five tenant rules, and TEST-only loopback aliases. | DB-free tenant 6/6, migrations 6/6; forwarded-Host and unlisted-migration mutations failed as expected. `0005` NOT APPLIED: `.env.test` is absent. DB-backed suites unrun. No production migration. |
+| 2026-11-13 | `arena/a12e637c-alder` | `0d81188` `6b59157` `af26707` | Made migration `0005` idempotent; brought in the tenant-host fixture fixes; expanded B6g replay diagnostics without changing its assertion. | TEST: migration applied twice to the installed schema; fresh temporary table applied twice; duplicate host rejected (`23505`); old non-idempotent mutation failed with duplicate-column (`42701`) and scratch table was removed. Final full run: 525 assertions / 36 suites / 0 failures / 0 skips in 317.5 s. An earlier full run had one B6g failure; focused and ordered reruns passed, final full run passed, initial cause unconfirmed. No production database was queried. |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |
