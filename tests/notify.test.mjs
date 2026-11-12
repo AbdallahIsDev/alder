@@ -1195,10 +1195,13 @@ try {
 
   /* Second business -> its own chat */
   const { data: biz2 } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
+  const secondHost = 'second-demo.test';
+  const { error: hostError } = await svc.from('businesses').update({ site_host: secondHost }).eq('id', biz2.id);
+  if (hostError) throw hostError;
   const chat2 = FIXTURE_CHATS.notifySecond;
   await svc.from('business_chats').upsert({ business_id: biz2.id, tg_chat_id: chat2 }, { onConflict: 'tg_chat_id' });
   await reset(TG);
-  await post({ slug: 'second-demo' });
+  await post({ slug: 'second-demo' }, { host: secondHost });
   const req2 = (await requests(TG)).filter((x) => x.path.includes('/sendMessage'));
   const boundB = (await svc.from('business_chats').select('tg_chat_id').eq('business_id', biz2.id)).data
     .map((r) => String(r.tg_chat_id)).sort();
@@ -1210,11 +1213,11 @@ try {
   /* Active business with no chat -> no call, tg_failed no_chat */
   const { data: made } = await svc.from('businesses').insert({
     slug: `active-${RUN}`, name: 'Active Co', owner_email: 'owner@active.example.com',
-    google_review_url: 'https://g.page/r/active', status: 'active',
+    google_review_url: 'https://g.page/r/active', status: 'active', site_host: `active-${RUN}.test`,
   }).select('id').single();
   activeId = made.id;
   await reset(TG);
-  const { res, key } = await post({ slug: `active-${RUN}` });
+  const { res, key } = await post({ slug: `active-${RUN}` }, { host: `active-${RUN}.test` });
   const reqA = (await requests(TG)).filter((x) => x.path.includes('/sendMessage'));
   const rows = await leadFor(key);
   const evs = rows.length ? await events(rows[0].id) : [];

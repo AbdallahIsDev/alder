@@ -12,6 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { JSDOM } from 'jsdom';
@@ -20,7 +21,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const API = process.env.LEAD_API_URL || 'http://localhost:3000/api/lead';
 const ORIGIN = new URL(API).origin;
 const LOG = path.resolve(ROOT, process.env.LEAD_API_LOG || '_debug/vercel-dev.log');
-const RUN = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+const RUN = randomUUID();
 
 /* ---------- env, one shared loader ---------- */
 // process.env > .env.test (TEST_ENV=1) > .env.local > .env, same as every other suite.
@@ -148,6 +149,16 @@ async function leadFor(key) {
 async function eventsFor(leadId) {
   const { data } = await svc.from('lead_events').select('kind, meta').eq('lead_id', leadId);
   return data || [];
+}
+async function clearLeadForTestKey(key) {
+  const { data, error } = await svc.from('leads').select('id').eq('idempotency_key', key);
+  if (error) throw error;
+  const ids = (data || []).map((row) => row.id);
+  if (!ids.length) return;
+  const { error: eventError } = await svc.from('lead_events').delete().in('lead_id', ids);
+  if (eventError) throw eventError;
+  const { error: leadError } = await svc.from('leads').delete().eq('idempotency_key', key);
+  if (leadError) throw leadError;
 }
 
 /* ---------- in-process handler (most tests) vs real HTTP (kept tests) ----
@@ -323,6 +334,7 @@ const logOffset = fs.statSync(LOG).size;
   for (const [id, fields, opts, expected] of cases) {
     await resetLimits();
     const key = `${RUN}-${id.toLowerCase()}`;
+    await clearLeadForTestKey(key);
     const r = await post(payload({ idempotencyKey: key, ...fields }), opts);
     const rows = await leadFor(key);
     line(r.status === 200 && rows.length === 1 && rows[0].business_id === expected,
