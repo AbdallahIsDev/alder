@@ -90,6 +90,10 @@ export const deliverSelfCheck = deliverToBusinesses;
  * Same rule for demo and active — a demo row is the operator's test business,
  * not an audience for operator text.
  */
+export function filterActiveBusinesses(businesses, requestedBusiness) {
+  return businesses.filter((b) => !requestedBusiness || b.id === requestedBusiness);
+}
+
 export function alertTargets({ businesses, counts }) {
   return businesses
     .filter((b) => shouldAlertBusiness({ status: b.status, failed: failedTotal(counts.get(b.id) || {}) }))
@@ -181,7 +185,12 @@ export default async function handler(req, res) {
     // warning in lib/mail.js uses, so the daily line cannot drift from the log.
     const redirectActive = mailRedirectInProduction();
 
-    const active = await listActiveBusinesses();
+    const requestedBusiness = req.query && req.query.business_id;
+    if (requestedBusiness !== undefined
+      && (typeof requestedBusiness !== 'string' || !/^[0-9a-f-]{36}$/i.test(requestedBusiness))) {
+      return res.status(400).json({ ok: false });
+    }
+    const active = filterActiveBusinesses(await listActiveBusinesses(), requestedBusiness);
     const counts = await eventCountsByBusiness({ sinceIso: since, kinds: KINDS });
     const failed = active.reduce((a, b) => a + failedTotal(counts.get(b.id) || {}), 0);
 

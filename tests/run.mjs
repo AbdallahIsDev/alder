@@ -52,6 +52,8 @@ const DEFAULT_SUITES = [
   { file: 'tests/migrations.test.mjs', needsHttp: false },
   { file: 'tests/test-env-check.test.mjs', needsHttp: false },
   { file: 'tests/vercel-config.test.mjs', needsHttp: false },
+  { file: 'tests/tenant.test.mjs', needsHttp: false },
+  { file: 'tests/replay-policy.test.mjs', needsHttp: false },
   { file: 'tests/health.test.mjs', needsHttp: false },
   { file: 'tests/email-layout.test.mjs', needsHttp: false },
   { file: 'tests/digest.test.mjs', needsHttp: false },
@@ -282,6 +284,14 @@ if (RUN_SEED_CHECK) {
 }
 
 assertTestProject();
+
+// Public endpoints require a real canonical site_host. TEST only: seed the demo
+// host and map loopback HTTP to it; production can never enable this alias.
+{
+  const { error } = await svc.from('businesses').update({ site_host: 'alder-demo.test' }).eq('slug', ALDER_DEMO);
+  if (error) { out(`FAIL  runner  could not assign TEST site_host: ${error.code || 'no_code'}`); process.exit(1); }
+  process.env.TENANT_HOST_MAP = JSON.stringify({ localhost: 'alder-demo.test', '127.0.0.1': 'alder-demo.test' });
+}
 
 /* A full run writes two 124 MB build trees. Running out of space mid-suite looks
    like a test failure and is not one, so refuse up front. Fail-open only if the

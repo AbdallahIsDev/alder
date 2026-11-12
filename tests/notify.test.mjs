@@ -99,7 +99,7 @@ async function post(over, extra) {
   const res = fakeRes();
   const req = {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-real-ip': `203.0.113.${ip++}`, ...(extra || {}) },
+    headers: { 'content-type': 'application/json', 'x-real-ip': `203.0.113.${ip++}`, host: 'alder-demo.test', ...(extra || {}) },
     body, socket: {},
   };
   const t0 = Date.now();

@@ -1,7 +1,7 @@
 # SESSION HANDOFF: Alder roofing lead platform (orchestrator continuation)
 
 > **Purpose.** Give this file to any cloud AI assistant so it can continue as the **orchestrator** for this project without the owner re-explaining anything.
-> **Last updated:** 2026-11-12 (lead-safety retry, throttle, and audit follow-up).
+> **Last updated:** 2026-11-12 (Architecture A tenant seam; TEST apply still pending).
 > **Rule for the local agent:** after every task, update the change log and any section whose facts changed. Never put secret values in it.
 
 ---
@@ -117,7 +117,7 @@ Look for: unhandled rejections, fail-open paths, module-level state across warm 
 
 Required in Vercel: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `SITE_URL`, `HEALTH_SECRET`, `CRON_SECRET` (set both; selfcheck/digest return 503 if `HEALTH_SECRET` is unset even when `CRON_SECRET` is set).
 
-Optional: `TELEGRAM_CHAT_ID`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX` (**remove before first real client**), `AUTOREPLY_DAILY_CAP` (40), `DIGEST_ENABLED` (unset = no-op), `DIGEST_UNTOUCHED_DAYS` (14), `RECIPIENTS_MAX` (5), `INVITES_MAX` (3), `TELEGRAM_BOT_USERNAME`, `DATABASE_URL` (migrations only), `VERCEL_ENV`.
+Optional: `TELEGRAM_CHAT_ID`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX` (**remove before first real client**), `AUTOREPLY_DAILY_CAP` (40), `DIGEST_ENABLED` (unset = no-op), `DIGEST_UNTOUCHED_DAYS` (14), `RECIPIENTS_MAX` (5), `INVITES_MAX` (3), `TELEGRAM_BOT_USERNAME`, `DATABASE_URL` (migrations only), `VERCEL_ENV`, `TENANT_HOST_MAP` (JSON canonical-host aliases; TEST/development/preview only, always ignored in production).
 
 New in `ops-audience` (not deployed): `OPERATOR_CHAT_ID` (falls back to `TELEGRAM_CHAT_ID`), `OPERATOR_EMAIL`.
 
@@ -425,6 +425,8 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-12 | `arena/9c9b4995-alder` | `2173631` | Re-verified partial-chat retries and concurrent 409 handling; suppressed owner-email retries after uncertain Resend 5xx, corrected delayed-500 fake support, isolated digest fake idempotency state, and recorded decisions | B1a–B1f, B5p/B5d/B5r, B6a/B6b, C38/C39 passed; touched suites 245/0/0 in 254.6s; full 502/0/0 in 320.6s (baseline 496); mutations failed as intended; review diffs are gitignored at _debug/patches/lead-safety-review.diff and _debug/patches/arena-fix-delta.diff; no schema |
 | 2026-11-12 | `arena/9c9b4995-alder` | `e01b7e4` | Restored owner-email 5xx fallback and replay retries with one attempt per replay; replay now retries both missing paths after partial Telegram delivery; operator alarms claim each problem with fail-open behavior; documented digest claim outcomes; assessed sharp High and deferred non-lockfile upgrade; corrected stale test, cron, self-check, and build docs | D5 strict and B12 restored to baseline strength; interim D5/B12 suppression was weaker and is fixed. Touched 170/0/0 in 131.7s plus notify rerun 62/0/0 in 67.3s; full 506/0/0 in 313.2s (prior 502/0/0 in 320.6s); mutations failed as intended; PR #25 merged to `main` on 2026-11-12; no schema |
 | 2026-11-12 | `multi-client-prep` | `dd34ba9` | Added A/B architecture decision memo, honest manual onboarding limits, owner decisions, and replay guard for recorded structural email failures | B8b added; no assertions weakened. Touched suites: lead-api 51/51 + notify 62/62, 136s. Full TEST project: 507/0/0 across 34 suites in 329.6s (+16.4s vs baseline 506/0/0 in 313.2s). B8b mutation: 50/51, failed as expected (ownerAttempts=1). No schema. Pushed after dry-run; draft PR #26 targets main. Review diff: 49,243 bytes / 572 lines, zero secret-pattern hits; apply-check passed on fresh `origin/main` worktree |
+| 2026-11-12 | `arena/a12e637c-alder` | `85f5486` | Chose Architecture A; later replay retries missing env/sender and all failures except `blocked_test_mode`; same-request suppression unchanged. Added real-path replay recovery/5xx tests. | Decision record 82 lines; replay policy 3/3 and old-guard mutation failed R1; DB integration unrun because `.env.test` is absent |
+| 2026-11-12 | `arena/a12e637c-alder` | (next) | Added Host-only tenant resolution, nullable unique `site_host`, wrong-business token denial, optional single-business daily-job filters, two-tenant lead/review cases, five tenant rules, and TEST-only loopback aliases. | DB-free tenant 6/6, migrations 6/6; forwarded-Host and unlisted-migration mutations failed as expected. `0005` NOT APPLIED: `.env.test` is absent. DB-backed suites unrun. No production migration. |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |

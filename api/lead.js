@@ -9,9 +9,10 @@ import { randomUUID } from 'node:crypto';
 import { hashIp } from '../lib/hash.js';
 import { clientIp } from '../lib/request.js';
 import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
-import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit, getLeadForReplay, getLeadDeliveryState, claimLeadNotification, releaseLeadNotification } from '../lib/db.js';
+import { insertLead, addEvent, hitRateLimit, getLeadForReplay, getLeadDeliveryState, claimLeadNotification, releaseLeadNotification } from '../lib/db.js';
 import { findRecentDuplicate } from '../lib/lead-intake.js';
 import { isOwnerEmailReplayRetryable, notifyAllAfterLead } from '../lib/notify.js';
+import { resolveTenant } from '../lib/tenant.js';
 
 const SERVICES = ['replacement', 'storm', 'repair', 'unsure'];
 const HOMES = ['house', 'multi', 'commercial', 'other'];
@@ -21,7 +22,7 @@ const AGES = ['Under 10 years', '10 to 20 years', 'Over 20 years', 'Not sure'];
 // Exactly the keys the form sends. Anything else is a 400.
 const ALLOWED = new Set([
   'service', 'home', 'timing', 'age', 'zip', 'phone', 'name', 'email', 'notes',
-  'claim', 'website', 'elapsed', 'slug', 'idempotencyKey',
+  'claim', 'website', 'elapsed', 'slug', 'business_id', 'idempotencyKey',
 ]);
 
 const MAX_BODY = 10 * 1024;
@@ -107,6 +108,9 @@ export default async function handler(req, res) {
     return res.status(code).send(htmlPage(title, message, businessName));
   };
   const badForm = (businessName) => htmlReply(400, 'Check your details', 'Please go back and check your details.', businessName);
+  const tenantNotFound = () => isForm
+    ? htmlReply(404, 'Not found', 'Not found.', null)
+    : res.status(404).json({ ok: false });
 
   let b = req.body;
   if (typeof b === 'string') {
@@ -175,20 +179,14 @@ export default async function handler(req, res) {
   // and will not match a lowercased address in the duplicate check.
   const email = clean(str(b.email)).toLowerCase();
 
-  const slug = str(b.slug);
-  if (!/^[a-z0-9-]{2,60}$/.test(slug)) return isForm ? badForm(null) : res.status(400).json({ ok: false });
-
+  // slug/business_id are accepted only for backward-compatible payloads and are
+  // deliberately ignored. Host alone selects the tenant; forwarded Host is unused.
   const idem = str(b.idempotencyKey);
   if (!/^[A-Za-z0-9-]{8,64}$/.test(idem)) return isForm ? badForm(null) : res.status(400).json({ ok: false });
 
-  let business;
-  try {
-    business = await getActiveBusinessBySlug(slug);
-  } catch (e) {
-    console.error('lead_business_lookup_failed', (e && e.code) || 'no_code');
-    return isForm ? htmlReply(500, 'Try again', 'Please try again shortly.', null) : res.status(500).json({ ok: false });
-  }
-  if (!business) return isForm ? badForm(null) : res.status(400).json({ ok: false });     // unknown, paused or churned
+  const tenant = await resolveTenant(req);
+  if (!tenant) return tenantNotFound(); // unknown/malformed host, inactive business, or lookup failure
+  const { business } = tenant;
 
   // Phone: validated and normalised to E.164 (region is always 'US'; see above).
   // Anything that does not parse as a valid number is a 400; stored value

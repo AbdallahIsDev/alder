@@ -58,12 +58,12 @@ try {
     default: handler, digestText, digestHasSomething, digestEnabled, digestUntouchedDays,
   } = await import('../api/digest.js');
 
-  const call = async ({ method = 'GET', secret, bearer } = {}) => {
+  const call = async ({ method = 'GET', secret, bearer, businessId } = {}) => {
     const res = fakeRes();
     const headers = {};
     if (secret !== undefined) headers['x-health-secret'] = secret;
     if (bearer !== undefined) headers.authorization = 'Bearer ' + bearer;
-    await handler({ method, headers }, res);
+    await handler({ method, headers, query: businessId ? { business_id: businessId } : {} }, res);
     return res;
   };
 
@@ -175,6 +175,8 @@ try {
         return json(page(fx.failedEvents));
       }
       if (table === 'businesses') {
+        const id = u.searchParams.get('id');
+        if (id && id.startsWith('eq.')) return json(fx.businesses.filter((b) => b.id === id.slice(3)));
         const st = u.searchParams.get('status');
         if (st && st.startsWith('in.(')) {
           const allowed = st.slice(4, -1).split(',');
@@ -188,11 +190,11 @@ try {
     installed = () => { globalThis.fetch = realFetch; };
   };
 
-  const run = async () => {
+  const run = async ({ businessId } = {}) => {
     process.env.DIGEST_ENABLED = '1';
     await ctl(TG, { mode: 'ok' }); await ctl(RS, { mode: 'ok', status: 200 , clearIdempotency: true });
     await resetFake(TG); await resetFake(RS);
-    const r = await call({ secret: 'health-test-secret-value' });
+    const r = await call({ secret: 'health-test-secret-value', businessId });
     const tg = (await fakeReqs(TG)).filter((x) => x.path.includes('/sendMessage'));
     const mail = (await fakeReqs(RS)).filter((x) => x.path === '/emails');
     return { r, tg, mail };
@@ -216,6 +218,17 @@ try {
       `code=${r.code} tg=${tg.length} mail=${mail.length} a=${aOk} b=${bOk} sent=${r.body.sent} emailed=${r.body.emailed}`);
   } catch (e) {
     line(false, 'D3', 'counts: new / repeats / untouched / failed, per business', e.message);
+  } finally { if (installed) installed(); }
+
+  /* ---------- D16: optional single-business filter ---------- */
+  try {
+    install(fixture);
+    const { r, tg, mail } = await run({ businessId: A });
+    line(r.code === 200 && r.body.businesses === 1 && tg.length === 1 && mail.length === 0,
+      'D16', 'business_id filter sends only that business; default remains all',
+      `businesses=${r.body.businesses} tg=${tg.length} mail=${mail.length}`);
+  } catch (e) {
+    line(false, 'D16', 'single-business digest filter', e.message);
   } finally { if (installed) installed(); }
 
   /* ---------- D4: a quiet business gets nothing ---------- */

@@ -66,7 +66,7 @@ async function callReview({ method = 'GET', token, query = {}, body }) {
     method,
     query: { token, ...query },
     url: `/r/${token}`,
-    headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-real-ip': `198.51.100.${rip++}` },
+    headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-real-ip': `198.51.100.${rip++}`, host: 'alder-demo.test' },
     body, socket: {},
   }, res);
   return { status: res.code, headers: res.headers, text: String(res.body) };
