@@ -1,7 +1,7 @@
 # SESSION HANDOFF: Alder roofing lead platform (orchestrator continuation)
 
 > **Purpose.** Give this file to any cloud AI assistant so it can continue as the **orchestrator** for this project without the owner re-explaining anything.
-> **Last updated:** 2026-11-12 (lead-safety local verification and decisions).
+> **Last updated:** 2026-11-12 (lead-safety retry, throttle, and audit follow-up).
 > **Rule for the local agent:** after every task, update the change log and any section whose facts changed. Never put secret values in it.
 
 ---
@@ -16,13 +16,13 @@ combined). No `.patch`, no last-N, no per-area splits. Report its size, line cou
 `git apply --check` against a fresh `origin/main` worktree, and a secret scan
 (counts only). Older `.patch` files may stay on disk; do not add more.
 
-### Backup/restore rule (set 2026-11-07)
+### Test-project rule (updated 2026-11-12)
 
-The backup, reset and restore touch ONLY the `businesses` columns of `alder-demo`.
-`business_chats` is never read for a restore, never deleted, never re-inserted: a
-phone can be connected at any moment. `seed-check` reports the chat count and does
-not require it to be zero. The runner fails a run that adds or removes a chat,
-leaks a test-shaped lead, or grows the live unused bind-code count of a real business.
+Run suites only with `TEST_ENV=1` and `.env.test`. `tests/run.mjs` refuses a missing
+test URL or one equal to the production URL in `.env`, then checks that its canary
+lands in the test project. No production backup/reset/restore ritual is part of a test
+run. Never print env values, service credentials, chat identifiers, bind codes, or
+lead data.
 
 ### Vercel CLI rule (set 2026-11-09)
 
@@ -48,11 +48,11 @@ the server from a dev root that has a copied `.vercel/project.json` and no `.env
 
 ### Prompt-writing rules (every prompt must include)
 - **CONTEXT:** branch, "never push to main", no force, no tags, push dry-run first.
-- Standard rules: never print secret values (names/counts/8-char ids/tails only); every behaviour change gets a **test plus a mutation check** (break the code, show the test fails, revert); one commit per logical item with hashes; **schema changes are proposals only** (never apply a migration, never leave an unapplied one in `supabase/migrations/`); never loosen or delete an assertion — if one must change, stop and report before/after.
-- Production-DB rule: suites run against production until `.env.test` exists. Take a fresh timestamped backup of the `businesses` columns before any run. The owner's phones (tails `6109`, `6852`) stay connected; `business_chats` and the three `alder-demo` leads / two feedback rows must be unchanged after every run.
+- Standard rules: never print secret values or PII; every behaviour change gets a **test plus a mutation check** (break the code, show the test fails, revert); one commit per logical item with hashes; **schema changes are proposals only** (never apply a migration, never leave an unapplied one in `supabase/migrations/`); never weaken an assertion without recording its before/after meaning.
+- Test-database rule: every suite run uses `TEST_ENV=1` and `.env.test`; verify with `npm run test:env-check`. The runner refuses production before starting and checks its canary. Never back up, reset, or restore production test fixtures.
 - **EDGE-CASE RULE:** list the cases beyond the owner's list and report a table: case / current behaviour / decision (test ID, proposal, n/a).
 - **BUDGET RULE:** priority order; after each group, run the touched suites, push dry-run, add a handoff entry. If budget runs low, stop at a clean commit and list what is left.
-- **FINAL REPORT:** Critical/High at the top; one section per group with commit hashes, tests, mutation results, changed assertions, what was NOT verified; suites run and which database; per-suite times; chat tails and lead/event/feedback counts before/after; `git status`; `git log --oneline -20`.
+- **FINAL REPORT:** Critical/High at the top; one section per group with commit hashes, tests, mutation results, changed assertions, what was NOT verified; suites run and which database; per-suite times; `git status`; `git log --oneline -20`. Do not include secrets, identifiers, or lead data.
 - **HANDOFF UPDATE (mandatory):** update this file with what changed, new issues and open questions.
 
 ### Pending-prompt tracking rule
@@ -92,7 +92,7 @@ Look for: unhandled rejections, fail-open paths, module-level state across warm 
 | Repo | `https://github.com/AbdallahIsDev/alder` |
 | Local path | `C:\Users\11\projects\Roofing-2` |
 | Live site | `https://alder-roofing.vercel.app` (deploys from **`main`**) |
-| Hosting | Vercel **Hobby** (one cron/day; non-commercial; Pro needed before paid clients) |
+| Hosting | Vercel **Hobby** (each cron job runs at most daily; commercial use needs a paid plan) |
 | DB | Supabase Postgres, **us-east-1** (~192 ms median from Cairo) |
 | Telegram | Webhook `api/tg.js`; helper `lib/tg.js` |
 | Email | Resend (`lib/notify.js`, `lib/email-layout.js`, `lib/email-builders.js`) |
@@ -108,7 +108,7 @@ Look for: unhandled rejections, fail-open paths, module-level state across warm 
 - Bind codes: single use, 24 h, one minting function (`lib/bind-codes.js`).
 - Secrets: `HEALTH_SECRET` and `CRON_SECRET` are different values, compared in constant time; rotated after an earlier exposure.
 - `OUTBOUND_TIMEOUT_MS` and `*_API_BASE` overrides only honoured in dev.
-- Latest npm/security audit: no Critical/High.
+- `npm audit` checked 2026-11-12: one High advisory in devDependency `sharp@0.34.5`; fix is `0.35.5` and requires a package manifest range change, so no lockfile-only upgrade was applied. See `docs/proposals/sharp-upgrade.md`.
 
 ---
 
@@ -192,16 +192,16 @@ Last full run before this bundle: 385.2 s / 384.4 s / 385.6 s, all green. This b
 
 ## 8. Still missing / not done
 
-1. **Separate test Supabase project (Phase C), DONE 2026-11-09.** `.env.test` exists and the full suite is green on it (391 assertions, 241.5 s against 382 / 417.8 s on production; `delete-scripts` X1-X5 only run there). Still to do: fixtures replace the `alder-demo` literals, and the backup ritual can go. The guard is absolute as of 2026-11-09 (`ALLOW_PROD_TESTS` removed).
+1. **Separate test Supabase project (Phase C), DONE 2026-11-09.** `.env.test` exists; all suites require it with `TEST_ENV=1`, and no production-test override exists. Fixtures use seeded businesses in the test project. No production backup/reset/restore is part of test runs.
 2. **Summary schedule** (proposal only, `docs/PROPOSALS.md` §5d): four presets, per-business timezone, one column, hourly cron on Pro.
 3. Self-check is operator-only and not owner-configurable (decision).
 4. Quiet hours / 15-minute reminders: parked; Hobby crons are daily.
 5. Pre-launch checklist: remove `MAIL_REDIRECT_TO`, verify Resend domain, real `owner_email`, `OPERATOR_CHAT_ID`, Vercel Pro, Resend plan, hard-fail redirect check, retention decision, real Gmail/Outlook rendering, review handoff on a phone.
 6. Prompt queue, unsent: README rewrite + CI without secrets + preview check + fresh-eyes review of `main` + test-quality audit.
 7. Telegram command menus: after merge, `npm run tg:commands`, then `tg-webhook set` and `info` (the `my_chat_member` handler only arrives if `allowed_updates` is re-registered).
-8. Known minor: stale handoff lines, `sharp` bump deferred, 13 images without width/height (CLS 0), `--timing` flag.
+8. Known minor: sharp High advisory deferred under the conditions in `docs/proposals/sharp-upgrade.md`; 13 images without width/height (CLS 0); `--timing` flag.
 9. A5 is done (`scripts/purge-expired.mjs`, dry run default). A2 is done: every bind test runs on `zz-test-bind-<run>` and F8 bans a real-business mint. Keyset paging is report-only. Hostile review: 409 and bind read-error are fixed; `botUsername()` cache (Low) and the retry lock window edge (Low) remain. The retry lock should become a unique index in the next migration proposal — no migration file is added now.
-10. Proposals only, not implemented: `robots.txt` and `sitemap.xml` hard-coded to `alderroof.com` (pre-launch item); one brand per deployment; `/clients` and `/stats <slug>` on `v_client_leads`; retention predicates; `npm run new-client`.
+10. Proposals only, not implemented: one brand per deployment; `/clients` and `/stats <slug>` on `v_client_leads`; retention predicates; `npm run new-client`. `robots.txt` and `sitemap.xml` are generated from the selected client's `domain` by `build-static.js`.
     CI proposal: run `npm run test:port-guard` **before** `tests/run.mjs`. It binds port 3000 and therefore cannot live in the suite list, so a CI job that only runs the suite would silently skip the guard.
 11. **Supabase key format (read-only review, 2026-11-09).** Legacy JWT keys retire in early 2027; the replacements are `sb_publishable_…` (public) and `sb_secret_…` (server), which are not JWTs. What the code assumes: nothing. There is no JWT decode, no `eyJ` check, no key-length check, no raw `fetch` to `/rest/v1` in app code — `lib/db.js`, `lib/digest-db.js`, `lib/lead-intake.js`, `lib/review-db.js` and `api/health.js` all call `createClient(url, key)` (supabase-js 2.118.0), which sends `apikey` and `Authorization: Bearer` and does not care what the string looks like. No migration calls `auth.jwt()` or `auth.role()`, so RLS does not depend on claims. The anon key is used only by `tests/db-wall.test.mjs`; it never reaches the browser (the page has no Supabase code). **What would break:** `db-wall` treats any error as a pass, so a rejected or retired key would leave it green for the wrong reason; `test:env-check` only checks that a name is present. **Smallest steps:** (1) create the new keys in the dashboard, (2) put them in `.env.test` and run `db-wall` alone, (3) tighten `db-wall` so a 401 "invalid API key" fails while an RLS denial passes, (4) swap the production env values and redeploy, (5) delete the legacy keys, (6) repeat step 2. Unverified: that this project's PostgREST accepts `sb_secret_` in the `Authorization: Bearer` header as well as in `apikey` — test it in step 2 before touching production.
 
@@ -209,10 +209,10 @@ Last full run before this bundle: 385.2 s / 384.4 s / 385.6 s, all green. This b
 
 ## 9. Testing and verification status
 
-### Verified by automated tests (fakes + production DB)
+### Verified by automated tests (fakes + test database)
 Lead intake validation, rate limits, idempotency, honeypot; Telegram callbacks (C1-C36); fallbacks (B9-B15); health/selfcheck/digest (H, S, D); recipients (R1-R14); operator commands (OP1-OP16); bot text artifact guard (T1-T7); network guard; email layout; modal a11y; brand tests; fixture-safety F1-F7.
 
-### This bundle's runs (production DB, `ALLOW_PROD_TESTS=1`)
+### This bundle's runs (historical production DB; do not repeat)
 | Run | Result |
 |---|---|
 | `fixture-safety` | 7/7, 0.7 s; mutation: old id `880001` back → F7 fails |
@@ -326,11 +326,13 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
   uptime-check proposals only. Independent-review follow-up: lead `maxDuration` 30 with no tg override;
   truthful Resend replay/409 handling; salted per-chat outcomes and targeted partial retries; honest
   fixed-window claim docs; duplicate-panel recap hidden; built page `aa71755b` -> `80d6281c`, other output
-  hashes unchanged. Local review branch `arena/9c9b4995-alder` tracks its origin branch; `origin/lead-safety`
-  is an ancestor. Local verification uses `.env.test`, never production. The final touched-suite and full-suite
-  counts and mutation checks are in the 2026-11-12 change-log row below; review diff
-  paths and the draft PR link are in the completion report.
-  No schema change, no merge.
+  hashes unchanged. Review branch `arena/9c9b4995-alder` is based on this branch; `origin/lead-safety`
+  is an ancestor. Local verification uses `.env.test`, never production. Draft PR #25 targets `main`
+  and supersedes #24; #24 remains untouched. Current verification and mutation results are in the
+  2026-11-12 change-log row below. Review artifacts are `_debug/patches/arena-fix-delta-2.diff` and
+  `_debug/patches/lead-safety-review.diff`.
+  No schema change, no merge. The current branch contains `e01b7e4` plus this handoff update,
+  was pushed after a dry-run, and has a clean tracked worktree.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
@@ -341,6 +343,7 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 | Branch | PR | Role |
 |---|---|---|
 | `main` | — | deploys to production; never pushed by an agent |
+| `arena/9c9b4995-alder` | #25 | lead-safety corrections; draft, base `main`, supersedes #24 |
 | `ops-audience` | #6 | the operator work and every fix that came out of reviewing it; one review `.diff` against `main` |
 | `fix-invite-message` | #7 | cut from `main`, merged into `ops-audience` as `58d2707`; GitHub reports it merged |
 
@@ -403,6 +406,7 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-11 | `lead-safety` | (this commit) | `docs/OPERATIONS.md` §4c/§4d/§8: how one lead is announced, how to find a silent lead, the form's retry rules, the timeout and redirect semantics | Docs only |
 | 2026-11-11 | `lead-safety` review | (this wrap-up) | Lead `maxDuration` 30; truthful Resend replay/409 outcomes; partial Telegram retries by salted chat hash; claim/browser/recap honesty; stale docs and tests corrected | Draft PR #24; no schema. Static/mutations green; DB/full suite blocked by unset `SUPABASE_URL` |
 | 2026-11-12 | `arena/9c9b4995-alder` | `2173631` | Re-verified partial-chat retries and concurrent 409 handling; suppressed owner-email retries after uncertain Resend 5xx, corrected delayed-500 fake support, isolated digest fake idempotency state, and recorded decisions | B1a–B1f, B5p/B5d/B5r, B6a/B6b, C38/C39 passed; touched suites 245/0/0 in 254.6s; full 502/0/0 in 320.6s (baseline 496); mutations failed as intended; review diffs are gitignored at _debug/patches/lead-safety-review.diff and _debug/patches/arena-fix-delta.diff; no schema |
+| 2026-11-12 | `arena/9c9b4995-alder` | `e01b7e4` | Restored owner-email 5xx fallback and replay retries with one attempt per replay; replay now retries both missing paths after partial Telegram delivery; operator alarms claim each problem with fail-open behavior; documented digest claim outcomes; assessed sharp High and deferred non-lockfile upgrade; corrected stale test, cron, and build docs | D5 strict and B12 restored to baseline strength; interim D5/B12 suppression was weaker and is fixed. Touched 170/0/0 in 131.7s plus notify rerun 62/0/0 in 67.3s; full 506/0/0 in 313.2s (prior 502/0/0 in 320.6s); 5xx suppression mutation fails B6b/B12; disabled throttle mutation fails S12/S22, S23 proves fail-open; PR #25 draft, no schema |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |
