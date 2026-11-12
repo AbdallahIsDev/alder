@@ -328,7 +328,8 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
   fixed-window claim docs; duplicate-panel recap hidden; built page `aa71755b` -> `80d6281c`, other output
   hashes unchanged. Local review branch `arena/9c9b4995-alder` tracks its origin branch; `origin/lead-safety`
   is an ancestor. Local verification uses `.env.test`, never production. The final touched-suite and full-suite
-  counts and mutation checks are in the 2026-11-12 change-log row below; review diff\n  paths and the draft PR link are in the completion report.
+  counts and mutation checks are in the 2026-11-12 change-log row below; review diff
+  paths and the draft PR link are in the completion report.
   No schema change, no merge.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
