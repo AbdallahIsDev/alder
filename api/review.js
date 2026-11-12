@@ -13,10 +13,11 @@
 
 import { hashIp } from '../lib/hash.js';
 import { clientIp } from '../lib/request.js';
-import { getBusinessById, addEvent, hitRateLimit } from '../lib/db.js';
+import { addEvent, hitRateLimit } from '../lib/db.js';
 import { getLeadByReviewToken, getFeedback, upsertFeedback, markGoogleClicked } from '../lib/review-db.js';
 import { reviewPage, googleUrlAllowed } from '../lib/content.js';
 import { sendLowRatingAlert } from '../lib/notify.js';
+import { resolveTenant } from '../lib/tenant.js';
 
 const NOT_FOUND = '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Not found</title></head><body><p>Not found.</p></body></html>';
 
@@ -49,13 +50,12 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   if (!token || !/^[A-Za-z0-9_-]{16,64}$/.test(token)) return notFound(res);
 
+  const tenant = await resolveTenant(req);
+  if (!tenant) return notFound(res);
+  const { business } = tenant;
   let lead;
-  try { lead = await getLeadByReviewToken(token); } catch { lead = null; }
+  try { lead = await getLeadByReviewToken(token, business.id); } catch { lead = null; }
   if (!lead) return notFound(res);
-
-  let business;
-  try { business = await getBusinessById(lead.business_id); } catch { business = null; }
-  if (!business) return notFound(res);
   const googleUrl = usableGoogleUrl(business.google_review_url);
   if (!googleUrlAllowed(googleUrl)) {
     console.error('review_google_url_invalid');

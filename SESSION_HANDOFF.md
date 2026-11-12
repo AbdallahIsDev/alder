@@ -1,7 +1,7 @@
 # SESSION HANDOFF: Alder roofing lead platform (orchestrator continuation)
 
 > **Purpose.** Give this file to any cloud AI assistant so it can continue as the **orchestrator** for this project without the owner re-explaining anything.
-> **Last updated:** 2026-11-12 (lead-safety retry, throttle, and audit follow-up).
+> **Last updated:** 2026-11-13 (PR #27 TEST migration verification and fixture fixes).
 > **Rule for the local agent:** after every task, update the change log and any section whose facts changed. Never put secret values in it.
 
 ---
@@ -10,9 +10,10 @@
 
 ### Review artefact rule (set 2026-11-07)
 
-Exactly ONE review file per task: `_debug/patches/ops-audience-review.diff` =
-`git diff origin/main...ops-audience` (every commit from main to the branch head,
-combined). No `.patch`, no last-N, no per-area splits. Report its size, line count,
+Exactly ONE review file per task: `_debug/patches/<branch>-review.diff` =
+`git diff origin/main...<branch>` (every commit from main to the branch head,
+combined). For this task: `_debug/patches/multi-client-prep-review.diff`. No
+`.patch`, no last-N, no per-area splits. Report its size, line count,
 `git apply --check` against a fresh `origin/main` worktree, and a secret scan
 (counts only). Older `.patch` files may stay on disk; do not add more.
 
@@ -116,7 +117,7 @@ Look for: unhandled rejections, fail-open paths, module-level state across warm 
 
 Required in Vercel: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `SITE_URL`, `HEALTH_SECRET`, `CRON_SECRET` (set both; selfcheck/digest return 503 if `HEALTH_SECRET` is unset even when `CRON_SECRET` is set).
 
-Optional: `TELEGRAM_CHAT_ID`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX` (**remove before first real client**), `AUTOREPLY_DAILY_CAP` (40), `DIGEST_ENABLED` (unset = no-op), `DIGEST_UNTOUCHED_DAYS` (14), `RECIPIENTS_MAX` (5), `INVITES_MAX` (3), `TELEGRAM_BOT_USERNAME`, `DATABASE_URL` (migrations only), `VERCEL_ENV`.
+Optional: `TELEGRAM_CHAT_ID`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX` (**remove before first real client**), `AUTOREPLY_DAILY_CAP` (40), `DIGEST_ENABLED` (unset = no-op), `DIGEST_UNTOUCHED_DAYS` (14), `RECIPIENTS_MAX` (5), `INVITES_MAX` (3), `TELEGRAM_BOT_USERNAME`, `DATABASE_URL` (migrations only), `VERCEL_ENV`, `TENANT_HOST_MAP` (JSON canonical-host aliases; TEST/development/preview only, always ignored in production).
 
 New in `ops-audience` (not deployed): `OPERATOR_CHAT_ID` (falls back to `TELEGRAM_CHAT_ID`), `OPERATOR_EMAIL`.
 
@@ -295,14 +296,26 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
   Language stays English.
 - Review flow decision for page work, not implemented here: everyone is sent to
   the Google review link, whatever the rating.
-- One shared Telegram bot serves all clients. The first paying client may stay on
-  the free hosting plan; hosting provider choice is open.
+- One shared Telegram bot serves all clients; one Telegram account/chat belongs
+  to one business only. Vercel Hobby is non-commercial, so no paying client may
+  use it. Choose Vercel Pro or another commercially permitted host first.
 - Working method: the owner uses a local worker and an online worker; a separate
   assistant reviews; every task ends with a diff file for review.
 
+### Owner decisions pending
+
+- **Architecture — DECIDED:** A, one shared Host-routed deployment. B remains an
+  escape hatch for a client needing a separate custom project; do not fork code.
+- **Hosting:** Vercel Pro or a compliant alternative before accepting payment.
+  Default: Vercel Pro because the repo and TEST harness already target Vercel.
+- **Retention/legal:** lawyer review of the retention window, deletion promise,
+  privacy/terms URLs, and lead notice before a contract. Default: do not sign
+  until reviewed.
+
 ## 12. Git state (as of this report)
 
-- `main` = `de2c8fe` (deploys to production; PR #14 merged 2026-11-09).
+- `origin/main` = `1d2c748fd779f0b6a1c789dca969eb2698791d1a`; PR #25 was verified
+  merged into it on 2026-11-12 before starting this branch. Never push to `main`.
 - `ops-audience` (PR #6): merged to `main` on GitHub (`4348b24`); local `main` = `origin/main`.
 - `fix-code-copy`: merged to `main` as `1e3be74` (PR #8).
 - `operator-ux`: merged to `main` as `baf15d1` (PR #9).
@@ -327,12 +340,24 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
   truthful Resend replay/409 handling; salted per-chat outcomes and targeted partial retries; honest
   fixed-window claim docs; duplicate-panel recap hidden; built page `aa71755b` -> `80d6281c`, other output
   hashes unchanged. Review branch `arena/9c9b4995-alder` is based on this branch; `origin/lead-safety`
-  is an ancestor. Local verification uses `.env.test`, never production. Draft PR #25 targets `main`
-  and supersedes #24; #24 remains untouched. Current verification and mutation results are in the
+  is an ancestor. Local verification uses `.env.test`, never production. Draft PR #25 targeted `main`
+  and superseded #24; #24 remains untouched. PR #25 was later merged into `origin/main` at
+  `1d2c748fd779f0b6a1c789dca969eb2698791d1a`. Current verification and mutation results are in the
   2026-11-12 change-log row below. Review artifacts are `_debug/patches/arena-fix-delta-2.diff` and
   `_debug/patches/lead-safety-review.diff`.
-  No schema change, no merge. The current branch contains `e01b7e4` plus handoff/documentation
-  updates, was pushed after a dry-run, and has a clean tracked worktree.
+  No schema change. The review branch was pushed after a dry-run and merged by its owner.
+- `multi-client-prep` is based directly on the merged `origin/main` above. Commit `dd34ba9`
+  contains the architecture comparison, replay fix, and onboarding/handoff updates. It was
+  pushed after a successful dry-run; draft PR #26 targets `main`.
+- PR #27 (`arena/a12e637c-alder`) remains a draft against `main`; this branch now has
+  idempotent migration `0005` (`0d81188`), the tenant-host fixture fixes (`6b59157`), and
+  clearer B6g failure diagnostics (`af26707`). The final TEST run passed 525 assertions
+  across 36 suites with 0 failures and 0 skips in 317.5 s. No production database was queried.
+- **Host rollout gate:** docs identify `alder-roofing.vercel.app` as live. `clients/alder.json`
+  configures `www.alderroof.com`, while the README says to set the real canonical/OG domain
+  before launch; custom-domain attachment is unverified locally. Every Host that production
+  will serve needs a `businesses.site_host` value before merge. That column stores one host per
+  business, so serving both independently needs a redirect or an explicit alias design.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
@@ -343,7 +368,8 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 | Branch | PR | Role |
 |---|---|---|
 | `main` | — | deploys to production; never pushed by an agent |
-| `arena/9c9b4995-alder` | #25 | lead-safety corrections; draft, base `main`, supersedes #24 |
+| `arena/9c9b4995-alder` | #25 | lead-safety corrections; merged to `main` at `1d2c748` |
+| `multi-client-prep` | #26 | multi-client comparison + replay guard; draft, base `main` |
 | `ops-audience` | #6 | the operator work and every fix that came out of reviewing it; one review `.diff` against `main` |
 | `fix-invite-message` | #7 | cut from `main`, merged into `ops-audience` as `58d2707`; GitHub reports it merged |
 
@@ -406,7 +432,10 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-11 | `lead-safety` | (this commit) | `docs/OPERATIONS.md` §4c/§4d/§8: how one lead is announced, how to find a silent lead, the form's retry rules, the timeout and redirect semantics | Docs only |
 | 2026-11-11 | `lead-safety` review | (this wrap-up) | Lead `maxDuration` 30; truthful Resend replay/409 outcomes; partial Telegram retries by salted chat hash; claim/browser/recap honesty; stale docs and tests corrected | Draft PR #24; no schema. Static/mutations green; DB/full suite blocked by unset `SUPABASE_URL` |
 | 2026-11-12 | `arena/9c9b4995-alder` | `2173631` | Re-verified partial-chat retries and concurrent 409 handling; suppressed owner-email retries after uncertain Resend 5xx, corrected delayed-500 fake support, isolated digest fake idempotency state, and recorded decisions | B1a–B1f, B5p/B5d/B5r, B6a/B6b, C38/C39 passed; touched suites 245/0/0 in 254.6s; full 502/0/0 in 320.6s (baseline 496); mutations failed as intended; review diffs are gitignored at _debug/patches/lead-safety-review.diff and _debug/patches/arena-fix-delta.diff; no schema |
-| 2026-11-12 | `arena/9c9b4995-alder` | `e01b7e4` | Restored owner-email 5xx fallback and replay retries with one attempt per replay; replay now retries both missing paths after partial Telegram delivery; operator alarms claim each problem with fail-open behavior; documented digest claim outcomes; assessed sharp High and deferred non-lockfile upgrade; corrected stale test, cron, self-check, and build docs | D5 strict and B12 restored to baseline strength; interim D5/B12 suppression was weaker and is fixed. Touched 170/0/0 in 131.7s plus notify rerun 62/0/0 in 67.3s; full 506/0/0 in 313.2s (prior 502/0/0 in 320.6s); 5xx suppression mutation fails B6b/B12; disabled throttle mutation fails S12/S22, S23 proves fail-open; PR #25 draft, no schema |
+| 2026-11-12 | `arena/9c9b4995-alder` | `e01b7e4` | Restored owner-email 5xx fallback and replay retries with one attempt per replay; replay now retries both missing paths after partial Telegram delivery; operator alarms claim each problem with fail-open behavior; documented digest claim outcomes; assessed sharp High and deferred non-lockfile upgrade; corrected stale test, cron, self-check, and build docs | D5 strict and B12 restored to baseline strength; interim D5/B12 suppression was weaker and is fixed. Touched 170/0/0 in 131.7s plus notify rerun 62/0/0 in 67.3s; full 506/0/0 in 313.2s (prior 502/0/0 in 320.6s); mutations failed as intended; PR #25 merged to `main` on 2026-11-12; no schema |
+| 2026-11-12 | `multi-client-prep` | `dd34ba9` | Added A/B architecture decision memo, honest manual onboarding limits, owner decisions, and replay guard for recorded structural email failures | B8b added; no assertions weakened. Touched suites: lead-api 51/51 + notify 62/62, 136s. Full TEST project: 507/0/0 across 34 suites in 329.6s (+16.4s vs baseline 506/0/0 in 313.2s). B8b mutation: 50/51, failed as expected (ownerAttempts=1). No schema. Pushed after dry-run; draft PR #26 targets main. Review diff: 49,243 bytes / 572 lines, zero secret-pattern hits; apply-check passed on fresh `origin/main` worktree |
+| 2026-11-12 | `arena/a12e637c-alder` | `85f5486` | Chose Architecture A; later replay retries missing env/sender and all failures except `blocked_test_mode`; same-request suppression unchanged. Added real-path replay recovery/5xx tests. | Decision record 82 lines; replay policy 3/3 and old-guard mutation failed R1; DB integration unrun because `.env.test` is absent |
+| 2026-11-13 | `arena/a12e637c-alder` | `0d81188` `6b59157` `af26707` | Made migration `0005` idempotent; brought in the tenant-host fixture fixes; expanded B6g replay diagnostics without changing its assertion. | TEST: migration applied twice to the installed schema; fresh temporary table applied twice; duplicate host rejected (`23505`); old non-idempotent mutation failed with duplicate-column (`42701`) and scratch table was removed. Final full run: 525 assertions / 36 suites / 0 failures / 0 skips in 317.5 s. An earlier full run had one B6g failure; focused and ordered reruns passed, final full run passed, initial cause unconfirmed. No production database was queried. |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |

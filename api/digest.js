@@ -80,8 +80,13 @@ export default async function handler(req, res) {
     const since = new Date(now - DAY).toISOString();
     const cutoff = new Date(now - DAY).toISOString();
     const floor = new Date(now - digestUntouchedDays() * DAY).toISOString();
+    const requestedBusiness = req.query && req.query.business_id;
+    if (requestedBusiness !== undefined
+      && (typeof requestedBusiness !== 'string' || !/^[0-9a-f-]{36}$/i.test(requestedBusiness))) {
+      return res.status(400).json({ ok: false });
+    }
     const counts = await digestCounts({ sinceIso: since, cutoffIso: cutoff, floorIso: floor });
-    const targets = await digestTargets();
+    const targets = await digestTargets({ businessId: requestedBusiness || null });
     const dateKey = new Date(now).toISOString().slice(0, 10);
 
     const due = [];

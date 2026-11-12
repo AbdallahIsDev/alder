@@ -12,6 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { JSDOM } from 'jsdom';
@@ -20,7 +21,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const API = process.env.LEAD_API_URL || 'http://localhost:3000/api/lead';
 const ORIGIN = new URL(API).origin;
 const LOG = path.resolve(ROOT, process.env.LEAD_API_LOG || '_debug/vercel-dev.log');
-const RUN = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+const RUN = randomUUID();
 
 /* ---------- env, one shared loader ---------- */
 // process.env > .env.test (TEST_ENV=1) > .env.local > .env, same as every other suite.
@@ -29,12 +30,29 @@ import { fakeRes, ALDER_DEMO, sweepTestLeads, fixtureEmail } from './helpers.mjs
 import { FIXTURE_CHATS } from './fixture-ids.mjs';
 loadEnv();
 const FAKE_TG_URL = process.env.FAKE_TG_URL;
+const FAKE_RESEND_URL = process.env.FAKE_RESEND_URL;
 async function fakeTg(cfg) {
   if (!FAKE_TG_URL) throw new Error('FAKE_TG_URL is not set — run through tests/run.mjs');
   const r = await fetch(FAKE_TG_URL + '/__control', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
   });
   return r.json();
+}
+async function fakeResend(cfg) {
+  if (!FAKE_RESEND_URL) throw new Error('FAKE_RESEND_URL is not set — run through tests/run.mjs');
+  const r = await fetch(FAKE_RESEND_URL + '/__control', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg),
+  });
+  return r.json();
+}
+async function fakeResendRequests() {
+  if (!FAKE_RESEND_URL) throw new Error('FAKE_RESEND_URL is not set — run through tests/run.mjs');
+  const r = await fetch(FAKE_RESEND_URL + '/__requests');
+  return (await r.json()).requests;
+}
+async function resetFakeResend() {
+  if (!FAKE_RESEND_URL) throw new Error('FAKE_RESEND_URL is not set — run through tests/run.mjs');
+  await fetch(FAKE_RESEND_URL + '/__reset', { method: 'POST' });
 }
 
 /* ---------- printer ---------- */
@@ -69,7 +87,7 @@ async function post(body, opts = {}) {
   if (!opts.http) return postInProcess(body, opts);
   const res = await fetch(opts.url || API, {
     method: opts.method || 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-real-ip': opts.ip || `203.0.113.${ipSeq++}` },
+    headers: { 'Content-Type': 'application/json', 'x-real-ip': opts.ip || `203.0.113.${ipSeq++}`, ...(opts.host ? { host: opts.host } : {}) },
     body: opts.method === 'GET' ? undefined : JSON.stringify(body),
   });
   let json = null;
@@ -106,6 +124,21 @@ let SEED_BIZ = null;
   }
 }
 
+// A second real TEST row proves Host, not payload fields, selects the tenant.
+const TENANT_B_SLUG = `zz-tenant-${RUN}`;
+const TENANT_B_HOST = `tenant-${RUN}.test`;
+let TENANT_B = null;
+{
+  await svc.from('businesses').delete().eq('slug', TENANT_B_SLUG);
+  const { data, error } = await svc.from('businesses').insert({
+    slug: TENANT_B_SLUG, name: 'Tenant B Fixture', owner_email: fixtureEmail('tenant-b'),
+    google_review_url: 'https://search.google.com/local/writereview?placeid=fixture',
+    timezone: 'America/Chicago', status: 'active', site_host: TENANT_B_HOST,
+  }).select('id, slug, name, status, timezone, owner_email, google_review_url, site_host').single();
+  if (error) throw error;
+  TENANT_B = data;
+}
+
 async function resetLimits() {
   await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
 }
@@ -116,6 +149,16 @@ async function leadFor(key) {
 async function eventsFor(leadId) {
   const { data } = await svc.from('lead_events').select('kind, meta').eq('lead_id', leadId);
   return data || [];
+}
+async function clearLeadForTestKey(key) {
+  const { data, error } = await svc.from('leads').select('id').eq('idempotency_key', key);
+  if (error) throw error;
+  const ids = (data || []).map((row) => row.id);
+  if (!ids.length) return;
+  const { error: eventError } = await svc.from('lead_events').delete().in('lead_id', ids);
+  if (eventError) throw eventError;
+  const { error: leadError } = await svc.from('leads').delete().eq('idempotency_key', key);
+  if (leadError) throw leadError;
 }
 
 /* ---------- in-process handler (most tests) vs real HTTP (kept tests) ----
@@ -129,7 +172,7 @@ async function postInProcess(body, opts) {
   const res = fakeRes();
   await leadHandler({
     method: opts.method || 'POST',
-    headers: { 'content-type': 'application/json', 'x-real-ip': opts.ip || `203.0.113.${ipSeq++}` },
+    headers: { 'content-type': 'application/json', 'x-real-ip': opts.ip || `203.0.113.${ipSeq++}`, host: opts.host || 'alder-demo.test', ...(opts.forwarded ? { 'x-forwarded-host': opts.forwarded } : {}) },
     body: body === null || body === undefined ? body : { ...body },
     socket: {},
   }, res);
@@ -192,12 +235,14 @@ const logOffset = fs.statSync(LOG).size;
   line(status === 400 && (await leadFor(key)).length === 0, '4', 'unknown key -> 400', status);
 }
 
-/* ---------- 5. unknown slug ---------- */
+/* ---------- 5. body slug is not a tenant selector ---------- */
 {
   await resetLimits();
   const key = `${RUN}-t5`;
   const { status } = await post(payload({ idempotencyKey: key, slug: 'not-a-business' }));
-  line(status === 400 && (await leadFor(key)).length === 0, '5', 'unknown slug -> 400', status);
+  const rows = await leadFor(key);
+  line(status === 200 && rows.length === 1 && rows[0].business_id === SEED_BIZ,
+    '5', 'forged body slug ignored; Host selects tenant', `${status} tenantMatch=${rows[0] && rows[0].business_id === SEED_BIZ}`);
 }
 
 /* ---------- 6. honeypot ---------- */
@@ -227,6 +272,100 @@ const logOffset = fs.statSync(LOG).size;
   const created = evs.filter((e) => e.kind === 'created').length;
   line(a.status === 200 && b.status === 200 && rows.length === 1 && created === 1,
     '8', 'same key twice -> one row, one event', `${a.status},${b.status} rows=${rows.length} created=${created}`);
+}
+
+/* ---------- 8b/8c. replay classification through the REAL send path ---------- */
+{
+  await resetLimits();
+  const key = `${RUN}-t8b`;
+  const savedFrom = process.env.MAIL_FROM, savedRedirect = process.env.MAIL_REDIRECT_TO;
+  let first, replay, row, firstEvents = [], replayEvents = [], ownerAttempts = [];
+  try {
+    // No verified sender and no redirect: sendMail itself records this status.
+    delete process.env.MAIL_FROM; delete process.env.MAIL_REDIRECT_TO;
+    await resetFakeResend();
+    first = await post(payload({ idempotencyKey: key }));
+    row = (await leadFor(key))[0];
+    firstEvents = row ? await eventsFor(row.id) : [];
+    // Repair configuration, then replay the same stored lead.
+    if (savedFrom === undefined) delete process.env.MAIL_FROM; else process.env.MAIL_FROM = savedFrom;
+    if (savedRedirect === undefined) delete process.env.MAIL_REDIRECT_TO; else process.env.MAIL_REDIRECT_TO = savedRedirect;
+    await resetFakeResend();
+    replay = await post(payload({ idempotencyKey: key }));
+    ownerAttempts = (await fakeResendRequests()).filter((r) => r.path === '/emails'
+      && String(r.headers['idempotency-key'] || '').endsWith(':owner'));
+    replayEvents = row ? await eventsFor(row.id) : [];
+  } finally {
+    if (savedFrom === undefined) delete process.env.MAIL_FROM; else process.env.MAIL_FROM = savedFrom;
+    if (savedRedirect === undefined) delete process.env.MAIL_REDIRECT_TO; else process.env.MAIL_REDIRECT_TO = savedRedirect;
+  }
+  const failure = firstEvents.find((e) => e.kind === 'email_owner_failed');
+  const ok = first && first.status === 200 && !!row && failure && failure.meta.status === 'no_verified_sender'
+    && firstEvents.some((e) => e.kind === 'tg_sent') && replay && replay.status === 200
+    && ownerAttempts.length === 1 && replayEvents.some((e) => e.kind === 'email_owner_sent');
+  line(ok, '8b', 'real no_verified_sender: replay retries after config repair',
+    `status=${failure && failure.meta.status} ownerAttempts=${ownerAttempts.length} sent=${replayEvents.some((e) => e.kind === 'email_owner_sent')}`);
+}
+{
+  await resetLimits();
+  const key = `${RUN}-t8c`;
+  await fakeResend({ mode: '500' }); await resetFakeResend();
+  const first = await post(payload({ idempotencyKey: key }));
+  const row = (await leadFor(key))[0];
+  const firstEvents = row ? await eventsFor(row.id) : [];
+  await fakeResend({ mode: 'ok' }); await resetFakeResend();
+  const replay = await post(payload({ idempotencyKey: key }));
+  const ownerAttempts = (await fakeResendRequests()).filter((r) => r.path === '/emails'
+    && String(r.headers['idempotency-key'] || '').endsWith(':owner'));
+  const failure = firstEvents.find((e) => e.kind === 'email_owner_failed');
+  line(first.status === 200 && replay.status === 200 && !!row && failure && failure.meta.status === 500
+    && firstEvents.some((e) => e.kind === 'tg_sent') && ownerAttempts.length === 1,
+    '8c', 'real 5xx owner failure: replay makes one retry',
+    `status=${failure && failure.meta.status} ownerAttempts=${ownerAttempts.length}`);
+}
+
+/* ---------- T7-T11. two-tenant Host seam ---------- */
+{
+  const cases = [
+    ['T7', { slug: TENANT_B_SLUG }, {}, SEED_BIZ], // forged A payload on A host
+    ['T8', { slug: ALDER_DEMO, business_id: SEED_BIZ }, { host: TENANT_B_HOST }, TENANT_B.id],
+    ['T9', { slug: ALDER_DEMO }, { host: TENANT_B_HOST, forwarded: 'alder-demo.test' }, TENANT_B.id],
+  ];
+  for (const [id, fields, opts, expected] of cases) {
+    await resetLimits();
+    const key = `${RUN}-${id.toLowerCase()}`;
+    await clearLeadForTestKey(key);
+    const r = await post(payload({ idempotencyKey: key, ...fields }), opts);
+    const rows = await leadFor(key);
+    line(r.status === 200 && rows.length === 1 && rows[0].business_id === expected,
+      id, 'forged tenant fields cannot override Host', `${r.status} tenantMatch=${rows[0] && rows[0].business_id === expected}`);
+  }
+  for (const [id, host] of [['T10', 'unknown.test'], ['T11', 'bad_host']]) {
+    await resetLimits();
+    const key = `${RUN}-${id.toLowerCase()}`;
+    const r = await post(payload({ idempotencyKey: key }), { host });
+    line(r.status === 404 && (await leadFor(key)).length === 0, id, 'unknown/malformed Host fails closed', r.status);
+  }
+}
+{
+  const { default: reviewHandler } = await import('../api/review.js');
+  const reviewToken = crypto.randomUUID();
+  const { error } = await svc.from('leads').insert({
+    business_id: SEED_BIZ, name: NAME, phone: '+15155550142', email: EMAIL, zip: '50265',
+    service: 'repair', home: 'house', timing: 'asap', roof_age: 'Not sure', insurance_claim: false,
+    notes: NOTES, status: 'done', review_token: reviewToken, idempotency_key: `${RUN}-review-tenant`,
+  });
+  const call = async (token, host) => {
+    const res = fakeRes({ body: '' });
+    await reviewHandler({ method: 'GET', query: { token }, url: `/r/${token}`, headers: { host }, body: {}, socket: {} }, res);
+    return { status: res.code, body: String(res.body) };
+  };
+  const valid = await call(reviewToken, 'alder-demo.test');
+  const cross = await call(reviewToken, TENANT_B_HOST);
+  const missing = await call(crypto.randomUUID(), TENANT_B_HOST);
+  line(!error && valid.status === 200 && cross.status === 404 && missing.status === 404 && cross.body === missing.body,
+    'T12', 'tenant A review token on B Host equals unknown-token 404',
+    `valid=${valid.status} cross=${cross.status} sameBody=${cross.body === missing.body}`);
 }
 
 /* ---------- 9. per-IP rate limit ---------- */
@@ -914,6 +1053,10 @@ const typeSeqOf = (api) => (s) => { let v = ''; for (const ch of s) v = api.sani
     const { data } = await svc.from('leads').select('id').or(`idempotency_key.like.${RUN}-%,notes.like.${NOTES}%`);
     leftovers = (data || []).length;
     await svc.from('rate_limits').delete().gte('window_start', '2000-01-01');
+    if (TENANT_B) {
+      await svc.from('leads').delete().eq('business_id', TENANT_B.id);
+      await svc.from('businesses').delete().eq('id', TENANT_B.id);
+    }
   } finally {
     try { await svc.from('business_chats').delete().eq('tg_chat_id', ALERT_CHAT); } catch { /* the guard will report it */ }
     console.log('');

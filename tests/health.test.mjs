@@ -29,7 +29,7 @@ const line = (ok, id, what, d) => {
 };
 
 const { default: handler, countInvalidReviewLinks, reviewLinkOk } = await import('../api/health.js');
-const { default: selfcheck, alertTargets, deliverSelfCheck, operatorAlarm, claimOperatorAlarmProblems, selectUnclaimedOperatorAlarm } = await import('../api/selfcheck.js');
+const { default: selfcheck, alertTargets, deliverSelfCheck, operatorAlarm, claimOperatorAlarmProblems, selectUnclaimedOperatorAlarm, filterActiveBusinesses } = await import('../api/selfcheck.js');
 const { selfCheckText, shouldAlertBusiness, failedTotal, operatorAlarmText } = await import('../lib/ops-copy.js');
 const { selfCheckEmail } = await import('../lib/email-builders.js');
 
@@ -45,6 +45,12 @@ const call = async ({ method = 'GET', secret } = {}) => {
 
 const saved = { HEALTH_SECRET: process.env.HEALTH_SECRET, CRON_SECRET: process.env.CRON_SECRET, MAIL_REDIRECT_TO: process.env.MAIL_REDIRECT_TO };
 try {
+  {
+    const rows = [{ id: 'a' }, { id: 'b' }];
+    line(filterActiveBusinesses(rows, 'b').map((b) => b.id).join(',') === 'b'
+      && filterActiveBusinesses(rows, null).length === 2,
+      'S17', 'self-check business filter: one when requested, all by default');
+  }
   /* H1: no secret configured */
   delete process.env.HEALTH_SECRET;
   {
