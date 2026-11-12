@@ -11,7 +11,7 @@ import { clientIp } from '../lib/request.js';
 import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
 import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit, getLeadForReplay, getLeadDeliveryState, claimLeadNotification, releaseLeadNotification } from '../lib/db.js';
 import { findRecentDuplicate } from '../lib/lead-intake.js';
-import { notifyAllAfterLead } from '../lib/notify.js';
+import { isOwnerEmailReplayRetryable, notifyAllAfterLead } from '../lib/notify.js';
 
 const SERVICES = ['replacement', 'storm', 'repair', 'unsure'];
 const HOMES = ['house', 'multi', 'commercial', 'other'];
@@ -74,6 +74,8 @@ async function announceLead(ctx, recheck) {
       ctx.deliveredChatHashes = state.deliveredChatHashes;
       ctx.retryTelegramOnly = partialTelegram && state.emailOwnerSent;
       ctx.retryEmailOnly = state.delivered && !state.emailOwnerSent && state.failedChatHashes.length === 0;
+      ctx.skipOwnerEmail = !state.emailOwnerSent && state.emailOwnerFailureRecorded
+        && !isOwnerEmailReplayRetryable(state.lastEmailOwnerFailureStatus);
     }
     await notifyAllAfterLead(ctx);
   } finally {
