@@ -67,12 +67,13 @@ async function announceLead(ctx, recheck) {
   if (!claimed) return;
   try {
     if (recheck) {
+      ctx.replay = true;
       const state = await getLeadDeliveryState(ctx.leadId);
       const partialTelegram = state.delivered && state.failedChatHashes.length > 0;
-      if (state.delivered && !partialTelegram) return;
+      if (state.delivered && !partialTelegram && state.emailOwnerSent) return;
       ctx.deliveredChatHashes = state.deliveredChatHashes;
-      ctx.retryTelegramOnly = partialTelegram;
-      ctx.emailOwnerUncertain = state.emailOwnerUncertain;
+      ctx.retryTelegramOnly = partialTelegram && state.emailOwnerSent;
+      ctx.retryEmailOnly = state.delivered && !state.emailOwnerSent && state.failedChatHashes.length === 0;
     }
     await notifyAllAfterLead(ctx);
   } finally {
@@ -302,12 +303,12 @@ export default async function handler(req, res) {
             console.error('lead_event_created_failed', (e && e.code) || 'no_code');
           }
         }
-        if (!state.delivered || state.failedChatHashes.length) {
+        if (!state.delivered || state.failedChatHashes.length || !state.emailOwnerSent) {
           await announceLead({
             leadId: stored.id, business, duplicate: !!duplicateOf,
             deliveredChatHashes: state.deliveredChatHashes,
-            retryTelegramOnly: state.delivered && state.failedChatHashes.length > 0,
-            emailOwnerUncertain: state.emailOwnerUncertain,
+            retryTelegramOnly: state.delivered && state.failedChatHashes.length > 0 && state.emailOwnerSent,
+            retryEmailOnly: state.delivered && !state.emailOwnerSent && state.failedChatHashes.length === 0,
             lead: {
               name: stored.name, phone: stored.phone, email: stored.email || '', zip: stored.zip,
               service: stored.service, home: stored.home, timing: stored.timing,

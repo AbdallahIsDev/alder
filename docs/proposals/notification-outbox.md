@@ -10,11 +10,13 @@ after this document is accepted.
 (`api/lead.js`, the new drain, the purge script). No change to `leads`,
 `lead_events`, the wall, or the review flow.
 
-**Why.** Today one request is the whole retry story: primary attempt, one
-fallback, then silence. A Resend 5xx at 09:00 on a Saturday means that lead's
-owner alert is gone forever, and the `lead_events` row is the only trace. The
-outbox makes "this lead was never announced" a queryable fact with a retry
-schedule, instead of a log line nobody reads.
+**Why.** Today one request does the primary attempt and, when both owner channels
+fail, one fallback. Owner email reuses the same idempotency key and exact payload;
+a later same-lead replay makes at most one email attempt if no successful email
+event exists. There is still no automatic retry schedule. If all in-request attempts
+fail and nobody replays the lead, it can remain unannounced; `lead_events` is the
+only trace. The outbox makes that pending state queryable and schedules another
+attempt instead of relying on a manual replay.
 
 ---
 
@@ -117,9 +119,9 @@ attempts (~6 h of coverage). Rows are drained oldest-due first, at most 5 per
 claim, at most 20 per run, so one drain stays inside a 10 s function.
 
 **The scheduling problem, stated plainly.** The project is on a Hobby plan,
-which allows **one cron run per day**. A daily drain turns a 6 h retry window
-into a 24 h one — better than nothing, still not a queue. There are two honest
-options:
+which allows each cron job to run no more than once per day. A daily drain turns
+a 6 h retry window into a 24 h one — better than nothing, still not a queue.
+There are two honest options:
 
 - **Option A (no new infrastructure):** drain at the start of the existing daily
   `/api/selfcheck`, before it counts anything, so the day's numbers include what

@@ -192,12 +192,12 @@ immediately.
 | `/api/health` → `mail_redirect_active: true` | `MAIL_REDIRECT_TO` is set, in **any** environment | if production, remove it |
 | `/api/health` → `webhook_secret_set: false` | `TELEGRAM_WEBHOOK_SECRET` missing → `/api/tg` answers 503 | set it (§6) |
 | `/api/health` → `salt_set: false` | `IP_HASH_SALT` missing → `/api/lead` answers 500 | set it (§6) |
-| Log line `owner_alert_fallback` | both owner channels failed; at least one eligible channel got one retry (Resend 5xx email is suppressed) | check Telegram and Resend |
+| Log line `owner_alert_fallback` | both owner channels failed; at least one eligible channel got one retry, including owner email after a 5xx | check Telegram and Resend |
 | Log line `autoreply_capped` | the business hit `AUTOREPLY_DAILY_CAP` (default 40) | expected on a flood; raise the cap or the plan |
 | Log line `mail_redirect_active` | first send in production with a redirect configured | remove the redirect |
 | Log line `lead_notify_claim_failed` / `lead_notify_release_failed` | the per-lead notification claim could not be read or cleared; the alert still went out (the claim fails open) | usually a Supabase blip; repeated lines mean the `rate_limits` table is unreachable |
 | `tg_failed` with `meta.abandoned` | the notification round hit its 6 s deadline; N phones never answered and were left to their own 3 s timeout | phones are slow or many; see §4c |
-| `email_owner_failed` with `meta.status: "timeout"` | Resend did not answer inside the 3 s send budget — **unknown**, not failed | not retried on purpose (§4c); check Resend before assuming the email was lost |
+| `email_owner_failed` with `meta.status: "timeout"` | Resend did not answer inside the 3 s send budget — **unknown**, not failed | no retry in that round; a same-lead replay retries email only if no `email_owner_sent` event exists (§4c) |
 
 **Who receives what.** Every message carries only the counts of the business that
 receives it. A business with status `demo` is the operator's own: it also gets the
@@ -228,12 +228,15 @@ has claimed but not yet written an outcome. The claim is released in `finally`
 and fails open. A durable cross-bucket claim needs the proposed outbox/locking
 work, not wording that implies certainty this primitive cannot provide.
 2. **A replay announces only what is missing.** With no confirmed delivery it
-re-drives the notification from the stored row and writes a missing `created`
-event. Telegram events record per-chat outcomes in `lead_events.meta` as
+   re-drives the notification from the stored row and writes a missing `created`
+   event. If no `email_owner_sent` event exists, one owner-email attempt is allowed
+   per replay. When Telegram delivered and all phones are confirmed, the replay sends
+   email only. Telegram events record per-chat outcomes in `lead_events.meta` as
 `chat_outcomes: [{ chat_hash, delivered }]`; `chat_hash` uses the existing
 IP-hash salt and SHA-256 helper with a Telegram namespace. Raw chat ids are never
 stored. If three phones succeeded and two failed, fallback and replay target only
-those two. Once any owner channel succeeded, replay does not add an owner email.
+those two; when owner email also failed, replay may retry that missing email once
+with the same key.
 3. **Both channels run at once**, and Telegram fans out to every eligible bound
 phone with `Promise.allSettled`. A 400 response to a message with a keyboard gets
 one retry without buttons. Successful phones are excluded from a partial retry.
@@ -257,16 +260,15 @@ deadline). Configured outbound work is therefore at most about **9 s**, but tota
 request time is **not strictly bounded in code** because Supabase calls have no
 per-call deadline. The 30 s Vercel ceiling limits a hung invocation; it does not
 promise a response by 30 s.
-5. **Timeouts and Resend 5xx responses are unknown.** A send whose answer was lost
-   may have been accepted, so it is never retried. Resend does not document whether
-   a 5xx is stored under its idempotency key, so owner email is also not retried for
-   5xx: a retry could either replay the error or send a duplicate if the first email
-   was delivered before the error. Telegram's definite failures can still receive
-   one fallback attempt, and other retryable email failures are eligible only while
-   less than 2000 ms of the owner round have elapsed. Resend
-   `concurrent_idempotent_requests` is unknown and is not retried immediately. A
-   payload-mismatch 409 is a fixed-key programming or configuration error, so an
-   identical retry cannot repair it.
+5. **Timeouts and Resend 5xx responses follow different retry rules.** A timeout
+   may mean Resend accepted the email but its answer was lost, so it gets no retry
+   in that round. When both owner channels fail, a Resend 5xx gets one fallback
+   attempt with the same key and byte-identical payload; a replay can make at most
+   one email attempt when no `email_owner_sent` event exists. Telegram's definite
+   failures can receive one fallback attempt while less than 2000 ms of the owner
+   round have elapsed. Resend `concurrent_idempotent_requests` is unknown and is
+   not retried immediately. A payload-mismatch 409 is a fixed-key programming or
+   configuration error, so an identical retry cannot repair it.
 6. **One idempotency key per lead per channel.** Retryable primary and fallback
    owner emails have byte-identical subject, HTML, text, attachments and headers
    under `<leadId>:owner`. Within Resend's 24 h window, the same key and same payload
@@ -277,21 +279,22 @@ promise a response by 30 s.
    fixed log events `mail_idempotency_concurrent` or
    `mail_idempotency_payload_mismatch`.
 
-   **ASSUMPTION — TEST FAKE ONLY:** `tests/fakes.mjs` also stores and replays a
-   5xx response. Resend's documentation says same-key, same-payload replays return
-   the original response without re-sending and documents the concurrent 409; it
-   does not say whether a 5xx response is stored. The application treats that
-   outcome as unknown and does not retry the owner email in the immediate fallback
-   or on a later replay of the same lead. It uses the existing
-   `email_owner_failed` event metadata; no schema change is needed.
+    **ASSUMPTION — TEST FAKE ONLY:** `tests/fakes.mjs` stores and replays a 5xx
+    response. Resend documents that same-key, same-payload replays return the
+    original response without another send, but does not say whether 5xx responses
+    are stored. The application retries once with the same key because an accepted
+    request is protected by that idempotency behavior and a retry may recover an
+    unaccepted alert. The retry uses the existing `email_owner_failed` event; no
+    schema change is needed.
 
-   | Resend's 5xx behavior | Can the app send a fallback email after it? | Can this 5xx path duplicate an email? |
-   |---|---|---|
-   | Failure is stored and replayed | No. The app suppresses the retry. | No second app send; the original may already have delivered once. |
-   | Failure is not stored | No. The app suppresses the retry. | No second app send; the original may already have delivered once. |
+    | Resend's 5xx behavior | What the same-key retry does |
+    |---|---|
+    | Failure is stored and replayed | Returns the original 5xx; no new send. The alert may remain undelivered. |
+    | Failure is not stored | Resend can process the same-key request again and deliver the alert. |
 
-   The test fake's stored-5xx behavior remains an explicit assumption, not a
-   verified Resend guarantee.
+    The test fake's stored-5xx behavior remains an explicit assumption, not a
+    verified Resend guarantee. The key/payload guarantee for an accepted request
+    is documented; persistence of a failed response is not.
 
 **Finding a lead that was stored but never announced** (the case the replay above
 repairs):
@@ -469,12 +472,26 @@ set, so it cannot be pointed at a fake by accident.
 - **The digest uses the UTC day.** A roofer in America/Chicago gets "yesterday evening
   to this evening" labelled with the UTC date. There is no per-business timezone
   arithmetic; doing it properly needs a `digest_hour` column and an hourly cron (Pro).
-- **Hobby crons run once a day.** Both scheduled jobs are daily for that reason. A more
-  frequent expression fails the deployment rather than silently skipping runs.
-- **The tests run against the production database** until `.env.test` exists. The
-  runner backs up and restores `alder-demo` around a run. There is no longer an
-`ALLOW_PROD_TESTS` opt-out: a suite run needs `TEST_ENV=1` and `.env.test`, or it
-  explicit opt-out of the guard. See `docs/TEST_PROJECT.md`.
+- **Each Hobby cron job can run at most once a day.** Both scheduled jobs are daily.
+  A more frequent expression fails the deployment rather than silently skipping runs.
+- **The self-check runs at 09:00 UTC daily.** Before throttling, every invocation
+  could repeat the operator Telegram alarm, including cron retries and manual calls.
+  Operator alerts now claim each distinct business/failure, no-phone problem, and
+  production mail-redirect problem once per 24-hour rate-limit bucket. Claim errors
+  fail open; if both operator channels fail, the claims are released for a retry.
+  The shared rate-limit RPC uses fixed database-clock buckets, so calls across a
+  bucket edge can be less than 24 hours apart.
+- **Digest claim errors favor delivery over deduplication.** `/api/digest` proceeds
+  when its per-business `hit_rate_limit` call errors; if that run delivers and a later
+  run can claim, the owner may see a duplicate digest. A failed claim call does not
+  suppress the send. If both delivery channels fail, the handler clears the claim so
+  a same-day retry can try again; if that clear also fails, the claim may remain and
+  the owner may get no retry that day.
+- **Tests use a separate Supabase project.** A suite run requires `TEST_ENV=1` and
+  `.env.test`, and the runner refuses the production URL before starting. It verifies
+  the canary landed in the test database and checks that it is absent from production.
+  No production backup/reset/restore is part of the test workflow. See
+  `docs/TEST_PROJECT.md`.
 - **WhatsApp is not supported.** Its Business API needs a business account, is paid,
   and only allows free-form messages inside a 24-hour window opened by the customer —
   a lead alert arrives outside that window, so it would need pre-approved templates.
@@ -495,7 +512,7 @@ set, so it cannot be pointed at a fake by accident.
   windows if the run takes long enough to cross a second boundary. At this size it does
   not happen; it would at hundreds of businesses.
 
-## 9. Reviewing a branch, and the backup rule
+## 9. Reviewing a branch and test-project isolation
 
 **Review artefacts.** For a branch that merged another branch, the `.diff`
 (`git diff origin/main...<branch>`) is the review artefact: it applies with
@@ -503,25 +520,13 @@ set, so it cannot be pointed at a fake by accident.
 (`git format-patch`) is best-effort — `git am` cannot replay a merge commit, so
 it stops there. Use the diff to review, the patch only for a linear branch.
 
-**Restoring after a test run.** The backup, the reset and the restore touch the
-`businesses` columns of `alder-demo` and **nothing else**. `business_chats` is
-never read for a restore, never deleted and never re-inserted: a phone can be
-connected at any moment, and a blanket "delete every chat, put the backup's rows
-back" silently unbinds a client. That is exactly how the second phone was lost on
-2026-11-07. `--read-production-seed` reports the chat count and does not require it
-to be zero.
-
-The runner now fails a run that adds or removes a `business_chats` row, so a
-leak is loud instead of silent.
-
-### Test runs against production are a pre-launch blocker
-
-While the suites run against production, each suite binds fixture chats to
-`alder-demo` for a few minutes. A real lead arriving in that window is alerted to
-those fixture chats as well as the real phones, and a bug in a suite can touch
-real rows. **No suite may run against production once a real client is onboarded.**
-A separate test project (`docs/TEST_PROJECT.md`, `.env.test`) is a hard
-pre-launch requirement, not a nice-to-have.
+Every suite must run with `TEST_ENV=1` and `.env.test`; `tests/run.mjs` compares the
+resolved Supabase URL with `.env` and refuses production before it starts. The runner
+also uses a temporary canary to verify the function and runner use the same test
+project. If the canary is found in production, it deletes only that random canary lead
+and aborts before any suite runs. Tests do not back up, reset, or restore production
+business rows or chat bindings. See `docs/TEST_PROJECT.md` for setup and failure
+handling.
 
 ## 10. Vercel storage
 

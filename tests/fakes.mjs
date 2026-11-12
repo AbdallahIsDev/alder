@@ -4,7 +4,7 @@
 import http from 'node:http';
 
 function start(name) {
-  const state = { mode: 'ok', status: 200, hangMs: 2500, hangStatus: 200, hangUsed: false, requests: [], all: [], idempotency: new Map() };
+  const state = { mode: 'ok', status: 200, hangMs: 2500, hangStatus: 200, hangUsed: false, requests: [], all: [], idempotency: new Map(), storeErrorResponses: true };
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -12,7 +12,10 @@ function start(name) {
     let idem = null;
     let replay = false;
     const send = (code, obj) => {
-      if (idem && !replay) { idem.response = { code, obj }; idem.pending = false; }
+      if (idem && !replay) {
+        if (code >= 500 && !state.storeErrorResponses) state.idempotency.delete(idem.key);
+        else { idem.response = { code, obj }; idem.pending = false; }
+      }
       res.writeHead(code, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(obj));
     };
@@ -29,6 +32,7 @@ function start(name) {
         // Digest scenarios reuse the same business/day idempotency key. Clear
         // stored responses only when that test explicitly asks for isolation.
         if (c.clearIdempotency === true) state.idempotency.clear();
+        if (c.storeErrorResponses !== undefined) state.storeErrorResponses = c.storeErrorResponses === true;
         if (c.hangMs !== undefined) state.hangMs = Number(c.hangMs);
         // Per-chat control, for the fan-out and per-phone failure tests. A null
         // clears the seat; anything else is compared as a string to chat_id.
@@ -79,7 +83,7 @@ function start(name) {
           replay = true;
           return send(previous.response.code, previous.response.obj);
         }
-        idem = { raw, pending: true, response: null };
+        idem = { key, raw, pending: true, response: null };
         state.idempotency.set(key, idem);
       }
     }

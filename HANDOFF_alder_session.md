@@ -2,12 +2,16 @@
 
 Living handoff for continuing sessions. Update after each task bundle. No secrets here — names only.
 
+> Historical bundle snapshot. Current branch state and current test rules live in
+> `SESSION_HANDOFF.md`; the dedicated test-project rule below supersedes older
+> production-database instructions in this file.
+
 ## Current state
 
 - Branch `db-backend` (never push to `main`).
 - Baseline before this bundle (pre-bundle code, all green): `db-wall 27, lead-api 44, notify 37, webhook 42, review 21, fallback 7, brand 6, outbound 4` = **188 tests**.
 - Final full run after this bundle (all green): `db-wall 27, lead-api 44, notify 37, webhook 42, review 21, fallback 7, brand 6, outbound 7` = **191 tests**. Outbound went 4 → 7 because F5–F7 were added; no test was removed or skipped (191 PASS/FAIL lines in the run log).
-- Production is live; suites read the production database (see caveat below).
+- Production is live; suites use the dedicated test project through `.env.test`.
 
 ## What changed in this bundle (operator, owner, recovery — 2026-11-07)
 
@@ -105,28 +109,30 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - ITEM 4 emails: logo as CID inline image (`cid:brand-logo`, 32×32, `alt=""`) attached via Resend single `/emails` from `logo.onDarkB64` in `lib/brand.generated.json` (written by `scripts/sync-brand.mjs`); function never reads `assets/` at run time; hosted PNGs stay for the preview only. One padding system: header/body/footer `.px` 24px horizontal; header 18px top/bottom, body 24/24, footer 8px top 24px bottom; review wrapper inset removed, button left-aligned. Tests A1c, S2; G8 rewritten.
 - ITEM 5 preview/docs/handoff: `scripts/preview.mjs` shows six Telegram views and the three emails with the logo (data-URI rewrite in the gallery only). `docs/EMAIL_SYSTEM.md` and `docs/ONBOARDING.md` updated (CID logo, `MAIL_REDIRECT_PREFIX`, status block + Try again, phone rules).
 
-## Production-database test caveat and backup/reset/restore
+## Test-project isolation
 
-- Suites read the **production** Supabase database and expect the seed values for the `alder-demo` business row; they fail if the row was edited or a phone is bound.
-- Before any test run: back up the `alder-demo` businesses row (all columns) and every `business_chats` row for it to `_debug/prod-backup.json` (gitignored). Print only differing column names and row counts, never values.
-- Reset the differing columns to the seed values (`supabase/seed.sql` / migrations) and delete only that business's `business_chats` rows. Touch nothing else.
-- After the final full test run and before the push: restore the saved rows exactly; confirm by column names and counts only.
-- **Back up once per session, before the first reset — never again after it.** `_debug/prod-backup.mjs` writes a single fixed path, so running it a second time captures the *reset* state and overwrites the only copy of the real one. That happened on 2026-11-07 and was recovered from `_debug/businesses-backup.json` and `_debug/business_chats-backup.json` (2026-11-05 snapshots). If a run needs a fresh backup, move the existing file aside first.
+- Every suite run requires `TEST_ENV=1` and `.env.test`, which points to the dedicated
+  Supabase test project. `tests/run.mjs` refuses the production URL before starting.
+- The runner uses a dev root without `.env` files and checks that its canary lands in
+  the same test project selected by the runner. No production backup/reset/restore is
+  part of a test run.
+- Use `npm run test:env-check` before suites. Never print env values, credentials,
+  chat identifiers, bind codes, or lead data.
 
 ## Env files and the test project
 
 - One loader, `lib/env.js`, used by the runner, every suite and every script (`bind`, `tg:commands`, `db:apply`, `live-smoke`). Precedence, highest first: **`process.env` > `.env.test` (only when `TEST_ENV=1`) > `.env.local` > `.env`**. `.env.*` is gitignored; `.env.example` carries names only and must ship.
 - `.env` is the production reference. It is never edited to point the tests elsewhere.
 - To point the suite at a separate Supabase project: copy `.env.test.example` to `.env.test`, fill it in, run `npm run test:env-check`, then `TEST_ENV=1 npm run db:apply` and `TEST_ENV=1 node tests/run.mjs`. **Full step-by-step: `docs/TEST_PROJECT.md`** (region, keys, pooler string, the free-project pause, and the three follow-ups that only become possible once it works).
-- Guard: the runner refuses to start a suite when the resolved `SUPABASE_URL` equals the value in `.env`. The comparison is by value and neither URL is printed. `ALLOW_PROD_TESTS=1` is the explicit opt-out and prints a warning; it exists only until `.env.test` exists. `--seed-check` is exempt (two SELECTs, then exit) so the read-only check keeps working against production — test E8.
+- Guard: the runner requires `TEST_ENV=1`, `.env.test`, and a test URL different from `.env`; there is no production-test override. `--read-production-seed` is a separate read-only command and exits before any suite starts.
 - `npm run db:apply` refuses a `DATABASE_URL` that came from the shell unless `TEST_ENV=1`, so a stray export cannot point a schema apply at another database.
 
 ## Test workflow
 
-- `node tests/run.mjs [suites...]` — one shared `vercel dev` for the run; suites run sequentially in the listed order. Per-suite seconds and total always print. Flags: `--seed-check` runs the read-only alder-demo seed check only (no tests, exits 1 on mismatch). There is no `--timing` flag — per-suite seconds always print, and any unknown `--flag` is now rejected with exit 1 instead of being silently dropped (test E6). The suites that need no HTTP are `db-wall`, `migrations`, `notify`, `webhook`, `brand`, `outbound`; `vercel dev` and the canary are skipped only when **every** selected suite is in that set, not suite by suite. `TEST_ENV=1` switches the loader to `.env.test`; `ALLOW_PROD_TESTS=1` overrides the production guard.
-- During an item, run only the suites you touched. Run `--seed-check` instead of a full baseline run whenever the last recorded green HEAD equals START. Run the full suite once at the end.
+- `node tests/run.mjs [suites...]` — one shared `vercel dev` for the run; suites run sequentially in the listed order. Per-suite seconds and total always print. `--read-production-seed` runs the read-only seed report only (no tests). There is no `--timing` flag; unknown flags are rejected. The suites that need no HTTP are `db-wall`, `migrations`, `notify`, `webhook`, `brand`, `outbound`; `vercel dev` and the canary are skipped only when every selected suite is in that set. Every suite run requires `TEST_ENV=1` and `.env.test`.
+- During an item, run only the suites you touched, then run the full suite once at the end. `--read-production-seed` is a read-only production seed report, not a test baseline.
 - Outbound timeout rule: production code uses 3000 ms always. In tests only, `OUTBOUND_TIMEOUT_MS` is honoured when `VERCEL_ENV` is **exactly `development`** (integer 200–3000); an unset `VERCEL_ENV` is not dev and gets 3000 ms. Fake "hang" durations must stay above it (2500 ms).
-- Biggest remaining win is a nearby dedicated test Supabase project. Measured per-test instrumentation (2026-11-06, not committed): lead-api makes 400 Supabase requests in 82.6 s and webhook 450 in 91.5 s; at the measured 192 ms median round trip that is 76.8 s and 86.4 s — i.e. ~93–95 % of each suite is database round-trip time, and the fake Telegram/Resend servers plus the 7 deliberate 1 s hangs account for the rest. `vercel dev` itself is no longer a suite cost: startup is ~10 s (9,972 ms measured today; the 55.8 s baseline figure was a cold `npx` cache, not a fixed cost), and only 4 lead-api tests call it (10, 12, 12b, 14) plus one reachability probe.
+- The dedicated test Supabase project is in use. The 2026-11-06 per-test timing below is historical instrumentation; use current test-run timings from `SESSION_HANDOFF.md`.
 
 ## How to create a bind code
 
@@ -140,7 +146,7 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 
 ## Env var names in use
 
-`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX`, `SITE_URL`, `DATABASE_URL`, `RESEND_API_BASE`, `TELEGRAM_API_BASE`, `VERCEL_ENV`, `HEALTH_SECRET`, `CRON_SECRET`, `AUTOREPLY_DAILY_CAP` (optional, default 40), `DIGEST_ENABLED` (optional, unset = digest off), `DIGEST_UNTOUCHED_DAYS` (optional, default 14), `RECIPIENTS_MAX` (optional, default 5), `INVITES_MAX` (optional, default 3) (test-only: `TEST_ENV`, `ALLOW_PROD_TESTS`).
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX`, `SITE_URL`, `DATABASE_URL`, `RESEND_API_BASE`, `TELEGRAM_API_BASE`, `VERCEL_ENV`, `HEALTH_SECRET`, `CRON_SECRET`, `AUTOREPLY_DAILY_CAP` (optional, default 40), `DIGEST_ENABLED` (optional, unset = digest off), `DIGEST_UNTOUCHED_DAYS` (optional, default 14), `RECIPIENTS_MAX` (optional, default 5), `INVITES_MAX` (optional, default 3) (test-only: `TEST_ENV`).
 
 - `VERCEL_ENV`: read in `lib/outbound.js` only (`api/review.js` imports `isDev()` from it). Vercel sets it (`production`/`preview`/`development`). Two predicates with opposite polarity, on purpose: `isDev()` is `=== 'development'` and gates everything that WEAKENS a guard (shorter timeout, loopback host) — fail-closed; `testModeActive()` is `!isDeployed() && marker` and decides whether to BLOCK a real send — fail-safe. An unset `VERCEL_ENV` therefore gets production timeouts, real hosts, and still blocks when the marker is present.
 
@@ -153,7 +159,7 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 1. **Remove `MAIL_REDIRECT_TO`** from the Vercel production environment. While it is set, every customer email (auto-reply, review request, owner alert, digest) goes to the redirect address. Confirm it is gone by calling `/api/health` and reading `mail_redirect_active: false` — the code also logs `mail_redirect_active` once per instance and `/api/selfcheck` reports it daily, but none of that stops the redirect.
 2. Verify the Resend sending domain, and set `MAIL_FROM` to an address on it (otherwise `sendMail` returns `no_verified_sender` and sends nothing).
 3. **Set the Resend plan to match `AUTOREPLY_DAILY_CAP`.** The cap is sized for the free plan (100 emails/day): 40 auto-replies → at most 80 emails a day with the uncapped owner alert. On a paid plan raise both together, or leave the cap at 40 and treat it as a flood brake rather than a quota limit.
-4. Move to Vercel Pro (Hobby is non-commercial) — and Pro is what allows more than one cron run a day if the digest ever needs to be hourly.
+4. Use a plan allowed for commercial work before taking payment. Vercel Hobby limits each cron job to once daily; an hourly digest needs a plan that permits more frequent schedules.
 5. Set `HEALTH_SECRET` and `CRON_SECRET` to **two different values**; `/api/health` takes the first as a header, `/api/selfcheck` and `/api/digest` take either (header or `Authorization: Bearer`). Neither is accepted in the other's place, and both must exist — a missing `HEALTH_SECRET` returns 503 even when `CRON_SECRET` is set.
 6. Only then, flip the redirect check to a hard failure (currently it is a warning by decision). That change is not made.
 7. Decide the retention window and run `npm run offboard -- <slug>` for anything that should not ship with the client.
@@ -162,7 +168,7 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 
 - `GET /api/health` — seven event counts for the last hour and the last 24 hours (`created`, `tg_sent`, `tg_failed`, `email_owner_sent`, `email_owner_failed`, `autoreply_failed`, `review_request_failed`) plus `mail_redirect_active`, `webhook_secret_set`, `salt_set`. Numbers and booleans only; no PII, no business names, no env values. Auth: `x-health-secret` compared in constant time; **503 when `HEALTH_SECRET` is unset**, 401 otherwise, 405 for anything but GET.
 - `GET /api/selfcheck` — per-business counts for the last 24 h. A `demo` business is messaged when one of its own sends failed **or** `MAIL_REDIRECT_TO` is set while `VERCEL_ENV=production`; an `active` client only when one of its own sends failed. Each message carries that business's numbers only, and only a demo business sees the redirect warning. **If a business has no chat, or none of its sends landed, the same text goes to its `owner_email` instead** — a fallback, never a second copy. Two businesses sharing one inbox get one message per run (worst-first). Clean state sends nothing. The response is `{ ok, sent, emailed, deduped, failed, redirect_active }`, where `failed` is the sum across active businesses.
-- `vercel.json` schedules `/api/selfcheck` daily at `0 9 * * *`. Vercel documents **Hobby as one run per day minimum interval** — a more frequent expression fails the deployment — and Pro/Enterprise as once per minute, so daily is legal on every plan (source: https://vercel.com/docs/schedules/cron-jobs/usage-and-pricing, read 2026-11-06). Cron Jobs are marked legacy there in favour of "Schedules".
+- `vercel.json` schedules `/api/selfcheck` daily at `0 9 * * *`. Vercel documents a **once-per-day minimum interval for each Hobby cron job** — a more frequent expression fails the deployment — and Pro/Enterprise as once per minute, so daily is legal on every plan (source: https://vercel.com/docs/schedules/cron-jobs/usage-and-pricing, read 2026-11-06). Cron Jobs are marked legacy there in favour of "Schedules".
 - Auth: `/api/health` accepts `x-health-secret` = `HEALTH_SECRET` only. `/api/selfcheck` accepts that header **or** `Authorization: Bearer $CRON_SECRET`; the two secrets are independent and neither is accepted in the other's place. Both comparisons are constant-time.
 - **Both secrets must be set in Vercel.** `/api/selfcheck` returns **503 when `HEALTH_SECRET` is unset even if `CRON_SECRET` is set** — the health secret is the gate, the cron secret is only the second way to present it. A cron with only `CRON_SECRET` configured therefore fails loudly every day instead of silently doing nothing.
 - `GET /api/digest` — daily owner digest, **off unless `DIGEST_ENABLED=1`** (returns `200 {ok:true, enabled:false}` and sends nothing). Same auth as `/api/selfcheck`. For every **active** business (`status` in `demo`/`active`; paused and churned are never messaged) with a bound chat or an `owner_email` it counts the last 24 h — new leads, possible repeats (`duplicate_of` on the `created` event), still-open leads older than 24 h but newer than `DIGEST_UNTOUCHED_DAYS` with no `contacted` event, and failed alerts — and sends one message. **Counts only**: no name, phone, email, note or business name, so the same text is safe by email. A business with 0 new, 0 untouched and 0 failed gets nothing.
@@ -211,7 +217,7 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 
 ## Known issues / next
 
-1. The suites run against the production database and should move to a separate Supabase project.
+1. The dedicated test Supabase project is in use; every suite requires `.env.test` and `TEST_ENV=1`.
 2. `businesses` has no country column; the phone default country is US.
 3. Logo CID not verified in real Gmail/Outlook/Apple Mail.
 4. Telegram button colours show only on clients newer than Feb 2026.
@@ -219,7 +225,7 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 6. ~~Stale comment in `api/review.js` and unused `mailCard` import.~~ **Resolved** in `a9e7bb2`: the header now states GET-never-writes (matches tests D2/D4/I1), and `grep -rn "mailCard" --include=*.js --include=*.mjs .` returns nothing outside `node_modules`. Nothing to do.
 7. ~~`/leads` reply does not use the new emoji statuses.~~ **Resolved**: `api/tg.js:52-54` builds the reply with `renderLeadList(leads)`; `lib/content.js:258-269` renders each block through `statusLine()`, which prepends `STATUS_EMOJI` (`lib/content.js:37-44`). Test L1 asserts the spaced format. The line in the "previous bundle" section above is the accurate one; this entry was stale.
 8. Domain verification in Resend and removal of `MAIL_REDIRECT_TO` before real clients.
-9. Vercel Hobby is non-commercial; Pro needed once a client pays.
+9. Vercel Hobby is for non-commercial use; a paid client needs an eligible plan. Each Hobby cron job, rather than the whole project, is limited to once daily.
 10. ~~Double-tap Try again race~~ **Resolved**: the `r:` branch takes a `rate_limits` mutex keyed `retry:<leadId>`, released in a `finally` after the attempt, so a concurrent second tap answers "Nothing to retry." and sends nothing. Test C33 fires two callbacks with `Promise.all` and asserts one email. A proper `review_attempt` counter column would be cleaner; this needs no schema change.
 11. ~~Client/server phone minimum mismatch~~ Resolved: North America is `[10, 10]` on both sides now (see follow-up bundle above).
 12. Owner bot plan: a second bot could reuse `lib/tg.js` by threading a per-call token (today it reads `TELEGRAM_BOT_TOKEN` from env in `call()`). Not implemented.
@@ -227,8 +233,8 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 14. `MAIL_REDIRECT_TO` in a production environment silently sends **every** customer email (auto-reply, review request) to the redirect address, with no error anywhere. Nothing in the code refuses it when `VERCEL_ENV=production`. Check the Vercel production env before the next client.
 15. No retention or deletion path. `leads.business_id` has no `on delete cascade`, so removing a business needs its leads deleted first; `lead_events`, `review_feedback` and `private.lead_financials` cascade from `leads`. A customer deletion request is manual SQL today.
 16. The per-business cap is 200 leads/hour. At two emails per lead that exhausts a Resend free-plan daily quota (100/day) in about 15 minutes, after which owner emails and auto-replies stop while Telegram keeps working. **Partly addressed:** the customer auto-reply now has its own daily ceiling (`AUTOREPLY_DAILY_CAP`, default 40). The owner email is deliberately not capped, so a flood can still exhaust the quota through owner alerts alone.
-17. `sharp` 0.34.5 carries libvips/libheif/librsvg advisories (`npm audit`: 1 high). Dev-only image pipeline, fed only local trusted files; the fix is sharp 0.35.5, a breaking change. **Deferred by decision** — revisit before the next image-pipeline run.
-18. ~~No observability~~ Partly addressed: `/api/health` (counts on demand) and `/api/selfcheck` (daily, only speaks when something failed). Still missing: an alert when the *check itself* stops running.
+17. `sharp` 0.34.5 has one High `npm audit` finding in dev-only image tooling; the fix is 0.35.5 and is not lockfile-only. Upgrade plan is in `docs/proposals/sharp-upgrade.md`.
+18. ~~No observability~~ Partly addressed: `/api/health` (counts on demand) and `/api/selfcheck` (daily, only speaks when something failed). Operator alarm problems are throttled per 24-hour rate-limit bucket; claim errors fail open. Still missing: an alert when the *check itself* stops running.
 19. **The digest's failure line is generic.** `digestCounts` returns one `failed` total, so the
     message says "N messages could not be delivered" rather than naming the kind. The self-check
     does name the kind because it reads the events per business. Splitting the digest count by kind

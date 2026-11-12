@@ -458,7 +458,7 @@ try {
     'B11', 'resend down: telegram delivered, no duplicate send', `tg=${tg} mail=${mail} failed=${failed} fallback=${fb}`);
 } catch (e) { line(false, 'B11', 'resend down', e.message); }
 
-/* B12: both down — Telegram is retried once; a Resend 5xx stays unknown. */
+/* B12: both down — nothing reached the owner, so both channels are retried once. */
 try {
   await clean();
   await control(TG, { mode: '500' }); await control(RS, { mode: '500' });
@@ -470,14 +470,14 @@ try {
   const tg = await sendMessageCount(), mail = await emailCount();
   const fb = metaOf(evs).filter((m) => m.fallback === true).length;
   const failedTg = evs.filter((e) => e.kind === 'tg_failed').length;
-  line(res.code === 200 && rows.length === 1 && tg === 2 && mail === 2 && fb === 1 && failedTg === 2,
-    'B12', 'both down: only Telegram gets a retry after email 5xx', `tg=${tg} mail=${mail} fallback=${fb} tgFailed=${failedTg}`);
+  line(res.code === 200 && rows.length === 1 && tg === 2 && mail === 3 && fb === 2 && failedTg === 2,
+    'B12', 'both down: lead saved, one retry per channel', `tg=${tg} mail=${mail} fallback=${fb} tgFailed=${failedTg}`);
 } catch (e) { line(false, 'B12', 'both down', e.message); }
 
-/* ====== B6 — timeout, 5xx and concurrent 409 delivery is uncertain ======
-   Timeouts and Resend 5xx responses are not retried for owner email: a retry
-   could duplicate a send, and Resend does not document 5xx storage. Concurrent
-   and payload-mismatch 409s are failures, not delivery confirmations. */
+/* ====== B6 — timeout and concurrent 409 delivery is uncertain ======
+   Timeout and concurrent 409 are not retried in the same round. A same-key,
+   same-payload 5xx retry cannot create a second accepted email. Payload-mismatch
+   409 remains a failure, never delivery. */
 
 /* B6a: the owner email hangs (status timeout from the 200 ms send budget) and
    Telegram is down. Nothing may be re-sent to Resend. */
@@ -503,32 +503,93 @@ try {
     `ownerMails=${ownerMails.length} emailFallback=${emailFallback} meta=${JSON.stringify(failed && failed.meta)}`);
 } catch (e) { line(false, 'B6a', 'timeout is unknown', e.message); }
 
-/* B6b: a Resend 5xx has no documented replay guarantee. Do not retry email:
-   the first request may have delivered despite its response. Telegram fallback
-   still runs independently. */
+/* B6b: a Resend 5xx gets one successful fallback attempt with the primary key
+   and exact bytes when the first failure was not stored. B6f covers the stored
+   5xx assumption separately. */
 try {
   await clean();
   await control(TG, { mode: '500' });
-  await control(RS, { mode: '500' });
+  await control(RS, { mode: 'fail_nth', nth: 1, storeErrorResponses: false });
   await reset(TG); await reset(RS);
   const { res, key } = await post({});
   await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
   const rows = await leadFor(key);
   const evs = rows.length ? await events(rows[0].id) : [];
   const ownerReqs = (await requests(RS))
-    .filter((r) => r.path === '/emails' && r.headers && /:owner/.test(String(r.headers['idempotency-key'] || '')));
-  const ownerKey = ownerReqs[0] && String(ownerReqs[0].headers['idempotency-key']);
-  const fallbackEmail = evs.some((e) => e.kind === 'email_owner_failed' && e.meta && e.meta.fallback === true);
+    .filter((r) => r.path === '/emails' && r.headers && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  const fallbackSent = evs.some((e) => e.kind === 'email_owner_sent' && e.meta && e.meta.fallback === true);
+  const sameBytes = ownerReqs.length === 2 && ownerReqs[0].raw === ownerReqs[1].raw;
+  const sameKey = ownerReqs.length === 2
+    && ownerReqs[0].headers['idempotency-key'] === ownerReqs[1].headers['idempotency-key'];
+  line(res.code === 200 && rows.length === 1 && sameKey && sameBytes && fallbackSent,
+    'B6b', 'successful fallback retries once with the primary key and exact payload',
+    `ownerAttempts=${ownerReqs.length} sameKey=${sameKey} sameBytes=${sameBytes} fallbackSent=${fallbackSent}`);
+} catch (e) { line(false, 'B6b', 'fallback key reuse', e.message); } finally {
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok', storeErrorResponses: true });
+}
+
+/* B6g: an email-only 5xx outcome is retried once by a later replay, with the
+   original key and bytes. The fake cache is cleared to model an unstored 5xx. */
+try {
+  await clean();
   await control(TG, { mode: '500' }); await control(RS, { mode: '500' });
   await reset(TG); await reset(RS);
-  await post({ idempotencyKey: key });
-  const replayOwnerReqs = (await requests(RS))
-    .filter((r) => r.path === '/emails' && r.headers && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
-  line(res.code === 200 && rows.length === 1 && ownerReqs.length === 1
-    && /:owner$/.test(ownerKey || '') && !fallbackEmail && replayOwnerReqs.length === 0,
-    'B6b', 'Resend 5xx: no fallback or replay email attempt',
-    `ownerAttempts=${ownerReqs.length} fallbackEvent=${fallbackEmail} replayAttempts=${replayOwnerReqs.length}`);
-} catch (e) { line(false, 'B6b', 'fallback key reuse', e.message); }
+  const first = await post({});
+  const rows = await leadFor(first.key);
+  const leadId = rows[0] && rows[0].id;
+  const initialOwner = (await requests(RS)).find((r) => r.path === '/emails' && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  if (leadId) {
+    await svc.from('lead_events').delete().eq('lead_id', leadId);
+    await svc.from('lead_events').insert([
+      { lead_id: leadId, kind: 'created', meta: { source: 'test', slug: ALDER_DEMO } },
+      { lead_id: leadId, kind: 'email_owner_failed', meta: { status: 500 } },
+    ]);
+  }
+  await control(TG, { mode: '500' });
+  await control(RS, { mode: 'ok', status: 200, clearIdempotency: true });
+  await reset(TG); await reset(RS);
+  await post({ idempotencyKey: first.key });
+  const replayOwner = (await requests(RS)).filter((r) => r.path === '/emails' && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  const eventsAfterReplay = leadId ? await events(leadId) : [];
+  const sent = eventsAfterReplay.some((e) => e.kind === 'email_owner_sent');
+  line(leadId && initialOwner && replayOwner.length === 1
+    && replayOwner[0].headers['idempotency-key'] === initialOwner.headers['idempotency-key']
+    && replayOwner[0].raw === initialOwner.raw && sent,
+    'B6g', 'email-only 5xx replay retries once with the original key and bytes',
+    `replayAttempts=${replayOwner.length} sentEvent=${sent}`);
+} catch (e) { line(false, 'B6g', 'owner-email 5xx replay', e.message); } finally {
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+}
+
+/* B6h: Telegram already delivered, but no email_owner_sent exists. A replay
+   retries only email once; it does not announce the lead again on Telegram. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: '500', clearIdempotency: true });
+  await reset(TG); await reset(RS);
+  const first = await post({});
+  const rows = await leadFor(first.key);
+  const leadId = rows[0] && rows[0].id;
+  const firstEvents = leadId ? await events(leadId) : [];
+  const firstOwnerAttempts = (await requests(RS)).filter((r) => r.path === '/emails' && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  await control(TG, { mode: '500' });
+  await control(RS, { mode: 'ok', status: 200, clearIdempotency: true });
+  await reset(TG); await reset(RS);
+  await post({ idempotencyKey: first.key });
+  const replayTg = (await requests(TG)).filter((r) => r.path.includes('/sendMessage'));
+  const replayOwner = (await requests(RS)).filter((r) => r.path === '/emails' && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  const lastEvents = leadId ? await events(leadId) : [];
+  line(leadId && firstEvents.some((e) => e.kind === 'tg_sent')
+    && firstEvents.some((e) => e.kind === 'email_owner_failed')
+    && firstOwnerAttempts.length === 1 && replayOwner.length === 1 && replayTg.length === 0
+    && replayOwner[0].headers['idempotency-key'] === firstOwnerAttempts[0].headers['idempotency-key']
+    && replayOwner[0].raw === firstOwnerAttempts[0].raw
+    && lastEvents.some((e) => e.kind === 'email_owner_sent'),
+    'B6h', 'delivered Telegram + missing email: replay retries email only',
+    `ownerFirst=${firstOwnerAttempts.length} ownerReplay=${replayOwner.length} tgReplay=${replayTg.length}`);
+} catch (e) { line(false, 'B6h', 'email-only replay after Telegram delivery', e.message); } finally {
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+}
 
 /* B6c-B6e: the fake models Resend's three documented idempotency outcomes. */
 const { sendMail } = await import('../lib/mail.js');
@@ -906,8 +967,8 @@ try {
 }
 
 /* B5r: three phones succeed and two fail while email also fails. The immediate
-   fallback and the later same-key replay each target exactly those two phones.
-   Persisted outcomes contain salted hashes only, never raw chat ids. */
+   fallback and later replay target those two phones; replay also retries the
+   missing owner email once. Persisted outcomes contain hashes, never chat ids. */
 try {
   await clean(); await bindFan();
   const failedChats = [String(FAN[1]), String(FAN[4])];
@@ -917,24 +978,30 @@ try {
   const first = await post({});
   const firstTg = (await requests(TG)).filter((r) => r.path.includes('/sendMessage'));
   const fallbackTg = firstTg.slice(FAN.length);
-  const ownerMailCount = (await requests(RS)).filter((r) => /:owner$/.test(String(r.headers['idempotency-key'] || ''))).length;
+  const ownerMails = (await requests(RS)).filter((r) => /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  const ownerMailCount = ownerMails.length;
+  const ownerRetrySame = ownerMails.length === 2 && ownerMails[0].raw === ownerMails[1].raw
+    && ownerMails[0].headers['idempotency-key'] === ownerMails[1].headers['idempotency-key'];
   await control(TG, { mode: 'ok', failChats: [] }); await control(RS, { mode: 'ok' });
   await reset(TG); await reset(RS);
   await post({ idempotencyKey: first.key });
   const replayTg = (await requests(TG)).filter((r) => r.path.includes('/sendMessage'));
   const replayOwnerMails = (await requests(RS)).filter((r) => /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  const replayOwnerSame = replayOwnerMails.length === 1 && replayOwnerMails[0].raw === ownerMails[0].raw
+    && replayOwnerMails[0].headers['idempotency-key'] === ownerMails[0].headers['idempotency-key'];
   const rows = await leadFor(first.key);
   const evs = rows.length ? await events(rows[0].id) : [];
   const metaText = JSON.stringify(evs.map((e) => e.meta));
   const outcomes = evs.flatMap((e) => Array.isArray(e.meta.chat_outcomes) ? e.meta.chat_outcomes : []);
+  const emailEventKinds = evs.filter((e) => e.kind.startsWith('email_owner_')).map((e) => e.kind).join(',');
   const exactTargets = (reqs) => reqs.length === 2 && new Set(reqs.map((r) => String(r.body.chat_id))).size === 2
     && reqs.every((r) => failedChats.includes(String(r.body.chat_id)));
   const hashesOnly = outcomes.length >= FAN.length && outcomes.every((o) => /^[a-f0-9]{64}$/.test(o.chat_hash))
     && !FAN.some((id) => metaText.includes(String(id)));
   line(first.res.code === 200 && firstTg.length === FAN.length + 2 && exactTargets(fallbackTg)
-    && exactTargets(replayTg) && ownerMailCount === 1 && replayOwnerMails.length === 0 && hashesOnly,
+    && exactTargets(replayTg) && ownerMailCount === 2 && ownerRetrySame && replayOwnerSame && hashesOnly,
     'B5r', '3 ok / 2 failed: fallback and replay resend exactly 2',
-    `primary=${firstTg.length} replay=${replayTg.length} ownerReplay=${replayOwnerMails.length} hashes=${outcomes.length}`);
+    `primary=${firstTg.length} replay=${replayTg.length} ownerFirst=${ownerMailCount} ownerReplay=${replayOwnerMails.length} emailEvents=${emailEventKinds} hashes=${outcomes.length}`);
 } catch (e) { line(false, 'B5r', 'partial Telegram replay', e.message); } finally {
   await control(TG, { mode: 'ok', failChats: [], hangChat: null, failChat: null });
   await control(RS, { mode: 'ok' }); await unbindFan();

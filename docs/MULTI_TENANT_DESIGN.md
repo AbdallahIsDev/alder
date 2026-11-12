@@ -1,8 +1,8 @@
 # Multi-tenant design: one deployment, many clients
 
 **Status:** proposal. Docs only — no code, no migration, no schema applied.
-Every file:line below was read in this repo on 2026-11-09 at `origin/main`
-(`de2c8fe`).
+Most file:line references below were read on 2026-11-09 at `origin/main`
+(`de2c8fe`). Rows 12–13 were refreshed against the current build on 2026-11-12.
 
 The goal: one deployment serves every client. The layout stays identical; only
 client data and page content change. Assets (logo, photos, video) must not ship
@@ -26,8 +26,8 @@ builder.
 | 9 | og image file | `BIZ.ogImage` → `assets/images/og-image.jpg` | `site_assets` row, kind `og` | object storage |
 | 10 | `<meta name="robots" content="noindex,nofollow">` | `index.html:9` | `sites.noindex` flag | DB |
 | 11 | `X-Robots-Tag: noindex, nofollow` on every response | `vercel.json:86` | per-host header from `sites.noindex` | server |
-| 12 | `robots.txt` (hard-coded sitemap host) | `robots.txt:4` | generated per host | server |
-| 13 | `sitemap.xml` (hard-coded host, fixed lastmod) | `sitemap.xml:4` | generated per host from `sites.updated_at` | server |
+| 12 | `robots.txt` (built from the selected client's `domain`) | `build-static.js:318` | generated per request host for a shared deployment | server |
+| 13 | `sitemap.xml` (built from the selected client's `domain` and `lastmod`) | `build-static.js:314-321` | generated per request host from tenant data | server |
 | 14 | Hero headline and sub-copy | `index.html:2059` | `content.hero` | content |
 | 15 | Hero media (video tiers, posters) | `index.html:2027-2084`, `assets/images/hero/*` | `site_assets` rows, kind `video`/`poster` | object storage |
 | 16 | Stats band | `index.html:2290` | `content.stats` | content |

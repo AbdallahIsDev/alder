@@ -29,7 +29,7 @@ const line = (ok, id, what, d) => {
 };
 
 const { default: handler, countInvalidReviewLinks, reviewLinkOk } = await import('../api/health.js');
-const { default: selfcheck, alertTargets, deliverSelfCheck, operatorAlarm } = await import('../api/selfcheck.js');
+const { default: selfcheck, alertTargets, deliverSelfCheck, operatorAlarm, claimOperatorAlarmProblems, selectUnclaimedOperatorAlarm } = await import('../api/selfcheck.js');
 const { selfCheckText, shouldAlertBusiness, failedTotal, operatorAlarmText } = await import('../lib/ops-copy.js');
 const { selfCheckEmail } = await import('../lib/email-builders.js');
 
@@ -356,6 +356,7 @@ try {
     const reset = (base) => realFetch(base + '/__reset', { method: 'POST' });
     const reqs = async (base) => (await (await realFetch(base + '/__requests')).json()).requests;
     const sent = [];
+    const claimedProblems = new Set();
     let restore = null;
     try {
       process.env.VERCEL_ENV = 'development';
@@ -377,6 +378,12 @@ try {
         const select = u.searchParams.get('select') || '';
         sent.push(table + '?' + select);
         const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+        if (table === 'rpc/hit_rate_limit') {
+          const key = JSON.parse(init.body || '{}').p_key;
+          if (claimedProblems.has(key)) return json(false);
+          claimedProblems.add(key);
+          return json(true);
+        }
         if (table === 'lead_events' && select === 'id') {
           const kind = (u.searchParams.get('kind') || '').replace('eq.', '');
           const n = kind === 'tg_failed' ? 2 : 0;
@@ -424,21 +431,21 @@ try {
       process.env.MAIL_REDIRECT_TO = 'inbox@example.com';
       const r2 = await call();
       const mail2 = (await reqs(RS)).filter((x) => x.path === '/emails');
-      // The redirect rewrites EVERY recipient, so both the owner and the
-      // operator email land in the test inbox.
-      const toRedirect = mail2.length === 2
+      // The owner still gets its self-check; the repeated operator problem is
+      // claimed, so only one redirected email remains.
+      const toRedirect = mail2.length === 1
         && mail2.every((x) => JSON.stringify(x.body.to) === JSON.stringify(['inbox@example.com']));
 
       // Two Telegram attempts: the owner chat (mode 500) and the operator alarm.
       const opTg = tg1.find((x) => String(x.body.chat_id) === 'op-chat');
-      // Telegram is in 500 mode for everyone, so the operator alarm falls back
-      // to OPERATOR_EMAIL: two emails, one owner and one operator.
+      // Telegram is in 500 mode for everyone, so the first operator alarm falls
+      // back to OPERATOR_EMAIL: one owner email and one operator email.
       const opMail = mail1.find((x) => JSON.stringify(x.body.to) === JSON.stringify(['ops@example.com']));
       const ok = r1.code === 200 && r1.body.emailed === 1 && r1.body.sent === 0
         && r1.body.operator === 'email'
         && mail1.length === 2 && !!opMail && tg1.length === 2 && !!opTg && toOwner && keyOk && countsOnly
         && /alder-demo: 1 alert could not be delivered/.test(opTg.body.text)
-        && r2.code === 200 && mail2.length === 2 && toRedirect;
+        && r2.code === 200 && r2.body.operator === 'none' && mail2.length === 1 && toRedirect;
       // The email assertion lives on its own line so a missing business shows
       // up here, not buried in S12's combined condition.
       line(!!headerOk, 'S4b', 'selfcheck email: company header, platform footer',
@@ -537,6 +544,7 @@ try {
     const ctl = (base, body) => realFetch3(base + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const reset = (base) => realFetch3(base + '/__reset', { method: 'POST' });
     const reqs = async (base) => (await (await realFetch3(base + '/__requests')).json()).requests;
+    const claimedProblems = new Set();
     const install = (data) => {
       globalThis.fetch = async (input, init = {}) => {
         const url = typeof input === 'string' ? input : input.url;
@@ -544,6 +552,12 @@ try {
         const u = new URL(url);
         const table = u.pathname.replace('/rest/v1/', '');
         const json = (b) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+        if (table === 'rpc/hit_rate_limit') {
+          const key = JSON.parse(init.body || '{}').p_key;
+          if (claimedProblems.has(key)) return json(false);
+          claimedProblems.add(key);
+          return json(true);
+        }
         if (table === 'businesses') return json(data.businesses || []);
         // PostgREST filters; so does this. Without the business_id filter the
         // chat lookup would hand every business the same chat.
@@ -663,6 +677,42 @@ try {
   }
 
   /* S17-S20: the operator alarm goes quiet when nothing is actually wrong */
+  /* S22-S23: operator problems are claimed once per 24-hour rate-limit bucket;
+     claim errors fail open so an alert is still sent. */
+  {
+    const business = { id: 'biz-throttle', slug: 'throttle-client', status: 'active' };
+    const makeAlarm = (day) => operatorAlarm({
+      businesses: [business], counts: new Map([[business.id, day]]),
+      chatsByBusiness: new Map([[business.id, []]]),
+      recentLeadBusinesses: new Set(), redirectActive: true,
+    });
+    const alarm = makeAlarm({ tg_failed: 2, email_owner_failed: 1 });
+    const held = new Set();
+    const atomicClaim = async (key, windowSeconds, max) => {
+      if (windowSeconds !== 86400 || max !== 1) throw new Error('unexpected claim settings');
+      if (held.has(key)) return false;
+      held.add(key);
+      return true;
+    };
+    const first = await claimOperatorAlarmProblems(alarm, atomicClaim);
+    const repeat = await claimOperatorAlarmProblems(alarm, atomicClaim);
+    const repeated = selectUnclaimedOperatorAlarm(alarm, repeat);
+    const expanded = makeAlarm({ tg_failed: 3, email_owner_failed: 1, review_request_failed: 1 });
+    const newProblem = await claimOperatorAlarmProblems(expanded, atomicClaim);
+    const filtered = selectUnclaimedOperatorAlarm(expanded, newProblem);
+    const throttleOk = first.length === 4 && repeat.length === 0 && repeated === null
+      && newProblem.length === 1 && filtered && filtered.body.includes('review request')
+      && !filtered.body.includes('alerts could not be delivered') && !filtered.body.includes('Test mode is on');
+    line(throttleOk, 'S22', 'repeat operator issues are throttled; new issue still alerts',
+      `first=${first.length} repeat=${repeat.length} new=${newProblem.length}`);
+
+    const failedOpen = await claimOperatorAlarmProblems(alarm, async () => { throw new Error('db unavailable'); });
+    const openAlarm = selectUnclaimedOperatorAlarm(alarm, failedOpen);
+    const failOpenOk = failedOpen.length === alarm.problemKeys.length && !!openAlarm
+      && openAlarm.body.includes('alerts could not be delivered') && openAlarm.body.includes('Test mode is on');
+    line(failOpenOk, 'S23', 'claim errors still send every operator problem', `problems=${failedOpen.length}`);
+  }
+
   {
     const demo = { id: 'd1', slug: 'second-demo', status: 'demo' };
     const active = { id: 'a1', slug: 'client', status: 'active' };
