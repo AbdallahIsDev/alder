@@ -190,7 +190,7 @@ try {
 
   const run = async () => {
     process.env.DIGEST_ENABLED = '1';
-    await ctl(TG, { mode: 'ok' }); await ctl(RS, { mode: 'ok' });
+    await ctl(TG, { mode: 'ok' }); await ctl(RS, { mode: 'ok', status: 200 , clearIdempotency: true });
     await resetFake(TG); await resetFake(RS);
     const r = await call({ secret: 'health-test-secret-value' });
     const tg = (await fakeReqs(TG)).filter((x) => x.path.includes('/sendMessage'));
@@ -309,7 +309,7 @@ try {
   try {
     install({ ...fixture, businesses: [fixture.businesses[0]], chats: [{ business_id: A, tg_chat_id: 'chat-a' }] });
     process.env.DIGEST_ENABLED = '1';
-    await ctl(TG, { mode: '500' }); await ctl(RS, { mode: '500' });
+    await ctl(TG, { mode: '500' }); await ctl(RS, { mode: '500', clearIdempotency: true });
     await resetFake(TG); await resetFake(RS);
     const first = await call({ secret: 'health-test-secret-value' });
     const second = await call({ secret: 'health-test-secret-value' });
@@ -324,7 +324,7 @@ try {
   try {
     install({ ...fixture, businesses: [fixture.businesses[0]], chats: [{ business_id: A, tg_chat_id: 'chat-a' }] });
     process.env.DIGEST_ENABLED = '1';
-    await ctl(TG, { mode: '500' }); await ctl(RS, { mode: 'ok' });
+    await ctl(TG, { mode: '500' }); await ctl(RS, { mode: 'ok', status: 200, clearIdempotency: true });
     await resetFake(TG); await resetFake(RS);
     const first = await call({ secret: 'health-test-secret-value' });
     const second = await call({ secret: 'health-test-secret-value' });
@@ -340,7 +340,7 @@ try {
   try {
     install({ ...fixture, businesses: [fixture.businesses[0]], chats: [{ business_id: A, tg_chat_id: 'chat-a' }] });
     process.env.DIGEST_ENABLED = '1';
-    await ctl(TG, { mode: '500' }); await ctl(RS, { mode: 'ok' });
+    await ctl(TG, { mode: '500' }); await ctl(RS, { mode: 'ok', status: 200, clearIdempotency: true });
     await resetFake(TG); await resetFake(RS);
     const r = await call({ secret: 'health-test-secret-value' });
     const mail = (await fakeReqs(RS)).filter((x) => x.path === '/emails');
@@ -349,7 +349,7 @@ try {
     // handler selected, not from a fixture passed by the test.
     const html = (mail[0] && mail[0].body.html) || '';
     line(r.code === 200 && r.body.sent === 0 && r.body.emailed === 1 && mail.length === 1
-      && to === JSON.stringify(['owner@example.com'])
+      && to === JSON.stringify([process.env.MAIL_REDIRECT_TO || 'owner@example.com'])
       && html.includes('>Alder Roofing<') && html.includes('Sent by Lead Alerts')
       && !html.includes('>Lead Alerts<'),
       'D5', 'telegram down: email carries the company header and platform footer',
@@ -362,7 +362,7 @@ try {
   try {
     install({ ...fixture, businesses: [fixture.businesses[0]], chats: [{ business_id: A, tg_chat_id: 'chat-a' }] });
     process.env.DIGEST_ENABLED = '1';
-    await ctl(TG, { mode: '500' }); await ctl(RS, { mode: '500' });
+    await ctl(TG, { mode: '500' }); await ctl(RS, { mode: '500' , clearIdempotency: true });
     await resetFake(TG); await resetFake(RS);
     const r = await call({ secret: 'health-test-secret-value' });
     line(r.code === 200 && r.body.ok === true && r.body.sent === 0 && r.body.emailed === 0 && r.body.businesses === 1,
@@ -375,7 +375,7 @@ try {
   try {
     install({ ...fixture, businesses: [fixture.businesses[0]], chats: [{ business_id: A, tg_chat_id: 'chat-a' }] });
     process.env.DIGEST_ENABLED = '1';
-    await ctl(TG, { mode: 'ok' }); await ctl(RS, { mode: 'ok' });
+    await ctl(TG, { mode: 'ok' }); await ctl(RS, { mode: 'ok', status: 200 , clearIdempotency: true });
     await resetFake(TG); await resetFake(RS);
     const first = await call({ secret: 'health-test-secret-value' });
     const tg1 = (await fakeReqs(TG)).filter((x) => x.path.includes('/sendMessage')).length;
@@ -424,7 +424,7 @@ try {
     if (v === undefined) delete process.env[k]; else process.env[k] = v;
   }
   await ctl(TG, { mode: 'ok' }).catch(() => {});
-  await ctl(RS, { mode: 'ok' }).catch(() => {});
+  await ctl(RS, { mode: 'ok' , clearIdempotency: true }).catch(() => {});
 }
 
 /* D-name: the real digest target carries the company name, because the email

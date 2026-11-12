@@ -636,9 +636,10 @@ try {
     const cLead = await seedLead(bizB.id, 'Key Seq C', 'keyseqc@example.com');
     await resendCtrl({ mode: 'ok' });
     await toContacted(cLead);
-    await resendCtrl({ mode: 'hang_once', hangMs: 2500 });
+    await resendCtrl({ mode: 'hang_once', hangMs: 400, hangStatus: 500 });
     await resetResend();
     await good(cb(chatB, 'y:' + cLead));
+    await new Promise((resolve) => setTimeout(resolve, 450));
     await resendCtrl({ mode: '500' });
     await resetResend();
     await good(cb(chatB, 'r:' + cLead));

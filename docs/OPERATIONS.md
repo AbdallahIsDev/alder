@@ -192,7 +192,7 @@ immediately.
 | `/api/health` → `mail_redirect_active: true` | `MAIL_REDIRECT_TO` is set, in **any** environment | if production, remove it |
 | `/api/health` → `webhook_secret_set: false` | `TELEGRAM_WEBHOOK_SECRET` missing → `/api/tg` answers 503 | set it (§6) |
 | `/api/health` → `salt_set: false` | `IP_HASH_SALT` missing → `/api/lead` answers 500 | set it (§6) |
-| Log line `owner_alert_fallback` | both owner channels failed with a **definite** status and each was retried once | check Telegram and Resend |
+| Log line `owner_alert_fallback` | both owner channels failed; at least one eligible channel got one retry (Resend 5xx email is suppressed) | check Telegram and Resend |
 | Log line `autoreply_capped` | the business hit `AUTOREPLY_DAILY_CAP` (default 40) | expected on a flood; raise the cap or the plan |
 | Log line `mail_redirect_active` | first send in production with a redirect configured | remove the redirect |
 | Log line `lead_notify_claim_failed` / `lead_notify_release_failed` | the per-lead notification claim could not be read or cleared; the alert still went out (the claim fails open) | usually a Supabase blip; repeated lines mean the `rate_limits` table is unreachable |
@@ -257,23 +257,41 @@ deadline). Configured outbound work is therefore at most about **9 s**, but tota
 request time is **not strictly bounded in code** because Supabase calls have no
 per-call deadline. The 30 s Vercel ceiling limits a hung invocation; it does not
 promise a response by 30 s.
-5. **A timeout is unknown, not failed.** A send whose answer was lost may have
-been accepted, so it is never retried. Only a definite answer (4xx/5xx) is
-eligible for one fallback attempt, and only while less than 2000 ms of the owner
-round have elapsed. Resend `concurrent_idempotent_requests` is also unknown and
-is not retried immediately. A payload-mismatch 409 is a fixed-key programming or
-configuration error, so immediate identical retries cannot repair it either.
-6. **One idempotency key per lead per channel.** Primary and fallback owner email
-have byte-identical subject, HTML, text, attachments and headers under
-`<leadId>:owner`. Within Resend's 24 h window, the same key and same payload
-returns the **original response without another send**. A 409
-`concurrent_idempotent_requests` means the original is still in progress (outcome
-unknown); a 409 `invalid_idempotent_request` means the key was reused with
-different content. Neither means delivered. Both are recorded as failures, with
-fixed log events `mail_idempotency_concurrent` or
-`mail_idempotency_payload_mismatch`. **NOT VERIFIED:** Resend's documentation does
-not say whether a request that returned 5xx is stored for later replay; the code
-does not assume either outcome.
+5. **Timeouts and Resend 5xx responses are unknown.** A send whose answer was lost
+   may have been accepted, so it is never retried. Resend does not document whether
+   a 5xx is stored under its idempotency key, so owner email is also not retried for
+   5xx: a retry could either replay the error or send a duplicate if the first email
+   was delivered before the error. Telegram's definite failures can still receive
+   one fallback attempt, and other retryable email failures are eligible only while
+   less than 2000 ms of the owner round have elapsed. Resend
+   `concurrent_idempotent_requests` is unknown and is not retried immediately. A
+   payload-mismatch 409 is a fixed-key programming or configuration error, so an
+   identical retry cannot repair it.
+6. **One idempotency key per lead per channel.** Retryable primary and fallback
+   owner emails have byte-identical subject, HTML, text, attachments and headers
+   under `<leadId>:owner`. Within Resend's 24 h window, the same key and same payload
+   returns the **original response without another send**. A 409
+   `concurrent_idempotent_requests` means the original is still in progress (outcome
+   unknown); a 409 `invalid_idempotent_request` means the key was reused with
+   different content. Neither means delivered. Both are recorded as failures, with
+   fixed log events `mail_idempotency_concurrent` or
+   `mail_idempotency_payload_mismatch`.
+
+   **ASSUMPTION — TEST FAKE ONLY:** `tests/fakes.mjs` also stores and replays a
+   5xx response. Resend's documentation says same-key, same-payload replays return
+   the original response without re-sending and documents the concurrent 409; it
+   does not say whether a 5xx response is stored. The application treats that
+   outcome as unknown and does not retry the owner email in the immediate fallback
+   or on a later replay of the same lead. It uses the existing
+   `email_owner_failed` event metadata; no schema change is needed.
+
+   | Resend's 5xx behavior | Can the app send a fallback email after it? | Can this 5xx path duplicate an email? |
+   |---|---|---|
+   | Failure is stored and replayed | No. The app suppresses the retry. | No second app send; the original may already have delivered once. |
+   | Failure is not stored | No. The app suppresses the retry. | No second app send; the original may already have delivered once. |
+
+   The test fake's stored-5xx behavior remains an explicit assumption, not a
+   verified Resend guarantee.
 
 **Finding a lead that was stored but never announced** (the case the replay above
 repairs):

@@ -1,6 +1,7 @@
 # Proposal — durable notification outbox (AUDIT B2/B3)
 
-**Status: NOT IMPLEMENTED.** Nothing here is applied. `supabase/migrations/` is
+**Status: FUTURE IMPLEMENTATION — planned for when the hosting plan is upgraded.**
+Proposal only; nothing is built now. Nothing here is applied. `supabase/migrations/` is
 unchanged, so `npm run db:apply` still produces exactly the schema in production
 today. The SQL below is written to be copied into `supabase/migrations/` only
 after this document is accepted.

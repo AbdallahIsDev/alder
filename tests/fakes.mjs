@@ -4,7 +4,7 @@
 import http from 'node:http';
 
 function start(name) {
-  const state = { mode: 'ok', status: 200, hangMs: 2500, hangUsed: false, requests: [], all: [], idempotency: new Map() };
+  const state = { mode: 'ok', status: 200, hangMs: 2500, hangStatus: 200, hangUsed: false, requests: [], all: [], idempotency: new Map() };
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
@@ -20,9 +20,15 @@ function start(name) {
     if (req.url === '/__control' && req.method === 'POST') {
       try {
         const c = JSON.parse(raw || '{}');
-        if (c.mode !== undefined) { state.mode = String(c.mode); state.hangUsed = false; state.calls = 0; state.edits = {}; }
+        if (c.mode !== undefined) {
+          state.mode = String(c.mode); state.hangUsed = false; state.calls = 0; state.edits = {};
+          state.hangStatus = Number(c.hangStatus || 200);
+        }
         if (c.nth !== undefined) state.nth = Number(c.nth);
         if (c.status !== undefined) state.status = Number(c.status);
+        // Digest scenarios reuse the same business/day idempotency key. Clear
+        // stored responses only when that test explicitly asks for isolation.
+        if (c.clearIdempotency === true) state.idempotency.clear();
         if (c.hangMs !== undefined) state.hangMs = Number(c.hangMs);
         // Per-chat control, for the fan-out and per-phone failure tests. A null
         // clears the seat; anything else is compared as a string to chat_id.
@@ -56,7 +62,9 @@ function start(name) {
 
     /* Resend's three documented idempotency behaviours. A true replay returns
        the original status/body without another send; an in-flight original gives
-       concurrent 409; different bytes under the same key give invalid 409. */
+       concurrent 409; different bytes under the same key give invalid 409.
+       ASSUMPTION: this fake also stores and replays 5xx responses; Resend's docs
+       do not say whether failed requests are stored. */
     if (name === 'resend' && req.url === '/emails') {
       const key = req.headers['idempotency-key'];
       if (key) {
@@ -104,7 +112,11 @@ function start(name) {
     if (parsed && Array.isArray(state.failChats) && state.failChats.includes(String(parsed.chat_id))) mode = '503';
 
     if (mode === 'hang') {
-      setTimeout(() => { try { send(200, { ok: true }); } catch {} }, state.hangMs);
+      const code = state.hangStatus;
+      const body = name === 'tg'
+        ? (code < 400 ? { ok: true, result: { message_id: 1 } } : { ok: false, error_code: code, description: 'fake rejection' })
+        : (code < 400 ? { id: 'fake-id' } : { statusCode: code, message: 'fake rejection', name: 'fake_error' });
+      setTimeout(() => { try { send(code, body); } catch {} }, state.hangMs);
       return;
     }
     if (name === 'resend' && (mode === 'concurrent' || mode === 'invalid')) {

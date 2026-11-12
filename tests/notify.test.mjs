@@ -458,7 +458,7 @@ try {
     'B11', 'resend down: telegram delivered, no duplicate send', `tg=${tg} mail=${mail} failed=${failed} fallback=${fb}`);
 } catch (e) { line(false, 'B11', 'resend down', e.message); }
 
-/* B12: both down — nothing reached the owner, so both channels are retried once */
+/* B12: both down — Telegram is retried once; a Resend 5xx stays unknown. */
 try {
   await clean();
   await control(TG, { mode: '500' }); await control(RS, { mode: '500' });
@@ -470,16 +470,14 @@ try {
   const tg = await sendMessageCount(), mail = await emailCount();
   const fb = metaOf(evs).filter((m) => m.fallback === true).length;
   const failedTg = evs.filter((e) => e.kind === 'tg_failed').length;
-  line(res.code === 200 && rows.length === 1 && tg === 2 && mail === 3 && fb === 2 && failedTg === 2,
-    'B12', 'both down: lead saved, one retry per channel', `tg=${tg} mail=${mail} fallback=${fb} tgFailed=${failedTg}`);
+  line(res.code === 200 && rows.length === 1 && tg === 2 && mail === 2 && fb === 1 && failedTg === 2,
+    'B12', 'both down: only Telegram gets a retry after email 5xx', `tg=${tg} mail=${mail} fallback=${fb} tgFailed=${failedTg}`);
 } catch (e) { line(false, 'B12', 'both down', e.message); }
 
-/* ====== B6 — a timeout is "unknown", and the fallback reuses the key ======
-   A send whose answer was lost may have been accepted. Retrying it under a fresh
-   idempotency key is exactly how one alert becomes two, so a timeout is never
-   retried, and the fallback email goes out under the primary attempt's key: the
-   provider returns the original response to a same-payload replay. Neither 409
-   is a delivery confirmation. */
+/* ====== B6 — timeout, 5xx and concurrent 409 delivery is uncertain ======
+   Timeouts and Resend 5xx responses are not retried for owner email: a retry
+   could duplicate a send, and Resend does not document 5xx storage. Concurrent
+   and payload-mismatch 409s are failures, not delivery confirmations. */
 
 /* B6a: the owner email hangs (status timeout from the 200 ms send budget) and
    Telegram is down. Nothing may be re-sent to Resend. */
@@ -505,12 +503,13 @@ try {
     `ownerMails=${ownerMails.length} emailFallback=${emailFallback} meta=${JSON.stringify(failed && failed.meta)}`);
 } catch (e) { line(false, 'B6a', 'timeout is unknown', e.message); }
 
-/* B6b: both channels fail with a definite status, so the fallback round runs. The
-   second owner email must carry the same Idempotency-Key as the first. */
+/* B6b: a Resend 5xx has no documented replay guarantee. Do not retry email:
+   the first request may have delivered despite its response. Telegram fallback
+   still runs independently. */
 try {
   await clean();
   await control(TG, { mode: '500' });
-  await control(RS, { mode: 'fail_nth', nth: 1 }); // attempt 1 -> 500, attempt 2 -> ok
+  await control(RS, { mode: '500' });
   await reset(TG); await reset(RS);
   const { res, key } = await post({});
   await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
@@ -518,16 +517,17 @@ try {
   const evs = rows.length ? await events(rows[0].id) : [];
   const ownerReqs = (await requests(RS))
     .filter((r) => r.path === '/emails' && r.headers && /:owner/.test(String(r.headers['idempotency-key'] || '')));
-  const keys = ownerReqs.map((r) => String(r.headers['idempotency-key']));
-  // The fake now follows Resend: replaying the original 500 returns that same
-  // 500. It must not become a false email_owner_sent event.
-  const failedAgain = evs.some((e) => e.kind === 'email_owner_failed' && e.meta && e.meta.fallback === true && e.meta.status === 500);
-  const sameBytes = ownerReqs.length === 2 && ownerReqs[0].raw === ownerReqs[1].raw
-    && JSON.stringify(ownerReqs[0].headers) === JSON.stringify(ownerReqs[1].headers);
-  line(res.code === 200 && rows.length === 1 && keys.length === 2 && keys[0] === keys[1]
-    && /:owner$/.test(keys[0]) && failedAgain && sameBytes,
-    'B6b', 'fallback is byte-identical and replays the original response',
-    `keys=${keys.length} sameBytes=${sameBytes} failedAgain=${failedAgain}`);
+  const ownerKey = ownerReqs[0] && String(ownerReqs[0].headers['idempotency-key']);
+  const fallbackEmail = evs.some((e) => e.kind === 'email_owner_failed' && e.meta && e.meta.fallback === true);
+  await control(TG, { mode: '500' }); await control(RS, { mode: '500' });
+  await reset(TG); await reset(RS);
+  await post({ idempotencyKey: key });
+  const replayOwnerReqs = (await requests(RS))
+    .filter((r) => r.path === '/emails' && r.headers && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  line(res.code === 200 && rows.length === 1 && ownerReqs.length === 1
+    && /:owner$/.test(ownerKey || '') && !fallbackEmail && replayOwnerReqs.length === 0,
+    'B6b', 'Resend 5xx: no fallback or replay email attempt',
+    `ownerAttempts=${ownerReqs.length} fallbackEvent=${fallbackEmail} replayAttempts=${replayOwnerReqs.length}`);
 } catch (e) { line(false, 'B6b', 'fallback key reuse', e.message); }
 
 /* B6c-B6e: the fake models Resend's three documented idempotency outcomes. */
@@ -564,6 +564,21 @@ try {
     && logs.some((x) => x.includes('mail_idempotency_concurrent')),
     'B6e', 'concurrent 409 stays unknown and is not delivery', `slow=${slow.status} concurrent=${concurrent.status}`);
 } catch (e) { line(false, 'B6e', 'concurrent idempotency', e.message); }
+
+/* B6f records a test-only assumption: this fake replays a stored 5xx for the
+   same key and payload. Resend's docs do not promise this for failed requests. */
+try {
+  const failedMail = { ...idemMail('Stored failure'), idempotencyKey: `${RUN}-resend-5xx` };
+  await control(RS, { mode: '500' }); await reset(RS);
+  const first = await sendMail(failedMail);
+  await control(RS, { mode: 'ok' });
+  const replay = await sendMail(failedMail);
+  const calls = (await requests(RS)).filter((r) => r.path === '/emails');
+  line(!first.ok && Number(first.status) === 500 && !replay.ok && Number(replay.status) === 500
+    && calls.length === 2 && calls[0].raw === calls[1].raw,
+    'B6f', 'fake assumption: same-key 5xx replay returns original response',
+    `calls=${calls.length} first=${first.status} replay=${replay.status}`);
+} catch (e) { line(false, 'B6f', 'fake 5xx replay assumption', e.message); }
 
 /* B13: the per-business daily cap applies to the customer auto-reply only.
    Two leads, cap of 1: the second auto-reply is skipped, but its lead is saved
@@ -917,7 +932,7 @@ try {
   const hashesOnly = outcomes.length >= FAN.length && outcomes.every((o) => /^[a-f0-9]{64}$/.test(o.chat_hash))
     && !FAN.some((id) => metaText.includes(String(id)));
   line(first.res.code === 200 && firstTg.length === FAN.length + 2 && exactTargets(fallbackTg)
-    && exactTargets(replayTg) && ownerMailCount === 2 && replayOwnerMails.length === 0 && hashesOnly,
+    && exactTargets(replayTg) && ownerMailCount === 1 && replayOwnerMails.length === 0 && hashesOnly,
     'B5r', '3 ok / 2 failed: fallback and replay resend exactly 2',
     `primary=${firstTg.length} replay=${replayTg.length} ownerReplay=${replayOwnerMails.length} hashes=${outcomes.length}`);
 } catch (e) { line(false, 'B5r', 'partial Telegram replay', e.message); } finally {

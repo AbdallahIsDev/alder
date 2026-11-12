@@ -1,7 +1,7 @@
 # Proposal — external uptime check for `/api/health` (AUDIT B4)
 
-**Status: NOT IMPLEMENTED.** Nothing here is wired up; this is the note the
-audit asked for so the decision is on record.
+**Status: ON HOLD — PROPOSAL ONLY.** Nothing here is wired up; this is the note
+the audit asked for so the decision is on record.
 
 **Why.** Every existing "alerts are broken" warning travels over Telegram and
 Resend — the same two channels that fail. If both are down, the owner hears

@@ -1,7 +1,7 @@
 # SESSION HANDOFF: Alder roofing lead platform (orchestrator continuation)
 
 > **Purpose.** Give this file to any cloud AI assistant so it can continue as the **orchestrator** for this project without the owner re-explaining anything.
-> **Last updated:** 2026-11-11 (lead-safety independent-review follow-up).
+> **Last updated:** 2026-11-12 (lead-safety local verification and decisions).
 > **Rule for the local agent:** after every task, update the change log and any section whose facts changed. Never put secret values in it.
 
 ---
@@ -279,6 +279,27 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 
 ---
 
+## Decisions (2026-11-12)
+
+- Leads belong to the client. The business owner is the data owner; the platform
+  operator provides the system.
+- Retention is one global rule, stored as a per-client config field with the same
+  default for everyone: keep leads while the client is active; delete on request
+  within 30 days; delete all client data 30 days after the client leaves. **To be
+  reviewed by a lawyer before any contract.**
+- Alerts are best-effort for now. The guaranteed notification outbox is **FUTURE
+  IMPLEMENTATION**, planned for when the hosting plan is upgraded; nothing is built
+  now.
+- Uptime and outage alerting is **ON HOLD** and remains a proposal only.
+- Country, phone format, timezone and legal text are configurable per client.
+  Language stays English.
+- Review flow decision for page work, not implemented here: everyone is sent to
+  the Google review link, whatever the rating.
+- One shared Telegram bot serves all clients. The first paying client may stay on
+  the free hosting plan; hosting provider choice is open.
+- Working method: the owner uses a local worker and an online worker; a separate
+  assistant reviews; every task ends with a diff file for review.
+
 ## 12. Git state (as of this report)
 
 - `main` = `de2c8fe` (deploys to production; PR #14 merged 2026-11-09).
@@ -305,9 +326,10 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
   uptime-check proposals only. Independent-review follow-up: lead `maxDuration` 30 with no tg override;
   truthful Resend replay/409 handling; salted per-chat outcomes and targeted partial retries; honest
   fixed-window claim docs; duplicate-panel recap hidden; built page `aa71755b` -> `80d6281c`, other output
-  hashes unchanged. Arena working branch `arena/9c9b4995-alder`, intended for draft PR #24 (`lead-safety`).
-  Static checks and standalone mutations green; DB-backed/full suite blocked because test env has no
-  `SUPABASE_URL`. No schema change, no merge.
+  hashes unchanged. Local review branch `arena/9c9b4995-alder` tracks its origin branch; `origin/lead-safety`
+  is an ancestor. Local verification uses `.env.test`, never production. The final touched-suite and full-suite
+  counts, mutation checks, diff artifacts and draft PR are recorded in the 2026-11-12 change-log row below.
+  No schema change, no merge.
 - Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
 - `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
 - `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).

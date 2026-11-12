@@ -72,6 +72,7 @@ async function announceLead(ctx, recheck) {
       if (state.delivered && !partialTelegram) return;
       ctx.deliveredChatHashes = state.deliveredChatHashes;
       ctx.retryTelegramOnly = partialTelegram;
+      ctx.emailOwnerUncertain = state.emailOwnerUncertain;
     }
     await notifyAllAfterLead(ctx);
   } finally {
@@ -306,6 +307,7 @@ export default async function handler(req, res) {
             leadId: stored.id, business, duplicate: !!duplicateOf,
             deliveredChatHashes: state.deliveredChatHashes,
             retryTelegramOnly: state.delivered && state.failedChatHashes.length > 0,
+            emailOwnerUncertain: state.emailOwnerUncertain,
             lead: {
               name: stored.name, phone: stored.phone, email: stored.email || '', zip: stored.zip,
               service: stored.service, home: stored.home, timing: stored.timing,
