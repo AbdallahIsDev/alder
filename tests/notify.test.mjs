@@ -552,11 +552,12 @@ try {
   const replayOwner = (await requests(RS)).filter((r) => r.path === '/emails' && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
   const eventsAfterReplay = leadId ? await events(leadId) : [];
   const sent = eventsAfterReplay.some((e) => e.kind === 'email_owner_sent');
-  line(leadId && initialOwner && replayOwner.length === 1
-    && replayOwner[0].headers['idempotency-key'] === initialOwner.headers['idempotency-key']
-    && replayOwner[0].raw === initialOwner.raw && sent,
+  const sameKey = Boolean(initialOwner && replayOwner.length === 1
+    && replayOwner[0].headers['idempotency-key'] === initialOwner.headers['idempotency-key']);
+  const sameBytes = Boolean(initialOwner && replayOwner.length === 1 && replayOwner[0].raw === initialOwner.raw);
+  line(leadId && initialOwner && replayOwner.length === 1 && sameKey && sameBytes && sent,
     'B6g', 'email-only 5xx replay retries once with the original key and bytes',
-    `replayAttempts=${replayOwner.length} sentEvent=${sent}`);
+    `leadFound=${Boolean(leadId)} initialOwner=${Boolean(initialOwner)} replayAttempts=${replayOwner.length} sameKey=${sameKey} sameBytes=${sameBytes} sentEvent=${sent}`);
 } catch (e) { line(false, 'B6g', 'owner-email 5xx replay', e.message); } finally {
   await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
 }
