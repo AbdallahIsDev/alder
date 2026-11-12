@@ -3,4 +3,7 @@
 -- onboarding assigns their host; unresolved hosts fail closed.
 
 alter table public.businesses
-  add column site_host text unique;
+  add column if not exists site_host text;
+
+create unique index if not exists businesses_site_host_key
+  on public.businesses (site_host);
