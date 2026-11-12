@@ -99,7 +99,7 @@ async function post(over, extra) {
   const res = fakeRes();
   const req = {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-real-ip': `203.0.113.${ip++}`, ...(extra || {}) },
+    headers: { 'content-type': 'application/json', 'x-real-ip': `203.0.113.${ip++}`, host: 'alder-demo.test', ...(extra || {}) },
     body, socket: {},
   };
   const t0 = Date.now();
@@ -552,11 +552,12 @@ try {
   const replayOwner = (await requests(RS)).filter((r) => r.path === '/emails' && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
   const eventsAfterReplay = leadId ? await events(leadId) : [];
   const sent = eventsAfterReplay.some((e) => e.kind === 'email_owner_sent');
-  line(leadId && initialOwner && replayOwner.length === 1
-    && replayOwner[0].headers['idempotency-key'] === initialOwner.headers['idempotency-key']
-    && replayOwner[0].raw === initialOwner.raw && sent,
+  const sameKey = Boolean(initialOwner && replayOwner.length === 1
+    && replayOwner[0].headers['idempotency-key'] === initialOwner.headers['idempotency-key']);
+  const sameBytes = Boolean(initialOwner && replayOwner.length === 1 && replayOwner[0].raw === initialOwner.raw);
+  line(leadId && initialOwner && replayOwner.length === 1 && sameKey && sameBytes && sent,
     'B6g', 'email-only 5xx replay retries once with the original key and bytes',
-    `replayAttempts=${replayOwner.length} sentEvent=${sent}`);
+    `leadFound=${Boolean(leadId)} initialOwner=${Boolean(initialOwner)} replayAttempts=${replayOwner.length} sameKey=${sameKey} sameBytes=${sameBytes} sentEvent=${sent}`);
 } catch (e) { line(false, 'B6g', 'owner-email 5xx replay', e.message); } finally {
   await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
 }
@@ -1195,10 +1196,13 @@ try {
 
   /* Second business -> its own chat */
   const { data: biz2 } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
+  const secondHost = 'second-demo.test';
+  const { error: hostError } = await svc.from('businesses').update({ site_host: secondHost }).eq('id', biz2.id);
+  if (hostError) throw hostError;
   const chat2 = FIXTURE_CHATS.notifySecond;
   await svc.from('business_chats').upsert({ business_id: biz2.id, tg_chat_id: chat2 }, { onConflict: 'tg_chat_id' });
   await reset(TG);
-  await post({ slug: 'second-demo' });
+  await post({ slug: 'second-demo' }, { host: secondHost });
   const req2 = (await requests(TG)).filter((x) => x.path.includes('/sendMessage'));
   const boundB = (await svc.from('business_chats').select('tg_chat_id').eq('business_id', biz2.id)).data
     .map((r) => String(r.tg_chat_id)).sort();
@@ -1210,11 +1214,11 @@ try {
   /* Active business with no chat -> no call, tg_failed no_chat */
   const { data: made } = await svc.from('businesses').insert({
     slug: `active-${RUN}`, name: 'Active Co', owner_email: 'owner@active.example.com',
-    google_review_url: 'https://g.page/r/active', status: 'active',
+    google_review_url: 'https://g.page/r/active', status: 'active', site_host: `active-${RUN}.test`,
   }).select('id').single();
   activeId = made.id;
   await reset(TG);
-  const { res, key } = await post({ slug: `active-${RUN}` });
+  const { res, key } = await post({ slug: `active-${RUN}` }, { host: `active-${RUN}.test` });
   const reqA = (await requests(TG)).filter((x) => x.path.includes('/sendMessage'));
   const rows = await leadFor(key);
   const evs = rows.length ? await events(rows[0].id) : [];

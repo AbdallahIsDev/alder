@@ -1,35 +1,56 @@
 # Onboarding a roofer
 
 How a new business gets a lead page, a Telegram link, and the first test lead.
-No secrets, no pricing — only the steps and the env var names.
+No secrets or customer data belong in this document.
 
-- **Create the business row** — one row per roofer.
-- **Mint a bind code** — `npm run bind -- <slug>`.
-- **Link the Telegram chat** — the roofer sends the code to the bot.
-- **Send a test lead** — one lead end to end.
-- **What to check** — the quiet verifications.
+> **Current status:** Architecture A is decided and the public API resolves its
+> tenant from the request Host. Setup is still manual: static pages remain a
+> one-selected-client build, automated domain/row provisioning is not implemented,
+> and phone/postal rules and legal links are not configurable end to end.
+> Retention, export, and request-deletion workflows are not implemented.
 
----
+## Current manual steps
 
-## Create the business row
+Until the architecture decision is implemented, these are the repo's current
+setup tasks, not a safe self-service flow:
 
-In the Supabase SQL editor (service role, never the anon key), add one row to
-`public.businesses`:
+1. Choose one deployment/client and its domain. Do not take payment on Vercel
+   Hobby; its current terms restrict it to personal, non-commercial use. Choose
+   Vercel Pro or another host whose commercial terms fit.
+2. Add one `public.businesses` row with the client's slug, name, owner email,
+   timezone, and review URL. `timezone` exists in the schema; country, phone
+   region, site URL, sender, legal text, and retention settings do not.
+3. Add `clients/<slug>.json` and build the selected page with that client. This
+   currently controls static copy and the optional email sender; it does not
+   resolve the API tenant securely.
+4. Configure the deployment's environment names listed below, its email sender,
+   domain, database, and outbound services. Use TEST credentials in previews.
+5. Deploy the page and check its canonical URL, legal links, sender, and form.
+   Legal links remain placeholders until approved client-specific URLs/text are
+   implemented. Current postal validation is US ZIP-only.
+6. Mint a bind code with `npm run bind -- <slug>` and have the owner connect a
+   Telegram account to the bot.
+7. Bind each additional recipient with a separate Telegram account using the
+   existing invite flow. **One Telegram account/chat belongs to one business
+   only.** `business_chats.tg_chat_id` is unique; the same account cannot receive
+   alerts for two businesses.
+8. Submit a test lead and verify owner email, Telegram alert, customer auto-
+   reply, and review email/link. Do not use a real customer's data for a test.
+9. Before signing, settle the host plan and ask a lawyer to approve legal text
+   and retention. The current offboard script deletes immediately; it does not
+   provide a 30-day grace period.
 
-- `slug` — the subdomain slug, e.g. `acme-roofing` (lowercase letters,
-  digits, hyphens, 2 to 60 chars).
-- `name` — the business name as the customer should see it.
-- `status` — `active` (or `demo` for the practice site).
-- `timezone` — e.g. `America/Chicago`.
-- `owner_email` — the owner's email for lead alerts.
-- `google_review_url` — the Google review link (https).
+The architecture decision and second-client gates are in
+[`docs/proposals/multi-client-architecture.md`](proposals/multi-client-architecture.md).
+Never insert a business through the anon key or from a browser.
 
-The seed (`supabase/seed.sql`) shows a demo row. Never insert a business
-through the anon key or from a browser — the anon wall rejects it by design.
+## Tenant rules
 
-The site build reads its own tokens from `index.html` and
-`lib/brand.generated.json`; the business row only supplies the name, timezone,
-owner email and review link above. Run `npm run build` after any page change.
+1. Public APIs use `resolveTenant(req)`; Host alone selects the business.
+2. Client settings are data, not client-specific code or one-off configuration branches.
+3. Daily jobs process every active business by default and can target one `business_id`.
+4. Never write `if (client === ...)` (or an equivalent slug special case) in shared code.
+5. A client needing a custom UI gets a separate project built from this same repo.
 
 ## Mint a bind code
 

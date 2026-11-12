@@ -50,7 +50,7 @@ const line = (ok, id, what, d) => {
   const numeric = APPLY_ORDER.map((f) => /(\d{4})_/.exec(path.basename(f))).filter(Boolean).map((m) => Number(m[1]));
   const ascending = numeric.every((n, i) => i === 0 || n > numeric[i - 1]);
   const ok = i1 === 0 && iseed === 1 && i2 > iseed && i3 > i2 && i4 > i3 && ascending;
-  line(ok, 'M3', 'apply order: 0001, seed, 0002, 0003, 0004',
+  line(ok, 'M3', 'apply order: 0001, seed, 0002, 0003, 0004, 0005',
     `i=${i1}/${iseed}/${i2}/${i3}/${i4} ascending=${ascending}`);
 }
 
