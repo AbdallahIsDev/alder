@@ -195,7 +195,7 @@ immediately.
 | Log line `owner_alert_fallback` | both owner channels failed; at least one eligible channel got one retry, including owner email after a 5xx | check Telegram and Resend |
 | Log line `autoreply_capped` | the business hit `AUTOREPLY_DAILY_CAP` (default 40) | expected on a flood; raise the cap or the plan |
 | Log line `mail_redirect_active` | first send in production with a redirect configured | remove the redirect |
-| Log line `lead_notify_claim_failed` / `lead_notify_release_failed` | the per-lead notification claim could not be read or cleared; the alert still went out (the claim fails open) | usually a Supabase blip; repeated lines mean the `rate_limits` table is unreachable |
+| Log line `lead_notify_claim_failed` / `lead_notify_release_failed` | the claim could not be read or cleared; notification proceeds without that claim, but delivery is not guaranteed | usually a Supabase blip; repeated lines mean the `rate_limits` table is unreachable |
 | `tg_failed` with `meta.abandoned` | the notification round hit its 6 s deadline; N phones never answered and were left to their own 3 s timeout | phones are slow or many; see §4c |
 | `email_owner_failed` with `meta.status: "timeout"` | Resend did not answer inside the 3 s send budget — **unknown**, not failed | no retry in that round; a same-lead replay retries email only if no `email_owner_sent` event exists (§4c) |
 
@@ -236,7 +236,9 @@ work, not wording that implies certainty this primitive cannot provide.
 IP-hash salt and SHA-256 helper with a Telegram namespace. Raw chat ids are never
 stored. If three phones succeeded and two failed, fallback and replay target only
 those two; when owner email also failed, replay may retry that missing email once
-with the same key.
+with the same key. Same-round `missing_env` / `no_verified_sender` failures are not
+retried immediately, but a later replay does retry after configuration is fixed;
+`blocked_test_mode` stays suppressed because the test interlock is deliberate.
 3. **Both channels run at once**, and Telegram fans out to every eligible bound
 phone with `Promise.allSettled`. A 400 response to a message with a keyboard gets
 one retry without buttons. Successful phones are excluded from a partial retry.

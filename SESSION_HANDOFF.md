@@ -304,14 +304,13 @@ For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email
 
 ### Owner decisions pending
 
-1. **Architecture:** shared Host-routed project (A) or project per client (B).
-   Default: B for the next client, with a central Telegram webhook and the
-   isolation gates in `docs/proposals/multi-client-architecture.md`.
-2. **Hosting:** Vercel Pro or a compliant alternative before accepting payment.
-   Default: Vercel Pro because the repo and TEST harness already target Vercel.
-3. **Retention/legal:** lawyer review of the retention window, deletion promise,
-   privacy/terms URLs, and lead notice before a contract. Default: do not sign
-   until reviewed.
+- **Architecture — DECIDED:** A, one shared Host-routed deployment. B remains an
+  escape hatch for a client needing a separate custom project; do not fork code.
+- **Hosting:** Vercel Pro or a compliant alternative before accepting payment.
+  Default: Vercel Pro because the repo and TEST harness already target Vercel.
+- **Retention/legal:** lawyer review of the retention window, deletion promise,
+  privacy/terms URLs, and lead notice before a contract. Default: do not sign
+  until reviewed.
 
 ## 12. Git state (as of this report)
 
