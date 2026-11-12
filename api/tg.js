@@ -736,13 +736,12 @@ async function onRetry(ctx) {
     if (await hasReviewSent(leadId)) { await answer(TOAST_NOTHING_TO_RETRY); return; }
     const retry = await getDoneLeadForRetry(leadId, businessId);
     if (!retry || !retry.review_token || !retry.email) { await answer(TOAST_NOTHING_TO_RETRY); return; }
-    // Idempotency key: Resend caches per key for 24 h. After a timeout the
-    // timed-out attempt may have delivered, so reuse its EXACT key (recorded
-    // in that failure's meta) and let Resend dedupe; after any other failure
-    // the cached failure must not be replayed, so use a fresh suffixed key
-    // named by the earlier failure count. A new suffixed key can never equal
-    // an earlier one: earlier suffixes are r1..r(count-1), this one is r<count>.
-    const retryKey = failInfo.lastStatus === 'timeout'
+    // Idempotency key: Resend caches per key for 24 h. After a timeout or a
+    // concurrent-409 the original attempt may still deliver, so a LATER manual
+    // retry reuses its EXACT key (recorded in failure meta); nothing auto-retries.
+    // After any definite failure use a fresh suffixed key named by the earlier
+    // failure count. A new suffix can never equal an earlier one.
+    const retryKey = (failInfo.lastStatus === 'timeout' || failInfo.lastStatus === 'idempotency_concurrent')
       ? (failInfo.lastKey || `${leadId}:review`)
       : `${leadId}:review:r${failInfo.count}`;
     await answer('');

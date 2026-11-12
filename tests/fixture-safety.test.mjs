@@ -2,10 +2,9 @@
 // tests/fixture-safety.test.mjs — Gate F.
 // HARNESS: in-process checks plus read-only Supabase queries.
 //
-// The suites write to a production database. Their chat ids used to sit in the
-// real Telegram user-id space (770001, 880001, 900001), so a real person with
-// that id could be rebound and then deleted. This suite pins the reserved range
-// and the two-signal sweep rule so the mistake cannot come back quietly.
+// Suites now write only to the dedicated test database. The reserved fixture-chat
+// range and two-signal sweep rule still guard against accidentally targeting a
+// real Telegram user if test data or cleanup code drifts.
 
 import fs from 'node:fs';
 import path from 'node:path';

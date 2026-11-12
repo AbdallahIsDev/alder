@@ -28,10 +28,15 @@ const OUT = path.join(ROOT, '_debug', 'client-build');
 /* The build of origin/main (fa6030d) with the CSS moved out of the page and
    linked root-absolute (visual-polish): the <style> block is gone and a <link>
    takes its place, so the page hash moved — 20948309… before, 23af892b… with a
-   relative href, be79571b… with /assets/css/styles.css. That is the only
-   intended change; the other three files are unchanged and are pinned to the
-   same values as before. */
-const BASELINE = 'be79571b36651b1a633dcf7de165e8be7e6721b4a28d715f341f9a0d1d52276d';
+   relative href, be79571b… with /assets/css/styles.css.
+
+   lead-safety moved it to aa71755b… with the bounded form retry. This review
+   moves it aa71755bf242ae8a7a9af32833d29bb52abfe5731e74ee05a3069a40ef4d20d5
+   -> 80d6281c5d4a333db88b411d749b2acc42801b49ddb7c849f2731fa4c9cddbef
+   (index.html only): the timeout rationale now matches maxDuration 30, and an
+   in-page duplicate hides unsent edited recap values. The other three output
+   hashes below are unchanged and prove no other client-data output changed. */
+const BASELINE = '80d6281c5d4a333db88b411d749b2acc42801b49ddb7c849f2731fa4c9cddbef';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = 'dcd93cf0545e1bad61f0218310823424565419e811ba50b74a2e7f7642ce7053';
 const BASELINE_SITEMAP = 'f90e45bdfa569c01cc2c7fe584831cd9e03b212fbac43254454968bcc16c27e8';

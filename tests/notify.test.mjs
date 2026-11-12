@@ -67,7 +67,8 @@ let SEED_NAME = '';
   const { data: seedBiz } = await svc.from('businesses').select('id, name').eq('slug', ALDER_DEMO).single();
   SEED_NAME = (seedBiz && seedBiz.name) || '';
   // A killed run leaves the row behind; clear both fixture ids before binding.
-  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond]);
+  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond,
+    FIXTURE_CHATS.notifyFan1, FIXTURE_CHATS.notifyFan2, FIXTURE_CHATS.notifyFan3, FIXTURE_CHATS.notifyFan4]);
   await svc.from('business_chats').upsert(
     { business_id: seedBiz.id, tg_chat_id: FIXTURE_CHAT }, { onConflict: 'tg_chat_id' },
   );
@@ -457,7 +458,7 @@ try {
     'B11', 'resend down: telegram delivered, no duplicate send', `tg=${tg} mail=${mail} failed=${failed} fallback=${fb}`);
 } catch (e) { line(false, 'B11', 'resend down', e.message); }
 
-/* B12: both down — nothing reached the owner, so both channels are retried once */
+/* B12: both down — nothing reached the owner, so both channels are retried once. */
 try {
   await clean();
   await control(TG, { mode: '500' }); await control(RS, { mode: '500' });
@@ -472,6 +473,173 @@ try {
   line(res.code === 200 && rows.length === 1 && tg === 2 && mail === 3 && fb === 2 && failedTg === 2,
     'B12', 'both down: lead saved, one retry per channel', `tg=${tg} mail=${mail} fallback=${fb} tgFailed=${failedTg}`);
 } catch (e) { line(false, 'B12', 'both down', e.message); }
+
+/* ====== B6 — timeout and concurrent 409 delivery is uncertain ======
+   Timeout and concurrent 409 are not retried in the same round. A same-key,
+   same-payload 5xx retry cannot create a second accepted email. Payload-mismatch
+   409 remains a failure, never delivery. */
+
+/* B6a: the owner email hangs (status timeout from the 200 ms send budget) and
+   Telegram is down. Nothing may be re-sent to Resend. */
+try {
+  await clean();
+  await control(TG, { mode: '500' });
+  await control(RS, { mode: 'hang_once', hangMs: 2500 });
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const ownerMails = (await requests(RS))
+    .filter((r) => r.path === '/emails' && r.headers && /:owner/.test(String(r.headers['idempotency-key'] || '')));
+  const failed = evs.find((e) => e.kind === 'email_owner_failed');
+  // The Telegram retry is correct (500 is a definite failure); the EMAIL must not
+  // have a second attempt, and must not have one under a different key.
+  const emailFallback = evs.some((e) => (e.kind === 'email_owner_sent' || e.kind === 'email_owner_failed')
+    && e.meta && e.meta.fallback === true);
+  line(res.code === 200 && rows.length === 1 && ownerMails.length === 1 && !emailFallback
+    && !!failed && failed.meta.status === 'timeout',
+    'B6a', 'email timeout: one attempt, nothing re-sent',
+    `ownerMails=${ownerMails.length} emailFallback=${emailFallback} meta=${JSON.stringify(failed && failed.meta)}`);
+} catch (e) { line(false, 'B6a', 'timeout is unknown', e.message); }
+
+/* B6b: a Resend 5xx gets one successful fallback attempt with the primary key
+   and exact bytes when the first failure was not stored. B6f covers the stored
+   5xx assumption separately. */
+try {
+  await clean();
+  await control(TG, { mode: '500' });
+  await control(RS, { mode: 'fail_nth', nth: 1, storeErrorResponses: false });
+  await reset(TG); await reset(RS);
+  const { res, key } = await post({});
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const ownerReqs = (await requests(RS))
+    .filter((r) => r.path === '/emails' && r.headers && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  const fallbackSent = evs.some((e) => e.kind === 'email_owner_sent' && e.meta && e.meta.fallback === true);
+  const sameBytes = ownerReqs.length === 2 && ownerReqs[0].raw === ownerReqs[1].raw;
+  const sameKey = ownerReqs.length === 2
+    && ownerReqs[0].headers['idempotency-key'] === ownerReqs[1].headers['idempotency-key'];
+  line(res.code === 200 && rows.length === 1 && sameKey && sameBytes && fallbackSent,
+    'B6b', 'successful fallback retries once with the primary key and exact payload',
+    `ownerAttempts=${ownerReqs.length} sameKey=${sameKey} sameBytes=${sameBytes} fallbackSent=${fallbackSent}`);
+} catch (e) { line(false, 'B6b', 'fallback key reuse', e.message); } finally {
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok', storeErrorResponses: true });
+}
+
+/* B6g: an email-only 5xx outcome is retried once by a later replay, with the
+   original key and bytes. The fake cache is cleared to model an unstored 5xx. */
+try {
+  await clean();
+  await control(TG, { mode: '500' }); await control(RS, { mode: '500' });
+  await reset(TG); await reset(RS);
+  const first = await post({});
+  const rows = await leadFor(first.key);
+  const leadId = rows[0] && rows[0].id;
+  const initialOwner = (await requests(RS)).find((r) => r.path === '/emails' && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  if (leadId) {
+    await svc.from('lead_events').delete().eq('lead_id', leadId);
+    await svc.from('lead_events').insert([
+      { lead_id: leadId, kind: 'created', meta: { source: 'test', slug: ALDER_DEMO } },
+      { lead_id: leadId, kind: 'email_owner_failed', meta: { status: 500 } },
+    ]);
+  }
+  await control(TG, { mode: '500' });
+  await control(RS, { mode: 'ok', status: 200, clearIdempotency: true });
+  await reset(TG); await reset(RS);
+  await post({ idempotencyKey: first.key });
+  const replayOwner = (await requests(RS)).filter((r) => r.path === '/emails' && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  const eventsAfterReplay = leadId ? await events(leadId) : [];
+  const sent = eventsAfterReplay.some((e) => e.kind === 'email_owner_sent');
+  line(leadId && initialOwner && replayOwner.length === 1
+    && replayOwner[0].headers['idempotency-key'] === initialOwner.headers['idempotency-key']
+    && replayOwner[0].raw === initialOwner.raw && sent,
+    'B6g', 'email-only 5xx replay retries once with the original key and bytes',
+    `replayAttempts=${replayOwner.length} sentEvent=${sent}`);
+} catch (e) { line(false, 'B6g', 'owner-email 5xx replay', e.message); } finally {
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+}
+
+/* B6h: Telegram already delivered, but no email_owner_sent exists. A replay
+   retries only email once; it does not announce the lead again on Telegram. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: '500', clearIdempotency: true });
+  await reset(TG); await reset(RS);
+  const first = await post({});
+  const rows = await leadFor(first.key);
+  const leadId = rows[0] && rows[0].id;
+  const firstEvents = leadId ? await events(leadId) : [];
+  const firstOwnerAttempts = (await requests(RS)).filter((r) => r.path === '/emails' && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  await control(TG, { mode: '500' });
+  await control(RS, { mode: 'ok', status: 200, clearIdempotency: true });
+  await reset(TG); await reset(RS);
+  await post({ idempotencyKey: first.key });
+  const replayTg = (await requests(TG)).filter((r) => r.path.includes('/sendMessage'));
+  const replayOwner = (await requests(RS)).filter((r) => r.path === '/emails' && /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  const lastEvents = leadId ? await events(leadId) : [];
+  line(leadId && firstEvents.some((e) => e.kind === 'tg_sent')
+    && firstEvents.some((e) => e.kind === 'email_owner_failed')
+    && firstOwnerAttempts.length === 1 && replayOwner.length === 1 && replayTg.length === 0
+    && replayOwner[0].headers['idempotency-key'] === firstOwnerAttempts[0].headers['idempotency-key']
+    && replayOwner[0].raw === firstOwnerAttempts[0].raw
+    && lastEvents.some((e) => e.kind === 'email_owner_sent'),
+    'B6h', 'delivered Telegram + missing email: replay retries email only',
+    `ownerFirst=${firstOwnerAttempts.length} ownerReplay=${replayOwner.length} tgReplay=${replayTg.length}`);
+} catch (e) { line(false, 'B6h', 'email-only replay after Telegram delivery', e.message); } finally {
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+}
+
+/* B6c-B6e: the fake models Resend's three documented idempotency outcomes. */
+const { sendMail } = await import('../lib/mail.js');
+const idemMail = (subject) => ({
+  to: 'owner@example.com', fromName: 'Lead Alerts', replyTo: 'lead@example.com',
+  subject, html: '<p>Same alert</p>', text: 'Same alert', idempotencyKey: `${RUN}-resend-semantics`,
+});
+try {
+  await control(RS, { mode: 'ok' }); await reset(RS);
+  const first = await sendMail(idemMail('Replay'));
+  const replay = await sendMail(idemMail('Replay'));
+  const calls = (await requests(RS)).filter((r) => r.path === '/emails');
+  line(first.ok && replay.ok && replay.status === first.status && calls.length === 2,
+    'B6c', 'same key + payload returns the original response', `calls=${calls.length} statuses=${first.status}/${replay.status}`);
+} catch (e) { line(false, 'B6c', 'same-payload replay', e.message); }
+try {
+  await reset(RS); logs.length = 0;
+  await sendMail(idemMail('Original'));
+  const mismatch = await sendMail(idemMail('Different'));
+  line(!mismatch.ok && mismatch.status === 'idempotency_payload_mismatch'
+    && logs.some((x) => x.includes('mail_idempotency_payload_mismatch')),
+    'B6d', 'payload-mismatch 409 is logged, never delivery', `result=${JSON.stringify(mismatch)}`);
+} catch (e) { line(false, 'B6d', 'payload mismatch', e.message); }
+try {
+  await control(RS, { mode: 'hang', hangMs: 2500 }); await reset(RS); logs.length = 0;
+  const concurrentKey = `${RUN}-resend-concurrent`;
+  const [slow, concurrent] = await Promise.all([
+    sendMail({ ...idemMail('Concurrent'), idempotencyKey: concurrentKey }),
+    sendMail({ ...idemMail('Concurrent'), idempotencyKey: concurrentKey }),
+  ]);
+  await control(RS, { mode: 'ok' });
+  line(!concurrent.ok && concurrent.status === 'idempotency_concurrent' && slow.status === 'timeout'
+    && logs.some((x) => x.includes('mail_idempotency_concurrent')),
+    'B6e', 'concurrent 409 stays unknown and is not delivery', `slow=${slow.status} concurrent=${concurrent.status}`);
+} catch (e) { line(false, 'B6e', 'concurrent idempotency', e.message); }
+
+/* B6f records a test-only assumption: this fake replays a stored 5xx for the
+   same key and payload. Resend's docs do not promise this for failed requests. */
+try {
+  const failedMail = { ...idemMail('Stored failure'), idempotencyKey: `${RUN}-resend-5xx` };
+  await control(RS, { mode: '500' }); await reset(RS);
+  const first = await sendMail(failedMail);
+  await control(RS, { mode: 'ok' });
+  const replay = await sendMail(failedMail);
+  const calls = (await requests(RS)).filter((r) => r.path === '/emails');
+  line(!first.ok && Number(first.status) === 500 && !replay.ok && Number(replay.status) === 500
+    && calls.length === 2 && calls[0].raw === calls[1].raw,
+    'B6f', 'fake assumption: same-key 5xx replay returns original response',
+    `calls=${calls.length} first=${first.status} replay=${replay.status}`);
+} catch (e) { line(false, 'B6f', 'fake 5xx replay assumption', e.message); }
 
 /* B13: the per-business daily cap applies to the customer auto-reply only.
    Two leads, cap of 1: the second auto-reply is skipped, but its lead is saved
@@ -564,6 +732,280 @@ try {
     'repeat phone flagged, lead still saved, no earlier details',
     `alerts=${alerts.length} flagged=${!!flagged} meta=${!!metaOk} saved=${allSaved}`);
 } catch (e) { line(false, 'B14', 'duplicate detection', e.message); }
+
+/* ================= B1 — a stored lead is never silent =================
+   A retry with the same idempotency key used to answer "ok" and stop there. If
+   the first invocation died after the insert and before (or during) the alert,
+   the lead was stored and nobody was told. A retry now re-drives the alert
+   exactly once, never re-sends a lead that already reached the owner, and a
+   concurrent second request cannot start a second alert set. */
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/* The claim is a 10 s rate-limit bucket on the DATABASE clock, so two claims on
+   opposite sides of a bucket edge do not see each other (tests/db-wall.test.mjs
+   demonstrates the same for the RPC). A test that asserts mutual exclusion has to
+   start away from the edge: same guard as tests/webhook.test.mjs, 3 s margin. */
+async function awayFromClaimEdge() {
+  const msLeft = 10000 - (Date.now() % 10000);
+  if (msLeft < 3000) await sleep(msLeft + 50);
+}
+async function seedSilentLead(key, over, withCreated = true) {
+  const { data: biz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
+  const { data, error } = await svc.from('leads').insert({
+    business_id: biz.id, name: 'Replay Tester', phone: nextPhone(), email: nextEmail(),
+    zip: '50265', service: 'repair', home: 'house', timing: 'asap',
+    roof_age: 'Not sure', insurance_claim: false, notes: '', source: 'form',
+    idempotency_key: key, ...(over || {}),
+  }).select('id').single();
+  if (error) throw error;
+  // The first invocation got as far as the created event, then died. With
+  // withCreated = false it died one step earlier: after the insert only.
+  if (withCreated) await svc.from('lead_events').insert({ lead_id: data.id, kind: 'created', meta: { source: 'form', slug: ALDER_DEMO } });
+  return data.id;
+}
+
+/* B1a: stored, created event written, nothing delivered -> the retry announces
+   it once, from the STORED row (the retry payload says a different name). */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const key = `${RUN}-replay-a`;
+  const id = await seedSilentLead(key);
+  const { res } = await post({ idempotencyKey: key });
+  const rows = await leadFor(key);
+  const evs = await events(id);
+  const kinds = evs.map((e) => e.kind);
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const texts = (await requests(TG))
+    .filter((r) => r.path.includes('/sendMessage') && String(r.body.chat_id) === String(FIXTURE_CHAT))
+    .map((r) => r.body.text || '');
+  const storedText = texts.length === 1 && texts[0].includes('Name: Replay Tester');
+  line(res.code === 200 && res.body && res.body.ok === true && rows.length === 1 && tg === 1 && mail === 2
+    && kinds.filter((k) => k === 'created').length === 1
+    && kinds.filter((k) => k === 'tg_sent').length === 1
+    && kinds.filter((k) => k === 'email_owner_sent').length === 1
+    && storedText,
+    'B1a', 'silent stored lead: retry announces it exactly once',
+    `code=${res.code} rows=${rows.length} tg=${tg} mail=${mail} kinds=${kinds.join(',')} stored=${storedText}`);
+} catch (e) { line(false, 'B1a', 'silent lead replay', e.message); }
+
+/* B1b: the same key again, now delivered -> nothing is sent a second time. */
+try {
+  await reset(TG); await reset(RS);
+  const key = `${RUN}-replay-a`;
+  const rows = await leadFor(key);
+  const before = rows.length ? (await events(rows[0].id)).length : -1;
+  const { res } = await post({ idempotencyKey: key });
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const tg = await sendMessageCount(), mail = await emailCount();
+  line(res.code === 200 && res.body && res.body.ok === true && tg === 0 && mail === 0 && evs.length === before,
+    'B1b', 'delivered lead: retry sends nothing, response unchanged',
+    `code=${res.code} tg=${tg} mail=${mail} events=${before}->${evs.length}`);
+} catch (e) { line(false, 'B1b', 'delivered replay', e.message); }
+
+/* B1c: two requests with the same key at the same time -> one lead, one set.
+   Both can pass the duplicate check and the "nothing delivered" read; the claim
+   is what makes exactly one of them send. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  await awayFromClaimEdge();
+  const key = `${RUN}-replay-c`;
+  const [a, b] = await Promise.all([post({ idempotencyKey: key }), post({ idempotencyKey: key })]);
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const kinds = evs.map((e) => e.kind);
+  const tg = await sendMessageCount(), mail = await emailCount();
+  line(a.res.code === 200 && b.res.code === 200 && rows.length === 1 && tg === 1 && mail === 2
+    && kinds.filter((k) => k === 'created').length === 1
+    && kinds.filter((k) => k === 'tg_sent').length === 1
+    && kinds.filter((k) => k === 'email_owner_sent').length === 1,
+    'B1c', 'two same-key requests at once: one lead, one alert set',
+    `codes=${a.res.code}/${b.res.code} rows=${rows.length} tg=${tg} mail=${mail} kinds=${kinds.join(',')}`);
+} catch (e) { line(false, 'B1c', 'concurrent same-key', e.message); }
+
+/* B1d: a live claim blocks the retry, and releasing it lets the same retry
+   through: the claim is a lock for the duration of the send, not a debounce. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const key = `${RUN}-replay-d`;
+  const id = await seedSilentLead(key);
+  await awayFromClaimEdge();
+  // Some other invocation is announcing this lead right now.
+  await svc.rpc('hit_rate_limit', { p_key: 'notify:' + id, p_window_seconds: 10, p_max: 1 });
+  const held = await post({ idempotencyKey: key });
+  const heldTg = await sendMessageCount(), heldMail = await emailCount();
+  await svc.from('rate_limits').delete().eq('key', 'notify:' + id);
+  const after = await post({ idempotencyKey: key });
+  const afterTg = await sendMessageCount(), afterMail = await emailCount();
+  line(held.res.code === 200 && held.res.body && held.res.body.ok === true && heldTg === 0 && heldMail === 0
+    && after.res.code === 200 && afterTg === 1 && afterMail === 2,
+    'B1d', 'live claim blocks the send; released claim lets it through',
+    `held=${heldTg}/${heldMail} after=${afterTg}/${afterMail}`);
+} catch (e) { line(false, 'B1d', 'claim held', e.message); }
+
+/* B1e: a claim left behind by a killed invocation lives in its own 10 s bucket,
+   so it stops matching without any timestamp arithmetic here. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const key = `${RUN}-replay-e`;
+  const id = await seedSilentLead(key);
+  await svc.from('rate_limits').insert({
+    key: 'notify:' + id, window_start: new Date(Date.now() - 10 * 60000).toISOString(), count: 1,
+  });
+  const { res } = await post({ idempotencyKey: key });
+  const tg = await sendMessageCount(), mail = await emailCount();
+  line(res.code === 200 && tg === 1 && mail === 2,
+    'B1e', 'claim from a dead invocation expires with its bucket',
+    `code=${res.code} tg=${tg} mail=${mail}`);
+} catch (e) { line(false, 'B1e', 'stale claim bucket', e.message); }
+
+/* B1f: the first invocation died between the insert and its first event. The
+   retry has to write the missing created row as well as send the alert, and it
+   must write each of them once. */
+try {
+  await clean();
+  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const key = `${RUN}-replay-f`;
+  const id = await seedSilentLead(key, null, false);
+  const { res } = await post({ idempotencyKey: key });
+  const evs = await events(id);
+  const kinds = evs.map((e) => e.kind);
+  const tg = await sendMessageCount(), mail = await emailCount();
+  const created = evs.filter((e) => e.kind === 'created');
+  const metaOk = created.length === 1 && created[0].meta && created[0].meta.slug === ALDER_DEMO
+    && !created[0].meta.duplicate_of;
+  line(res.code === 200 && tg === 1 && mail === 2 && metaOk
+    && kinds.filter((k) => k === 'tg_sent').length === 1
+    && kinds.filter((k) => k === 'email_owner_sent').length === 1,
+    'B1f', 'death before the first event: retry writes it and announces once',
+    `code=${res.code} tg=${tg} mail=${mail} kinds=${kinds.join(',')} meta=${!!metaOk}`);
+} catch (e) { line(false, 'B1f', 'missing created event', e.message); }
+
+/* ================= B5 — one bounded round for every bound phone =============
+   Five phones used to be five sequential sends at up to 3 s each, then a
+   fallback round on top: the request could outlast the function. All sends are
+   fanned out at once and the whole round has one deadline; a phone that never
+   answers is recorded as a timeout, once. */
+
+const FAN = [FIXTURE_CHAT, FIXTURE_CHATS.notifyFan1, FIXTURE_CHATS.notifyFan2,
+  FIXTURE_CHATS.notifyFan3, FIXTURE_CHATS.notifyFan4];
+async function bindFan() {
+  const { data: biz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
+  await svc.from('business_chats').delete().in('tg_chat_id', FAN);
+  await svc.from('business_chats').upsert(
+    FAN.map((id) => ({ business_id: biz.id, tg_chat_id: id })), { onConflict: 'tg_chat_id' },
+  );
+}
+async function unbindFan() {
+  await svc.from('business_chats').delete().in('tg_chat_id', FAN.slice(1));
+}
+
+/* B5p: five phones, every send slow. All five are attempted in one round, so the
+   request costs one outbound timeout, not five.
+
+   Wall-clock is useless here: the in-process suite pays the Supabase REST
+   round-trip (about 1 s) inside the same request, so `ms` swings by more than
+   the difference between parallel and sequential sends. The proof is the
+   arrival window instead: every send is issued in the same tick, so the five
+   requests reach the fake within a fraction of one 200 ms send timeout, while
+   sequential sends would sit one full timeout apart (a ~800 ms window). */
+try {
+  await clean();
+  await bindFan();
+  await control(TG, { mode: 'hang', hangMs: 2500 });
+  await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const { res, key, ms } = await post({});
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const f = evs.find((e) => e.kind === 'tg_failed');
+  const reqs = (await requests(TG)).filter((r) => r.path.includes('/sendMessage'));
+  const chats = new Set(reqs.map((r) => String(r.body.chat_id)));
+  const times = reqs.map((r) => r.at).filter((t) => typeof t === 'number');
+  const window = times.length ? Math.max(...times) - Math.min(...times) : -1;
+  await control(TG, { mode: 'ok', hangChat: null, failChat: null });
+  line(res.code === 200 && window >= 0 && window < 200 && chats.size === FAN.length && reqs.length === FAN.length
+    && !!f && f.meta.status === 'timeout' && f.meta.abandoned === undefined,
+    'B5p', 'five phones: one round, each tried once, one timeout event',
+    `window=${window}ms ms=${ms} reqs=${reqs.length} chats=${chats.size} meta=${JSON.stringify(f && f.meta)}`);
+} catch (e) { line(false, 'B5p', 'parallel fan-out', e.message); } finally { await unbindFan(); }
+
+/* B5d: one phone never answers. The round stops at the deadline instead of
+   waiting for it, and says so: abandoned count in the event, one attempt only. */
+const savedDeadline = process.env.NOTIFY_DEADLINE_MS;
+try {
+  await clean();
+  await bindFan();
+  process.env.NOTIFY_DEADLINE_MS = '150';
+  const hangChat = String(FIXTURE_CHATS.notifyFan2);
+  await control(TG, { mode: 'ok', hangChat, hangMs: 2500 });
+  await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  const { res, key, ms } = await post({});
+  const rows = await leadFor(key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const f = evs.find((e) => e.kind === 'tg_failed');
+  const reqs = (await requests(TG)).filter((r) => r.path.includes('/sendMessage'));
+  const hangTries = reqs.filter((r) => String(r.body.chat_id) === hangChat).length;
+  await control(TG, { mode: 'ok', hangChat: null, failChat: null });
+  // abandoned=1 is itself the proof the deadline fired: this phone's own send
+  // timeout is 200 ms, so only a round that stopped at 150 ms can abandon it.
+  line(res.code === 200 && ms < 2500 && reqs.length === FAN.length && hangTries === 1
+    && !!f && f.meta.status === 'timeout' && f.meta.abandoned === 1,
+    'B5d', 'deadline: hanging phone abandoned after one attempt',
+    `ms=${ms} reqs=${reqs.length} hang=${hangTries} meta=${JSON.stringify(f && f.meta)}`);
+} catch (e) { line(false, 'B5d', 'notify deadline', e.message); } finally { await unbindFan();
+  if (savedDeadline === undefined) delete process.env.NOTIFY_DEADLINE_MS; else process.env.NOTIFY_DEADLINE_MS = savedDeadline;
+}
+
+/* B5r: three phones succeed and two fail while email also fails. The immediate
+   fallback and later replay target those two phones; replay also retries the
+   missing owner email once. Persisted outcomes contain hashes, never chat ids. */
+try {
+  await clean(); await bindFan();
+  const failedChats = [String(FAN[1]), String(FAN[4])];
+  await control(TG, { mode: 'ok', failChats: failedChats, hangChat: null, failChat: null });
+  await control(RS, { mode: '500' });
+  await reset(TG); await reset(RS);
+  const first = await post({});
+  const firstTg = (await requests(TG)).filter((r) => r.path.includes('/sendMessage'));
+  const fallbackTg = firstTg.slice(FAN.length);
+  const ownerMails = (await requests(RS)).filter((r) => /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  const ownerMailCount = ownerMails.length;
+  const ownerRetrySame = ownerMails.length === 2 && ownerMails[0].raw === ownerMails[1].raw
+    && ownerMails[0].headers['idempotency-key'] === ownerMails[1].headers['idempotency-key'];
+  await control(TG, { mode: 'ok', failChats: [] }); await control(RS, { mode: 'ok' });
+  await reset(TG); await reset(RS);
+  await post({ idempotencyKey: first.key });
+  const replayTg = (await requests(TG)).filter((r) => r.path.includes('/sendMessage'));
+  const replayOwnerMails = (await requests(RS)).filter((r) => /:owner$/.test(String(r.headers['idempotency-key'] || '')));
+  const replayOwnerSame = replayOwnerMails.length === 1 && replayOwnerMails[0].raw === ownerMails[0].raw
+    && replayOwnerMails[0].headers['idempotency-key'] === ownerMails[0].headers['idempotency-key'];
+  const rows = await leadFor(first.key);
+  const evs = rows.length ? await events(rows[0].id) : [];
+  const metaText = JSON.stringify(evs.map((e) => e.meta));
+  const outcomes = evs.flatMap((e) => Array.isArray(e.meta.chat_outcomes) ? e.meta.chat_outcomes : []);
+  const emailEventKinds = evs.filter((e) => e.kind.startsWith('email_owner_')).map((e) => e.kind).join(',');
+  const exactTargets = (reqs) => reqs.length === 2 && new Set(reqs.map((r) => String(r.body.chat_id))).size === 2
+    && reqs.every((r) => failedChats.includes(String(r.body.chat_id)));
+  const hashesOnly = outcomes.length >= FAN.length && outcomes.every((o) => /^[a-f0-9]{64}$/.test(o.chat_hash))
+    && !FAN.some((id) => metaText.includes(String(id)));
+  line(first.res.code === 200 && firstTg.length === FAN.length + 2 && exactTargets(fallbackTg)
+    && exactTargets(replayTg) && ownerMailCount === 2 && ownerRetrySame && replayOwnerSame && hashesOnly,
+    'B5r', '3 ok / 2 failed: fallback and replay resend exactly 2',
+    `primary=${firstTg.length} replay=${replayTg.length} ownerFirst=${ownerMailCount} ownerReplay=${replayOwnerMails.length} emailEvents=${emailEventKinds} hashes=${outcomes.length}`);
+} catch (e) { line(false, 'B5r', 'partial Telegram replay', e.message); } finally {
+  await control(TG, { mode: 'ok', failChats: [], hangChat: null, failChat: null });
+  await control(RS, { mode: 'ok' }); await unbindFan();
+}
 
 /* Redirect off + default sender -> no HTTP call */
 try {
@@ -869,7 +1311,8 @@ try {
 
 /* cleanup */
 try {
-  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond]);
+  await svc.from('business_chats').delete().in('tg_chat_id', [FIXTURE_CHAT, FIXTURE_CHATS.notifySecond,
+    FIXTURE_CHATS.notifyFan1, FIXTURE_CHATS.notifyFan2, FIXTURE_CHATS.notifyFan3, FIXTURE_CHATS.notifyFan4]);
   if (activeId) {
     await svc.from('leads').delete().eq('business_id', activeId);
     await svc.from('businesses').delete().eq('id', activeId);

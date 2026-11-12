@@ -8,9 +8,10 @@ exactly the schema in production today.
 
 ## 5a. Reminder for a lead nobody has touched
 
-**The constraint.** Vercel's Hobby plan allows **one cron run per day** (a more
-frequent expression fails the deployment — see `docs/TEST_PROJECT.md` and
-`HANDOFF_alder_session.md`). Anything faster needs a scheduler outside Vercel.
+**The constraint.** Vercel Hobby allows each cron job to run no more than once
+per day; it does not limit a project to one cron job total. A more frequent
+schedule needs a plan that supports it or an external scheduler. See Vercel's
+current [cron limits](https://vercel.com/docs/schedules/cron-jobs/usage-and-pricing).
 
 ### Option 1 — daily section in the self-check (no new infrastructure, no schema change)
 
@@ -265,7 +266,7 @@ would give every existing business a morning summary on the next deploy.
 
 ### Scheduling
 
-Vercel Hobby runs a cron **at most once a day**, with up to an hour of imprecision, and
+Each Vercel Hobby cron job runs **at most once a day**, with up to an hour of imprecision, and
 rejects a more frequent schedule at deploy time. So on Hobby "evening" and "twice a day"
 cannot work, and `vercel.json` must keep exactly one daily digest entry:
 

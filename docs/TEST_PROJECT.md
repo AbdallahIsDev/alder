@@ -1,9 +1,9 @@
 # Running the tests against a dedicated Supabase project
 
-Today every suite reads the **production** database: it needs the `alder-demo` row at
-seed values, and any test run has to be preceded by a backup and followed by a
-restore. This document is the way out of that: one test project, one env file, and the
-production guard in `tests/run.mjs` stops being an obstacle.
+Every suite uses the dedicated Supabase test project. Set `TEST_ENV=1` so the loader
+uses `.env.test`; `tests/run.mjs` refuses to start if the test URL is missing or matches
+the production URL in `.env`. This document covers the one-time project setup and the
+checks that keep test traffic separate.
 
 Nothing here changes production. Do it once.
 
@@ -153,16 +153,16 @@ In PowerShell the variable stays set for the rest of the session. To unset it:
 Remove-Item Env:TEST_ENV
 ```
 
-Expected: the same counts as a production run, faster. Measured on 2026-11-09:
-391 assertions in 241.5 s against 382 in 417.8 s on production.
+Expected: assertions run against the dedicated test project, with no production
+database writes. Current suite counts and timings are recorded in `SESSION_HANDOFF.md`.
 
-### Why the suite cannot quietly use production
+### How the runner keeps the suite on the test project
 
 `vercel dev` reads `.env` and `.env.local` from its project directory, and those
-values beat the environment it was started with. Measured with 48.12.1: a function
-returned the `.env` value, not the one pinned into the parent process. A
-`TEST_ENV=1` run therefore wrote its canary lead into production while every check
-said "test".
+values beat the environment it was started with. In an earlier 2026-11-09 run, a
+function returned the `.env` value instead of the pinned test value; this exposed a
+production canary write before the runner was corrected. The current test workflow
+uses the isolated dev root below and checks that the canary remains outside production.
 
 The fix is structural, not a file shuffle. Before starting the server the runner
 builds a **dev root** (`tests/dev-root.mjs`): a directory under `_debug/` that has
@@ -235,17 +235,13 @@ and the data is kept. Re-run `npm run test:env-check` and then the suite.
 If you would rather not think about it, run the suite at least once a week, or move
 the project to a paid plan.
 
-## 8. When this is working
+## 8. Current state and follow-ups
 
-Then, and only then:
-
-1. ~~Delete `ALLOW_PROD_TESTS` and make the production guard absolute.~~ Done
-   2026-11-09: the gate requires `TEST_ENV=1` plus `.env.test`, and the flag no
-   longer exists.
-2. Replace the hardcoded `alder-demo` fixtures with `tests/fixtures.mjs`, seeding a
-   dedicated `test-fixture` business per run.
-3. Remove the backup/reset/restore ritual from `HANDOFF_alder_session.md` and from
-   the test workflow section.
-
-None of that is done yet: the suite still runs against production until `.env.test`
-exists.
+- The dedicated test project and `.env.test` are in use. Every suite requires
+  `TEST_ENV=1`; there is no production-test override.
+- Fixtures use seeded test businesses in that project. The runner checks the
+  canary's location and checks that test fixture chats, leads, and feedback remain
+  unchanged after a run.
+- No production backup/reset/restore ritual is part of the test workflow.
+- Keep the test project active; if it pauses, restore it in the dashboard before
+  running the environment check and suites again.

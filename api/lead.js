@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { hashIp } from '../lib/hash.js';
 import { clientIp } from '../lib/request.js';
 import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
-import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit } from '../lib/db.js';
+import { getActiveBusinessBySlug, insertLead, addEvent, hitRateLimit, getLeadForReplay, getLeadDeliveryState, claimLeadNotification, releaseLeadNotification } from '../lib/db.js';
 import { findRecentDuplicate } from '../lib/lead-intake.js';
 import { notifyAllAfterLead } from '../lib/notify.js';
 
@@ -42,6 +42,47 @@ function htmlPage(title, message, businessName) {
 <p>${esc(message)}</p>
 <p style="margin-top:24px"><a href="/" style="color:#1c1f24">Back to the site</a></p>
 </main></body></html>`;
+}
+
+/**
+ * Announce a stored lead, at most once at a time.
+ *
+ * The fixed-window claim (lib/db.js) stops most overlapping sends, but two calls
+ * straddling a bucket edge can both win. It is released when this attempt finishes
+ * — success or failure — so a retry after a failed alert is allowed again. Fails
+ * open: an owner alert matters more than the best-effort claim.
+ *
+ * `recheck` is for the replay path: two requests can both read "nothing has been
+ * delivered" before either takes the claim, so the holder looks once more before
+ * sending. A failed re-check propagates to the caller, which logs a code and
+ * answers as before — the claim is still released.
+ */
+async function announceLead(ctx, recheck) {
+  let claimed = true;
+  try {
+    claimed = await claimLeadNotification(ctx.leadId);
+  } catch (e) {
+    console.error('lead_notify_claim_failed', (e && e.code) || 'no_code');
+  }
+  if (!claimed) return;
+  try {
+    if (recheck) {
+      ctx.replay = true;
+      const state = await getLeadDeliveryState(ctx.leadId);
+      const partialTelegram = state.delivered && state.failedChatHashes.length > 0;
+      if (state.delivered && !partialTelegram && state.emailOwnerSent) return;
+      ctx.deliveredChatHashes = state.deliveredChatHashes;
+      ctx.retryTelegramOnly = partialTelegram && state.emailOwnerSent;
+      ctx.retryEmailOnly = state.delivered && !state.emailOwnerSent && state.failedChatHashes.length === 0;
+    }
+    await notifyAllAfterLead(ctx);
+  } finally {
+    try {
+      await releaseLeadNotification(ctx.leadId);
+    } catch (e) {
+      console.error('lead_notify_release_failed', (e && e.code) || 'no_code');
+    }
+  }
 }
 
 export default async function handler(req, res) {
@@ -233,8 +274,53 @@ export default async function handler(req, res) {
     return isForm ? htmlReply(500, 'Try again', 'Please try again shortly.', business.name) : res.status(500).json({ ok: false });
   }
 
-  // Already stored under this key: say ok, notify nobody, write no second event.
+  // Already stored under this key. This is a retry, and it is the last chance to
+  // announce a lead whose first invocation was killed before (or while) alerting:
+  // the old code returned "ok" here and the owner never heard about that lead.
+  // A retry sends only when nothing was delivered, or when recorded per-chat
+  // outcomes identify phones still missing a partial Telegram alert. Confirmed
+  // chats and an already-delivered owner email are not repeated. A failed read is
+  // not a reason to guess: log a code and leave the lead for the next attempt.
   if (leadId === null) {
+    try {
+      const stored = await getLeadForReplay(business.id, idem);
+      if (stored) {
+        const state = await getLeadDeliveryState(stored.id);
+        // The first invocation can also die between the insert and its first
+        // event. The retry writes the missing created row, with the same advisory
+        // the first attempt would have written (its lookup is already in flight).
+        let duplicateOf = state.duplicateOf;
+        if (!state.created) {
+          duplicateOf = await dupPromise;
+          if (duplicateOf === stored.id) duplicateOf = null;
+          try {
+            await addEvent(stored.id, 'created', {
+              source: isForm ? 'form-nojs' : 'form',
+              slug: business.slug,
+              ...(duplicateOf ? { duplicate_of: duplicateOf } : {}),
+            });
+          } catch (e) {
+            console.error('lead_event_created_failed', (e && e.code) || 'no_code');
+          }
+        }
+        if (!state.delivered || state.failedChatHashes.length || !state.emailOwnerSent) {
+          await announceLead({
+            leadId: stored.id, business, duplicate: !!duplicateOf,
+            deliveredChatHashes: state.deliveredChatHashes,
+            retryTelegramOnly: state.delivered && state.failedChatHashes.length > 0 && state.emailOwnerSent,
+            retryEmailOnly: state.delivered && !state.emailOwnerSent && state.failedChatHashes.length === 0,
+            lead: {
+              name: stored.name, phone: stored.phone, email: stored.email || '', zip: stored.zip,
+              service: stored.service, home: stored.home, timing: stored.timing,
+              roof_age: stored.roof_age, insurance_claim: stored.insurance_claim === true,
+              notes: stored.notes || '',
+            },
+          }, true);
+        }
+      }
+    } catch (e) {
+      console.error('lead_replay_failed', (e && e.code) || 'no_code');
+    }
     return isForm ? htmlReply(200, 'Request received', 'We received your request.', business.name) : res.status(200).json({ ok: true });
   }
 
@@ -256,11 +342,12 @@ export default async function handler(req, res) {
     console.error('lead_event_created_failed', (e && e.code) || 'no_code');
   }
 
-  // Save first, notify second. Nothing below can change the response.
-  await notifyAllAfterLead({
+  // Save first, notify second. Nothing below can change the response. The
+  // fixed-window claim reduces concurrent duplicate sends (see announceLead).
+  await announceLead({
     leadId, business, duplicate: !!duplicateOf,
     lead: { name, phone: phoneE164, email, zip, service, home, timing, roof_age: age, insurance_claim: b.claim === true, notes },
-  });
+  }, false);
 
   return isForm ? htmlReply(200, 'Request received', 'We received your request.', business.name) : res.status(200).json({ ok: true });
 }

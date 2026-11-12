@@ -274,7 +274,19 @@ const logOffset = fs.statSync(LOG).size;
       runScripts: 'dangerously',
       url: ORIGIN,
     });
-    dom.window.fetch = (u, o) => fetch(new URL(u, ORIGIN).href, o);
+    dom.window.fetch = (u, o) => {
+      /* The page uses the window's AbortController, and undici refuses a signal
+         from another realm (JSDOM here). Bridge it so a real request carries a
+         real signal: this is the harness adapting, not the page relaxing. */
+      const opts = { ...o };
+      if (o && o.signal) {
+        const bridged = new AbortController();
+        if (o.signal.aborted) bridged.abort();
+        else o.signal.addEventListener('abort', () => bridged.abort());
+        opts.signal = bridged.signal;
+      }
+      return fetch(new URL(u, ORIGIN).href, opts);
+    };
     Object.defineProperty(dom.window, 'crypto', { value: globalThis.crypto, configurable: true, writable: true });
     dom.window.eval(m[1]);
 
@@ -298,7 +310,77 @@ const logOffset = fs.statSync(LOG).size;
     const { data: viaBot } = await svc.from('leads').select('id').eq('notes', marker2);
     line(!threw2 && (viaBot || []).length === 0, '12b', 'page forwards website + elapsed',
       threw2 || `rows=${(viaBot || []).length}`);
+
+    /* 12c: offline. Nothing is posted and the visitor is told immediately: the
+       rejection carries the offline flag the modal turns into "You're offline." */
+    const realFetch = dom.window.fetch, realSetTimeout = dom.window.setTimeout, realClearTimeout = dom.window.clearTimeout;
+    let offlineCalls = 0;
+    Object.defineProperty(dom.window.navigator, 'onLine', { value: false, configurable: true });
+    dom.window.fetch = function () { offlineCalls++; return Promise.resolve({ ok: true, json: function () { return Promise.resolve({}); } }); };
+    let offlineErr = null;
+    try { await dom.window.estimateDeliver({ ...sent, notes: `${NOTES} offline ${key}` }); } catch (e) { offlineErr = e; }
+    Object.defineProperty(dom.window.navigator, 'onLine', { value: true, configurable: true });
+    dom.window.fetch = realFetch;
+    line(offlineCalls === 0 && !!offlineErr && offlineErr.offline === true,
+      '12c', 'offline: no request, offline error surfaced',
+      `calls=${offlineCalls} err=${offlineErr && offlineErr.message}`);
+
+    /* 12d: a request that never answers. The AbortController fires, one retry is
+       allowed under the SAME key, and then the error: the button cannot stay on
+       "Sending..." forever. Timers are shortened; the key is the assertion. */
+    const seen = [];
+    dom.window.setTimeout = function (fn) { return realSetTimeout(fn, 0); };
+    dom.window.clearTimeout = realClearTimeout;
+    dom.window.fetch = function (u, o) {
+      seen.push(o && o.body ? JSON.parse(o.body).idempotencyKey : null);
+      return new Promise(function (ok, fail) {
+        if (o && o.signal) o.signal.addEventListener('abort', function () { fail(new Error('aborted')); });
+      });
+    };
+    let hangErr = null;
+    try { await dom.window.estimateDeliver({ ...sent, notes: `${NOTES} hang ${key}` }); } catch (e) { hangErr = e; }
+    line(seen.length === 2 && seen[0] === seen[1] && !!hangErr && hangErr.network === true,
+      '12d', 'no answer: one retry, same idempotency key, then error',
+      `attempts=${seen.length} sameKey=${seen.length === 2 && seen[0] === seen[1]} err=${hangErr && hangErr.message}`);
+
+    /* 12e: the first attempt dies on the network, the retry gets through. Two
+       posts, one key, one stored lead - the exact case the retry exists for. */
+    dom.window.setTimeout = realSetTimeout;
+    const seen2 = [];
+    dom.window.fetch = function (u, o) {
+      seen2.push(JSON.parse(o.body).idempotencyKey);
+      if (seen2.length === 1) return Promise.reject(new TypeError('Failed to fetch'));
+      return realFetch(u, o);
+    };
+    await resetLimits();
+    const marker3 = `${NOTES} retry ${key}`;
+    let retryOk = false, retryErr = null;
+    try { await dom.window.estimateDeliver({ ...sent, notes: marker3 }); retryOk = true; } catch (e) { retryErr = e.message; }
+    const { data: retried } = await svc.from('leads').select('id').eq('notes', marker3);
+    dom.window.fetch = realFetch;
+    line(retryOk && seen2.length === 2 && seen2[0] === seen2[1] && (retried || []).length === 1,
+      '12e', 'network failure then success: one key, one lead',
+      retryErr || `attempts=${seen2.length} sameKey=${seen2[0] === seen2[1]} rows=${(retried || []).length}`);
   }
+}
+
+/* 12f: no graphical browser is needed for this DOM rule. An edited second send
+   is not posted, so its new values must not appear in the already-received recap. */
+{
+  const page = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const dom = new JSDOM(page, {
+    runScripts: 'dangerously', pretendToBeVisual: true, url: ORIGIN,
+    beforeParse(window) { window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} }); },
+  });
+  const recap = dom.window.document.querySelector('.est-recap');
+  recap.innerHTML = '<div><dt>Phone</dt><dd>actually-sent-value</dd></div>';
+  dom.window.estimateShowSent({ name: 'Edited Name', phone: '+15559999999', zip: '99999' }, true);
+  await new Promise((r) => setTimeout(r, 500));
+  line(recap.hidden === true && recap.textContent.includes('actually-sent-value')
+    && !recap.textContent.includes('15559999999'),
+    '12f', 'already-received panel hides unsent edited recap values',
+    `hidden=${recap.hidden} newValue=${recap.textContent.includes('15559999999')}`);
+  dom.window.close();
 }
 
 /* ---------- 13. logs carry no personal data ---------- */
@@ -530,6 +612,23 @@ const logOffset = fs.statSync(LOG).size;
     const ok = run({ status: 500, body: { ok: false } }) && run({ status: 503, body: {} }) && run(new Error('network'));
     line(ok, 'P14', 'modal handler: 5xx/network -> generic panel only', `ok=${ok}`);
   }
+}
+{
+  /* B19 (source level, no browser): pressing send twice within 30 s used to fall
+     into showError, so a visitor who simply pressed twice was told the form had
+     failed. The second press now reaches the sent panel with the duplicate
+     wording, and the generic error panel is not used at all. What this cannot
+     check is how the panel looks in a real browser — the state machine needs a
+     DOM and timers, which this suite does not drive. */
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const dup = /if \(Date\.now\(\) - lastSent < 30000\) \{([^}]*)\}/.exec(html);
+  const sentFn = /function showSent\(data, already\) \{([\s\S]*?)\n  \}/.exec(html);
+  const hasState = !!sentFn && /already \? 'You already sent this request/.test(sentFn[1])
+    && /Request already received/.test(sentFn[1]);
+  const routes = !!dup && /showSent\(data, true\)/.test(dup[1]) && !/showError/.test(dup[1]);
+  line(hasState && routes,
+    'B19', 'in-page duplicate -> already-received state, not the error panel',
+    `branch=${!!dup} showSentFlag=${routes} wording=${hasState}`);
 }
 {
   // P15: the built HTML inlines the calling-code table, under 6 KB, with the

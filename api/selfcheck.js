@@ -20,13 +20,13 @@
 // accepted in the other's place. 503 when HEALTH_SECRET is unset.
 
 import { secretMatches } from '../lib/request.js';
-import { listBusinessChats, listActiveBusinesses, sweepExpired } from '../lib/db.js';
+import { listBusinessChats, listActiveBusinesses, sweepExpired, hitRateLimit, clearRateLimit } from '../lib/db.js';
 import { sendMessage } from '../lib/tg.js';
-import { sendMail } from '../lib/mail.js';
+import { sendMail, mailRedirectInProduction } from '../lib/mail.js';
 import { deliverToBusinesses } from '../lib/ops-delivery.js';
 import { selfCheckEmail, operatorAlarmEmail } from '../lib/email-builders.js';
 import { eventCountsByBusiness } from '../lib/digest-db.js';
-import { selfCheckText, operatorAlarmBody, operatorAlarmText, shouldAlertBusiness, failedTotal } from '../lib/ops-copy.js';
+import { FAILED_KINDS, selfCheckText, operatorAlarmBody, operatorAlarmText, shouldAlertBusiness, failedTotal } from '../lib/ops-copy.js';
 import { operatorChatId, operatorEmail, operatorReachable } from '../lib/operator.js';
 
 const HEADER = 'x-health-secret';
@@ -40,6 +40,47 @@ const KINDS = [
   'review_request_failed',
 ];
 const DAY = 24 * 3600 * 1000;
+const OPERATOR_ALARM_WINDOW_SECONDS = 86400;
+const REDIRECT_PROBLEM_KEY = 'ops:selfcheck:mail-redirect';
+
+const businessProblemKey = (id, slug) => id || slug;
+const failureProblemKey = (id, slug, kind) => `ops:selfcheck:failure:${businessProblemKey(id, slug)}:${kind}`;
+const noPhoneProblemKey = (id, slug) => `ops:selfcheck:no-phone:${businessProblemKey(id, slug)}`;
+
+/** Claim each distinct operator problem independently. Claim errors fail open. */
+export async function claimOperatorAlarmProblems(alarm, claim = hitRateLimit) {
+  const results = await Promise.all((alarm && alarm.problemKeys || []).map(async (key) => {
+    try { return await claim(key, OPERATOR_ALARM_WINDOW_SECONDS, 1) ? key : null; }
+    catch { return key; }
+  }));
+  return results.filter(Boolean);
+}
+
+/** Rebuild one alarm from only the problems whose claims this run won. */
+export function selectUnclaimedOperatorAlarm(alarm, claimedKeys) {
+  if (!alarm) return null;
+  const claimed = new Set(claimedKeys || []);
+  const rows = alarm.rows.map((row) => {
+    const day = Object.fromEntries(FAILED_KINDS
+      .filter((kind) => row.day[kind] && claimed.has(failureProblemKey(row.id, row.slug, kind)))
+      .map((kind) => [kind, row.day[kind]]));
+    return { slug: row.slug, day };
+  }).filter((row) => FAILED_KINDS.some((kind) => row.day[kind]));
+  const noPhoneSlugs = alarm.noPhoneProblems
+    .filter((business) => claimed.has(noPhoneProblemKey(business.id, business.slug)))
+    .map((business) => business.slug);
+  const redirectActive = alarm.redirectActive && claimed.has(REDIRECT_PROBLEM_KEY);
+  const options = { rows, noPhoneSlugs, redirectActive };
+  const body = operatorAlarmBody(options);
+  return body ? { body, text: operatorAlarmText(options) } : null;
+}
+
+async function releaseOperatorAlarmProblems(keys) {
+  await Promise.all(keys.map(async (key) => {
+    try { await clearRateLimit(key); }
+    catch (e) { console.error('operator_alarm_claim_release_failed', (e && e.code) || 'no_code'); }
+  }));
+}
 
 /* One delivery path, shared with /api/digest. */
 export const deliverSelfCheck = deliverToBusinesses;
@@ -62,13 +103,13 @@ export function alertTargets({ businesses, counts }) {
 export function operatorAlarm({ businesses, counts, chatsByBusiness, recentLeadBusinesses, redirectActive }) {
   const rows = businesses
     .filter((b) => failedTotal(counts.get(b.id) || {}) > 0)
-    .map((b) => ({ slug: b.slug, day: counts.get(b.id) || {} }));
+    .map((b) => ({ id: b.id, slug: b.slug, day: counts.get(b.id) || {} }));
 
   // "No phone connected" is a problem only when somebody is actually missing
   // alerts. An empty demo row that never receives a lead is a parked test
   // business, not an incident, and nagging about it every day trains the
   // operator to ignore the alarm.
-  const noPhoneSlugs = businesses.filter((b) => {
+  const noPhoneProblems = businesses.filter((b) => {
     const chats = chatsByBusiness ? chatsByBusiness.get(b.id) : [];
     if (chats === null || chats === undefined) return false;   // unknown, not "no phone"
     if (chats.length) return false;
@@ -77,10 +118,20 @@ export function operatorAlarm({ businesses, counts, chatsByBusiness, recentLeadB
     // assuming the business is parked.
     if (recentLeadBusinesses === null) return true;
     return recentLeadBusinesses.has(b.id);
-  }).map((b) => b.slug);
+  }).map((b) => ({ id: b.id, slug: b.slug }));
+  const noPhoneSlugs = noPhoneProblems.map((b) => b.slug);
 
   const body = operatorAlarmBody({ rows, redirectActive, noPhoneSlugs });
-  return body ? { body, text: operatorAlarmText({ rows, redirectActive, noPhoneSlugs }) } : null;
+  if (!body) return null;
+  const problemKeys = rows.flatMap((row) => FAILED_KINDS
+    .filter((kind) => row.day[kind] > 0)
+    .map((kind) => failureProblemKey(row.id, row.slug, kind)))
+    .concat(noPhoneProblems.map((business) => noPhoneProblemKey(business.id, business.slug)));
+  if (redirectActive) problemKeys.push(REDIRECT_PROBLEM_KEY);
+  return {
+    body, text: operatorAlarmText({ rows, redirectActive, noPhoneSlugs }),
+    rows, noPhoneProblems, redirectActive, problemKeys: [...new Set(problemKeys)],
+  };
 }
 
 function authorised(req, healthSecret, cronSecret) {
@@ -126,7 +177,9 @@ export default async function handler(req, res) {
 
   try {
     const since = new Date(Date.now() - DAY).toISOString();
-    const redirectActive = !!process.env.MAIL_REDIRECT_TO && process.env.VERCEL_ENV === 'production';
+    // Swallowing customer mail is a production problem: the same predicate the
+    // warning in lib/mail.js uses, so the daily line cannot drift from the log.
+    const redirectActive = mailRedirectInProduction();
 
     const active = await listActiveBusinesses();
     const counts = await eventCountsByBusiness({ sinceIso: since, kinds: KINDS });
@@ -185,7 +238,14 @@ export default async function handler(req, res) {
 
     const alarm = operatorAlarm({ businesses: active, counts, chatsByBusiness, recentLeadBusinesses, redirectActive });
     let operator = 'none';
-    if (alarm) operator = await deliverOperatorAlarm({ body: alarm.body, text: alarm.text, dateKey });
+    if (alarm) {
+      const claimedKeys = await claimOperatorAlarmProblems(alarm);
+      const pendingAlarm = selectUnclaimedOperatorAlarm(alarm, claimedKeys);
+      if (pendingAlarm) {
+        operator = await deliverOperatorAlarm({ ...pendingAlarm, dateKey });
+        if (operator === 'undelivered') await releaseOperatorAlarmProblems(claimedKeys);
+      }
+    }
 
     // Housekeeping last, and never able to fail the run: bounded, counts only.
     // A sweep error is a number in the log, not a 500 on the daily check.
