@@ -1069,15 +1069,19 @@ try {
     if (savedOp === undefined) delete process.env.OPERATOR_CHAT_ID; else process.env.OPERATOR_CHAT_ID = savedOp;
   }
 
-  // C40: no sendMessage payload in the whole suite carries parse_mode. The bot
-  // sends plain text plus entities, and one stray parse_mode would make
-  // Telegram parse the message instead.
+  // C40: no payload of ANY Telegram send or edit method in the whole suite
+  // carries parse_mode. The bot sends plain text plus entities, and one stray
+  // parse_mode would make Telegram parse the message instead. Before the
+  // browser flow this checked sendMessage only; it now checks every recorded
+  // API call, so a new method cannot dodge it.
   {
     const all = (await (await fetch(TG + '/__all')).json()).requests
-      .filter((x) => x.path.includes('/sendMessage'));
-    const bad = all.filter((x) => x.body && 'parse_mode' in x.body);
-    line(all.length > 0 && bad.length === 0, 'C40', 'no sendMessage payload carries parse_mode',
-      `sends=${all.length} bad=${bad.length}`);
+      .filter((x) => x.body && typeof x.body === 'object');
+    const sends = all.filter((x) => x.path.includes('/sendMessage'));
+    const bad = all.filter((x) => 'parse_mode' in x.body);
+    const methods = [...new Set(all.map((x) => String(x.path).split('/').pop()).filter((m) => /^[a-z][a-zA-Z]+$/.test(m)))];
+    line(sends.length > 0 && bad.length === 0, 'C40', 'no send/edit payload of any method carries parse_mode',
+      `sends=${sends.length} methods=${methods.join(',')} bad=${bad.length}`);
   }
 
   /* ---------- operator commands, owner role, lead recovery ---------- */
@@ -1296,8 +1300,10 @@ try {
         const list = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
         const kb = (list && list.body.reply_markup && list.body.reply_markup.inline_keyboard) || [];
         const listText = (list && list.body.text) || '';
-        const nums = kb[0] || [];
-        const nav = kb[1] || [];
+        // Before the browser: five number buttons in one row + nav. After: one
+        // labeled row button per lead (Q:page:leadId) + nav, so 6 rows.
+        const rowBtns = kb.slice(0, -1).map((r) => r[0]).filter(Boolean);
+        const nav = kb[kb.length - 1] || [];
         await reset();
         await good(cb(bindA, 'rl:' + ids[0]));
         const confirm = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop();
@@ -1313,13 +1319,14 @@ try {
         await reset();
         await good(cb(bindA, 'rl:' + ids[0]));
         const stale = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
-        line(listText.startsWith(C2.REMOVE_LEAD_TITLE) && nums.length === 5 && nav.some((b) => b.text === 'Older')
+        line(listText.startsWith(C2.REMOVE_LEAD_TITLE) && rowBtns.length === 5 && nav.some((b) => b.text === 'Older')
+          && rowBtns.every((b) => /^Q:0:/.test(b.callback_data) && b.text.includes('Remove Me'))
           && confirm && confirm.body.text.includes('Remove Me 1') && ckb[0].style === 'danger'
           && ckb[1].text === 'Cancel' && gone === 0
           && afterText === 'Removed: Remove Me 1 · Repair' && removedToast.includes(afterText)
           && second.includes(C2.REMOVE_LEAD_GONE) && stale.includes(C2.REMOVE_LEAD_GONE),
           'OP27', '/remove_lead: list, confirm, scoped delete, double/stale taps',
-          `nums=${nums.length} gone=${gone} text=${JSON.stringify(afterText)}`);
+          `rows=${rowBtns.length} gone=${gone} text=${JSON.stringify(afterText)}`);
 
         await reset();
         await good(msg(bindB, '/remove_lead'));
@@ -1578,11 +1585,18 @@ try {
         const first = (await sends()).pop();
         const lines = String(first.body.text).split('\n');
         const kb1 = (first.body.reply_markup && first.body.reply_markup.inline_keyboard) || [];
+        // Before the browser: one row of five number buttons + nav (kb.length
+        // 2, rows 'o:' callbacks). After: one labeled button per lead on its
+        // own row (L:page:leadId), so page 0 of twelve is 6 keyboard rows.
         line(ids.length === 12 && lines[2] === '1. Paging 12' && lines[3] === 'Repair · +15155550100'
           && /^\u{1F7E1} New · \d+m ago$/u.test(lines[4])
-          && kb1.length === 2 && kb1[1].some((b) => b.text === 'Older'),
+          && kb1.length === 6 && kb1[0].length === 1
+          && kb1[0][0].text.includes('Paging 12') && kb1[0][0].text.includes('Repair')
+          && kb1[0][0].callback_data === 'L:0:' + ids[11]
+          && kb1[5].some((b) => b.text === 'Older' && !('disabled' in b))
+          && kb1[5].some((b) => b.text === 'Newer' && b.disabled === true),
           'OP36', '/leads rows: name, job type, phone, status, age last',
-          `third=${JSON.stringify(lines[4])}`);
+          `third=${JSON.stringify(lines[4])} rows=${kb1.length} first=${JSON.stringify(kb1[0][0] && kb1[0][0].text)}`);
 
         // A page that still has an older one keeps the button after the tap.
         await reset();
@@ -1591,9 +1605,11 @@ try {
         const page1Lines = String(page1 && page1.body.text).split('\n');
         const kb2 = (page1 && page1.body.reply_markup && page1.body.reply_markup.inline_keyboard) || [];
         line(/^1\. Paging 7$/.test(page1Lines[2] || '')
-          && kb2.length === 2 && kb2[1].some((b) => b.text === 'Older'),
+          && kb2.length === 6 && kb2[0][0].callback_data === 'L:1:' + ids[6]
+          && kb2[5].some((b) => b.text === 'Older') && kb2[5].some((b) => b.text === 'Newer')
+          && kb2[5].every((b) => !('disabled' in b)),
           'OP37', 'a page with older rows keeps the Older button',
-          `first=${JSON.stringify(page1Lines[2])} nav=${(kb2[1] || []).map((b) => b.text).join(',')}`);
+          `first=${JSON.stringify(page1Lines[2])} nav=${(kb2[5] || []).map((b) => b.text).join(',')}`);
 
         // The last page is deleted behind the message's back, then Older is
         // tapped: toast, then the message itself is rewritten with no buttons.
@@ -1637,6 +1653,364 @@ try {
           && rmAnswers.includes(C2.TOAST_NO_OLDER),
           'OP44', '/remove_lead: stale page is rewritten with no buttons',
           `edits=${rmEdits.length} kb=${rmKb.length} answers=${rmAnswers.join('|')}`);
+      }
+
+      /* OP46-OP60: the in-place /leads browser. One message: row taps edit it
+         to the detail, Back restores the exact page, /remove_lead is the same
+         browser in removal mode, and the persistent keyboard arrives per role.
+         invBiz is empty here (OP39 deleted its rows), so the pages below are
+         fully controlled. */
+      {
+        const C2 = await import('../lib/content.js');
+        const sends = async () => (await sent()).filter((x) => x.path.includes('/sendMessage'));
+        const edits = async () => (await sent()).filter((x) => x.path.includes('/editMessageText'));
+        const answers = async () => (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        const kbOf = (req) => (req && req.body.reply_markup && req.body.reply_markup.inline_keyboard) || [];
+
+        // Seven rows plus one long-name row: page 0 has five plus an older
+        // page, page 1 is the last. The long name is the NEWEST row, so page 0
+        // is fully deterministic: [long, Browser 7, 6, 5, 4] then [3, 2, 1].
+        const t0 = Date.now();
+        const ids = [];
+        for (let i = 0; i < 7; i++) {
+          const { data } = await svc.from('leads').insert({
+            business_id: invBiz.id, name: `Browser ${i + 1}`, phone: '5155550100', email: `browser${i}@fixture.invalid`,
+            zip: '50265', service: 'repair', home: 'house', timing: 'asap', roof_age: 'Not sure',
+            insurance_claim: false, notes: null, idempotency_key: `${RUN}-br${i}`,
+            created_at: new Date(t0 - (7 - i) * 60000).toISOString(),
+          }).select('id').single();
+          if (data) { ids.push(data.id); createdLeads.push(data.id); }
+        }
+        // ids[6] is the newest Browser row (Browser 7); a very long name for
+        // the label cap, newest of all so the page order never depends on a
+        // uuid tie-break.
+        const { data: longLead } = await svc.from('leads').insert({
+          business_id: invBiz.id, name: 'Maximilian Constantine Vanderberg-Roofington The Third Esquire',
+          phone: '5155550100', email: `browserlong@fixture.invalid`,
+          zip: '50265', service: 'replacement', home: 'house', timing: 'asap', roof_age: 'Not sure',
+          insurance_claim: false, notes: null, idempotency_key: `${RUN}-brlong`,
+          created_at: new Date(t0 - 30000).toISOString(),
+        }).select('id').single();
+        if (longLead) createdLeads.push(longLead.id);
+        const leadOnPage0 = ids[6];   // Browser 7, newest after the long name
+        const leadOnPage1 = ids[1];   // Browser 2, on page 1
+
+        // OP46: /leads opens ONE message; a row tap edits THAT message to the
+        // detail (status, contact information, actions, Back, copy phone) and
+        // sends nothing new.
+        await reset();
+        await good(msg(invOwner, '/leads'));
+        const listMsg = (await sends()).pop();
+        const listKb = kbOf(listMsg);
+        await reset();
+        await good(cb(invOwner, `L:0:${leadOnPage0}`));
+        const detailEdits = await edits();
+        const detailNew = await sends();
+        const detail = detailEdits[0] || {};
+        const dKb = kbOf(detail);
+        const flat = dKb.flat();
+        const copyBtn = flat.find((b) => b.copy_text);
+        const backBtn = flat.find((b) => b.callback_data === 'l:0');
+        line(listMsg && listKb.length === 6 && listKb[0][0].callback_data === `L:0:${longLead.id}`
+          && detailEdits.length === 1 && detailNew.length === 0
+          && String(detail.body.text).includes('Browser 7')
+          && String(detail.body.text).includes('Phone: +15155550100')
+          && dKb[0][0].text === 'Mark contacted' && dKb[0][0].callback_data === `C:0:${leadOnPage0}`
+          && copyBtn && copyBtn.copy_text.text === '+15155550100' && !copyBtn.callback_data
+          && backBtn && backBtn.text.includes('Back')
+          && !(await sends()).length,
+          'OP46', 'row tap edits the same message to the detail; no second message',
+          `edits=${detailEdits.length} sends=${detailNew.length} copy=${!!copyBtn} back=${!!backBtn}`);
+
+        // OP47: Back restores the exact page it came from (page 1 = rows
+        // Browser 3, 2, 1 of the eight seeded).
+        await reset();
+        await good(cb(invOwner, `L:1:${leadOnPage1}`));
+        await reset();
+        await good(cb(invOwner, 'l:1'));
+        const backEdits = await edits();
+        const back = backEdits[0] || {};
+        const bKb = kbOf(back);
+        const backText = String(back.body && back.body.text);
+        line(backEdits.length === 1 && backText.includes('1. Browser 3') && backText.includes('3. Browser 1')
+          && bKb.length === 4 && bKb[0][0].callback_data === `L:1:${ids[2]}`
+          && bKb[3].some((x) => x.text === 'Newer' && !('disabled' in x))
+          && bKb[3].some((x) => x.text === 'Older' && x.disabled === true),
+          'OP47', 'Back restores the exact page it came from',
+          `edits=${backEdits.length} first=${JSON.stringify((backText.split('\n')[2] || ''))} rows=${bKb.length}`);
+
+        // OP48: a status change edits in place; the detail keeps Back. A second
+        // tap of the same action answers "Already updated." and re-renders.
+        await reset();
+        await good(cb(invOwner, `C:0:${leadOnPage0}`));
+        const cEdits = await edits();
+        const cNew = await sends();
+        const cKb = kbOf(cEdits[0]);
+        await reset();
+        await good(cb(invOwner, `C:0:${leadOnPage0}`));
+        const twice = await answers();
+        const twiceEdits = await edits();
+        line(cEdits.length === 1 && cNew.length === 0
+          && String(cEdits[0].body.text).includes('Status: Contacted')
+          && cKb[0][0].text === 'Job completed' && cKb[0][0].callback_data === `D:0:${leadOnPage0}`
+          && cKb[1].some((x) => x.callback_data === 'l:0')
+          && twice.includes(C2.TOAST_ALREADY_UPDATED) && twiceEdits.length === 1,
+          'OP48', 'status change edits in place; repeat tap says already updated',
+          `edits=${cEdits.length} sends=${cNew.length} twice=${twice.join('|')}`);
+
+        // OP49: D: asks in place, Y: completes and sends exactly one review
+        // email, and the done detail keeps Back and the copy button.
+        await resetResend();
+        await reset();
+        await good(cb(invOwner, `D:0:${leadOnPage0}`));
+        const askEdits = await edits();
+        const aKb = kbOf(askEdits[0]);
+        await reset();
+        await good(cb(invOwner, `Y:0:${leadOnPage0}`));
+        const doneEdits = await edits();
+        const doneNew = await sends();
+        const doneEmails = (await resendCalls()).length;
+        const row = (await svc.from('leads').select('status, review_token').eq('id', leadOnPage0).single()).data;
+        line(askEdits.length === 1 && aKb[0][0].text === 'Send request' && aKb[0][0].callback_data === `Y:0:${leadOnPage0}`
+          && aKb[0][1].text === 'Cancel' && aKb[0][1].callback_data === `N:0:${leadOnPage0}`
+          && doneEdits.length === 1 && doneNew.length === 0 && doneEmails === 1
+          && row.status === 'done' && !!row.review_token
+          && String(doneEdits[0].body.text).includes('Status: Done')
+          && kbOf(doneEdits[0]).every((r) => r.every((x) => !x.callback_data || x.callback_data === 'l:0'))
+          && kbOf(doneEdits[0]).flat().some((x) => x.copy_text),
+          'OP49', 'browser confirm flow edits in place; done keeps Back and copy',
+          `ask=${askEdits.length} done=${doneEdits.length} emails=${doneEmails}`);
+
+        // OP50: /remove_lead is the same browser in removal mode. A row tap
+        // asks; Cancel returns to the same page; Confirm re-checks, deletes,
+        // and refreshes that page in removal mode.
+        await reset();
+        await good(msg(invOwner, '/remove_lead'));
+        const rmList = (await sends()).pop();
+        const rmKb0 = kbOf(rmList);
+        await reset();
+        await good(cb(invOwner, `Q:0:${ids[5]}`));
+        const ask = (await edits())[0];
+        const askKb = kbOf(ask);
+        await reset();
+        await good(cb(invOwner, 'rm:0'));
+        const cancelled = (await edits())[0];
+        await reset();
+        await good(cb(invOwner, `Q:0:${ids[5]}`));
+        await reset();
+        await good(cb(invOwner, `E:0:${ids[5]}`));
+        const removedNow = (await svc.from('leads').select('id').eq('id', ids[5])).data.length;
+        const afterDel = (await edits())[0];
+        const gone = (await answers());
+        line(String(rmList.body.text).startsWith(C2.REMOVE_LEAD_TITLE)
+          && rmKb0[0][0].callback_data === `Q:0:${longLead.id}`
+          && askKb[0][0].style === 'danger' && askKb[0][0].callback_data === `E:0:${ids[5]}`
+          && askKb[0][1].text === 'Cancel' && askKb[0][1].callback_data === 'rm:0'
+          && String(cancelled.body.text).startsWith(C2.REMOVE_LEAD_TITLE)
+          && cancelled.body.reply_markup.inline_keyboard[0][0].callback_data.startsWith('Q:0:')
+          && removedNow === 0
+          && String(afterDel.body.text).startsWith(C2.REMOVE_LEAD_TITLE)
+          && afterDel.body.reply_markup.inline_keyboard[0][0].callback_data.startsWith('Q:0:')
+          && gone.some((t) => t.startsWith('Removed: Browser 6')),
+          'OP50', 'removal browser: ask, cancel to page, confirm deletes and refreshes',
+          `removed=${removedNow} toast=${gone.find((t) => t.startsWith('Removed:')) || ''}`);
+
+        // OP51: removing the last row on a page moves to a valid page. Page 1
+        // (the last) holds Browser 2 and Browser 1; delete both and the
+        // refresh must land on page 0.
+        await reset();
+        await good(cb(invOwner, 'rm:1'));
+        const p1 = (await edits())[0];
+        await reset();
+        await good(cb(invOwner, `Q:1:${ids[1]}`));
+        await reset();
+        await good(cb(invOwner, `E:1:${ids[1]}`));
+        await reset();
+        await good(cb(invOwner, `Q:1:${ids[0]}`));
+        await reset();
+        await good(cb(invOwner, `E:1:${ids[0]}`));
+        const lastPage = (await edits())[0];
+        const kept = (await svc.from('leads').select('id').in('id', ids)).data.length;
+        line(String(p1.body.text).includes('Browser 2')
+          && kept === 4  // of the Browser rows; longLead and Browser 7 sit above them
+          && String(lastPage.body.text).includes('Browser 5')
+          && String(lastPage.body.text).startsWith(C2.REMOVE_LEAD_TITLE)
+          && lastPage.body.reply_markup.inline_keyboard[0][0].callback_data.startsWith('Q:0:'),
+          'OP51', 'deleting the last rows of a page refreshes to a valid page',
+          `kept=${kept} has5=${String(lastPage.body.text).includes('Browser 5')}`);
+
+        // OP52: taps on a lead that is already gone answer and refresh the
+        // page instead of leaving a dead button.
+        await svc.from('leads').delete().eq('id', ids[4]);
+        await reset();
+        await good(cb(invOwner, `L:0:${ids[4]}`));
+        const goneAnswers = await answers();
+        const goneEdits = await edits();
+        await reset();
+        await good(cb(invOwner, `Q:0:${ids[4]}`));
+        const goneQ = await answers();
+        await reset();
+        await good(cb(invOwner, `E:0:${ids[4]}`));
+        const goneE = await answers();
+        line(goneAnswers.includes(C2.TOAST_LEAD_GONE) && goneEdits.length === 1
+          && String(goneEdits[0].body.text).startsWith('Recent requests')
+          && goneQ.includes(C2.REMOVE_LEAD_GONE) && goneE.includes(C2.REMOVE_LEAD_GONE),
+          'OP52', 'deleted lead: every browser tap answers and refreshes',
+          `L=${goneAnswers.includes(C2.TOAST_LEAD_GONE)} Q=${goneQ.includes(C2.REMOVE_LEAD_GONE)} E=${goneE.includes(C2.REMOVE_LEAD_GONE)}`);
+
+        // OP53: a stale detail tap shows the lead in its CURRENT state. The
+        // lead on page 0 is done (OP49); the detail must say so and offer no
+        // status action, only Back and the copy button.
+        await reset();
+        await good(cb(invOwner, `L:0:${leadOnPage0}`));
+        const staleDetail = (await edits())[0];
+        const sKb = kbOf(staleDetail);
+        line(String(staleDetail.body.text).includes('Status: Done')
+          && sKb.every((r) => r.every((x) => !x.callback_data || x.callback_data === 'l:0'))
+          && sKb.flat().some((x) => x.copy_text),
+          'OP53', 'stale detail tap renders the current state',
+          `actions=${sKb.flat().filter((x) => x.callback_data && x.callback_data !== 'l:0').length}`);
+
+        // OP54: old-format callbacks from messages sent before the browser.
+        // o: still opens the card as a NEW message; l: still pages in place.
+        await reset();
+        await good(cb(invOwner, 'o:' + leadOnPage0));
+        const oldOpen = await sends();
+        const oldOpenEdits = await edits();
+        await reset();
+        await good(cb(invOwner, 'l:0'));
+        const oldPage = (await edits())[0];
+        line(oldOpen.length === 1 && oldOpenEdits.length === 0
+          && String(oldOpen[0].body.text).includes('Browser 7')
+          && String(oldPage.body.text).startsWith('Recent requests'),
+          'OP54', 'old o: opens a new message; old l: still pages in place',
+          `sends=${oldOpen.length} edits=${oldOpenEdits.length}`);
+
+        // OP55: staff can browse and act, but not remove. The staff phone gets
+        // the browser list; its status action works; its removal taps are
+        // refused by the owner gate.
+        await reset();
+        await good(msg(invStaff, '/leads'));
+        const staffList = (await sends()).pop();
+        await reset();
+        await good(cb(invStaff, `C:0:${ids[3]}`));
+        const staffAct = (await edits())[0];
+        const staffRow = (await svc.from('leads').select('status').eq('id', ids[3]).single()).data;
+        await reset();
+        await good(cb(invStaff, `Q:0:${ids[3]}`));
+        const staffQ = await answers();
+        await reset();
+        await good(cb(invStaff, `E:0:${ids[3]}`));
+        const staffE = await answers();
+        const staffKept = (await svc.from('leads').select('id').eq('id', ids[3])).data.length;
+        line(!!staffList && kbOf(staffList)[0][0].callback_data.startsWith('L:0:')
+          && staffRow.status === 'contacted' && String(staffAct.body.text).includes('Status: Contacted')
+          && staffQ.includes(C2.TOAST_OWNER_ONLY) && staffE.includes(C2.TOAST_OWNER_ONLY) && staffKept === 1,
+          'OP55', 'staff browses and acts; removal taps stay owner-only',
+          `status=${staffRow.status} Q=${staffQ.includes(C2.TOAST_OWNER_ONLY)} E=${staffE.includes(C2.TOAST_OWNER_ONLY)}`);
+
+        // OP56: cross-business attempts. chatB (owner of bizB) tapping the
+        // browser callbacks of an invBiz lead finds nothing, changes nothing,
+        // and its own refresh stays bizB's.
+        await reset();
+        await good(cb(chatB, `L:0:${ids[2]}`));
+        const foreignL = await answers();
+        const foreignEdits = await edits();
+        await reset();
+        await good(cb(chatB, `Q:0:${ids[2]}`));
+        await reset();
+        await good(cb(chatB, `E:0:${ids[2]}`));
+        const foreignKept = (await svc.from('leads').select('id').eq('id', ids[2])).data.length;
+        line(foreignL.includes('no longer here') && foreignEdits.length === 1
+          && !String(foreignEdits[0].body.text).includes('Browser')
+          && String(foreignEdits[0].body.text).startsWith('Recent requests')
+          && foreignKept === 1,
+          'OP56', 'cross-business browser taps: not found, nothing changed',
+          `kept=${foreignKept} edits=${foreignEdits.length}`);
+
+        // OP57: the disabled ends. Four rows remain, so page 0 is both the
+        // first and the last page: Newer and Older are both disabled with the
+        // CURRENT page as callback; tapping one anyway (a client that ignores
+        // `disabled`) is a harmless no-op.
+        await reset();
+        await good(cb(invOwner, 'l:0'));
+        const firstPage = (await edits())[0];
+        const fpKb = kbOf(firstPage);
+        const errors = [];
+        const realError = console.error;
+        console.error = (...args) => { errors.push(args.map(String).join(' ')); };
+        try {
+          await reset();
+          await good(cb(invOwner, 'l:0'));
+          const noop = await edits();
+          const noopAnswers = await answers();
+          line(fpKb[fpKb.length - 1].some((x) => x.text === 'Newer' && x.disabled === true && x.callback_data === 'l:0')
+            && fpKb[fpKb.length - 1].some((x) => x.text === 'Older' && x.disabled === true && x.callback_data === 'l:0')
+            && noop.length === 1 && noopAnswers.length === 1 && noopAnswers[0] === ''
+            && !errors.some((l) => l.includes('tg_edit_failed')),
+            'OP57', 'disabled ends render and a forced tap is a harmless no-op',
+            `nav=${JSON.stringify(fpKb[fpKb.length - 1].map((x) => x.text + (x.disabled ? '(off)' : '')))} noopEdits=${noop.length} answers=${JSON.stringify(noopAnswers)}`);
+        } finally {
+          console.error = realError;
+        }
+
+        // OP58: a very long name shortens in the row button, never in the
+        // callback; the message text keeps its own truncation.
+        await reset();
+        await good(cb(invOwner, 'l:0'));
+        const longPage = (await edits())[0];
+        const longBtn = kbOf(longPage).flat().find((b) => b.callback_data === `L:0:${longLead.id}`);
+        line(!!longBtn && longBtn.text.length <= 40 && longBtn.text.includes('…')
+          && !longBtn.text.includes('Vanderberg') && longBtn.text.includes('Roof replacement')
+          && longBtn.callback_data === `L:0:${longLead.id}`,
+          'OP58', 'long name: row label shortened, callback unchanged',
+          `label=${JSON.stringify(longBtn && longBtn.text)} cb=${longBtn && longBtn.callback_data.length}B`);
+
+        // OP59: every callback the live flow emits fits Telegram's 64 bytes.
+        await reset();
+        await good(msg(invOwner, '/leads'));
+        await good(msg(invOwner, '/remove_lead'));
+        const liveCbs = (await sent()).flatMap((x) => (x.body.reply_markup && x.body.reply_markup.inline_keyboard) || [])
+          .flat().filter((b) => b.callback_data).map((b) => b.callback_data);
+        const tooLong = liveCbs.filter((d) => Buffer.byteLength(d, 'utf8') > 64);
+        const longest = liveCbs.reduce((a, b) => (Buffer.byteLength(b) > Buffer.byteLength(a) ? b : a), '');
+        line(liveCbs.length > 10 && tooLong.length === 0,
+          'OP59', 'live flow: every callback_data is within 64 bytes',
+          `callbacks=${liveCbs.length} longest=${longest} (${Buffer.byteLength(longest)}B)`);
+
+        // OP60: the persistent keyboard per role, attached to /help, /start
+        // and the bind confirmation. A press arrives as text and maps onto the
+        // command through the same permission checks.
+        const kbText = (req) => (req && req.body.reply_markup) || null;
+        await reset();
+        await good(msg(invOwner, '/help'));
+        const ownerHelp = (await sends()).pop();
+        await reset();
+        await good(msg(invStaff, '/help'));
+        const staffHelp = (await sends()).pop();
+        await reset();
+        await good(msg(OP, '/help'));
+        const opHelp = (await sends()).pop();
+        await reset();
+        await good(msg(chatX, '/start'));
+        const unboundStart = (await sends()).pop();
+        await reset();
+        await good(msg(chatA, '/start'));
+        const boundStart = (await sends()).pop();
+        const labels = (kb) => (kb && kb.keyboard ? kb.keyboard.flat().map((b) => b.text) : null);
+        await reset();
+        await good(msg(invStaff, 'Invite'));
+        const staffPress = (await sends()).map((x) => x.body.text).join('|');
+        line(kbText(ownerHelp) && kbText(ownerHelp).is_persistent === true && kbText(ownerHelp).resize_keyboard === true
+          && JSON.stringify(labels(kbText(ownerHelp))) === JSON.stringify(['Leads', 'Invite', 'Recipients', 'Help'])
+          && JSON.stringify(labels(kbText(staffHelp))) === JSON.stringify(['Leads', 'Help'])
+          && JSON.stringify(labels(kbText(opHelp))) === JSON.stringify(['Businesses', 'Code', 'Phones', 'Operator'])
+          && kbText(unboundStart) && kbText(unboundStart).remove_keyboard === true
+          && JSON.stringify(labels(kbText(boundStart))) === JSON.stringify(['Leads', 'Invite', 'Recipients', 'Help'])
+          && !labels(kbText(opHelp)).includes('Leads')
+          && staffPress === C2.BOT_OWNER_ONLY,
+          'OP60', 'persistent keyboard per role; presses go through permission checks',
+          `owner=${!!kbText(ownerHelp)} staff=${!!kbText(staffHelp)} op=${!!kbText(opHelp)} unbound=${!!kbText(unboundStart)} press=${staffPress === C2.BOT_OWNER_ONLY}`);
       }
 
       // OP45: an edit that changes nothing is a success. Telegram answers 400
@@ -1753,7 +2127,8 @@ try {
         const rowsAtStart = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
         const answers = {};
         for (const data of ['x:' + ownerRow.id, 'X:' + ownerRow.id, 'v:' + ownerRow.id,
-          'rl:' + lead, 'RL:' + lead, 'rc:' + lead, 'rm:1', 'i:c', 'pc:' + bizA.id, 'pb:' + bizA.id]) {
+          'rl:' + lead, 'RL:' + lead, 'rc:' + lead, 'rm:1', 'Q:0:' + lead, 'E:0:' + lead,
+          'i:c', 'pc:' + bizA.id, 'pb:' + bizA.id]) {
           await reset();
           await good(cb(invStaff, data));
           answers[data.split(':')[0]] = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
@@ -1761,7 +2136,7 @@ try {
         const rowsKept = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
         const leadKept = (await svc.from('leads').select('id').eq('id', lead)).data.length;
         const liveAfter = await liveCodes();
-        const refused = ['x', 'X', 'v', 'rl', 'RL', 'rc', 'rm']
+        const refused = ['x', 'X', 'v', 'rl', 'RL', 'rc', 'rm', 'Q', 'E']
           .every((k) => (answers[k] || []).includes(C2.TOAST_OWNER_ONLY));
         const inviteRefused = (answers.i || []).includes(C2.BOT_OWNER_ONLY);
         const pickerRefused = (answers.pc || []).includes(C2.TOAST_NOT_FOUND)
@@ -1769,6 +2144,45 @@ try {
         line(refused && inviteRefused && pickerRefused && rowsKept === rowsAtStart && leadKept === 1 && liveAfter === liveBefore,
           'OP43', 'staff forged callbacks: refused, owner row, lead and codes intact',
           `rows=${rowsKept} lead=${leadKept} live=${liveBefore === liveAfter}`);
+      }
+
+      // OP61: a chat that is disconnected gets its persistent keyboard taken
+      // away — one short notice carrying ReplyKeyboardRemove — through both
+      // removal paths: the operator's /phones P: and the owner's /recipients
+      // X:. The staff phone is re-bound afterwards (later tests still use it).
+      {
+        const C2 = await import('../lib/content.js');
+        const sends = async () => (await sent()).filter((x) => x.path.includes('/sendMessage'));
+        const edits = async () => (await sent()).filter((x) => x.path.includes('/editMessageText'));
+        const staffRow = (await svc.from('business_chats').select('id, tg_chat_id')
+          .eq('business_id', invBiz.id).order('created_at').order('id')).data.find((r) => String(r.tg_chat_id) === String(invStaff));
+
+        // The operator's path.
+        await reset();
+        await good(cb(OP, 'P:' + staffRow.id));
+        const opRemoved = (await svc.from('business_chats').select('id').eq('id', staffRow.id)).data.length;
+        const opNotice = (await sends()).find((x) => String(x.body.chat_id) === String(invStaff));
+        // Re-bind as the newer phone (invOwner stays the main phone).
+        await svc.from('business_chats').insert({ business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date().toISOString() });
+
+        // The owner's path: ask, then confirm.
+        const again = (await svc.from('business_chats').select('id, tg_chat_id')
+          .eq('business_id', invBiz.id).order('created_at').order('id')).data.find((r) => String(r.tg_chat_id) === String(invStaff));
+        await reset();
+        await good(cb(invOwner, 'x:' + again.id));
+        await reset();
+        await good(cb(invOwner, 'X:' + again.id));
+        const ownerRemoved = (await svc.from('business_chats').select('id').eq('id', again.id)).data.length;
+        const ownerNotice = (await sends()).find((x) => String(x.body.chat_id) === String(invStaff));
+        // Re-bind once more for anything later that expects two phones.
+        await svc.from('business_chats').insert({ business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date().toISOString() });
+        const rebound = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
+
+        const noticeOk = (req) => !!req && req.body.text === C2.BOT_DISCONNECTED
+          && req.body.reply_markup && req.body.reply_markup.remove_keyboard === true;
+        line(opRemoved === 0 && ownerRemoved === 0 && noticeOk(opNotice) && noticeOk(ownerNotice) && rebound === 2,
+          'OP61', 'unbind: the removed chat gets one notice and ReplyKeyboardRemove',
+          `op=${noticeOk(opNotice)} owner=${noticeOk(ownerNotice)} rebound=${rebound}`);
       }
 
       // OP4: /phones marks the owner (oldest) and lists the others.
@@ -1864,8 +2278,8 @@ try {
       line(nowOwner, 'OP11', 'ownership moves to the oldest remaining phone', `owner=${nowOwner}`);
       await svc.from('businesses').delete().eq('id', opBiz.id);
 
-      // OP12: /leads has Open buttons; o: sends the current card; another
-      // business's lead is "Not found.".
+      // OP12: /leads has row buttons; the old o: callback still sends the
+      // current card as a new message; another business's lead is "Not found.".
       const leadA = await seedLead(bizA.id, 'Open Me', 'open@example.com');
       await reset();
       await good(msg(chatA2, '/leads'));
@@ -1878,9 +2292,9 @@ try {
       await reset();
       await good(cb(chatA2, 'o:' + foreign));
       const foreignAnswer = await answersNow();
-      line(kb.includes('o:' + leadA) && card.includes('Open Me') && foreignAnswer.includes('no longer here'), 'OP12',
-        '/leads Open button -> current card; another business\'s lead is Not found',
-        `kb=${kb.includes('o:')} card=${card.includes('Open Me')}`);
+      line(kb.includes('L:0:' + leadA) && card.includes('Open Me') && foreignAnswer.includes('no longer here'), 'OP12',
+        '/leads row button opens the browser; old o: still works; foreign is Not found',
+        `kb=${kb.includes('L:0:')} card=${card.includes('Open Me')}`);
 
       // OP13: my_chat_member (blocked) reaches the operator.
       await svc.from('rate_limits').delete().like('key', 'ops:blocked:%');
