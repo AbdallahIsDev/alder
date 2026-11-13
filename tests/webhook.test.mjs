@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { loadEnv } from './env.mjs';
 import { createClient } from '@supabase/supabase-js';
 import { fakeRes, ALDER_DEMO, sweepTestLeads, fixtureEmail } from './helpers.mjs';
-import { FIXTURE_CHATS } from './fixture-ids.mjs';
+import { FIXTURE_CHATS, fixtureId } from './fixture-ids.mjs';
 
 loadEnv();
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -67,11 +67,13 @@ const mkCode = (n) => { let s = ''; for (let i = 0; i < n; i++) s += ALPHA[Math.
 
 const RUN_STARTED = new Date().toISOString();
 const chatA = FIXTURE_CHATS.webhookA, chatB = FIXTURE_CHATS.webhookB, chatX = FIXTURE_CHATS.webhookX;
+const unboundKeyboardChat = fixtureId(33);
 const bindA = FIXTURE_CHATS.webhookBindA, bindB = FIXTURE_CHATS.webhookBindB, bindX = FIXTURE_CHATS.webhookBindX;
 // Every fixture id this suite may bind, for the start-of-suite and finally sweeps.
 const WEBHOOK_CHATS = [chatA, chatB, chatX, bindA, bindB, bindX,
   FIXTURE_CHATS.webhookA2, FIXTURE_CHATS.webhookA3,
-  FIXTURE_CHATS.webhookOpA, FIXTURE_CHATS.webhookOpB, FIXTURE_CHATS.webhookOperator];
+  FIXTURE_CHATS.webhookOpA, FIXTURE_CHATS.webhookOpB, FIXTURE_CHATS.webhookOperator,
+  unboundKeyboardChat];
 
 const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
 const { data: bizB } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
@@ -678,14 +680,15 @@ try {
     // branches: the y: body now lives in onConfirm, the r: body in onRetry.
     const yBlock = src.slice(src.indexOf('async function onConfirm'), src.indexOf('async function onRetry'));
     const hasTry = yBlock.includes('} catch (e) {') && yBlock.includes("console.error('tg_callback_failed'");
-    const errorView = yBlock.includes("render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed')");
-    const noEmailView = yBlock.includes("render('done', { reply_markup: { inline_keyboard: [] } }, 'no_email')");
+    const renderSignature = src.includes('const render = async (view, reviewResult = null) => {');
+    const catchBlock = yBlock.slice(yBlock.lastIndexOf('} catch (e) {'));
+    const recoveryViews = /if \(result\.lead && result\.lead\.email\) \{\s*await render\('error', 'failed'\);\s*\} else \{\s*await render\('done', 'no_email'\);\s*\}/.test(catchBlock);
     // Slice the catch body itself: a regex bounded by [^}] would stop at the first
     // inner brace and miss an answer() that sits after it.
-    const noSecondAnswer = !yBlock.slice(yBlock.lastIndexOf('} catch (e) {')).includes('answer(');
-    line(hasTry && errorView && noEmailView && noSecondAnswer,
+    const noSecondAnswer = !catchBlock.includes('answer(');
+    line(hasTry && renderSignature && recoveryViews && noSecondAnswer,
       'C31', 'y: post-transition wrap renders error (or no-email done) on throw',
-      `try=${hasTry} error=${errorView} noEmail=${noEmailView} innerCatchAnswers=${!noSecondAnswer}`);
+      `try=${hasTry} renderSignature=${renderSignature} recovery=${recoveryViews} innerCatchAnswers=${!noSecondAnswer}`);
   }
 
   /* C36: the answer-once guard, behaviourally. A callback whose handler would
@@ -1913,6 +1916,10 @@ try {
         // browser callbacks of an invBiz lead finds nothing, changes nothing,
         // and its own refresh stays bizB's.
         await reset();
+        await good(msg(chatB, '/leads'));
+        const ownList = (await sends()).pop();
+        const foreignBefore = (await svc.from('leads').select('*').eq('id', ids[2])).data || [];
+        await reset();
         await good(cb(chatB, `L:0:${ids[2]}`));
         const foreignL = await answers();
         const foreignEdits = await edits();
@@ -1921,12 +1928,30 @@ try {
         await reset();
         await good(cb(chatB, `E:0:${ids[2]}`));
         const foreignKept = (await svc.from('leads').select('id').eq('id', ids[2])).data.length;
-        line(foreignL.includes('no longer here') && foreignEdits.length === 1
+        const foreignAfter = (await svc.from('leads').select('*').eq('id', ids[2])).data || [];
+        const stableListText = (text) => String(text || '').replace(/ · (?:just now|\d+[mhd] ago)$/gm, ' · age');
+        const ownChat = !!ownList && foreignEdits.length === 1
+          && String(foreignEdits[0].body.chat_id) === String(chatB);
+        const ownText = !!ownList && foreignEdits.length === 1
+          && stableListText(foreignEdits[0].body.text) === stableListText(ownList.body.text);
+        const rowButtons = (req) => ((req && req.body.reply_markup && req.body.reply_markup.inline_keyboard) || [])
+          .flat().filter((button) => /^L:0:/.test(button.callback_data || ''))
+          .map((button) => [button.text, button.callback_data]);
+        const stableRowButtons = (req) => rowButtons(req).map(([text, data]) => [
+          String(text).replace(/( · [^·]+ · )(?:just now|\d+[mhd] ago)$/, '$1<age>'), data,
+        ]);
+        const ownRows = stableRowButtons(ownList);
+        const refreshedRows = stableRowButtons(foreignEdits[0]);
+        const ownLeadButtons = ownRows.length > 0 && JSON.stringify(refreshedRows) === JSON.stringify(ownRows);
+        const ownRefresh = ownChat && ownText && ownLeadButtons;
+        const foreignUnchanged = foreignBefore.length === 1 && foreignAfter.length === 1
+          && JSON.stringify(foreignBefore[0]) === JSON.stringify(foreignAfter[0]);
+        line(foreignL.some((text) => text.includes(C2.TOAST_LEAD_GONE)) && foreignEdits.length === 1
           && !String(foreignEdits[0].body.text).includes('Browser')
           && String(foreignEdits[0].body.text).startsWith('Recent requests')
-          && foreignKept === 1,
+          && ownRefresh && foreignKept === 1 && foreignUnchanged,
           'OP56', 'cross-business browser taps: not found, nothing changed',
-          `kept=${foreignKept} edits=${foreignEdits.length}`);
+          `toast=${foreignL.some((text) => text.includes(C2.TOAST_LEAD_GONE))} own=${ownRefresh}[chat=${ownChat},text=${ownText},rows=${ownLeadButtons}] kept=${foreignKept} unchanged=${foreignUnchanged}`);
 
         // OP57: the disabled ends. Four rows remain, so page 0 is both the
         // first and the last page: Newer and Older are both disabled with the
@@ -1936,20 +1961,34 @@ try {
         await good(cb(invOwner, 'l:0'));
         const firstPage = (await edits())[0];
         const fpKb = kbOf(firstPage);
+        const noopLeadsBefore = (await svc.from('leads').select('*').eq('business_id', invBiz.id).order('id')).data || [];
         const errors = [];
         const realError = console.error;
         console.error = (...args) => { errors.push(args.map(String).join(' ')); };
         try {
           await reset();
-          await good(cb(invOwner, 'l:0'));
-          const noop = await edits();
-          const noopAnswers = await answers();
+          const noopCallback = cb(invOwner, 'l:0');
+          await good(noopCallback);
+          const noopRequests = await sent();
+          const noop = noopRequests.filter((x) => x.path.includes('/editMessageText'));
+          const noopAnswers = noopRequests.filter((x) => x.path.includes('/answerCallbackQuery'));
+          const noopSends = noopRequests.filter((x) => x.path.includes('/sendMessage'));
+          const noopLeadsAfter = (await svc.from('leads').select('*').eq('business_id', invBiz.id).order('id')).data || [];
+          const answerBody = noopAnswers[0] && noopAnswers[0].body;
+          const answeredExactlyOnce = noopAnswers.length === 1
+            && answerBody.callback_query_id === noopCallback.callback_query.id;
+          const noErrorText = !!answerBody && (!('text' in answerBody) || answerBody.text === '');
+          const sameMessageRefreshedOnce = noop.length === 1
+            && noop[0].body.chat_id === invOwner
+            && noop[0].body.message_id === noopCallback.callback_query.message.message_id
+            && noopSends.length === 0;
+          const nothingChanged = JSON.stringify(noopLeadsBefore) === JSON.stringify(noopLeadsAfter);
           line(fpKb[fpKb.length - 1].some((x) => x.text === 'Newer' && x.disabled === true && x.callback_data === 'l:0')
             && fpKb[fpKb.length - 1].some((x) => x.text === 'Older' && x.disabled === true && x.callback_data === 'l:0')
-            && noop.length === 1 && noopAnswers.length === 1 && noopAnswers[0] === ''
+            && answeredExactlyOnce && noErrorText && sameMessageRefreshedOnce && nothingChanged
             && !errors.some((l) => l.includes('tg_edit_failed')),
             'OP57', 'disabled ends render and a forced tap is a harmless no-op',
-            `nav=${JSON.stringify(fpKb[fpKb.length - 1].map((x) => x.text + (x.disabled ? '(off)' : '')))} noopEdits=${noop.length} answers=${JSON.stringify(noopAnswers)}`);
+            `answer=${answeredExactlyOnce} noErrorText=${noErrorText} sameEdit=${sameMessageRefreshedOnce} unchanged=${nothingChanged}`);
         } finally {
           console.error = realError;
         }
@@ -1992,8 +2031,11 @@ try {
         await good(msg(OP, '/help'));
         const opHelp = (await sends()).pop();
         await reset();
-        await good(msg(chatX, '/start'));
+        await svc.from('business_chats').delete().eq('tg_chat_id', unboundKeyboardChat);
+        const unboundRowsBefore = (await svc.from('business_chats').select('id').eq('tg_chat_id', unboundKeyboardChat)).data.length;
+        await good(msg(unboundKeyboardChat, '/start'));
         const unboundStart = (await sends()).pop();
+        const unboundRowsAfter = (await svc.from('business_chats').select('id').eq('tg_chat_id', unboundKeyboardChat)).data.length;
         await reset();
         await good(msg(chatA, '/start'));
         const boundStart = (await sends()).pop();
@@ -2006,11 +2048,12 @@ try {
           && JSON.stringify(labels(kbText(staffHelp))) === JSON.stringify(['Leads', 'Help'])
           && JSON.stringify(labels(kbText(opHelp))) === JSON.stringify(['Businesses', 'Code', 'Phones', 'Operator'])
           && kbText(unboundStart) && kbText(unboundStart).remove_keyboard === true
+          && unboundRowsBefore === 0 && unboundRowsAfter === 0
           && JSON.stringify(labels(kbText(boundStart))) === JSON.stringify(['Leads', 'Invite', 'Recipients', 'Help'])
           && !labels(kbText(opHelp)).includes('Leads')
           && staffPress === C2.BOT_OWNER_ONLY,
           'OP60', 'persistent keyboard per role; presses go through permission checks',
-          `owner=${!!kbText(ownerHelp)} staff=${!!kbText(staffHelp)} op=${!!kbText(opHelp)} unbound=${!!kbText(unboundStart)} press=${staffPress === C2.BOT_OWNER_ONLY}`);
+          `owner=${!!kbText(ownerHelp)} staff=${!!kbText(staffHelp)} op=${!!kbText(opHelp)} unbound=${unboundRowsBefore}/${unboundRowsAfter} press=${staffPress === C2.BOT_OWNER_ONLY}`);
       }
 
       // OP45: an edit that changes nothing is a success. Telegram answers 400
@@ -2154,6 +2197,12 @@ try {
         const C2 = await import('../lib/content.js');
         const sends = async () => (await sent()).filter((x) => x.path.includes('/sendMessage'));
         const edits = async () => (await sent()).filter((x) => x.path.includes('/editMessageText'));
+        await svc.from('business_chats').delete().eq('business_id', invBiz.id);
+        await svc.from('business_chats').insert([
+          { business_id: invBiz.id, tg_chat_id: invOwner, created_at: new Date(Date.now() - 3600000).toISOString() },
+          { business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date(Date.now() - 1800000).toISOString() },
+        ]);
+        const startingBindings = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
         const staffRow = (await svc.from('business_chats').select('id, tg_chat_id')
           .eq('business_id', invBiz.id).order('created_at').order('id')).data.find((r) => String(r.tg_chat_id) === String(invStaff));
 
@@ -2161,7 +2210,7 @@ try {
         await reset();
         await good(cb(OP, 'P:' + staffRow.id));
         const opRemoved = (await svc.from('business_chats').select('id').eq('id', staffRow.id)).data.length;
-        const opNotice = (await sends()).find((x) => String(x.body.chat_id) === String(invStaff));
+        const opNotices = (await sends()).filter((x) => String(x.body.chat_id) === String(invStaff));
         // Re-bind as the newer phone (invOwner stays the main phone).
         await svc.from('business_chats').insert({ business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date().toISOString() });
 
@@ -2173,16 +2222,18 @@ try {
         await reset();
         await good(cb(invOwner, 'X:' + again.id));
         const ownerRemoved = (await svc.from('business_chats').select('id').eq('id', again.id)).data.length;
-        const ownerNotice = (await sends()).find((x) => String(x.body.chat_id) === String(invStaff));
+        const ownerNotices = (await sends()).filter((x) => String(x.body.chat_id) === String(invStaff));
         // Re-bind once more for anything later that expects two phones.
         await svc.from('business_chats').insert({ business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date().toISOString() });
         const rebound = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
 
         const noticeOk = (req) => !!req && req.body.text === C2.BOT_DISCONNECTED
           && req.body.reply_markup && req.body.reply_markup.remove_keyboard === true;
-        line(opRemoved === 0 && ownerRemoved === 0 && noticeOk(opNotice) && noticeOk(ownerNotice) && rebound === 2,
+        line(startingBindings === 2 && opRemoved === 0 && ownerRemoved === 0
+          && opNotices.length === 1 && ownerNotices.length === 1
+          && noticeOk(opNotices[0]) && noticeOk(ownerNotices[0]) && rebound === 2,
           'OP61', 'unbind: the removed chat gets one notice and ReplyKeyboardRemove',
-          `op=${noticeOk(opNotice)} owner=${noticeOk(ownerNotice)} rebound=${rebound}`);
+          `start=${startingBindings} op=${opNotices.length}/${opNotices.every(noticeOk)} owner=${ownerNotices.length}/${ownerNotices.every(noticeOk)} rebound=${rebound}`);
       }
 
       // OP4: /phones marks the owner (oldest) and lists the others.
