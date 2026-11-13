@@ -38,10 +38,15 @@ export const FIXTURE_CHATS = Object.freeze({
   webhookBindX: fixtureId(30),    // webhook: pastes a code (unbound)
   webhookInvOwner: fixtureId(31), // webhook: owner of the invite throwaway
   webhookInvStaff: fixtureId(32), // webhook: staff phone on the invite throwaway
-  recipientsA: fixtureId(40),     // recipients: in-memory store only
+  recipientsA: fixtureId(40),      // recipients: in-memory store only
   recipientsA2: fixtureId(41),
   recipientsB: fixtureId(42),
   recipientsOffice: fixtureId(43),
+  browserOwner: fixtureId(50),     // lead-browser: in-memory store only
+  browserStaff: fixtureId(51),
+  browserB: fixtureId(52),
+  browserX: fixtureId(53),
+  browserOperator: fixtureId(54),
 });
 
 export const ALL_FIXTURE_CHAT_IDS = Object.freeze(Object.values(FIXTURE_CHATS));

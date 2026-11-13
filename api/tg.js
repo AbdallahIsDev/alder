@@ -35,6 +35,8 @@ import {
   OPERATOR_USAGE_CODE, OPERATOR_USAGE_PHONES, OPERATOR_UNKNOWN_SLUG, OPERATOR_CAPPED, OPERATOR_NO_PHONES,
   OPERATOR_PHONE_REMOVED, OPERATOR_PHONE_GONE, operatorIdMessage, OPERATOR_HELP,
   OPERATOR_PICK_TEXT, OPERATOR_NO_BUSINESSES, operatorPickerKeyboard, OPERATOR_LEADS_HINT, OPERATOR_REMOVE_LEAD,
+  leadDetailKeyboard, persistentKeyboard, KEYBOARD_LABELS, BOT_DISCONNECTED,
+  OWNER_KEYBOARD_LABELS, STAFF_KEYBOARD_LABELS, OPERATOR_KEYBOARD_LABELS,
 } from '../lib/content.js';
 
 const GENERIC_NOT_FOUND = TOAST_NOT_FOUND;
@@ -53,6 +55,42 @@ async function reply(chatId, text) {
 /** Plain text plus entities. Never parse_mode: nothing here is markup. */
 async function replyMessage(chatId, msg) {
   return sendMessage(chatId, msg.text, { entities: msg.entities });
+}
+
+/* ---------- persistent reply keyboard ----------
+   One keyboard per role, attached to the /start and /help replies and to the
+   bind confirmation, so a role always sees its shortcuts and nothing else. A
+   press arrives as plain text and is mapped back onto the command through
+   KEYBOARD_LABELS; the handlers' permission checks are the authorization, so
+   the keyboard itself grants nothing. When a chat is disconnected it gets one
+   short notice carrying ReplyKeyboardRemove, because its keyboard went stale
+   the moment the binding row was deleted. */
+
+async function roleKeyboardMarkup(chatId, binding) {
+  // A bound chat is a business chat and must never be offered the operator
+  // keyboard, whatever OPERATOR_CHAT_ID says (bindChat already refuses to bind
+  // the operator chat; this ordering is the belt to those braces).
+  if (binding) {
+    const owner = await isOwnerChat(binding.business_id, chatId).catch(() => false);
+    return persistentKeyboard(owner ? OWNER_KEYBOARD_LABELS : STAFF_KEYBOARD_LABELS);
+  }
+  if (isOperatorChat(chatId)) return persistentKeyboard(OPERATOR_KEYBOARD_LABELS);
+  return { remove_keyboard: true };
+}
+
+/** Reply with this chat's current keyboard (or its removal) on the SAME
+ *  message. Best effort: a keyboard that cannot be resolved never blocks the
+ *  reply. */
+async function replyRole(chatId, text, binding) {
+  let markup = null;
+  try { markup = await roleKeyboardMarkup(chatId, binding); } catch { markup = null; }
+  return sendMessage(chatId, text, markup ? { reply_markup: markup } : undefined);
+}
+
+/** One short notice with the keyboard removed, to a chat that was just
+ *  disconnected. Best effort: a chat that blocked the bot stays blocked. */
+function sendKeyboardRemoved(chatId) {
+  return sendMessage(chatId, BOT_DISCONNECTED, { reply_markup: { remove_keyboard: true } }).catch(() => {});
 }
 
 /* ---------- binding by pasted code ----------
@@ -80,20 +118,20 @@ function bindCodeShape(text) {
  */
 async function finishBind(chatId, code, badText = BOT_CODE_BAD) {
   const businessId = await claimBindCode(code).catch(() => null);
-  if (!businessId) return reply(chatId, badText);
+  if (!businessId) return replyRole(chatId, badText, null);
   const business = await getBusinessById(businessId).catch(() => null);
   if (!business) {
     await restoreBindCode(code, businessId).catch(() => {});
-    return reply(chatId, isOperatorChat(chatId) ? OPERATOR_WELCOME : badText);
+    return replyRole(chatId, isOperatorChat(chatId) ? OPERATOR_WELCOME : badText, null);
   }
 
   try {
     await bindChat(businessId, chatId);
   } catch (e) {
     await restoreBindCode(code, businessId).catch(() => {});
-    if (e && e.code === 'operator_chat') return reply(chatId, OPERATOR_DO_NOT_OPEN);
+    if (e && e.code === 'operator_chat') return replyRole(chatId, OPERATOR_DO_NOT_OPEN, null);
     console.error('bind_after_claim_failed', (e && e.code) || 'no_code');
-    return reply(chatId, BOT_BIND_FAILED);
+    return replyRole(chatId, BOT_BIND_FAILED, null);
   }
 
   let actual = null;
@@ -103,14 +141,15 @@ async function finishBind(chatId, code, badText = BOT_CODE_BAD) {
     // A failed read is not evidence that the chat belongs elsewhere. Say so,
     // and do not charge the code for a bind we cannot confirm.
     await restoreBindCode(code, businessId).catch(() => {});
-    return reply(chatId, BOT_BIND_FAILED);
+    return replyRole(chatId, BOT_BIND_FAILED, null);
   }
   if (!actual || String(actual.business_id) !== String(businessId)) {
     await restoreBindCode(code, businessId).catch(() => {});
-    return reply(chatId, BOT_BOUND_ELSEWHERE);
+    return replyRole(chatId, BOT_BOUND_ELSEWHERE, actual);
   }
 
-  return reply(chatId, botLinkedText(business.name));
+  // The bind succeeded: this reply is where the chat gets its role keyboard.
+  return replyRole(chatId, botLinkedText(business.name), actual);
 }
 
 async function handlePastedCode(chatId, code) {
@@ -156,17 +195,17 @@ async function handleStart(chatId, arg) {
   const existing = await getChatBinding(chatId);
   const shaped = bindCodeShape(arg);
   if (existing) {
-    if (shaped && isOperatorChat(chatId)) return reply(chatId, await operatorLinkReply(shaped));
-    return reply(chatId, shaped ? BOT_ALREADY_CONNECTED_CODE : BOT_ALREADY_CONNECTED);
+    if (shaped && isOperatorChat(chatId)) return replyRole(chatId, await operatorLinkReply(shaped), existing);
+    return replyRole(chatId, shaped ? BOT_ALREADY_CONNECTED_CODE : BOT_ALREADY_CONNECTED, existing);
   }
-  if (!arg) return reply(chatId, isOperatorChat(chatId) ? OPERATOR_WELCOME : BOT_NOT_CONNECTED);
+  if (!arg) return replyRole(chatId, isOperatorChat(chatId) ? OPERATOR_WELCOME : BOT_NOT_CONNECTED, null);
   // An unbound operator opening a client link would bind the operator and burn
   // the code the client needs. A live code gets the do-not-open warning; a dead
   // one is just an unknown link, so the operator gets the welcome.
   if (shaped && isOperatorChat(chatId)) {
     let state = 'unknown';
     try { state = await getBindCodeState(shaped); } catch { state = 'unknown'; }
-    return reply(chatId, state === 'live' ? OPERATOR_DO_NOT_OPEN : OPERATOR_WELCOME);
+    return replyRole(chatId, state === 'live' ? OPERATOR_DO_NOT_OPEN : OPERATOR_WELCOME, null);
   }
 
   return finishBind(chatId, arg, BOT_BAD_CODE);
@@ -431,6 +470,8 @@ async function handleRecipientCallback({ cb, kind, rowId, binding, answer }) {
   if (String(row.tg_chat_id) === String(chatId)) { await answer(BOT_RECIPIENT_SELF); return; }
   if (rows.length <= 1) { await answer(BOT_RECIPIENT_LAST); return; }
   const removed = await removeBusinessChat(binding.business_id, rowId);
+  // The removed phone's keyboard is stale the moment this row is gone.
+  if (removed) await sendKeyboardRemoved(row.tg_chat_id);
   await answer(removed ? BOT_RECIPIENT_REMOVED : BOT_RECIPIENT_GONE);
   return sendRecipients(chatId, binding.business_id, messageId);
 }
@@ -565,6 +606,8 @@ async function handleOperatorPhoneCallback({ cb, kind, rowId, answer }) {
   }
 
   const removed = await removeChatById(rowId);
+  // The removed phone's keyboard is stale the moment this row is gone.
+  if (removed) await sendKeyboardRemoved(row.tg_chat_id);
   await answer(removed ? OPERATOR_PHONE_REMOVED : OPERATOR_PHONE_GONE);
   const after = await listBusinessChatsDetailed(row.business_id);
   if (!after.length) {
@@ -584,29 +627,54 @@ async function handleOperatorPhoneCallback({ cb, kind, rowId, answer }) {
    throws does not produce a second toast. */
 
 /** Everything a handler needs, including render(), which re-reads the lead. */
-function makeContext({ cb, business, lead, leadId, businessId, answer }) {
+function makeContext({ cb, business, lead, leadId, businessId, answer, surface = 'alert', page = 0 }) {
   const chatId = cb.message && cb.message.chat && cb.message.chat.id;
   const messageId = cb.message && cb.message.message_id;
+  // The page the browser list came from, bounded; Back and the detail's own
+  // actions re-address it, so it must never grow past what the regexes allow.
+  const safePage = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
+
+  /**
+   * The keyboard for a card state, on the surface the tap came from. The alert
+   * surface keeps today's keyboards exactly. The browser detail (surface
+   * 'detail') keeps the same actions and styles, adds Back to the page it came
+   * from, and adds the detail-only copy_text button for the phone.
+   */
+  const keyboardFor = (view, reviewResult, fresh) => {
+    if (surface === 'detail') {
+      const kind = view === 'confirm' ? 'confirm'
+        : (view === 'error' || reviewResult === 'failed') ? 'error'
+          : view; // 'new' | 'contacted' | 'done'
+      return leadDetailKeyboard(kind, leadId, safePage, fresh || lead);
+    }
+    if (view === 'error' || reviewResult === 'failed') return { reply_markup: tryAgainKeyboard(leadId) };
+    if (view === 'confirm') return { reply_markup: confirmKeyboard(leadId, !!((fresh || lead) && (fresh || lead).email)) };
+    if (view === 'contacted') return { reply_markup: jobDoneKeyboard(leadId) };
+    if (view === 'done') return { reply_markup: { inline_keyboard: [] } };
+    return { reply_markup: alertKeyboard(leadId) };
+  };
 
   // Re-render from the database through the roofer-facing path, never from the
   // previous message text. If the read fails, edit only the keyboard.
-  const render = async (view, keyboardExtra, reviewResult = null) => {
+  const render = async (view, reviewResult = null) => {
     if (!chatId || !messageId) return;
+    let fresh = null;
     let text;
     try {
-      const fresh = await getClientLead(leadId, businessId);
+      fresh = await getClientLead(leadId, businessId);
       if (!fresh) throw new Error('lead_gone');
       text = renderAlert({ business, lead: fresh, view, reviewResult });
     } catch (e) {
       console.error('tg_rerender_failed', (e && e.code) || 'no_code');
-      await editMessageReplyMarkup(chatId, messageId, keyboardExtra && keyboardExtra.reply_markup).catch(() => {});
+      await editMessageReplyMarkup(chatId, messageId, keyboardFor(view, reviewResult, fresh || lead).reply_markup).catch(() => {});
       return;
     }
-    const edited = await editMessageText(chatId, messageId, text, keyboardExtra).catch(() => ({ ok: false }));
+    const extra = keyboardFor(view, reviewResult, fresh);
+    const edited = await editMessageText(chatId, messageId, text, extra).catch(() => ({ ok: false }));
     if (edited && edited.ok) return;
     // Too old to edit (Telegram refuses, or the bot was restarted): send the
     // current card as a new message rather than leaving stale buttons on screen.
-    await sendMessage(chatId, text, keyboardExtra).catch(() => {});
+    await sendMessage(chatId, text, extra).catch(() => {});
   };
 
   /** Re-render this lead in whatever state it is in NOW. Used by a stale tap. */
@@ -614,7 +682,7 @@ function makeContext({ cb, business, lead, leadId, businessId, answer }) {
     const fresh = await getClientLead(leadId, businessId).catch(() => null);
     if (!fresh) return;
     const card = await cardFor({ lead: fresh, leadId });
-    await render(card.view, card.kb, card.reviewResult);
+    await render(card.view, card.reviewResult);
   };
 
   return { answer, render, renderCurrent, lead, leadId, businessId, business };
@@ -638,7 +706,7 @@ async function onContacted(ctx) {
   try { await addEvent(leadId, 'contacted', {}); } catch (e) {
     console.error('tg_contacted_event_failed', (e && e.code) || 'no_code');
   }
-  await render('contacted', { reply_markup: jobDoneKeyboard(leadId) });
+  await render('contacted');
 }
 
 /** d: ask before emailing; no write, no email. */
@@ -650,14 +718,14 @@ async function onJobDone(ctx) {
     return;
   }
   await answer('');
-  await render('confirm', { reply_markup: confirmKeyboard(leadId, !!lead.email) });
+  await render('confirm');
 }
 
 /** n: cancel back to step 2. No write. */
 async function onCancel(ctx) {
   const { answer, render, leadId } = ctx;
   await answer('');
-  await render('contacted', { reply_markup: jobDoneKeyboard(leadId) });
+  await render('contacted');
 }
 
 /** y: contacted/quoted/won -> done, then send the review request. */
@@ -690,16 +758,16 @@ async function onConfirm(ctx) {
       reviewResult = r && r.ok ? 'sent' : 'failed';
     }
     if (reviewResult === 'failed') {
-      await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
+      await render('error', 'failed');
     } else {
-      await render('done', { reply_markup: { inline_keyboard: [] } }, reviewResult);
+      await render('done', reviewResult);
     }
   } catch (e) {
     console.error('tg_callback_failed', (e && e.code) || 'no_code');
     if (result.lead && result.lead.email) {
-      await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
+      await render('error', 'failed');
     } else {
-      await render('done', { reply_markup: { inline_keyboard: [] } }, 'no_email');
+      await render('done', 'no_email');
     }
   }
 }
@@ -754,9 +822,9 @@ async function onRetry(ctx) {
     if (r && r.ok) {
       // Keep the claim: the send succeeded, so no tap needs this lock again.
       sentOk = true;
-      await render('done', { reply_markup: { inline_keyboard: [] } }, 'sent');
+      await render('done', 'sent');
     } else {
-      await render('error', { reply_markup: tryAgainKeyboard(leadId) }, 'failed');
+      await render('error', 'failed');
     }
   } finally {
     // Only a failed attempt releases the lock. A success keeps it, and the
@@ -795,11 +863,19 @@ const CB_LEAD = /^([cdynrvxo]):([0-9a-f-]{36})$/;
 const CB_RECIPIENT = /^([xXv]):([0-9a-f-]{36})$/;
 const CB_OPERATOR_PHONE = /^([pPq]):([0-9a-f-]{36})$/;
 const CB_PAGE = /^l:(\d{1,3})$/;
+// The in-place /leads browser. Row taps and detail actions carry the page the
+// list came from, so Back restores that exact page; the lead address is a uuid
+// and the page is bounded digits, so nothing a customer typed can ride along.
+const CB_LEAD_OPEN = /^L:(\d{1,3}):([0-9a-f-]{36})$/;
+const CB_LEAD_DETAIL = /^([CDYNR]):(\d{1,3}):([0-9a-f-]{36})$/;
 // /remove_lead: open a confirm, delete, cancel, page. All scoped to the binding.
 const CB_REMOVE_OPEN = /^rl:([0-9a-f-]{36})$/;
 const CB_REMOVE_DELETE = /^RL:([0-9a-f-]{36})$/;
 const CB_REMOVE_CANCEL = /^rc:([0-9a-f-]{36})$/;
 const CB_REMOVE_PAGE = /^rm:(\d{1,3})$/;
+// The /remove_lead browser: a row tap asks, E: confirms. Same owner gate.
+const CB_REMOVE_ASK = /^Q:(\d{1,3}):([0-9a-f-]{36})$/;
+const CB_REMOVE_DO = /^E:(\d{1,3}):([0-9a-f-]{36})$/;
 // The invite-cap button. No business id in the payload: the business comes from
 // the binding, so a forged callback can only ever act on the sender's own.
 const CB_INVITE_CANCEL = /^i:c$/;
@@ -821,6 +897,48 @@ async function handleOpenLead({ cb, leadId, binding, answer }) {
   const card = await cardFor({ lead, leadId });
   await answer('');
   await sendMessage(chatId, renderAlert({ business, lead, view: card.view, reviewResult: card.reviewResult }), card.kb);
+}
+
+/**
+ * L: — open one lead INSIDE the list message: the same message is edited to
+ * the detail, never a second one. The page travels in the callback so Back can
+ * restore the exact list page. A lead that is gone answers and refreshes the
+ * page, so no dead row button is left behind.
+ */
+async function handleDetailOpen({ cb, page, leadId, binding, answer }) {
+  const chatId = cb.message && cb.message.chat && cb.message.chat.id;
+  const messageId = cb.message && cb.message.message_id;
+  const lead = await getClientLead(leadId, binding.business_id).catch(() => null);
+  if (!lead) {
+    await answer(TOAST_LEAD_GONE);
+    return sendLeadsPage(chatId, binding.business_id, page, messageId, null);
+  }
+  const business = await getBusinessById(binding.business_id).catch(() => null);
+  if (!business) { await answer(GENERIC_NOT_FOUND); return; }
+  const card = await cardFor({ lead, leadId });
+  const text = renderAlert({ business, lead, view: card.view, reviewResult: card.reviewResult });
+  const markup = leadDetailKeyboard(card.view, leadId, page, lead);
+  await answer('');
+  const r = await editList(chatId, messageId, text, markup);
+  // Too old to edit: send the detail as a new message rather than leaving a
+  // dead row button on screen. Its Back edits the new message instead.
+  if (!(r && r.ok)) await sendMessage(chatId, text, markup).catch(() => {});
+}
+
+/**
+ * After a removal, redraw the removal list on the page the confirm came from.
+ * If that page emptied (its last row was the one deleted), step back to the
+ * newest page that still has rows, so the owner is never left staring at an
+ * empty page with only a disabled Older above nothing.
+ */
+async function refreshRemovePage(chatId, businessId, page, messageId) {
+  let p = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
+  while (p > 0) {
+    const probe = await listClientLeads(businessId, 1, p * REMOVE_PAGE).catch(() => [{}]);
+    if (probe.length) break;
+    p--;
+  }
+  return sendRemovePage(chatId, businessId, p, messageId, null);
 }
 
 /**
@@ -870,11 +988,33 @@ async function handleCallback(cb, binding) {
     const rmDel = CB_REMOVE_DELETE.exec(data);
     const rmCancel = CB_REMOVE_CANCEL.exec(data);
     const rmPage = CB_REMOVE_PAGE.exec(data);
-    if (rmOpen || rmDel || rmCancel || rmPage) {
+    const rmAsk = CB_REMOVE_ASK.exec(data);
+    const rmDo = CB_REMOVE_DO.exec(data);
+    if (rmOpen || rmDel || rmCancel || rmPage || rmAsk || rmDo) {
       // Owner only, before any read; the business is always the binding's.
       if (!(await isOwnerChat(binding.business_id, chatId))) { await answer(TOAST_OWNER_ONLY); return; }
       const messageId = cb.message && cb.message.message_id;
       if (rmPage) { return sendRemovePage(chatId, binding.business_id, Number(rmPage[1]), messageId, answer); }
+      // The /remove_lead browser: a row tap asks, E: re-checks the row and the
+      // binding (both re-read above and here), deletes, then refreshes that
+      // page — stepping back if the deletion emptied it.
+      if (rmAsk) {
+        const leadId = rmAsk[2];
+        const lead = await getClientLead(leadId, binding.business_id).catch(() => null);
+        if (!lead) { await answer(REMOVE_LEAD_GONE); return refreshRemovePage(chatId, binding.business_id, Number(rmAsk[1]), messageId); }
+        await answer('');
+        return editList(chatId, messageId, removeLeadConfirmText(lead), removeLeadConfirmKeyboard(leadId, Number(rmAsk[1])));
+      }
+      if (rmDo) {
+        const leadId = rmDo[2];
+        const lead = await getClientLead(leadId, binding.business_id).catch(() => null);
+        if (!lead) { await answer(REMOVE_LEAD_GONE); return refreshRemovePage(chatId, binding.business_id, Number(rmDo[1]), messageId); }
+        const removed = await deleteLeadScoped(leadId, binding.business_id).catch(() => 0);
+        // The name comes from the row read before the delete: after it there is
+        // nothing left to name.
+        await answer(removed ? removedText(lead) : REMOVE_LEAD_GONE);
+        return refreshRemovePage(chatId, binding.business_id, Number(rmDo[1]), messageId);
+      }
       const leadId = (rmOpen || rmDel || rmCancel)[1];
       if (rmCancel) {
         await answer('');
@@ -906,10 +1046,22 @@ async function handleCallback(cb, binding) {
       return;
     }
 
+    // L: — the /leads browser's row tap: the same message becomes the detail.
+    const open = CB_LEAD_OPEN.exec(data);
+    if (open) {
+      await handleDetailOpen({ cb, page: Number(open[1]), leadId: open[2], binding, answer });
+      return;
+    }
+
+    // c/d/y/n/r on an alert message (today's behaviour, unchanged) and
+    // C/D/Y/N/R on the browser detail (same handlers, page-aware keyboards).
     const m = CB_LEAD.exec(data);
-    if (!m) { await answer(GENERIC_NOT_FOUND); return; }
-    const kind = m[1];
-    const leadId = m[2];
+    const md = CB_LEAD_DETAIL.exec(data);
+    if (!m && !md) { await answer(GENERIC_NOT_FOUND); return; }
+    const kind = m ? m[1] : md[1].toLowerCase();
+    const leadId = m ? m[2] : md[3];
+    const surface = m ? 'alert' : 'detail';
+    const detailPage = md ? Number(md[2]) : 0;
 
     if (kind === 'o') { await handleOpenLead({ cb, leadId, binding, answer }); return; }
 
@@ -920,7 +1072,7 @@ async function handleCallback(cb, binding) {
 
     const handler = CALLBACK_HANDLERS[kind];
     if (!handler) { await answer(GENERIC_NOT_FOUND); return; }
-    await handler(makeContext({ cb, business, lead, leadId, businessId: binding.business_id, answer }));
+    await handler(makeContext({ cb, business, lead, leadId, businessId: binding.business_id, answer, surface, page: detailPage }));
   } catch (e) {
     // A stuck spinner is worse than a generic error: whatever threw (lead
     // read, business read, sent-check, retry read, transition, email send),
@@ -973,7 +1125,12 @@ export default async function handler(req, res) {
 
     if (u.message && typeof u.message.text === 'string') {
       const text = u.message.text.trim();
-      const token = text.split(/\s+/)[0];
+      // A persistent-keyboard press arrives as the button's plain text. Map the
+      // known labels onto their commands here; every handler still applies its
+      // own permission checks, exactly as if the command had been typed. An
+      // unknown text is not a press at all and takes the plain-text path.
+      const pressed = Object.prototype.hasOwnProperty.call(KEYBOARD_LABELS, text) ? KEYBOARD_LABELS[text] : null;
+      const token = pressed || text.split(/\s+/)[0];
       let first = token.toLowerCase();
       // /command@botname is how a command arrives from a client that appends the
       // bot. Only this bot's own username is stripped; another bot's suffix is
@@ -988,7 +1145,7 @@ export default async function handler(req, res) {
         }
         first = first.slice(0, at);
       }
-      const arg = text.slice(token.length).trim();
+      const arg = pressed ? '' : text.slice(token.length).trim();
       const operator = isOperatorChat(chatId, chat.type);
       // Operator answers for the owner commands: the role comes from the env,
       // not from a binding. No new callbacks: the pickers reuse pc:/pb:.
@@ -997,7 +1154,7 @@ export default async function handler(req, res) {
       } else if (operator && first === '/recipients') {
         await operatorPick(chatId, 'pb', OPERATOR_USAGE_PHONES);
       } else if (operator && first === '/help') {
-        await reply(chatId, OPERATOR_HELP);
+        await replyRole(chatId, OPERATOR_HELP, binding);
       } else if (operator && first === '/remove_lead') {
         await reply(chatId, OPERATOR_REMOVE_LEAD);
       } else if (operator && first === '/leads') {
@@ -1013,7 +1170,7 @@ export default async function handler(req, res) {
       } else if (first === '/remove_lead') {
         await handleRemoveLead(chatId, binding);
       } else if (first === '/help') {
-        await reply(chatId, binding ? BOT_HELP : BOT_NOT_CONNECTED);
+        await replyRole(chatId, binding ? BOT_HELP : BOT_NOT_CONNECTED, binding);
       } else if (first === '/id') {
         // Every private chat, bound or not, operator or not: it is how the
         // operator learns OPERATOR_CHAT_ID without a third-party bot. Not in
@@ -1025,7 +1182,7 @@ export default async function handler(req, res) {
         if (first === '/code') await handleOperatorCode(chatId, arg);
         else if (first === '/phones') await handleOperatorPhones(chatId, arg);
         else if (first === '/businesses') await handleOperatorBusinesses(chatId);
-        else if (first === '/operator') await reply(chatId, OPERATOR_HELP);
+        else if (first === '/operator') await replyRole(chatId, OPERATOR_HELP, binding);
         else await handlePlainText(chatId, binding, text);
       } else {
         await handlePlainText(chatId, binding, text);

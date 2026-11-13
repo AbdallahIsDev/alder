@@ -58,6 +58,7 @@ const DEFAULT_SUITES = [
   { file: 'tests/email-layout.test.mjs', needsHttp: false },
   { file: 'tests/digest.test.mjs', needsHttp: false },
   { file: 'tests/recipients.test.mjs', needsHttp: false },
+  { file: 'tests/lead-browser.test.mjs', needsHttp: false },
   { file: 'tests/runner-flags.test.mjs', needsHttp: false },
   { file: 'tests/disk-preflight.test.mjs', needsHttp: false },
   { file: 'tests/skip-summary.test.mjs', needsHttp: false },
