@@ -159,14 +159,23 @@ const samples = sampleTelegramTexts();
   const five = [lead, lead, lead, lead, lead];
   const listKb = C.leadListKeyboard(five, 1, true).reply_markup.inline_keyboard;
   const removeKb = C.removeLeadKeyboard(five, 1, true).reply_markup.inline_keyboard;
-  const numbers = [...listKb[0], ...removeKb[0]];
+  const bizId = '550e8400-e29b-41d4-a716-446655440000';
+  const fiveBiz = [1, 2, 3, 4, 5].map((n) => ({ id: bizId, name: 'A Very Long Business Name Roofing & Exteriors ' + n, slug: 's' + n, status: 'demo', phones: n }));
+  const fiveOpLeads = five.map((l) => ({ ...l, id: bizId }));
+  const opListKb = C.operatorBusinessListKeyboard(fiveBiz, 1, true).reply_markup.inline_keyboard;
+  const opLeadsKb = C.operatorLeadListKeyboard({ businessId: bizId, leads: fiveOpLeads, leadPage: 1, page: 1, hasOlder: true }).reply_markup.inline_keyboard;
+  const numbers = [...listKb[0], ...removeKb[0], ...opListKb[0], ...opLeadsKb[0]];
   const navAndActions = [
     C.BOT_INVITE_CANCEL_BUTTON,
     ...C.recipientsKeyboard([{ id: 'a', label: null }], {}).inline_keyboard.flat().map((b) => b.text),
     ...C.recipientConfirmKeyboard('a').inline_keyboard.flat().map((b) => b.text),
-    ...C.operatorPhonesKeyboard([{ id: 'a', label: null }]).reply_markup.inline_keyboard.flat().map((b) => b.text),
-    ...C.operatorConfirmRemoveKeyboard('a').reply_markup.inline_keyboard.flat().map((b) => b.text),
-    ...C.operatorPickerKeyboard([{ id: 'a', name: 'A Very Long Business Name Roofing & Exteriors', slug: 's' }], 'pb').reply_markup.inline_keyboard.flat().map((b) => b.text),
+    ...opListKb.flat().map((b) => b.text),
+    ...opLeadsKb.flat().map((b) => b.text),
+    ...C.operatorBusinessDetailKeyboard(bizId, 1).reply_markup.inline_keyboard.flat().map((b) => b.text),
+    ...C.operatorTerminateConfirmKeyboard(bizId, 1).reply_markup.inline_keyboard.flat().map((b) => b.text),
+    ...C.operatorBackToBusinessKeyboard(bizId, 1).reply_markup.inline_keyboard.flat().map((b) => b.text),
+    ...C.operatorLeadDetailKeyboard({ businessId: bizId, leadPage: 1, page: 1 }).reply_markup.inline_keyboard.flat().map((b) => b.text),
+    ...C.operatorPickerKeyboard([{ id: 'a', name: 'A Very Long Business Name Roofing & Exteriors', slug: 's' }], 'pc').reply_markup.inline_keyboard.flat().map((b) => b.text),
     ...listKb.flat().map((b) => b.text),
     ...removeKb.flat().map((b) => b.text),
     ...C.removeLeadConfirmKeyboard('x', 0).reply_markup.inline_keyboard.flat().map((b) => b.text),
@@ -180,10 +189,18 @@ const samples = sampleTelegramTexts();
   ];
   const longActions = navAndActions.filter((t) => t.length > 20);
   const badNumbers = numbers.filter((b) => !/^[1-5]$/.test(b.text));
-  const copy = [C.OPERATOR_USAGE_PHONES, C.OPERATOR_USAGE_CODE, C.OPERATOR_HELP, C.BOT_INVITE_CANCEL_BUTTON,
+  // The operator copy no longer offers a per-phone Remove, a /phones picker or
+  // a slug argument for /phones: the command only opens the business browser.
+  const copy = [C.OPERATOR_LEADS_HINT, C.OPERATOR_USAGE_CODE, C.OPERATOR_HELP, C.BOT_INVITE_CANCEL_BUTTON,
+    C.operatorBusinessListText(fiveBiz), C.operatorNoPhoneText({ business: { name: 'A', slug: 'a' } }),
+    C.operatorUnreachableText({ business: { name: 'A', slug: 'a' }, chatId: 1234 }),
+    C.operatorBusinessDetailText({ business: { name: 'A', slug: 'a', status: 'demo' }, rows: [{ label: null }], leadCount: 1 }),
     C.botRecipientsText([{ id: 'a', label: null }]), C.botInvitePendingText({ hours: [5] })].join('\n');
-  const banned = /with a Remove button each|Tap Remove to disconnect|The main phone is the one connected first|Cancel them to make a new one/i;
-  line(longActions.length === 0 && numbers.length === 10 && badNumbers.length === 0 && !banned.test(copy),
+  const banned = /with a Remove button each|Tap Remove to disconnect|The main phone is the one connected first|Cancel them to make a new one|\/phones (?!·)\S|Remove Phone|Pick a business with \/phones/i;
+  const goneExports = ['OPERATOR_USAGE_PHONES', 'OPERATOR_NO_PHONES', 'OPERATOR_PHONE_REMOVED', 'OPERATOR_PHONE_GONE',
+    'operatorPhonesText', 'operatorPhonesKeyboard', 'operatorConfirmRemoveText', 'operatorConfirmRemoveKeyboard', 'operatorBusinessesText']
+    .filter((k) => k in C);
+  line(longActions.length === 0 && numbers.length === 20 && badNumbers.length === 0 && !banned.test(copy) && goneExports.length === 0,
     'T9', 'every button <= 20 chars; list buttons are one digit',
     `buttons=${navAndActions.length} numbers=${numbers.map((b) => b.text).join('')} long=${longActions.join(',') || 'none'}`);
 }
@@ -194,10 +211,33 @@ const samples = sampleTelegramTexts();
   const one = C.recipientConfirmText({ id: 'a', label: null }, 0, { isLast: false });
   const last = C.recipientConfirmText({ id: 'a', label: null }, 0, { isLast: true });
   const kb = C.recipientConfirmKeyboard('row-1').inline_keyboard[0];
-  const opKb = C.operatorConfirmRemoveKeyboard('row-1').reply_markup.inline_keyboard[0];
-  const danger = [kb[0], opKb[0]];
-  const cancel = [kb[1], opKb[1]];
-  const ok = !/Remove it\?/.test(one) && !/Remove it\?/.test(last)
+  const bizId = '550e8400-e29b-41d4-a716-446655440000';
+  const biz = { id: bizId, name: 'Alder Roofing', slug: 'alder-demo', status: 'demo' };
+  const opKb = C.operatorTerminateConfirmKeyboard(bizId, 3).reply_markup.inline_keyboard[0];
+  const opDetail = C.operatorBusinessDetailKeyboard(bizId, 3).reply_markup.inline_keyboard;
+  const danger = [kb[0], opKb[0], opDetail[0][0]];
+  const cancel = [kb[1], opKb[1], opDetail[0][1], opDetail[1][0]];
+  const ask = C.operatorTerminateConfirmText({ business: biz, phones: 2 });
+  const askOne = C.operatorTerminateConfirmText({ business: { ...biz, status: 'paused' }, phones: 1 });
+  const JSONsame = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // The exact layouts: Terminate (danger) left, Leads right, Back below to the
+  // same list page; Confirm terminate (danger) left, Cancel right to the detail.
+  const opOk = JSONsame(opDetail, [
+    [{ text: 'Terminate', callback_data: `bt:3:${bizId}`, style: 'danger' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
+    [{ text: 'Back', callback_data: 'bl:3' }],
+  ]) && JSONsame(opKb, [
+    { text: 'Confirm terminate', callback_data: `bT:3:${bizId}`, style: 'danger' },
+    { text: 'Cancel', callback_data: `bd:3:${bizId}` },
+  ])
+    && ask === `Terminate Telegram access for Alder Roofing? 2 phones will stop receiving alerts and can no longer use this bot.\n\n${C.OPERATOR_TERMINATE_STILL}`
+    // A business that takes no website requests gets no promise about them.
+    && askOne === 'Terminate Telegram access for Alder Roofing? 1 phone will stop receiving alerts and can no longer use this bot.'
+    && C.OPERATOR_TERMINATE_STILL === 'New website requests are still saved and still emailed to the owner email. You get one no-phone notice for each.'
+    && C.botAccessEndedText(biz) === 'Your Telegram access for Alder Roofing was ended. New requests will no longer be sent to this chat. Contact support if this is a mistake.'
+    && C.operatorTerminatedText({ business: biz, removed: 2, failed: 0 }) === 'Alder Roofing terminated · 2 phones removed · 0 notices failed'
+    && C.operatorTerminatedText({ business: biz, removed: 1, failed: 1 }) === 'Alder Roofing terminated · 1 phone removed · 1 notice failed'
+    && C.operatorTerminatedText({ business: biz, removed: 1, failed: 0, invitesKept: true }).includes('/code alder-demo');
+  const ok = opOk && !/Remove it\?/.test(one) && !/Remove it\?/.test(last)
     && one.includes('It will stop receiving alerts.')
     && last.includes('This is the last phone.')
     && danger.every((b) => b.style === 'danger')
@@ -378,9 +418,15 @@ const samples = sampleTelegramTexts();
     C2.alertKeyboard(uuid), C2.jobDoneKeyboard(uuid), C2.tryAgainKeyboard(uuid), C2.confirmKeyboard(uuid, true),
     C2.recipientsKeyboard([{ id: uuid, label: null }], {}),
     C2.recipientConfirmKeyboard(uuid),
-    C2.operatorPhonesKeyboard([{ id: uuid, label: null }]),
-    C2.operatorPickerKeyboard([{ id: uuid, name: 'n', slug: 's' }], 'pb'),
-    C2.operatorConfirmRemoveKeyboard(uuid),
+    C2.operatorPickerKeyboard([{ id: uuid, name: 'n', slug: 's' }], 'pc'),
+    C2.operatorBusinessListKeyboard([lead, lead, lead, lead, lead], 998, true, true),
+    C2.operatorBusinessListKeyboard([lead, lead, lead, lead, lead], 999, true, true),
+    C2.operatorBusinessDetailKeyboard(uuid, 999),
+    C2.operatorTerminateConfirmKeyboard(uuid, 999),
+    C2.operatorBackToBusinessKeyboard(uuid, 999),
+    C2.operatorLeadListKeyboard({ businessId: uuid, leads: [lead, lead, lead, lead, lead], leadPage: 98, page: 999, hasOlder: true }),
+    C2.operatorLeadListKeyboard({ businessId: uuid, leads: [lead, lead, lead, lead, lead], leadPage: 99, page: 999, hasOlder: true }),
+    C2.operatorLeadDetailKeyboard({ businessId: uuid, leadPage: 99, page: 999 }),
     ...['new', 'contacted', 'confirm', 'done', 'error'].map((k) => C2.leadDetailKeyboard(k, uuid, 999, lead)),
     C2.leadDetailKeyboard('new', uuid, 999, { ...lead, phone: null }),
   ];
@@ -390,15 +436,29 @@ const samples = sampleTelegramTexts();
   const empty = cbs.filter((d) => Buffer.byteLength(d, 'utf8') < 1);
   // Nothing a customer typed can ride along: a known one- or two-letter kind,
   // then only digits, colons and uuid hex.
-  const shaped = cbs.filter((d) => !/^[A-Za-z]{1,2}:/.test(d) || !/^[0-9a-f:-]*$/.test(d.replace(/^[A-Za-z]{1,2}:/, '')));
-  // Every page a button addresses must pass the anchored page regex (1-3 digits).
-  const pages = cbs.map((d) => /^(?:l|rm):(\d+)$/.exec(d) || /^[LQCDYNRE]:(\d+):/.exec(d)).filter(Boolean).map((m) => m[1]);
-  const badPages = pages.filter((n) => n.length > 3);
+  // The one exception is bo: (the operator's read-only request): two uuids
+  // do not fit as text, so both travel packed, 22 base64url characters each,
+  // and each must unpack to a uuid again. Still nothing typed by anyone.
+  const packedOk = (d) => {
+    const m = /^bo:(\d{1,2}):(\d{1,3}):([A-Za-z0-9_-]{22})([A-Za-z0-9_-]{22})$/.exec(d);
+    return !!m && C2.unpackUuid(m[3]) === uuid && C2.unpackUuid(m[4]) === uuid;
+  };
+  const shaped = cbs.filter((d) => (d.startsWith('bo:')
+    ? !packedOk(d)
+    : !/^[A-Za-z]{1,2}:/.test(d) || !/^[0-9a-f:-]*$/.test(d.replace(/^[A-Za-z]{1,2}:/, ''))));
+  // Every page a button addresses must pass the anchored page regex (1-3 digits;
+  // the operator's request page 1-2 digits).
+  const pages = cbs.map((d) => /^(?:l|rm|bl):(\d+)$/.exec(d) || /^(?:[LQCDYNRE]|bd|bt|bT):(\d+):/.exec(d) || /^b[qo]:\d{1,2}:(\d+):/.exec(d)).filter(Boolean).map((m) => m[1]);
+  const badPages = pages.filter((n) => n.length > 3)
+    .concat(cbs.map((d) => /^b[qo]:(\d+):/.exec(d)).filter(Boolean).map((m) => m[1]).filter((n) => n.length > 2));
+  const packs = C2.packUuid(uuid).length === 22 && C2.unpackUuid(C2.packUuid(uuid)) === uuid
+    && C2.packUuid('not-a-uuid') === '' && C2.unpackUuid('short') === null && C2.unpackUuid('!'.repeat(22)) === null;
   const noAction = buttons.filter((b) => !b.callback_data);
   const copies = buttons.filter((b) => 'copy_text' in b);
   const longest = cbs.reduce((a, b) => (Buffer.byteLength(b) > Buffer.byteLength(a) ? b : a), '');
   line(cbs.length > 20 && tooLong.length === 0 && empty.length === 0 && shaped.length === 0
-    && badPages.length === 0 && pages.length > 20
+    && badPages.length === 0 && pages.length > 20 && packs
+    && cbs.filter((d) => d.startsWith('bo:')).length === 10
     && noAction.length === 0 && copies.length === 0,
     'T17', 'every callback_data <= 64 bytes; no copy_text button anywhere',
     `callbacks=${cbs.length} longest=${longest} (${Buffer.byteLength(longest)}B) copies=${copies.length}`);
@@ -456,7 +516,10 @@ const samples = sampleTelegramTexts();
     C2.alertKeyboard(uuid), C2.jobDoneKeyboard(uuid), C2.tryAgainKeyboard(uuid),
     C2.confirmKeyboard(uuid, true), C2.confirmKeyboard(uuid, false),
     C2.recipientsKeyboard([{ id: uuid, label: null }, { id: uuid, label: null }], {}), C2.recipientConfirmKeyboard(uuid),
-    C2.operatorPhonesKeyboard([{ id: uuid, label: null }]), C2.operatorConfirmRemoveKeyboard(uuid),
+    C2.operatorBusinessListKeyboard(five, 1, true), C2.operatorBusinessDetailKeyboard(uuid, 1),
+    C2.operatorTerminateConfirmKeyboard(uuid, 1), C2.operatorBackToBusinessKeyboard(uuid, 1),
+    C2.operatorLeadListKeyboard({ businessId: uuid, leads: five, leadPage: 1, page: 1, hasOlder: true }),
+    C2.operatorLeadDetailKeyboard({ businessId: uuid, leadPage: 1, page: 1 }),
     C2.operatorPickerKeyboard([{ id: uuid, name: 'Alder Roofing', slug: 'alder-demo' }], 'pc'),
     ...['new', 'contacted', 'confirm', 'done', 'error'].map((k) => C2.leadDetailKeyboard(k, uuid, 0, lead)),
   ].flatMap((kb) => (kb.reply_markup || kb).inline_keyboard.flat());

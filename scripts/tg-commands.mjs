@@ -39,8 +39,8 @@ export const COMMANDS = [
 /* Registered only for the operator chat, as a chat-scoped menu. */
 export const OPERATOR_COMMANDS = [
   { command: 'code', description: 'Invite code for a business' },
-  { command: 'phones', description: 'Connected phones for a business' },
-  { command: 'businesses', description: 'Every business and its phones' },
+  { command: 'businesses', description: 'Businesses: phones, requests, terminate' },
+  { command: 'phones', description: 'Same list as /businesses' },
   { command: 'id', description: "This chat's id" },
   { command: 'operator', description: 'Operator help' },
 ];

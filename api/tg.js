@@ -25,10 +25,13 @@ import {
   removeLeadListText, removeLeadKeyboard, removeLeadConfirmText, removeLeadConfirmKeyboard, removedText, REMOVE_LEAD_GONE,
   OPERATOR_ALREADY_CONNECTED_CODE, OPERATOR_DO_NOT_OPEN, OPERATOR_WELCOME, OPERATOR_CODE_USED, OPERATOR_CODE_EXPIRED, OPERATOR_CODE_UNKNOWN,
   BOT_OWNER_ONLY, botForwardText,
-  operatorCodeText, operatorCodeResendText, operatorPhonesText, operatorPhonesKeyboard,
-  operatorConfirmRemoveText, operatorConfirmRemoveKeyboard, operatorBusinessesText,
-  OPERATOR_USAGE_CODE, OPERATOR_USAGE_PHONES, OPERATOR_UNKNOWN_SLUG, OPERATOR_CAPPED, OPERATOR_NO_PHONES,
-  OPERATOR_PHONE_REMOVED, OPERATOR_PHONE_GONE, operatorIdMessage, OPERATOR_HELP,
+  operatorCodeText, operatorCodeResendText,
+  operatorBusinessListText, operatorBusinessListKeyboard, operatorBusinessDetailText, operatorBusinessDetailKeyboard,
+  operatorTerminateConfirmText, operatorTerminateConfirmKeyboard, operatorTerminatedText, operatorNotConnectedText,
+  operatorBackToBusinessKeyboard, operatorLeadListText, operatorLeadListKeyboard, operatorLeadDetailKeyboard,
+  botAccessEndedText, unpackUuid,
+  OPERATOR_BUSINESS_GONE, OPERATOR_SCREEN_EXPIRED, OPERATOR_PAGE_GONE, OPERATOR_NOT_CONNECTED, OPERATOR_TERMINATED,
+  OPERATOR_USAGE_CODE, OPERATOR_UNKNOWN_SLUG, OPERATOR_CAPPED, operatorIdMessage, OPERATOR_HELP,
   OPERATOR_PICK_TEXT, OPERATOR_NO_BUSINESSES, operatorPickerKeyboard, OPERATOR_LEADS_HINT, OPERATOR_REMOVE_LEAD,
   leadDetailKeyboard, persistentKeyboard, KEYBOARD_LABELS, BOT_DISCONNECTED,
   OWNER_KEYBOARD_LABELS, STAFF_KEYBOARD_LABELS, OPERATOR_KEYBOARD_LABELS,
@@ -44,9 +47,10 @@ import {
 const {
   getChatBinding, bindChat, claimBindCode, restoreBindCode, getBindCodeState, getBusinessById, clearRateLimit, deleteLeadScoped,
   listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
-  countBusinessChats, countBusinessesByName, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
+  countBusinessChats, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
   listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
-  getActiveBusinessBySlug, listBusinessSlugs, listPickerBusinesses, getChatById, removeChatById,
+  getActiveBusinessBySlug, listPickerBusinesses,
+  listBusinessesPage, countChatsForBusinesses, countClientLeads, removeAllBusinessChats,
 } = timedAll(dbApi, {
   getChatBinding: 'db.binding_lookup',
   bindChat: 'db.bind_chat',
@@ -55,11 +59,11 @@ const {
   getBindCodeState: 'db.bind_code_state',
   getBusinessById: 'db.business_by_id',
   getActiveBusinessBySlug: 'db.business_by_slug',
-  listBusinessSlugs: 'db.business_list',
+  listBusinessesPage: 'db.business_page',
   listPickerBusinesses: 'db.business_picker_list',
-  countBusinessesByName: 'db.business_name_count',
   listClientLeads: 'db.lead_page',
   getClientLead: 'db.lead_by_id',
+  countClientLeads: 'db.lead_count',
   transitionLead: 'db.status_update',
   deleteLeadScoped: 'db.lead_delete',
   getDoneLeadForRetry: 'db.lead_retry_read',
@@ -71,10 +75,10 @@ const {
   clearStaleRetryLock: 'db.retry_lock_clear',
   listBusinessChatsDetailed: 'db.chat_list',
   countBusinessChats: 'db.chat_count',
+  countChatsForBusinesses: 'db.chat_count_page',
   getBusinessChat: 'db.chat_by_id_scoped',
-  getChatById: 'db.chat_by_id',
   removeBusinessChat: 'db.chat_remove_scoped',
-  removeChatById: 'db.chat_remove',
+  removeAllBusinessChats: 'db.chat_remove_all',
   countLiveBindCodes: 'db.invite_count',
   listLiveBindCodes: 'db.invite_list',
   expireLiveBindCodes: 'db.invite_expire',
@@ -681,104 +685,199 @@ async function handleOperatorCode(chatId, arg, known = null) {
   }
 }
 
-/** `known`: see handleOperatorCode. The phone list and the same-name count
- *  are independent of each other, so they are read together. */
-async function handleOperatorPhones(chatId, arg, known = null) {
-  const slug = String(arg || '').trim();
-  if (!slug) return operatorPick(chatId, 'pb', OPERATOR_USAGE_PHONES);
-  if (!SLUG_RE.test(slug)) return reply(chatId, OPERATOR_USAGE_PHONES);
-  const business = known || await getActiveBusinessBySlug(slug).catch(() => null);
-  if (!business) return reply(chatId, OPERATOR_UNKNOWN_SLUG);
-  const [rows, duplicateName] = await together([
-    listBusinessChatsDetailed(business.id),
-    countBusinessesByName(business.name).then((n) => n > 1).catch(() => false),
-  ]);
-  const title = `${business.name}${duplicateName ? ` (${business.slug})` : ''}`;
-  if (!rows.length) {
-    return reply(chatId, `${OPERATOR_NO_PHONES}\n\n${title}. Mint an invite with /code ${business.slug}.`);
-  }
-  return sendMessage(chatId, operatorPhonesText({ business, rows, ownerId: rows[0].id, selfChatId: chatId, duplicateName }), operatorPhonesKeyboard(rows));
+/* ---------- operator business browser ----------
+   /businesses and /phones open the same ONE message, edited in place like the
+   owner's /leads: the list, one business, its requests (read-only), and
+   Terminate. Operator access is cross-business by design, so nothing here
+   comes from a binding; instead every tap is (1) checked against
+   OPERATOR_CHAT_ID by the dispatcher before anything is read, and (2) has its
+   business id read back from the database before anything is drawn or
+   changed. A business that is gone answers with a toast and the current list.
+   A request is always read by its own id AND that validated business id. */
+
+const BUSINESS_PAGE = 5;
+const BUSINESS_PAGE_MAX = 199;
+const clampBusinessPage = (page) => Math.max(0, Math.min(BUSINESS_PAGE_MAX, Number(page) || 0));
+
+/** One page in exactly two queries: the rows (name, then id), and the phone
+ *  counts of those rows together. Never one count per business. */
+async function readBusinessPage(page) {
+  const rows = await listBusinessesPage(BUSINESS_PAGE + 1, page * BUSINESS_PAGE);
+  const shown = rows.slice(0, BUSINESS_PAGE);
+  // Counted by business id, so a paused or churned business shows its phones
+  // too. null, not 0, when the count fails: the text says "?" for it.
+  const counts = shown.length ? await countChatsForBusinesses(shown.map((r) => r.id)).catch(() => null) : null;
+  return {
+    shown: shown.map((r) => ({ ...r, phones: counts ? (counts.get(String(r.id)) || 0) : null })),
+    hasOlder: rows.length > BUSINESS_PAGE && page < BUSINESS_PAGE_MAX,
+  };
 }
 
-/** How many phone counts /businesses asks for at the same time. */
-const BUSINESS_COUNT_BATCH = 6;
-
-async function handleOperatorBusinesses(chatId) {
-  const slugs = await listBusinessSlugs().catch(() => []);
-  // One count per business. No count depends on another, so they run side by
-  // side — a few at a time, so a long list never opens a burst of connections
-  // — and the rows keep the order of the list.
-  const rows = [];
-  for (let i = 0; i < slugs.length; i += BUSINESS_COUNT_BATCH) {
-    rows.push(...await together(slugs.slice(i, i + BUSINESS_COUNT_BATCH).map(async (r) => {
-      // Count by id: a paused or churned business has phones too, and the
-      // active-only lookup would show 0 for them.
-      // null, not 0: a failed count is unknown, and the text says "?" for it.
-      const phones = await countBusinessChats(r.id).catch(() => null);
-      return { slug: r.slug, name: r.name, status: r.status, phones };
-    })));
+/** The list. With a message id it is an edit, and the toast goes out with it;
+ *  without one (the command) it is the one new message. A page that no longer
+ *  exists becomes the first page, never an empty screen. */
+async function sendBusinessPage(chatId, page, messageId, answer = null, toast = '') {
+  let p = clampBusinessPage(page);
+  let view = await readBusinessPage(p);
+  let note = toast;
+  if (!view.shown.length && p > 0) {
+    p = 0;
+    view = await readBusinessPage(0);
+    note = note || OPERATOR_PAGE_GONE;
   }
-  return reply(chatId, operatorBusinessesText(rows));
+  const text = operatorBusinessListText(view.shown);
+  const markup = view.shown.length
+    ? operatorBusinessListKeyboard(view.shown, p, view.hasOlder)
+    : { reply_markup: { inline_keyboard: [] } };
+  if (messageId) {
+    const [, edited] = await together([answer ? answer(note) : null, editList(chatId, messageId, text, markup)]);
+    return edited;
+  }
+  return sendMessage(chatId, text, markup);
+}
+
+/** /businesses, /phones and the operator's /recipients: the same browser. */
+async function handleOperatorBusinesses(chatId) {
+  try {
+    return await sendBusinessPage(chatId, 0, null);
+  } catch (e) {
+    console.error('operator_businesses_failed', (e && e.code) || 'no_code');
+    return reply(chatId, TOAST_GENERIC_ERROR);
+  }
+}
+
+/** One business: its phones and its request count. The three reads need only
+ *  the id, so they run together; the business row is judged first, and
+ *  nothing is drawn unless it exists. */
+async function sendBusinessDetail({ chatId, messageId, businessId, page, answer, toast = '' }) {
+  const [biz, chats, leads] = await together([
+    settle(getBusinessById(businessId)),
+    settle(listBusinessChatsDetailed(businessId)),
+    settle(countClientLeads(businessId)),
+  ]);
+  if (biz.error) throw biz.error;
+  const business = biz.value;
+  if (!business) return sendBusinessPage(chatId, page, messageId, answer, OPERATOR_BUSINESS_GONE);
+  const text = operatorBusinessDetailText({
+    business,
+    rows: chats.error ? null : chats.value,
+    leadCount: leads.error ? null : leads.value,
+  });
+  await together([answer(toast), editList(chatId, messageId, text, operatorBusinessDetailKeyboard(business.id, page))]);
+}
+
+/** The validated business row for a tap, or null after answering with the
+ *  current list. Every lead read below waits for this. */
+async function operatorBusinessOrList({ chatId, messageId, businessId, page, answer }) {
+  const business = await getBusinessById(businessId);
+  if (!business) await sendBusinessPage(chatId, page, messageId, answer, OPERATOR_BUSINESS_GONE);
+  return business;
+}
+
+/** The business's requests, read-only: same text and order as the owner's
+ *  /leads (created_at desc, id desc), scoped by the validated business id. */
+async function sendOperatorLeads({ chatId, messageId, business, leadPage, page, answer, toast = null }) {
+  const lp = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(leadPage) || 0));
+  const leads = await listClientLeads(business.id, LEADS_PAGE + 1, lp * LEADS_PAGE);
+  const hasOlder = leads.length > LEADS_PAGE && lp < LEADS_PAGE_MAX;
+  const shown = leads.slice(0, LEADS_PAGE);
+  const note = toast !== null ? toast : (shown.length ? '' : (lp === 0 ? TOAST_NO_LEADS : TOAST_NO_OLDER));
+  await together([
+    answer(note),
+    editList(chatId, messageId, operatorLeadListText(business, shown, lp),
+      operatorLeadListKeyboard({ businessId: business.id, leads: shown, leadPage: lp, page, hasOlder })),
+  ]);
+}
+
+async function handleOperatorLeadsPage({ chatId, messageId, businessId, leadPage, page, answer }) {
+  const business = await operatorBusinessOrList({ chatId, messageId, businessId, page, answer });
+  if (!business) return;
+  await sendOperatorLeads({ chatId, messageId, business, leadPage, page, answer });
+}
+
+/** One request, read-only: the owner's card text, and only Back under it. */
+async function handleOperatorLeadOpen({ chatId, messageId, businessId, leadId, leadPage, page, answer }) {
+  const business = await operatorBusinessOrList({ chatId, messageId, businessId, page, answer });
+  if (!business) return;
+  const lead = await getClientLead(leadId, business.id).catch(() => null);
+  if (!lead) {
+    await sendOperatorLeads({ chatId, messageId, business, leadPage, page, answer, toast: TOAST_LEAD_GONE });
+    return;
+  }
+  const card = await cardFor({ lead, leadId });
+  const text = renderAlert({ business, lead, view: card.view, reviewResult: card.reviewResult });
+  await together([
+    answer(''),
+    editList(chatId, messageId, text, operatorLeadDetailKeyboard({ businessId: business.id, leadPage, page })),
+  ]);
 }
 
 /**
- * p: ask, P: remove, q: cancel. The row id is the address; the business comes
- * from the row. The operator may remove the last phone, because locking them out
- * of their own recovery path is worse than an empty business — the warning says
- * exactly what will happen.
+ * Terminate: end a business's Telegram access. `confirmed` false asks, true
+ * does it. The business status, the business row and its leads are not
+ * touched: only its chat bindings and its unused invites.
+ *
+ * On confirm, in this order: (a) one plain notice to every bound phone, with
+ * ReplyKeyboardRemove on the same message, BEFORE anything is deleted — a
+ * notice that fails is counted and blocks nothing; (b) every binding of that
+ * business in one scoped DELETE, together with (c) its unused invites expired,
+ * so an old code cannot connect a phone again; (d) the operator's message
+ * becomes the result. With no phone connected nothing is sent and nothing is
+ * written, so a second tap is harmless.
  */
-async function handleOperatorPhoneCallback({ cb, kind, rowId, answer }) {
-  const chatId = cb.message && cb.message.chat && cb.message.chat.id;
-  const messageId = cb.message && cb.message.message_id;
-  const row = await getChatById(rowId).catch(() => null);
-  if (!row) { await answer(OPERATOR_PHONE_GONE); return; }
-  // The business and its phone list both hang off the row and not off each
-  // other, so they are read together; a missing business is still judged
-  // first, exactly as when it was read first.
-  const [business, listed] = await together([
-    getBusinessById(row.business_id).catch(() => null),
-    settle(listBusinessChatsDetailed(row.business_id)),
+async function handleOperatorTerminate({ chatId, messageId, businessId, page, answer, confirmed }) {
+  const [biz, chats] = await together([
+    settle(getBusinessById(businessId)),
+    settle(listBusinessChatsDetailed(businessId)),
   ]);
-  if (!business) { await answer(OPERATOR_PHONE_GONE); return; }
-  if (listed.error) throw listed.error;
-  const rows = listed.value;
-  const index = rows.findIndex((r) => r.id === rowId);
+  if (biz.error) throw biz.error;
+  const business = biz.value;
+  if (!business) { await sendBusinessPage(chatId, page, messageId, answer, OPERATOR_BUSINESS_GONE); return; }
+  if (chats.error) throw chats.error;
+  const rows = chats.value;
+  const back = operatorBackToBusinessKeyboard(business.id, page);
 
-  if (kind === 'p') {
+  if (!confirmed) {
+    if (!rows.length) {
+      await sendBusinessDetail({ chatId, messageId, businessId: business.id, page, answer, toast: OPERATOR_NOT_CONNECTED });
+      return;
+    }
     await together([
       answer(''),
-      editMessageText(chatId, messageId,
-        operatorConfirmRemoveText({ row, index: index < 0 ? rows.length : index, isLast: rows.length <= 1 }),
-        operatorConfirmRemoveKeyboard(rowId)).catch(() => {}),
-    ]);
-    return;
-  }
-  if (kind === 'q') {
-    await together([
-      answer(''),
-      editMessageText(chatId, messageId,
-        operatorPhonesText({ business, rows, ownerId: rows[0] && rows[0].id }),
-        operatorPhonesKeyboard(rows)).catch(() => {}),
+      editList(chatId, messageId, operatorTerminateConfirmText({ business, phones: rows.length }),
+        operatorTerminateConfirmKeyboard(business.id, page)),
     ]);
     return;
   }
 
-  const removed = await removeChatById(rowId);
-  // The notice to the removed phone (its keyboard is stale the moment the row
-  // is gone), the toast and the fresh list do not wait for each other.
-  const [, , after] = await together([
-    removed ? sendKeyboardRemoved(row.tg_chat_id) : null,
-    answer(removed ? OPERATOR_PHONE_REMOVED : OPERATOR_PHONE_GONE),
-    listBusinessChatsDetailed(row.business_id),
-  ]);
-  if (!after.length) {
-    return editMessageText(chatId, messageId,
-      `📵 ${business.name} (${business.slug}) has no phones connected.\n\nNobody will receive alerts for this business until a new phone is connected. Mint an invite with /code ${business.slug}.`,
-      { reply_markup: { inline_keyboard: [] } }).catch(() => {});
+  if (!rows.length) {
+    await together([answer(OPERATOR_NOT_CONNECTED), editList(chatId, messageId, operatorNotConnectedText(business), back)]);
+    return;
   }
-  return editMessageText(chatId, messageId,
-    operatorPhonesText({ business, rows: after, ownerId: after[0].id }),
-    operatorPhonesKeyboard(after)).catch(() => {});
+
+  const notice = botAccessEndedText(business);
+  const sent = await together(rows.map((r) => settle(
+    sendMessage(r.tg_chat_id, notice, { reply_markup: { remove_keyboard: true } }))));
+  const failed = sent.filter((r) => r.error || !(r.value && r.value.ok)).length;
+
+  const [removed, expired] = await together([
+    settle(removeAllBusinessChats(business.id)),
+    settle(expireLiveBindCodes(business.id)),
+  ]);
+  // The bindings could not be deleted: nothing is reported as done. The
+  // dispatcher answers with the generic error and the question stays on screen.
+  if (removed.error) throw removed.error;
+  if (expired.error) console.error('operator_terminate_invites_kept', (expired.error && expired.error.code) || 'no_code');
+  const count = removed.value.length;
+  if (!count) {
+    await together([answer(OPERATOR_NOT_CONNECTED), editList(chatId, messageId, operatorNotConnectedText(business), back)]);
+    return;
+  }
+  await together([
+    answer(OPERATOR_TERMINATED),
+    editList(chatId, messageId,
+      operatorTerminatedText({ business, removed: count, failed, invitesKept: !!expired.error }), back),
+  ]);
 }
 
 /* ---------- callback handling ----------
@@ -1061,6 +1160,8 @@ export function createAnswerOnce(id) {
 
 const CB_LEAD = /^([cdynrvxo]):([0-9a-f-]{36})$/;
 const CB_RECIPIENT = /^([xXv]):([0-9a-f-]{36})$/;
+// The operator's old "Remove Phone N" buttons. They no longer remove anything:
+// a tap answers "expired" and shows the current business list.
 const CB_OPERATOR_PHONE = /^([pPq]):([0-9a-f-]{36})$/;
 const CB_PAGE = /^l:(\d{1,3})$/;
 // The in-place /leads browser. Number taps and detail actions carry the page the
@@ -1079,9 +1180,17 @@ const CB_REMOVE_DO = /^E:(\d{1,3}):([0-9a-f-]{36})$/;
 // The invite-cap button. No business id in the payload: the business comes from
 // the binding, so a forged callback can only ever act on the sender's own.
 const CB_INVITE_CANCEL = /^i:c$/;
-// Operator pickers: pb = phones, pc = code. The payload is the business id, so a
-// stale list can only ever point at a business that no longer exists.
+// Operator pickers: pc = code. pb was the /phones picker; a button from a
+// message sent before the browser existed now opens that business in it. The
+// payload is the business id, so a stale list can only ever point at a business
+// that no longer exists.
 const CB_OPERATOR_PICK = /^(pb|pc):([0-9a-f-]{36})$/;
+// The operator's business browser (see lib/content.js for the table). Pages are
+// bounded digits and every id is a uuid, as text or as 22 packed characters.
+const CB_OP_LIST = /^bl:(\d{1,3})$/;
+const CB_OP_BUSINESS = /^(bd|bt|bT):(\d{1,3}):([0-9a-f-]{36})$/;
+const CB_OP_LEADS = /^bq:(\d{1,2}):(\d{1,3}):([0-9a-f-]{36})$/;
+const CB_OP_LEAD = /^bo:(\d{1,2}):(\d{1,3}):([A-Za-z0-9_-]{22})([A-Za-z0-9_-]{22})$/;
 
 /** Open one lead as a NEW message with its current card. */
 async function handleOpenLead({ cb, leadId, binding, answer }) {
@@ -1170,31 +1279,70 @@ async function handleCallback(cb, binding) {
   const messageId = cb.message && cb.message.message_id;
 
   try {
+    const opList = CB_OP_LIST.exec(data);
+    const opBusiness = CB_OP_BUSINESS.exec(data);
+    const opLeads = CB_OP_LEADS.exec(data);
+    const opLead = CB_OP_LEAD.exec(data);
+    if (opList || opBusiness || opLeads || opLead) {
+      setHandler(opList ? 'cb.operator_business_page'
+        : opLeads ? 'cb.operator_leads_page'
+          : opLead ? 'cb.operator_lead_open'
+            : { bd: 'cb.operator_business_open', bt: 'cb.operator_terminate_ask', bT: 'cb.operator_terminate' }[opBusiness[1]]);
+      // Operator-only BEFORE any data read, on every tap; a non-operator gets
+      // the same answer as any unknown callback and nothing is read or written.
+      if (!isOperatorChat(chatId, chatType)) { await answer(GENERIC_NOT_FOUND); return; }
+      if (opList) { await sendBusinessPage(chatId, Number(opList[1]), messageId, answer); return; }
+      if (opBusiness) {
+        const at = { chatId, messageId, businessId: opBusiness[3], page: clampBusinessPage(opBusiness[2]), answer };
+        if (opBusiness[1] === 'bd') await sendBusinessDetail(at);
+        else await handleOperatorTerminate({ ...at, confirmed: opBusiness[1] === 'bT' });
+        return;
+      }
+      if (opLeads) {
+        await handleOperatorLeadsPage({
+          chatId, messageId, businessId: opLeads[3], leadPage: Number(opLeads[1]), page: clampBusinessPage(opLeads[2]), answer,
+        });
+        return;
+      }
+      const businessId = unpackUuid(opLead[3]);
+      const leadId = unpackUuid(opLead[4]);
+      if (!businessId || !leadId) { await answer(GENERIC_NOT_FOUND); return; }
+      await handleOperatorLeadOpen({
+        chatId, messageId, businessId, leadId, leadPage: Number(opLead[1]), page: clampBusinessPage(opLead[2]), answer,
+      });
+      return;
+    }
+
     const pick = CB_OPERATOR_PICK.exec(data);
     if (pick) {
       // Operator-only BEFORE any data read; a non-operator gets the same answer
       // as any unknown callback.
       setHandler(pick[1] === 'pb' ? 'cb.operator_pick_phones' : 'cb.operator_pick_code');
       if (!isOperatorChat(chatId, chatType)) { await answer(GENERIC_NOT_FOUND); return; }
+      // An old /phones picker button: the picker message becomes that business
+      // in the browser (Back leads to the first page of the list).
+      if (pick[1] === 'pb') {
+        await sendBusinessDetail({ chatId, messageId, businessId: pick[2], page: 0, answer });
+        return;
+      }
       const b = await getBusinessById(pick[2]).catch(() => null);
       if (!b || (b.status !== 'demo' && b.status !== 'active')) { await answer(OPERATOR_UNKNOWN_SLUG); return; }
       // The row just read IS the business (served status checked above), so
       // the command does not look it up again by slug; the toast is empty and
       // goes out while the command runs.
-      await together([
-        answer(''),
-        pick[1] === 'pb' ? handleOperatorPhones(chatId, b.slug, b) : handleOperatorCode(chatId, b.slug, b),
-      ]);
+      await together([answer(''), handleOperatorCode(chatId, b.slug, b)]);
       return;
     }
 
     const opPhone = CB_OPERATOR_PHONE.exec(data);
     if (opPhone) {
       // A non-operator tapping a forged p:/P:/q: gets the same answer as any
-      // unknown callback, and nothing is read or written.
-      setHandler({ p: 'cb.operator_phone_ask', P: 'cb.operator_phone_remove', q: 'cb.operator_phone_cancel' }[opPhone[1]]);
+      // unknown callback, and nothing is read or written. For the operator
+      // these are buttons of a screen that no longer exists: nothing is
+      // removed, the tap says so and the message becomes the current list.
+      setHandler('cb.operator_phone_legacy');
       if (!isOperatorChat(chatId, chatType)) { await answer(GENERIC_NOT_FOUND); return; }
-      await handleOperatorPhoneCallback({ cb, kind: opPhone[1], rowId: opPhone[2], answer });
+      await sendBusinessPage(chatId, 0, messageId, answer, OPERATOR_SCREEN_EXPIRED);
       return;
     }
 
@@ -1408,11 +1556,12 @@ async function handleUpdate(u, chat) {
     setHandler(COMMAND_HANDLER_NAMES[first] && (operator || !OPERATOR_ONLY_COMMANDS.has(first))
       ? COMMAND_HANDLER_NAMES[first] : 'text.plain');
     // Operator answers for the owner commands: the role comes from the env,
-    // not from a binding. No new callbacks: the pickers reuse pc:/pb:.
+    // not from a binding. /invite is the /code picker; /recipients is the
+    // business browser, where each business lists its phones.
     if (operator && first === '/invite') {
       await operatorPick(chatId, 'pc', OPERATOR_USAGE_CODE);
     } else if (operator && first === '/recipients') {
-      await operatorPick(chatId, 'pb', OPERATOR_USAGE_PHONES);
+      await handleOperatorBusinesses(chatId);
     } else if (operator && first === '/help') {
       await replyRole(chatId, OPERATOR_HELP, binding);
     } else if (operator && first === '/remove_lead') {
@@ -1440,8 +1589,8 @@ async function handleUpdate(u, chat) {
       // Operator commands. A non-operator never reaches this branch, so the
       // reply they get is the same as for any unknown text.
       if (first === '/code') await handleOperatorCode(chatId, arg);
-      else if (first === '/phones') await handleOperatorPhones(chatId, arg);
-      else if (first === '/businesses') await handleOperatorBusinesses(chatId);
+      // /phones is kept as a command; it opens the same browser.
+      else if (first === '/phones' || first === '/businesses') await handleOperatorBusinesses(chatId);
       else if (first === '/operator') await replyRole(chatId, OPERATOR_HELP, binding);
       else await handlePlainText(chatId, binding, text);
     } else {
