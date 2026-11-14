@@ -36,13 +36,15 @@ export const COMMANDS = [
   { command: 'help', description: 'How this works' },
 ];
 
-/* Registered only for the operator chat, as a chat-scoped menu. */
+/* Registered only for the operator chat, as a chat-scoped menu. These four
+   are every operator command (/operator still answers as an alias of /help,
+   unlisted). /code and /phones are gone: run this script after a deploy so
+   the menu stops offering them. */
 export const OPERATOR_COMMANDS = [
-  { command: 'code', description: 'Invite code for a business' },
-  { command: 'businesses', description: 'Businesses: phones, requests, terminate' },
-  { command: 'phones', description: 'Same list as /businesses' },
+  { command: 'businesses', description: 'Businesses: phones, leads, suspend' },
+  { command: 'invite', description: 'Invite link for a business' },
+  { command: 'help', description: 'Operator commands' },
   { command: 'id', description: "This chat's id" },
-  { command: 'operator', description: 'Operator help' },
 ];
 
 export const DESCRIPTION = BOT_DESCRIPTION;

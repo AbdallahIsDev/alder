@@ -154,7 +154,7 @@ add('selfcheck-active.html', 'Alert check email — active client', wrapHtml('Al
 // business per chat, no names — the list is "Recipient N" unless a label is set.
 add('telegram-invite.txt', 'Telegram /invite (deep link; [[link]] and [[code]] show entities)', renderMessage(botInviteText('K7M2QPX9RT4W', { username: 'alder_alerts_bot' })), false);
 add('telegram-invite-fallback.txt', 'Telegram /invite (no username)', renderMessage(botInviteText('K7M2QPX9RT4W')), false);
-add('telegram-code.txt', 'Telegram /code: operator line + client message', [renderMessage(operatorCodeText({ slug: 'alder-demo', code: 'K7M2QPX9RT4W' })), renderMessage(botForwardText({ code: 'K7M2QPX9RT4W', username: 'alder_alerts_bot' }))].join('\n\n---\n\n'), false);
+add('telegram-code.txt', 'Telegram operator /invite <slug>: operator line + client message', [renderMessage(operatorCodeText({ slug: 'alder-demo', code: 'K7M2QPX9RT4W' })), renderMessage(botForwardText({ code: 'K7M2QPX9RT4W', username: 'alder_alerts_bot' }))].join('\n\n---\n\n'), false);
 add('telegram-recipients.txt', 'Telegram /recipients', botRecipientsText([
   { id: 'r1', label: null },
   { id: 'r2', label: null },
