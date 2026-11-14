@@ -239,9 +239,9 @@ const answers = async () => (await tgReqs()).filter((x) => x.path.includes('/ans
 const kbOf = (req) => (req && req.body.reply_markup && req.body.reply_markup.inline_keyboard) || [];
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 /** The exact layouts. Literal on purpose: a changed constant must fail here. */
-const OWNER_KB = { keyboard: [[{ text: 'Leads' }, { text: 'Invite' }]], is_persistent: true, resize_keyboard: true };
+const OWNER_KB = { keyboard: [[{ text: 'Invite' }, { text: 'Leads' }]], is_persistent: true, resize_keyboard: true };
 const STAFF_KB = { keyboard: [[{ text: 'Leads' }]], is_persistent: true, resize_keyboard: true };
-const OPERATOR_KB = { keyboard: [[{ text: 'Businesses' }, { text: 'Code' }]], is_persistent: true, resize_keyboard: true };
+const OPERATOR_KB = { keyboard: [[{ text: 'Code' }, { text: 'Businesses' }]], is_persistent: true, resize_keyboard: true };
 const REMOVE_KB = { remove_keyboard: true };
 /** A list keyboard's first row is the number row: "1".."N", nothing else. */
 const numbersOk = (row, n) => Array.isArray(row) && row.length === n
