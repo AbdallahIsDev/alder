@@ -39,6 +39,19 @@
 //       owner, staff), an unbound chat gets ReplyKeyboardRemove, and a
 //       business chat never gets the operator keyboard
 //   LB18 no button label anywhere in the suite carries an emoji
+//   LB19 every update prints exactly one "[tg-timing]" line: fixed keys, fixed
+//       handler and step names, numbers — and no chat id, lead id, name,
+//       phone, email, business, callback data, token or message text
+//   LB20 the call budget of each flow (database calls / Telegram calls), and
+//       the line counts exactly the calls that were made; a lead is read
+//       once per tap, always scoped by id AND the binding's business
+//   LB21 the toast is not waited for: the edit is on its way while
+//       answerCallbackQuery is still pending
+//   LB22 the lead and the business are read side by side; the owner check is
+//       NOT: nothing it guards is read until it has returned
+//   LB23 lib/timing.js: cold-start flag, label sanitising, arguments and
+//       results never logged, a failed step is marked and rethrown unchanged,
+//       the line is bounded, and it is printed when the handler throws
 
 import { loadEnv } from './env.mjs';
 import { fakeRes } from './helpers.mjs';
@@ -93,6 +106,11 @@ const tgReqs = async () => (await (await realFetch(TG + '/__requests')).json()).
 const uuid = (n) => `${String(n).padStart(8, '0')}-0000-0000-0000-${String(n).padStart(12, '0')}`;
 let store;
 let sbRequests = [];
+/** Test hooks (LB21, LB22). tgHook sees every non-database request before it
+ *  is forwarded; sbHook sees every database request before it is served and
+ *  may return a Response to serve instead. Both null outside those tests. */
+let tgHook = null;
+let sbHook = null;
 const freshStore = () => ({
   businesses: [
     { id: BIZ_A, slug: 'alder-demo', name: 'Alder Roofing', status: 'demo', timezone: 'America/Chicago', owner_email: 'owner@example.com', google_review_url: 'https://g.page/r/x' },
@@ -153,12 +171,19 @@ const install = () => {
   const SB = process.env.SUPABASE_URL;
   globalThis.fetch = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : input.url;
-    if (!url.startsWith(SB)) return realFetch(input, init);
+    if (!url.startsWith(SB)) {
+      if (tgHook) await tgHook(url);
+      return realFetch(input, init);
+    }
     const u = new URL(url);
     const table = u.pathname.replace('/rest/v1/', '');
     const method = String(init.method || 'GET').toUpperCase();
     const params = [...u.searchParams.entries()];
     sbRequests.push({ table, method, params });
+    if (sbHook) {
+      const forced = await sbHook({ table, method, params });
+      if (forced) return forced;
+    }
     const json = (body, headers = {}) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json', ...headers } });
     const countHeader = (n) => new Response(null, { status: 200, headers: { 'content-range': `0-${n ? n - 1 : 0}/${n}` } });
 
@@ -799,6 +824,363 @@ try {
     line(buttons.length > 100 && withEmoji.length === 0 && iconField.length === 0,
       'LB18', 'no button label carries an emoji or a custom-emoji icon',
       `buttons=${buttons.length} emoji=${withEmoji.map((b) => b.text).slice(0, 3).join(',') || 'none'}`);
+  }
+
+  /* ---------- where the time goes: the timing line and the call budget ---------- */
+
+  const TIMING = '[tg-timing] ';
+  /** Run one update; return its timing lines, the parsed line, the database
+   *  requests it made and the Telegram requests it made. */
+  const timedCall = async (update) => {
+    const lines = [];
+    const realLog = console.log;
+    console.log = (...args) => {
+      const text = args.map(String).join(' ');
+      if (text.startsWith(TIMING)) lines.push(text); else realLog(...args);
+    };
+    await tgReset();
+    sbRequests = [];
+    try { await call(update); } finally { console.log = realLog; }
+    let obj = null;
+    try { obj = lines.length === 1 ? JSON.parse(lines[0].slice(TIMING.length)) : null; } catch { obj = null; }
+    return { lines, obj, sb: sbRequests.slice(), tg: await tgReqs() };
+  };
+  const param = (r, key) => (r.params.find(([k]) => k === key) || [])[1];
+
+  /* LB19: one line per update, and nothing in it but fixed names and numbers.
+     The lists are literal on purpose: a new key, handler name or step label
+     has to be added here by hand, which is the moment to ask what it carries. */
+  store = freshStore();
+  {
+    const PII = { name: 'Zebediah Quuxley', phone: '5155550177', email: 'zebediah@fixture.invalid' };
+    const ids = [seedLead(BIZ_A, { ...PII, created_at: '2026-11-12T09:00:00Z' })];
+    for (let i = 1; i <= 6; i++) ids.push(seedLead(BIZ_A, { name: `Timing ${i}`, created_at: `2026-11-0${9 - i}T09:00:00Z` }));
+    const KEYS = ['v', 'handler', 'type', 'cold', 'region', 'total_ms', 'answer_ms', 'answer_done_ms',
+      'db_calls', 'tg_calls', 'db_sum_ms', 'tg_sum_ms', 'steps', 'steps_dropped'];
+    const REQUIRED = KEYS.filter((k) => k !== 'region' && k !== 'steps_dropped');
+    const STEP_KEYS = ['s', 'at', 'ms', 'err'];
+    const STEPS = ['db.binding_lookup', 'db.lead_page', 'db.lead_by_id', 'db.business_by_id', 'db.status_update',
+      'db.event_insert', 'db.rate_limit', 'db.chat_list', 'tg.send_message', 'tg.answer_callback', 'tg.edit_message_text'];
+    const flows = [
+      [msg(OWNER, '/leads'), 'cmd.leads', 'message'],
+      [cb(OWNER, 'l:1'), 'cb.leads_page', 'callback'],
+      [cb(OWNER, `L:0:${ids[0]}`), 'cb.lead_open', 'callback'],
+      [cb(OWNER, `C:0:${ids[0]}`), 'cb.contacted.detail', 'callback'],
+      [cb(OWNER, `D:0:${ids[0]}`), 'cb.job_done.detail', 'callback'],
+      [cb(OWNER, `N:0:${ids[0]}`), 'cb.cancel.detail', 'callback'],
+      [cb(OWNER, `c:${ids[1]}`), 'cb.contacted.alert', 'callback'],
+      // What a person types and what a forged button carries never name the handler.
+      [msg(OWNER, `call ${PII.name} on ${PII.phone}`), 'text.plain', 'message'],
+      [msg(OWNER, `/${PII.phone}`), 'text.plain', 'message'],
+      [cb(OWNER, `zz:${PII.phone}`), 'cb.unknown', 'callback'],
+    ];
+    const problems = [];
+    const seen = [];
+    for (const [update, handlerName, type] of flows) {
+      const r = await timedCall(update);
+      const what = handlerName;
+      if (r.lines.length !== 1 || !r.obj) { problems.push(`${what}: lines=${r.lines.length}`); continue; }
+      const o = r.obj;
+      seen.push(r.lines[0]);
+      if (o.handler !== handlerName || o.type !== type) problems.push(`${what}: named ${o.handler}/${o.type}`);
+      if (Object.keys(o).some((k) => !KEYS.includes(k)) || REQUIRED.some((k) => !(k in o))) problems.push(`${what}: keys`);
+      if (o.v !== 1 || o.cold !== false) problems.push(`${what}: v/cold`);
+      for (const k of ['total_ms', 'db_calls', 'tg_calls', 'db_sum_ms', 'tg_sum_ms']) {
+        if (!Number.isInteger(o[k]) || o[k] < 0) problems.push(`${what}: ${k}`);
+      }
+      // A callback says when its answer was sent; a command has none.
+      const answered = Number.isInteger(o.answer_ms) && Number.isInteger(o.answer_done_ms) && o.answer_done_ms >= o.answer_ms;
+      if (type === 'callback' ? !answered : (o.answer_ms !== null || o.answer_done_ms !== null)) problems.push(`${what}: answer_ms`);
+      if (!Array.isArray(o.steps) || !o.steps.length) { problems.push(`${what}: steps`); continue; }
+      for (const st of o.steps) {
+        if (Object.keys(st).some((k) => !STEP_KEYS.includes(k)) || !STEPS.includes(st.s)
+          || !Number.isInteger(st.at) || !Number.isInteger(st.ms) || ('err' in st && st.err !== true)) {
+          problems.push(`${what}: step ${String(st.s).slice(0, 30)}`);
+        }
+      }
+      // Every string in the line is one of the fixed names above.
+      const strings = [];
+      JSON.stringify(o, (k, v) => { if (typeof v === 'string') strings.push(v); return v; });
+      const allowed = new Set([handlerName, type, ...STEPS]);
+      if (strings.some((x) => !allowed.has(x))) problems.push(`${what}: free string`);
+      // And none of the values the request carried or read.
+      const cbq = update.callback_query;
+      const forbidden = [String(OWNER), BIZ_A, 'Alder Roofing', 'alder-demo', PII.name, 'Zebediah', PII.phone, PII.email,
+        SECRET, String(process.env.TELEGRAM_BOT_TOKEN || 'no-token-set'), ...ids,
+        ...(cbq ? [cbq.id, cbq.data] : [update.message.text])];
+      const leaked = forbidden.filter((x) => x && r.lines[0].includes(x));
+      if (leaked.length) problems.push(`${what}: leaked ${leaked.length}`);
+    }
+    // The region is the platform's own name for where the function ran: shown
+    // when it looks like one, left out otherwise.
+    const savedRegion = process.env.VERCEL_REGION;
+    let regionOk = false;
+    try {
+      process.env.VERCEL_REGION = 'iad1';
+      const withRegion = (await timedCall(cb(OWNER, 'l:0'))).obj;
+      process.env.VERCEL_REGION = 'not a region!';
+      const badRegion = (await timedCall(cb(OWNER, 'l:0'))).obj;
+      delete process.env.VERCEL_REGION;
+      const noRegion = (await timedCall(cb(OWNER, 'l:0'))).obj;
+      regionOk = !!withRegion && withRegion.region === 'iad1'
+        && !!badRegion && !('region' in badRegion) && !!noRegion && !('region' in noRegion);
+    } finally {
+      if (savedRegion === undefined) delete process.env.VERCEL_REGION; else process.env.VERCEL_REGION = savedRegion;
+    }
+    line(problems.length === 0 && seen.length === flows.length && regionOk,
+      'LB19', 'one timing line per update: fixed names, numbers, no PII',
+      `lines=${seen.length}/${flows.length} region=${regionOk} problems=${problems.slice(0, 3).join('; ') || 'none'}`);
+  }
+
+  /* LB20: the call budget. [database calls, Telegram calls] per flow, counted
+     twice — by the timing line and by the two fakes — so the line cannot
+     miss a call. A regression that adds a round trip to a tap fails here. */
+  store = freshStore();
+  {
+    const ids = [];
+    for (let i = 0; i < 12; i++) ids.push(seedLead(BIZ_A, { name: `Budget ${i}`, created_at: `2026-11-${String(12 - i).padStart(2, '0')}T09:00:00Z` }));
+    const staffRow = store.chats.find((c) => String(c.tg_chat_id) === String(STAFF)).id;
+    const budget = [
+      ['/leads', msg(OWNER, '/leads'), 2, 1],
+      ['l: older', cb(OWNER, 'l:1'), 2, 2],
+      ['l: back', cb(OWNER, 'l:0'), 2, 2],
+      ['L: open', cb(OWNER, `L:0:${ids[0]}`), 3, 2],
+      ['C: contacted', cb(OWNER, `C:0:${ids[0]}`), 6, 2],
+      ['D: job done', cb(OWNER, `D:0:${ids[0]}`), 3, 2],
+      ['N: cancel', cb(OWNER, `N:0:${ids[0]}`), 3, 2],
+      ['c: alert contacted', cb(OWNER, `c:${ids[1]}`), 6, 2],
+      ['/remove_lead', msg(OWNER, '/remove_lead'), 3, 1],
+      ['rm: page', cb(OWNER, 'rm:1'), 3, 2],
+      ['Q: ask', cb(OWNER, `Q:0:${ids[3]}`), 3, 2],
+      ['E: remove', cb(OWNER, `E:0:${ids[3]}`), 5, 2],
+      // The last page is emptied: one read finds it empty, one reads the page before.
+      ['E: remove, page emptied', cb(OWNER, `E:2:${ids[11]}`), 6, 2],
+      ['/recipients', msg(OWNER, '/recipients'), 3, 1],
+      ['x: ask', cb(OWNER, `x:${staffRow}`), 2, 2],
+      ['v: cancel', cb(OWNER, `v:${staffRow}`), 3, 2],
+      ['/invite', msg(OWNER, '/invite'), 5, 2],
+    ];
+    const off = [];
+    const scope = [];
+    for (const [name, update, db, tg] of budget) {
+      const r = await timedCall(update);
+      const o = r.obj || {};
+      if (r.sb.length !== db || r.tg.length !== tg || o.db_calls !== db || o.tg_calls !== tg) {
+        off.push(`${name}: fakes ${r.sb.length}/${r.tg.length} line ${o.db_calls}/${o.tg_calls} want ${db}/${tg}`);
+      }
+      // Every read of the lead view names the binding's business; a read by
+      // id names the id as well, and a status tap makes exactly one of them.
+      const leadReads = r.sb.filter((q) => q.table === 'v_client_leads');
+      if (leadReads.some((q) => param(q, 'business_id') !== `eq.${BIZ_A}`)) scope.push(`${name}: unscoped read`);
+      const byId = leadReads.filter((q) => param(q, 'id'));
+      if (/^[CDNc]:/.test(name) && byId.length !== 1) scope.push(`${name}: lead read ${byId.length}x`);
+      // Every write to a lead names both the id and the business.
+      const writes = r.sb.filter((q) => q.table === 'leads' && q.method !== 'GET');
+      if (writes.some((q) => !param(q, 'id') || param(q, 'business_id') !== `eq.${BIZ_A}`)) scope.push(`${name}: unscoped write`);
+    }
+    line(off.length === 0 && scope.length === 0,
+      'LB20', 'call budget per flow; one scoped lead read per tap',
+      `flows=${budget.length} off=${off.slice(0, 2).join('; ') || 'none'} scope=${scope.slice(0, 2).join('; ') || 'none'}`);
+  }
+
+  /* LB21: the toast is not waited for. The answer is held back until the edit
+     has been asked for (or 150 ms, under the 200 ms outbound timeout): code
+     that awaits the answer before it starts the edit never sees the edit
+     arrive in time. Result-dependent toasts are included (a stale tap). */
+  store = freshStore();
+  {
+    const ids = [];
+    for (let i = 0; i < 7; i++) ids.push(seedLead(BIZ_A, { name: `Overlap ${i}`, created_at: `2026-11-0${9 - i}T09:00:00Z` }));
+    const overlapOf = async (update) => {
+      let editAsked = null;
+      const editSeen = new Promise((resolve) => { editAsked = resolve; });
+      let overlapped = false;
+      tgHook = async (url) => {
+        if (url.includes('/editMessageText')) { editAsked(true); return; }
+        if (!url.includes('/answerCallbackQuery')) return;
+        overlapped = await Promise.race([editSeen, new Promise((resolve) => setTimeout(() => resolve(false), 150))]);
+      };
+      try { await call(update); } finally { tgHook = null; }
+      return overlapped;
+    };
+    const taps = [
+      ['l:', cb(OWNER, 'l:1')],
+      ['L:', cb(OWNER, `L:0:${ids[0]}`)],
+      ['C:', cb(OWNER, `C:0:${ids[0]}`)],
+      ['C: stale', cb(OWNER, `C:0:${ids[0]}`)],
+      ['D:', cb(OWNER, `D:0:${ids[0]}`)],
+      ['N:', cb(OWNER, `N:0:${ids[0]}`)],
+      ['rm:', cb(OWNER, 'rm:1')],
+      ['Q:', cb(OWNER, `Q:0:${ids[1]}`)],
+      ['E:', cb(OWNER, `E:0:${ids[1]}`)],
+    ];
+    const waited = [];
+    for (const [name, update] of taps) {
+      await tgReset();
+      if (!(await overlapOf(update))) waited.push(name);
+    }
+    // The stale tap still says so, and the removal still names the lead: the
+    // toasts that depend on a result were not made generic to send them early.
+    await tgReset();
+    await call(cb(OWNER, `C:0:${ids[0]}`));
+    const staleToast = await answers();
+    await tgReset();
+    await call(cb(OWNER, `E:0:${ids[2]}`));
+    const removeToast = await answers();
+    line(waited.length === 0
+      && staleToast.length === 1 && staleToast[0] === C.TOAST_ALREADY_UPDATED
+      && removeToast.length === 1 && removeToast[0].includes('Overlap 2'),
+      'LB21', 'the edit starts while the answer is still pending',
+      `waited=${waited.join(',') || 'none'} stale=${staleToast.join('|')} removed=${removeToast.join('|').slice(0, 30)}`);
+  }
+
+  /* LB22: which reads run together and which must not. The lead read is held
+     until the business read has been asked for: sequential code times out
+     here. The owner check is the opposite case: it is held, and nothing it
+     guards may be asked for while it is. */
+  store = freshStore();
+  {
+    const ids = [];
+    for (let i = 0; i < 7; i++) ids.push(seedLead(BIZ_A, { name: `Reads ${i}`, created_at: `2026-11-0${9 - i}T09:00:00Z` }));
+    const readsOverlap = async (update) => {
+      let businessAsked = null;
+      const businessSeen = new Promise((resolve) => { businessAsked = resolve; });
+      let overlapped = false;
+      let decided = false;
+      sbHook = async ({ table, params }) => {
+        if (table === 'businesses') { businessAsked(true); return null; }
+        if (table !== 'v_client_leads' || !params.some(([k]) => k === 'id')) return null;
+        // The first read of the lead decides; a later one proves nothing.
+        if (decided) return null;
+        decided = true;
+        overlapped = await Promise.race([businessSeen, new Promise((resolve) => setTimeout(() => resolve(false), 150))]);
+        return null;
+      };
+      try { await call(update); } finally { sbHook = null; }
+      return overlapped;
+    };
+    const together = [];
+    for (const [name, update] of [['L:', cb(OWNER, `L:0:${ids[0]}`)], ['C:', cb(OWNER, `C:0:${ids[0]}`)], ['o:', cb(OWNER, `o:${ids[1]}`)]]) {
+      await tgReset();
+      if (!(await readsOverlap(update))) together.push(name);
+    }
+
+    // The owner check: hold the phone list for 40 ms and record everything
+    // that was asked for meanwhile.
+    const duringOwnerCheck = async (update) => {
+      const early = [];
+      let holding = false;
+      sbHook = async ({ table, params }) => {
+        if (holding) { early.push(table); return null; }
+        const ownerList = table === 'business_chats' && params.some(([k]) => k === 'business_id') && params.some(([k]) => k === 'order');
+        if (!ownerList) return null;
+        holding = true;
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        holding = false;
+        return null;
+      };
+      sbRequests = [];
+      try { await call(update); } finally { sbHook = null; }
+      return early;
+    };
+    const early = [];
+    for (const update of [cb(OWNER, 'rm:0'), cb(OWNER, `Q:0:${ids[2]}`), cb(OWNER, `E:0:${ids[2]}`), msg(OWNER, '/remove_lead'), msg(OWNER, '/invite')]) {
+      await tgReset();
+      early.push(...await duringOwnerCheck(update));
+    }
+    // And for the phone that is not the owner the guarded read never happens.
+    const before = JSON.stringify(store.leads);
+    const staffTouched = [];
+    const staffToasts = [];
+    for (const data of ['rm:0', `Q:0:${ids[3]}`, `E:0:${ids[3]}`]) {
+      await tgReset();
+      sbRequests = [];
+      await call(cb(STAFF, data));
+      staffTouched.push(...sbRequests.filter((q) => q.table === 'v_client_leads' || q.table === 'leads').map((q) => q.table));
+      staffToasts.push(...await answers());
+    }
+    // A lead of another business: read side by side or not, it is not found
+    // and nothing is written.
+    const foreign = seedLead(BIZ_B, { name: 'Foreign Lead' });
+    await tgReset();
+    sbRequests = [];
+    await call(cb(OWNER, `C:0:${foreign}`));
+    const foreignWrites = sbRequests.filter((q) => q.method !== 'GET' && q.table !== 'rpc/hit_rate_limit').length;
+    const foreignToast = await answers();
+    const foreignEdits = await edits();
+    line(together.length === 0 && early.length === 0
+      && staffTouched.length === 0 && staffToasts.length === 3 && staffToasts.every((t) => t === C.TOAST_OWNER_ONLY)
+      && JSON.stringify(store.leads.filter((l) => l.business_id === BIZ_A)) === before
+      && foreignWrites === 0 && foreignEdits.length === 0
+      && foreignToast.length === 1 && foreignToast[0] === C.TOAST_NOT_FOUND
+      && store.leads.find((l) => l.id === foreign).status === 'open',
+      'LB22', 'lead and business read together; the owner check alone',
+      `sequential=${together.join(',') || 'none'} early=${early.join(',') || 'none'} staff=${staffTouched.length}/${staffToasts.length} foreign=${foreignWrites}/${foreignEdits.length}`);
+  }
+
+  /* LB23: lib/timing.js on its own. A fresh copy of the module (the query
+     string makes it a new instance) stands in for a fresh serverless instance. */
+  {
+    const T = await import('../lib/timing.js?lb23=fresh');
+    const printed = [];
+    const realLog = console.log;
+    console.log = (...args) => {
+      const text = args.map(String).join(' ');
+      if (text.startsWith(TIMING)) printed.push(JSON.parse(text.slice(TIMING.length))); else realLog(...args);
+    };
+    const SECRET_ARG = 'arg-5155550199-Zed';
+    const SECRET_RESULT = 'result-zed@fixture.invalid';
+    const boom = Object.assign(new Error(`failure about ${SECRET_ARG}`), { code: 'boom' });
+    let passThrough = null;
+    let rethrown = null;
+    let handlerThrow = null;
+    let unknownExport = null;
+    let raw = '';
+    try {
+      const echo = T.timed('db.lead_by_id', async (x) => `${SECRET_RESULT}:${x}`);
+      const fails = T.timed('db.status_update', async () => { throw boom; });
+      const badLabel = T.timed(`Lead ${SECRET_ARG}`, async () => 1);
+      // Outside an update: the function simply runs, and nothing is printed.
+      passThrough = await echo('outside');
+      await T.runTimed('callback', async () => {
+        T.setHandler('cb.lead_open');
+        await echo(SECRET_ARG);
+        await badLabel();
+        try { await fails(); } catch (e) { rethrown = e; }
+      });
+      await T.runTimed('message', async () => {
+        T.setHandler(`John ${SECRET_ARG}`);
+        for (let i = 0; i < 45; i++) await echo(String(i));
+      });
+      try {
+        await T.runTimed('callback', async () => { T.setHandler('cb.leads_page'); throw boom; });
+      } catch (e) { handlerThrow = e; }
+      try { T.timedAll({ real: async () => 1 }, { real: 'db.lead_page', missing: 'db.lead_by_id' }); } catch (e) { unknownExport = e; }
+      raw = JSON.stringify(printed);
+    } finally {
+      console.log = realLog;
+    }
+    const [first, second, third] = printed;
+    const s1 = (first && first.steps) || [];
+    line(printed.length === 3
+      && passThrough === `${SECRET_RESULT}:outside`
+      // The first update of an instance is the cold one; no later one is.
+      && first.cold === true && second.cold === false && third.cold === false
+      && first.handler === 'cb.lead_open' && first.type === 'callback'
+      && s1.length === 3 && s1.filter((x) => x.s === 'db.lead_by_id').length === 1
+      && s1.filter((x) => x.s === 'invalid').length === 1
+      && s1.filter((x) => x.s === 'db.status_update' && x.err === true).length === 1
+      && s1.filter((x) => 'err' in x).length === 1
+      && first.db_calls === 2 && first.tg_calls === 0
+      && rethrown === boom
+      // A name that is not a fixed lowercase identifier never reaches the log.
+      && second.handler === 'invalid' && second.steps.length === 40 && second.steps_dropped === 5
+      // The handler threw: the line is still printed, and the error is the same one.
+      && handlerThrow === boom && third.handler === 'cb.leads_page' && third.steps.length === 0
+      && !!unknownExport && unknownExport.message === 'timing_unknown_function'
+      && !raw.includes('5155550199') && !raw.includes('Zed') && !raw.includes('fixture.invalid') && !raw.includes('boom'),
+      'LB23', 'timing module: cold flag, fixed names only, bounded, survives a throw',
+      `lines=${printed.length} cold=${printed.map((x) => x.cold).join(',')} steps=${printed.map((x) => x.steps.length).join(',')} dropped=${second && second.steps_dropped}`);
   }
 } catch (e) {
   line(false, 'LB0', 'lead-browser suite threw', e.message);

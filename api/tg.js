@@ -5,18 +5,13 @@
 // through public.v_client_leads. Nothing here touches the private schema.
 
 import { randomBytes } from 'node:crypto';
-import {
-  getChatBinding, bindChat, claimBindCode, restoreBindCode, getBindCodeState, getBusinessById, clearRateLimit, deleteLeadScoped,
-  listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
-  countBusinessChats, countBusinessesByName, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
-  listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
-  getActiveBusinessBySlug, listBusinessSlugs, listPickerBusinesses, getChatById, removeChatById,
-} from '../lib/db.js';
+import * as dbApi from '../lib/db.js';
 import { isOperatorChat } from '../lib/operator.js';
-import { mintBindCode, BIND_CODE_HOURS } from '../lib/bind-codes.js';
-import { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup, botUsername } from '../lib/tg.js';
+import * as bindCodesApi from '../lib/bind-codes.js';
+import * as tgApi from '../lib/tg.js';
 import { secretMatches } from '../lib/request.js';
-import { sendReviewRequest, notifyOperatorUnreachable } from '../lib/notify.js';
+import * as notifyApi from '../lib/notify.js';
+import { runTimed, setHandler, timedAll } from '../lib/timing.js';
 import {
   renderAlert, renderLeadList, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard,
   botLinkedText, BOT_HELP, BOT_ALREADY_CONNECTED, BOT_NOT_CONNECTED, BOT_BAD_CODE, BOT_PLAIN_TEXT,
@@ -39,7 +34,88 @@ import {
   OWNER_KEYBOARD_LABELS, STAFF_KEYBOARD_LABELS, OPERATOR_KEYBOARD_LABELS,
 } from '../lib/content.js';
 
+/* ---------- timing ----------
+   Every database and Telegram call this file makes goes through a wrapper that
+   records how long it took, under a label that says what the call is FOR. The
+   labels are the only thing recorded: no argument and no result is read (see
+   lib/timing.js). The handler prints one "[tg-timing]" line per update. The
+   wrapped functions keep their names, so the code below reads as before. */
+
+const {
+  getChatBinding, bindChat, claimBindCode, restoreBindCode, getBindCodeState, getBusinessById, clearRateLimit, deleteLeadScoped,
+  listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
+  countBusinessChats, countBusinessesByName, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
+  listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
+  getActiveBusinessBySlug, listBusinessSlugs, listPickerBusinesses, getChatById, removeChatById,
+} = timedAll(dbApi, {
+  getChatBinding: 'db.binding_lookup',
+  bindChat: 'db.bind_chat',
+  claimBindCode: 'db.bind_code_claim',
+  restoreBindCode: 'db.bind_code_restore',
+  getBindCodeState: 'db.bind_code_state',
+  getBusinessById: 'db.business_by_id',
+  getActiveBusinessBySlug: 'db.business_by_slug',
+  listBusinessSlugs: 'db.business_list',
+  listPickerBusinesses: 'db.business_picker_list',
+  countBusinessesByName: 'db.business_name_count',
+  listClientLeads: 'db.lead_page',
+  getClientLead: 'db.lead_by_id',
+  transitionLead: 'db.status_update',
+  deleteLeadScoped: 'db.lead_delete',
+  getDoneLeadForRetry: 'db.lead_retry_read',
+  hasReviewSent: 'db.review_sent_check',
+  getReviewFailureInfo: 'db.review_failure_info',
+  addEvent: 'db.event_insert',
+  hitRateLimit: 'db.rate_limit',
+  clearRateLimit: 'db.rate_limit_clear',
+  clearStaleRetryLock: 'db.retry_lock_clear',
+  listBusinessChatsDetailed: 'db.chat_list',
+  countBusinessChats: 'db.chat_count',
+  getBusinessChat: 'db.chat_by_id_scoped',
+  getChatById: 'db.chat_by_id',
+  removeBusinessChat: 'db.chat_remove_scoped',
+  removeChatById: 'db.chat_remove',
+  countLiveBindCodes: 'db.invite_count',
+  listLiveBindCodes: 'db.invite_list',
+  expireLiveBindCodes: 'db.invite_expire',
+});
+const { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup, botUsername } = timedAll(tgApi, {
+  sendMessage: 'tg.send_message',
+  answerCallbackQuery: 'tg.answer_callback',
+  editMessageText: 'tg.edit_message_text',
+  editMessageReplyMarkup: 'tg.edit_reply_markup',
+  // Not a Telegram request once the username is known (env override, or the
+  // per-instance cache after one getMe), so it is not counted under "tg.".
+  botUsername: 'lookup.bot_username',
+});
+// One insert each; the label says so.
+const { mintBindCode } = timedAll(bindCodesApi, { mintBindCode: 'db.invite_mint' });
+const { BIND_CODE_HOURS } = bindCodesApi;
+// The review email is the Resend call plus the event row that records it.
+const { sendReviewRequest, notifyOperatorUnreachable } = timedAll(notifyApi, {
+  sendReviewRequest: 'mail.review_request',
+  notifyOperatorUnreachable: 'tg.operator_notice',
+});
+
 const GENERIC_NOT_FOUND = TOAST_NOT_FOUND;
+
+/** A promise's outcome as a value, so two independent reads can run together
+ *  and still be judged in the order the code reads them. */
+const settle = (promise) => promise.then((value) => ({ value }), (error) => ({ error }));
+
+/**
+ * Run steps that do not depend on each other side by side, and wait for ALL of
+ * them — also when one fails, so nothing this function started is still on
+ * its way when the update is answered. Then fail with the first failure in
+ * list order, as the same steps run one after another would have. Returns the
+ * results in list order; a step may be a plain value (null for "nothing to do").
+ */
+async function together(steps) {
+  const results = await Promise.allSettled(steps);
+  const failed = results.find((r) => r.status === 'rejected');
+  if (failed) throw failed.reason;
+  return results.map((r) => r.value);
+}
 
 function secretOk(req) {
   const want = process.env.TELEGRAM_WEBHOOK_SECRET;
@@ -193,9 +269,10 @@ async function operatorLinkReply(code) {
  * only one that may invite or remove; every phone keeps alerts, buttons and
  * /leads.
  */
+const isOwnerOf = (rows, chatId) => rows.length > 0 && String(rows[0].tg_chat_id) === String(chatId);
+
 async function isOwnerChat(businessId, chatId) {
-  const rows = await listBusinessChatsDetailed(businessId);
-  return rows.length > 0 && String(rows[0].tg_chat_id) === String(chatId);
+  return isOwnerOf(await listBusinessChatsDetailed(businessId), chatId);
 }
 
 async function handleStart(chatId, arg) {
@@ -253,7 +330,9 @@ async function editList(chatId, messageId, text, markup) {
  * read for writing and nothing is changed, so a stale Newer/Older (including a
  * disabled end from a message sent before the ends were dropped) is harmless.
  * Older is not offered on the last page the browser can address. `answer` is
- * the callback's once-only responder, absent on the /leads command path.
+ * the callback's once-only responder, absent on the /leads command path. The
+ * toast depends on the page that was read, so it cannot go out before the
+ * read; it goes out TOGETHER with the edit, not ahead of it.
  */
 async function sendLeadsPage(chatId, businessId, page, messageId, answer = null) {
   const safePage = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
@@ -264,8 +343,11 @@ async function sendLeadsPage(chatId, businessId, page, messageId, answer = null)
   const text = empty ? 'No requests yet.' : renderLeadList(shown);
   const markup = empty ? { reply_markup: { inline_keyboard: [] } } : leadListKeyboard(shown, safePage, hasOlder);
   if (messageId) {
-    if (answer) await answer(empty ? (safePage === 0 ? TOAST_NO_LEADS : TOAST_NO_OLDER) : '');
-    return editList(chatId, messageId, text, markup);
+    const [, edited] = await together([
+      answer ? answer(empty ? (safePage === 0 ? TOAST_NO_LEADS : TOAST_NO_OLDER) : '') : null,
+      editList(chatId, messageId, text, markup),
+    ]);
+    return edited;
   }
   if (empty) return reply(chatId, safePage === 0 ? 'No requests yet.' : 'No older requests.');
   return sendMessage(chatId, text, markup);
@@ -280,18 +362,22 @@ const REMOVE_PAGE = 5;
 
 /** The /remove_lead list: five per page, one row of number buttons, the same
  *  navigation rule as /leads. Same rule for an empty page: it is rewritten,
- *  never left with a button that does nothing. */
-async function sendRemovePage(chatId, businessId, page, messageId, answer = null) {
+ *  never left with a button that does nothing. `rows` is this page as the
+ *  caller has just read it (refreshRemovePage), so it is not read twice. */
+async function sendRemovePage(chatId, businessId, page, messageId, answer = null, rows = null) {
   const safePage = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
-  const leads = await listClientLeads(businessId, REMOVE_PAGE + 1, safePage * REMOVE_PAGE);
+  const leads = rows || await listClientLeads(businessId, REMOVE_PAGE + 1, safePage * REMOVE_PAGE);
   const hasOlder = leads.length > REMOVE_PAGE && safePage < LEADS_PAGE_MAX;
   const shown = leads.slice(0, REMOVE_PAGE);
   const empty = !shown.length;
   const text = empty ? 'No requests to remove.' : removeLeadListText(shown);
   const markup = empty ? { reply_markup: { inline_keyboard: [] } } : removeLeadKeyboard(shown, safePage, hasOlder);
   if (messageId) {
-    if (answer) await answer(empty ? (safePage === 0 ? TOAST_NO_REMOVE : TOAST_NO_OLDER) : '');
-    return editList(chatId, messageId, text, markup);
+    const [, edited] = await together([
+      answer ? answer(empty ? (safePage === 0 ? TOAST_NO_REMOVE : TOAST_NO_OLDER) : '') : null,
+      editList(chatId, messageId, text, markup),
+    ]);
+    return edited;
   }
   if (empty) return reply(chatId, safePage === 0 ? 'No requests to remove.' : 'No older requests.');
   return sendMessage(chatId, text, markup);
@@ -378,12 +464,13 @@ async function mintAndSendInvite(chatId, businessId) {
 /** /invite — mint one single-use code for THIS chat's business. */
 async function handleInvite(chatId, binding) {
   if (!binding) return reply(chatId, BOT_NOT_CONNECTED);
-  if (!(await isOwnerChat(binding.business_id, chatId))) return reply(chatId, BOT_OWNER_ONLY);
+  // The owner check reads this business's phones, so the same rows say how
+  // many are connected: no second query for the count.
+  const phones = await listBusinessChatsDetailed(binding.business_id);
+  if (!isOwnerOf(phones, chatId)) return reply(chatId, BOT_OWNER_ONLY);
 
-  const [bound, pending] = await Promise.all([
-    countBusinessChats(binding.business_id),
-    countLiveBindCodes(binding.business_id),
-  ]);
+  const bound = phones.length;
+  const pending = await countLiveBindCodes(binding.business_id);
   if (bound >= recipientsMax()) return reply(chatId, BOT_INVITE_CAPPED);
   if (pending >= invitesMax()) {
     // Say how many are waiting and when each lapses, never the codes. The one
@@ -425,10 +512,15 @@ async function handleInviteCancel({ chatId, businessId, answer }) {
   }
 }
 
-/** The list, as a new message or as an edit of the one the button lives on. */
-async function sendRecipients(chatId, businessId, messageId) {
-  const rows = await listBusinessChatsDetailed(businessId);
-  const pending = await countLiveBindCodes(businessId);
+/** The list, as a new message or as an edit of the one the button lives on.
+ *  `known` is the phone list when the caller read it in this same request and
+ *  nothing has changed since; after a removal it is read again. The pending
+ *  count does not depend on the list, so the two reads run together. */
+async function sendRecipients(chatId, businessId, messageId, known = null) {
+  const [rows, pending] = await together([
+    known || listBusinessChatsDetailed(businessId),
+    countLiveBindCodes(businessId),
+  ]);
   const text = `${botRecipientsText(rows)}\n\n${BOT_RECIPIENTS_PENDING(pending)}`;
   const markup = { reply_markup: rows.length ? recipientsKeyboard(rows, { selfChatId: chatId }) : { inline_keyboard: [] } };
   if (messageId) return editMessageText(chatId, messageId, text, markup).catch(() => {});
@@ -438,8 +530,10 @@ async function sendRecipients(chatId, businessId, messageId) {
 /** /recipients — who receives alerts, with one Remove button per row. */
 async function handleRecipients(chatId, binding) {
   if (!binding) return reply(chatId, BOT_NOT_CONNECTED);
-  if (!(await isOwnerChat(binding.business_id, chatId))) return reply(chatId, BOT_OWNER_ONLY);
-  return sendRecipients(chatId, binding.business_id);
+  // Owner check first, on the same rows the list is then drawn from.
+  const rows = await listBusinessChatsDetailed(binding.business_id);
+  if (!isOwnerOf(rows, chatId)) return reply(chatId, BOT_OWNER_ONLY);
+  return sendRecipients(chatId, binding.business_id, undefined, rows);
 }
 
 /**
@@ -452,25 +546,35 @@ async function handleRecipientCallback({ cb, kind, rowId, binding, answer }) {
   const chatId = cb.message && cb.message.chat && cb.message.chat.id;
   const messageId = cb.message && cb.message.message_id;
   const rows = await listBusinessChatsDetailed(binding.business_id);
-  if (!rows.length || String(rows[0].tg_chat_id) !== String(chatId)) {
+  if (!isOwnerOf(rows, chatId)) {
     await answer(TOAST_OWNER_ONLY);
     return;
   }
   const index = rows.findIndex((r) => r.id === rowId);
+  // Once the toast is decided it goes out together with the edit: the spinner
+  // stops while the message is being redrawn, not before the redraw starts.
+  // A list read in this request is reused while nothing has been removed.
+  const goneAndRefresh = () => together([
+    answer(BOT_RECIPIENT_GONE),
+    sendRecipients(chatId, binding.business_id, messageId, rows),
+  ]);
 
   if (kind === 'x') {
     const row = index >= 0 ? rows[index] : await getBusinessChat(binding.business_id, rowId);
-    if (!row) { await answer(BOT_RECIPIENT_GONE); return sendRecipients(chatId, binding.business_id, messageId); }
+    if (!row) { await goneAndRefresh(); return; }
     if (String(row.tg_chat_id) === String(chatId)) { await answer(BOT_RECIPIENT_SELF); return; }
-    await answer('');
-    return editMessageText(chatId, messageId, recipientConfirmText(row, index < 0 ? rows.length : index, { isLast: rows.length <= 1 }), {
-      reply_markup: recipientConfirmKeyboard(rowId),
-    }).catch(() => {});
+    await together([
+      answer(''),
+      editMessageText(chatId, messageId, recipientConfirmText(row, index < 0 ? rows.length : index, { isLast: rows.length <= 1 }), {
+        reply_markup: recipientConfirmKeyboard(rowId),
+      }).catch(() => {}),
+    ]);
+    return;
   }
 
   if (kind === 'v') {
-    await answer('');
-    return sendRecipients(chatId, binding.business_id, messageId);
+    await together([answer(''), sendRecipients(chatId, binding.business_id, messageId, rows)]);
+    return;
   }
 
   // X: the confirm tap. Existence first: after a successful removal the list has
@@ -478,14 +582,18 @@ async function handleRecipientCallback({ cb, kind, rowId, binding, answer }) {
   // last phone". The delete is still scoped by business AND row, and reports 0
   // rows if two taps race.
   const row = index >= 0 ? rows[index] : await getBusinessChat(binding.business_id, rowId);
-  if (!row) { await answer(BOT_RECIPIENT_GONE); return sendRecipients(chatId, binding.business_id, messageId); }
+  if (!row) { await goneAndRefresh(); return; }
   if (String(row.tg_chat_id) === String(chatId)) { await answer(BOT_RECIPIENT_SELF); return; }
   if (rows.length <= 1) { await answer(BOT_RECIPIENT_LAST); return; }
   const removed = await removeBusinessChat(binding.business_id, rowId);
-  // The removed phone's keyboard is stale the moment this row is gone.
-  if (removed) await sendKeyboardRemoved(row.tg_chat_id);
-  await answer(removed ? BOT_RECIPIENT_REMOVED : BOT_RECIPIENT_GONE);
-  return sendRecipients(chatId, binding.business_id, messageId);
+  // Three things that do not wait for each other: the notice to the removed
+  // phone (its keyboard is stale the moment this row is gone), the toast, and
+  // the list — read again, because it has just changed.
+  await together([
+    removed ? sendKeyboardRemoved(row.tg_chat_id) : null,
+    answer(removed ? BOT_RECIPIENT_REMOVED : BOT_RECIPIENT_GONE),
+    sendRecipients(chatId, binding.business_id, messageId),
+  ]);
 }
 
 /**
@@ -534,7 +642,10 @@ async function operatorPick(chatId, prefix, usageText) {
   return sendMessage(chatId, OPERATOR_PICK_TEXT, operatorPickerKeyboard(rows, prefix));
 }
 
-async function handleOperatorCode(chatId, arg) {
+/** `known` is the business row a picker tap has just read by id and checked
+ *  for a served status: the same row the slug lookup would return, so it is
+ *  not read a second time. A typed command has no row and looks the slug up. */
+async function handleOperatorCode(chatId, arg, known = null) {
   const slug = String(arg || '').trim();
   if (!slug) return operatorPick(chatId, 'pc', OPERATOR_USAGE_CODE);
   if (!SLUG_RE.test(slug)) return reply(chatId, OPERATOR_USAGE_CODE);
@@ -542,7 +653,7 @@ async function handleOperatorCode(chatId, arg) {
   let within;
   try { within = await hitRateLimit('opcode:' + slug, 3600, CODES_PER_SLUG_HOUR); } catch { return; }
   if (!within) return reply(chatId, OPERATOR_CAPPED);
-  const business = await getActiveBusinessBySlug(slug).catch(() => null);
+  const business = known || await getActiveBusinessBySlug(slug).catch(() => null);
   if (!business) return reply(chatId, OPERATOR_UNKNOWN_SLUG);
   // A new code supersedes the business's older unused ones: leaving them live
   // fills the owner's invite cap with codes nobody will use. Used codes are
@@ -570,14 +681,18 @@ async function handleOperatorCode(chatId, arg) {
   }
 }
 
-async function handleOperatorPhones(chatId, arg) {
+/** `known`: see handleOperatorCode. The phone list and the same-name count
+ *  are independent of each other, so they are read together. */
+async function handleOperatorPhones(chatId, arg, known = null) {
   const slug = String(arg || '').trim();
   if (!slug) return operatorPick(chatId, 'pb', OPERATOR_USAGE_PHONES);
   if (!SLUG_RE.test(slug)) return reply(chatId, OPERATOR_USAGE_PHONES);
-  const business = await getActiveBusinessBySlug(slug).catch(() => null);
+  const business = known || await getActiveBusinessBySlug(slug).catch(() => null);
   if (!business) return reply(chatId, OPERATOR_UNKNOWN_SLUG);
-  const rows = await listBusinessChatsDetailed(business.id);
-  const duplicateName = await countBusinessesByName(business.name).then((n) => n > 1).catch(() => false);
+  const [rows, duplicateName] = await together([
+    listBusinessChatsDetailed(business.id),
+    countBusinessesByName(business.name).then((n) => n > 1).catch(() => false),
+  ]);
   const title = `${business.name}${duplicateName ? ` (${business.slug})` : ''}`;
   if (!rows.length) {
     return reply(chatId, `${OPERATOR_NO_PHONES}\n\n${title}. Mint an invite with /code ${business.slug}.`);
@@ -585,15 +700,23 @@ async function handleOperatorPhones(chatId, arg) {
   return sendMessage(chatId, operatorPhonesText({ business, rows, ownerId: rows[0].id, selfChatId: chatId, duplicateName }), operatorPhonesKeyboard(rows));
 }
 
+/** How many phone counts /businesses asks for at the same time. */
+const BUSINESS_COUNT_BATCH = 6;
+
 async function handleOperatorBusinesses(chatId) {
   const slugs = await listBusinessSlugs().catch(() => []);
+  // One count per business. No count depends on another, so they run side by
+  // side — a few at a time, so a long list never opens a burst of connections
+  // — and the rows keep the order of the list.
   const rows = [];
-  for (const r of slugs) {
-    // Count by id: a paused or churned business has phones too, and the
-    // active-only lookup would show 0 for them.
-    // null, not 0: a failed count is unknown, and the text says "?" for it.
-    const phones = await countBusinessChats(r.id).catch(() => null);
-    rows.push({ slug: r.slug, name: r.name, status: r.status, phones });
+  for (let i = 0; i < slugs.length; i += BUSINESS_COUNT_BATCH) {
+    rows.push(...await together(slugs.slice(i, i + BUSINESS_COUNT_BATCH).map(async (r) => {
+      // Count by id: a paused or churned business has phones too, and the
+      // active-only lookup would show 0 for them.
+      // null, not 0: a failed count is unknown, and the text says "?" for it.
+      const phones = await countBusinessChats(r.id).catch(() => null);
+      return { slug: r.slug, name: r.name, status: r.status, phones };
+    })));
   }
   return reply(chatId, operatorBusinessesText(rows));
 }
@@ -609,29 +732,45 @@ async function handleOperatorPhoneCallback({ cb, kind, rowId, answer }) {
   const messageId = cb.message && cb.message.message_id;
   const row = await getChatById(rowId).catch(() => null);
   if (!row) { await answer(OPERATOR_PHONE_GONE); return; }
-  const business = await getBusinessById(row.business_id).catch(() => null);
+  // The business and its phone list both hang off the row and not off each
+  // other, so they are read together; a missing business is still judged
+  // first, exactly as when it was read first.
+  const [business, listed] = await together([
+    getBusinessById(row.business_id).catch(() => null),
+    settle(listBusinessChatsDetailed(row.business_id)),
+  ]);
   if (!business) { await answer(OPERATOR_PHONE_GONE); return; }
-  const rows = await listBusinessChatsDetailed(row.business_id);
+  if (listed.error) throw listed.error;
+  const rows = listed.value;
   const index = rows.findIndex((r) => r.id === rowId);
 
   if (kind === 'p') {
-    await answer('');
-    return editMessageText(chatId, messageId,
-      operatorConfirmRemoveText({ row, index: index < 0 ? rows.length : index, isLast: rows.length <= 1 }),
-      operatorConfirmRemoveKeyboard(rowId)).catch(() => {});
+    await together([
+      answer(''),
+      editMessageText(chatId, messageId,
+        operatorConfirmRemoveText({ row, index: index < 0 ? rows.length : index, isLast: rows.length <= 1 }),
+        operatorConfirmRemoveKeyboard(rowId)).catch(() => {}),
+    ]);
+    return;
   }
   if (kind === 'q') {
-    await answer('');
-    return editMessageText(chatId, messageId,
-      operatorPhonesText({ business, rows, ownerId: rows[0] && rows[0].id }),
-      operatorPhonesKeyboard(rows)).catch(() => {});
+    await together([
+      answer(''),
+      editMessageText(chatId, messageId,
+        operatorPhonesText({ business, rows, ownerId: rows[0] && rows[0].id }),
+        operatorPhonesKeyboard(rows)).catch(() => {}),
+    ]);
+    return;
   }
 
   const removed = await removeChatById(rowId);
-  // The removed phone's keyboard is stale the moment this row is gone.
-  if (removed) await sendKeyboardRemoved(row.tg_chat_id);
-  await answer(removed ? OPERATOR_PHONE_REMOVED : OPERATOR_PHONE_GONE);
-  const after = await listBusinessChatsDetailed(row.business_id);
+  // The notice to the removed phone (its keyboard is stale the moment the row
+  // is gone), the toast and the fresh list do not wait for each other.
+  const [, , after] = await together([
+    removed ? sendKeyboardRemoved(row.tg_chat_id) : null,
+    answer(removed ? OPERATOR_PHONE_REMOVED : OPERATOR_PHONE_GONE),
+    listBusinessChatsDetailed(row.business_id),
+  ]);
   if (!after.length) {
     return editMessageText(chatId, messageId,
       `📵 ${business.name} (${business.slug}) has no phones connected.\n\nNobody will receive alerts for this business until a new phone is connected. Mint an invite with /code ${business.slug}.`,
@@ -646,9 +785,20 @@ async function handleOperatorPhoneCallback({ cb, kind, rowId, answer }) {
    handleCallback authenticates, parses, reads the lead once, then dispatches on
    the first character of callback_data. One function per kind; the shared
    answer() answers at most once, so a handler that already answered and then
-   throws does not produce a second toast. */
+   throws does not produce a second toast.
 
-/** Everything a handler needs, including render(), which re-reads the lead. */
+   Where the time goes, and the two rules that keep it short:
+   1. The toast is sent as soon as its text is known and is never waited for
+      before the next step: answer() goes out TOGETHER with the edit (or with
+      the writes that follow), so the spinner stops while the message is being
+      redrawn. A toast whose text depends on a read or a write still waits for
+      that read or write, and for nothing else.
+   2. A lead is read once per tap. The dispatcher reads it through
+      v_client_leads, scoped by id AND business, and the card is drawn from
+      that row; it is read again only when a write was refused, because that
+      is the one case where the row is known to have changed. */
+
+/** Everything a handler needs, including render(), which draws the card. */
 function makeContext({ cb, business, lead, leadId, businessId, answer, surface = 'alert', page = 0 }) {
   const chatId = cb.message && cb.message.chat && cb.message.chat.id;
   const messageId = cb.message && cb.message.message_id;
@@ -676,14 +826,22 @@ function makeContext({ cb, business, lead, leadId, businessId, answer, surface =
     return { reply_markup: alertKeyboard(leadId) };
   };
 
-  // Re-render from the database through the roofer-facing path, never from the
-  // previous message text. If the read fails, edit only the keyboard.
+  // The row the card is drawn from: what this request read through the
+  // roofer-facing view (scoped by id AND business) — the dispatcher's read,
+  // or renderCurrent's newer one. Never the previous message text.
+  let current = lead;
+
+  // Render from that row. The view (and so the status line and the buttons)
+  // is the caller's: it comes from the write this request has just made, or
+  // from the row itself. Nothing but the status changes on a lead after it is
+  // stored, so the row read before the write still holds every other line of
+  // the card, and reading it a second time would only repeat the first read.
+  // If the text cannot be built, edit only the keyboard.
   const render = async (view, reviewResult = null) => {
     if (!chatId || !messageId) return;
-    let fresh = null;
+    const fresh = current;
     let text;
     try {
-      fresh = await getClientLead(leadId, businessId);
       if (!fresh) throw new Error('lead_gone');
       text = renderAlert({ business, lead: fresh, view, reviewResult });
     } catch (e) {
@@ -699,10 +857,13 @@ function makeContext({ cb, business, lead, leadId, businessId, answer, surface =
     await sendMessage(chatId, text, extra).catch(() => {});
   };
 
-  /** Re-render this lead in whatever state it is in NOW. Used by a stale tap. */
+  /** Re-render this lead in whatever state it is in NOW. Used by a stale tap:
+   *  a write was refused, so the row has changed since the dispatcher read it
+   *  and is read again — once; render() then draws from this newer row. */
   const renderCurrent = async () => {
     const fresh = await getClientLead(leadId, businessId).catch(() => null);
     if (!fresh) return;
+    current = fresh;
     const card = await cardFor({ lead: fresh, leadId });
     await render(card.view, card.reviewResult);
   };
@@ -717,56 +878,60 @@ async function onContacted(ctx) {
   if (!result.changed) {
     // The lead exists — a second phone, or a double tap, moved it first. Show
     // the current card instead of the "Not found." lie.
-    await answer(TOAST_ALREADY_UPDATED);
-    await ctx.renderCurrent();
+    await together([answer(TOAST_ALREADY_UPDATED), ctx.renderCurrent()]);
     return;
   }
-  await answer('');
-  try { await addEvent(leadId, 'status_changed', { status: 'contacted' }); } catch (e) {
-    console.error('tg_status_event_failed', (e && e.code) || 'no_code');
-  }
-  try { await addEvent(leadId, 'contacted', {}); } catch (e) {
-    console.error('tg_contacted_event_failed', (e && e.code) || 'no_code');
-  }
-  await render('contacted');
+  // The status is written. The toast, the two event rows and the new card do
+  // not depend on each other, so none of them waits for another. The events
+  // keep their own order (status_changed, then contacted).
+  const events = async () => {
+    try { await addEvent(leadId, 'status_changed', { status: 'contacted' }); } catch (e) {
+      console.error('tg_status_event_failed', (e && e.code) || 'no_code');
+    }
+    try { await addEvent(leadId, 'contacted', {}); } catch (e) {
+      console.error('tg_contacted_event_failed', (e && e.code) || 'no_code');
+    }
+  };
+  await together([answer(''), events(), render('contacted')]);
 }
 
 /** d: ask before emailing; no write, no email. */
 async function onJobDone(ctx) {
   const { answer, render, lead, leadId } = ctx;
-  if (lead.status === 'done') { await answer(TOAST_ALREADY_UPDATED); await ctx.renderCurrent(); return; }
+  if (lead.status === 'done') { await together([answer(TOAST_ALREADY_UPDATED), ctx.renderCurrent()]); return; }
   if (lead.status !== 'contacted' && lead.status !== 'quoted' && lead.status !== 'won') {
     await answer(TOAST_CONTACT_FIRST);
     return;
   }
-  await answer('');
-  await render('confirm');
+  await together([answer(''), render('confirm')]);
 }
 
 /** n: cancel back to step 2. No write. */
 async function onCancel(ctx) {
   const { answer, render, leadId } = ctx;
-  await answer('');
-  await render('contacted');
+  await together([answer(''), render('contacted')]);
 }
 
 /** y: contacted/quoted/won -> done, then send the review request. */
 async function onConfirm(ctx) {
   const { answer, render, lead, leadId, businessId, business } = ctx;
-  if (lead.status === 'done') { await answer(TOAST_ALREADY_UPDATED); await ctx.renderCurrent(); return; }
+  if (lead.status === 'done') { await together([answer(TOAST_ALREADY_UPDATED), ctx.renderCurrent()]); return; }
   if (lead.status !== 'contacted' && lead.status !== 'quoted' && lead.status !== 'won') {
     await answer(TOAST_CONTACT_FIRST);
     return;
   }
   const token = randomBytes(24).toString('base64url');
   const result = await transitionLead(leadId, businessId, 'done', token);
-  if (!result.changed) { await answer(TOAST_ALREADY_UPDATED); await ctx.renderCurrent(); return; }
+  if (!result.changed) { await together([answer(TOAST_ALREADY_UPDATED), ctx.renderCurrent()]); return; }
+  // The lead is done and the toast is empty whatever the email does, so the
+  // spinner is stopped now and not waited for: the event row and the email
+  // start at once. It is awaited at the very end, after the card is drawn.
+  const answered = answer('');
   // Post-transition: the lead is done, so a throw here must not leave the
   // old Yes/Cancel buttons on screen (Yes would only say "already
   // completed" and Try again would never be offered). Best-effort render
   // of the error view (or the no-email done view) instead; no second answer.
   try {
-    await answer('');
     try { await addEvent(leadId, 'status_changed', { status: 'done' }); } catch (e) {
       console.error('tg_status_event_failed', (e && e.code) || 'no_code');
     }
@@ -792,6 +957,7 @@ async function onConfirm(ctx) {
       await render('done', 'no_email');
     }
   }
+  await answered;
 }
 
 /** r: retry the failed review email only. */
@@ -834,7 +1000,9 @@ async function onRetry(ctx) {
     const retryKey = (failInfo.lastStatus === 'timeout' || failInfo.lastStatus === 'idempotency_concurrent')
       ? (failInfo.lastKey || `${leadId}:review`)
       : `${leadId}:review:r${failInfo.count}`;
-    await answer('');
+    // Every check has passed: the toast is empty whatever the email does, so
+    // the spinner stops while the email is being sent.
+    const answered = answer('');
     const r = await sendReviewRequest({
       leadId, business,
       lead: { email: retry.email, name: retry.name, phone: retry.phone },
@@ -848,6 +1016,7 @@ async function onRetry(ctx) {
     } else {
       await render('error', 'failed');
     }
+    await answered;
   } finally {
     // Only a failed attempt releases the lock. A success keeps it, and the
     // lead is done anyway, so no later tap can reach this handler.
@@ -865,19 +1034,28 @@ const CALLBACK_HANDLERS = {
   r: onRetry,
 };
 
+/** Timing-log names for the lead buttons. Fixed strings, one per kind. */
+const LEAD_HANDLER_NAMES = {
+  c: 'contacted', d: 'job_done', n: 'cancel', y: 'confirm', r: 'retry', o: 'open_card',
+};
+
 /**
  * An answerer that reaches Telegram at most once per callback query.
  *
  * Every branch answers exactly once (a spinner that never stops is worse than a
  * generic toast), and a handler that somehow answered and then threw must not
  * produce a second toast. Exported so the guard can be exercised on its own.
+ *
+ * Every later call returns the FIRST call's promise. A handler may start the
+ * answer and carry on without waiting for it; whoever calls again — the
+ * dispatcher's catch included — then waits for that one request to finish, so
+ * the function never returns while the answer is still on its way.
  */
 export function createAnswerOnce(id) {
-  let answered = false;
+  let sent = null;
   return (text) => {
-    if (answered) return Promise.resolve();
-    answered = true;
-    return answerCallbackQuery(id, text).catch(() => {});
+    if (!sent) sent = answerCallbackQuery(id, text).catch(() => {});
+    return sent;
   };
 }
 
@@ -912,13 +1090,18 @@ async function handleOpenLead({ cb, leadId, binding, answer }) {
   // Fail closed: a stuck counter must not become an unlimited open loop.
   try { within = await hitRateLimit('open:' + chatId, 3600, OPENS_PER_HOUR); } catch { return; }
   if (!within) { await answer(TOAST_TOO_MANY_OPENS); return; }
-  const lead = await getClientLead(leadId, binding.business_id).catch(() => null);
+  // Both reads need only the binding's business, so they run together.
+  const [lead, business] = await together([
+    getClientLead(leadId, binding.business_id).catch(() => null),
+    getBusinessById(binding.business_id).catch(() => null),
+  ]);
   if (!lead) { await answer(TOAST_LEAD_GONE); return; }
-  const business = await getBusinessById(binding.business_id).catch(() => null);
   if (!business) { await answer(GENERIC_NOT_FOUND); return; }
   const card = await cardFor({ lead, leadId });
-  await answer('');
-  await sendMessage(chatId, renderAlert({ business, lead, view: card.view, reviewResult: card.reviewResult }), card.kb);
+  await together([
+    answer(''),
+    sendMessage(chatId, renderAlert({ business, lead, view: card.view, reviewResult: card.reviewResult }), card.kb),
+  ]);
 }
 
 /**
@@ -930,18 +1113,24 @@ async function handleOpenLead({ cb, leadId, binding, answer }) {
 async function handleDetailOpen({ cb, page, leadId, binding, answer }) {
   const chatId = cb.message && cb.message.chat && cb.message.chat.id;
   const messageId = cb.message && cb.message.message_id;
-  const lead = await getClientLead(leadId, binding.business_id).catch(() => null);
+  // The lead (scoped by id AND business) and the business row both need only
+  // the binding's business, so they are read together.
+  const [lead, business] = await together([
+    getClientLead(leadId, binding.business_id).catch(() => null),
+    getBusinessById(binding.business_id).catch(() => null),
+  ]);
   if (!lead) {
-    await answer(TOAST_LEAD_GONE);
-    return sendLeadsPage(chatId, binding.business_id, page, messageId, null);
+    await together([
+      answer(TOAST_LEAD_GONE),
+      sendLeadsPage(chatId, binding.business_id, page, messageId, null),
+    ]);
+    return;
   }
-  const business = await getBusinessById(binding.business_id).catch(() => null);
   if (!business) { await answer(GENERIC_NOT_FOUND); return; }
   const card = await cardFor({ lead, leadId });
   const text = renderAlert({ business, lead, view: card.view, reviewResult: card.reviewResult });
   const markup = leadDetailKeyboard(card.view, leadId, page, lead);
-  await answer('');
-  const r = await editList(chatId, messageId, text, markup);
+  const [, r] = await together([answer(''), editList(chatId, messageId, text, markup)]);
   // Too old to edit: send the detail as a new message rather than leaving a
   // dead number button on screen. Its Back edits the new message instead.
   if (!(r && r.ok)) await sendMessage(chatId, text, markup).catch(() => {});
@@ -955,12 +1144,16 @@ async function handleDetailOpen({ cb, page, leadId, binding, answer }) {
  */
 async function refreshRemovePage(chatId, businessId, page, messageId) {
   let p = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
-  while (p > 0) {
-    const probe = await listClientLeads(businessId, 1, p * REMOVE_PAGE).catch(() => [{}]);
-    if (probe.length) break;
+  // Read the page itself rather than probing it and then reading it again:
+  // the rows that prove the page is not empty are the rows that get drawn. A
+  // read that fails is left for sendRemovePage to repeat, and to report.
+  let rows = null;
+  for (;;) {
+    rows = await listClientLeads(businessId, REMOVE_PAGE + 1, p * REMOVE_PAGE).catch(() => null);
+    if (p === 0 || rows === null || rows.length) break;
     p--;
   }
-  return sendRemovePage(chatId, businessId, p, messageId, null);
+  return sendRemovePage(chatId, businessId, p, messageId, null, rows);
 }
 
 /**
@@ -981,12 +1174,17 @@ async function handleCallback(cb, binding) {
     if (pick) {
       // Operator-only BEFORE any data read; a non-operator gets the same answer
       // as any unknown callback.
+      setHandler(pick[1] === 'pb' ? 'cb.operator_pick_phones' : 'cb.operator_pick_code');
       if (!isOperatorChat(chatId, chatType)) { await answer(GENERIC_NOT_FOUND); return; }
       const b = await getBusinessById(pick[2]).catch(() => null);
       if (!b || (b.status !== 'demo' && b.status !== 'active')) { await answer(OPERATOR_UNKNOWN_SLUG); return; }
-      await answer('');
-      if (pick[1] === 'pb') await handleOperatorPhones(chatId, b.slug);
-      else await handleOperatorCode(chatId, b.slug);
+      // The row just read IS the business (served status checked above), so
+      // the command does not look it up again by slug; the toast is empty and
+      // goes out while the command runs.
+      await together([
+        answer(''),
+        pick[1] === 'pb' ? handleOperatorPhones(chatId, b.slug, b) : handleOperatorCode(chatId, b.slug, b),
+      ]);
       return;
     }
 
@@ -994,6 +1192,7 @@ async function handleCallback(cb, binding) {
     if (opPhone) {
       // A non-operator tapping a forged p:/P:/q: gets the same answer as any
       // unknown callback, and nothing is read or written.
+      setHandler({ p: 'cb.operator_phone_ask', P: 'cb.operator_phone_remove', q: 'cb.operator_phone_cancel' }[opPhone[1]]);
       if (!isOperatorChat(chatId, chatType)) { await answer(GENERIC_NOT_FOUND); return; }
       await handleOperatorPhoneCallback({ cb, kind: opPhone[1], rowId: opPhone[2], answer });
       return;
@@ -1002,6 +1201,7 @@ async function handleCallback(cb, binding) {
     if (!binding) { await answer(GENERIC_NOT_FOUND); return; }
 
     if (CB_INVITE_CANCEL.test(data)) {
+      setHandler('cb.invite_cancel');
       await handleInviteCancel({ chatId, businessId: binding.business_id, answer });
       return;
     }
@@ -1013,9 +1213,14 @@ async function handleCallback(cb, binding) {
     const rmAsk = CB_REMOVE_ASK.exec(data);
     const rmDo = CB_REMOVE_DO.exec(data);
     if (rmOpen || rmDel || rmCancel || rmPage || rmAsk || rmDo) {
+      setHandler(rmPage ? 'cb.remove_page' : rmAsk ? 'cb.remove_ask' : rmDo ? 'cb.remove_confirm'
+        : rmCancel ? 'cb.remove_cancel_legacy' : rmOpen ? 'cb.remove_ask_legacy' : 'cb.remove_confirm_legacy');
       // Owner only, before any read; the business is always the binding's.
+      // This check is never run alongside the read it guards.
       if (!(await isOwnerChat(binding.business_id, chatId))) { await answer(TOAST_OWNER_ONLY); return; }
       const messageId = cb.message && cb.message.message_id;
+      // Below, a toast goes out together with the edit that follows it, once
+      // its text is known; neither waits for the other.
       if (rmPage) { return sendRemovePage(chatId, binding.business_id, Number(rmPage[1]), messageId, answer); }
       // The /remove_lead browser: a number tap asks, E: re-checks the row and the
       // binding (both re-read above and here), deletes, then refreshes that
@@ -1023,47 +1228,64 @@ async function handleCallback(cb, binding) {
       if (rmAsk) {
         const leadId = rmAsk[2];
         const lead = await getClientLead(leadId, binding.business_id).catch(() => null);
-        if (!lead) { await answer(REMOVE_LEAD_GONE); return refreshRemovePage(chatId, binding.business_id, Number(rmAsk[1]), messageId); }
-        await answer('');
-        return editList(chatId, messageId, removeLeadConfirmText(lead), removeLeadConfirmKeyboard(leadId, Number(rmAsk[1])));
+        if (!lead) {
+          await together([answer(REMOVE_LEAD_GONE), refreshRemovePage(chatId, binding.business_id, Number(rmAsk[1]), messageId)]);
+          return;
+        }
+        await together([
+          answer(''),
+          editList(chatId, messageId, removeLeadConfirmText(lead), removeLeadConfirmKeyboard(leadId, Number(rmAsk[1]))),
+        ]);
+        return;
       }
       if (rmDo) {
         const leadId = rmDo[2];
         const lead = await getClientLead(leadId, binding.business_id).catch(() => null);
-        if (!lead) { await answer(REMOVE_LEAD_GONE); return refreshRemovePage(chatId, binding.business_id, Number(rmDo[1]), messageId); }
+        if (!lead) {
+          await together([answer(REMOVE_LEAD_GONE), refreshRemovePage(chatId, binding.business_id, Number(rmDo[1]), messageId)]);
+          return;
+        }
         const removed = await deleteLeadScoped(leadId, binding.business_id).catch(() => 0);
         // The name comes from the row read before the delete: after it there is
         // nothing left to name.
-        await answer(removed ? removedText(lead) : REMOVE_LEAD_GONE);
-        return refreshRemovePage(chatId, binding.business_id, Number(rmDo[1]), messageId);
+        await together([
+          answer(removed ? removedText(lead) : REMOVE_LEAD_GONE),
+          refreshRemovePage(chatId, binding.business_id, Number(rmDo[1]), messageId),
+        ]);
+        return;
       }
       const leadId = (rmOpen || rmDel || rmCancel)[1];
       if (rmCancel) {
-        await answer('');
-        return sendRemovePage(chatId, binding.business_id, 0, messageId);
+        await together([answer(''), sendRemovePage(chatId, binding.business_id, 0, messageId)]);
+        return;
       }
       const lead = await getClientLead(leadId, binding.business_id).catch(() => null);
       if (!lead) { await answer(REMOVE_LEAD_GONE); return; }
       if (rmOpen) {
-        await answer('');
-        return editMessageText(chatId, messageId, removeLeadConfirmText(lead), removeLeadConfirmKeyboard(leadId)).catch(() => {});
+        await together([
+          answer(''),
+          editMessageText(chatId, messageId, removeLeadConfirmText(lead), removeLeadConfirmKeyboard(leadId)).catch(() => {}),
+        ]);
+        return;
       }
       const removed = await deleteLeadScoped(leadId, binding.business_id).catch(() => 0);
       // The name comes from the row read before the delete: after it there is
       // nothing left to name.
       const done = removed ? removedText(lead) : REMOVE_LEAD_GONE;
-      await answer(done);
-      return editList(chatId, messageId, done, { reply_markup: { inline_keyboard: [] } });
+      await together([answer(done), editList(chatId, messageId, done, { reply_markup: { inline_keyboard: [] } })]);
+      return;
     }
 
     const page = CB_PAGE.exec(data);
     if (page) {
+      setHandler('cb.leads_page');
       await sendLeadsPage(chatId, binding.business_id, Number(page[1]), messageId, answer);
       return;
     }
 
     const recipient = CB_RECIPIENT.exec(data);
     if (recipient) {
+      setHandler({ x: 'cb.recipient_ask', X: 'cb.recipient_remove', v: 'cb.recipient_cancel' }[recipient[1]]);
       await handleRecipientCallback({ cb, kind: recipient[1], rowId: recipient[2], binding, answer });
       return;
     }
@@ -1071,6 +1293,7 @@ async function handleCallback(cb, binding) {
     // L: — the /leads browser's number tap: the same message becomes the detail.
     const open = CB_LEAD_OPEN.exec(data);
     if (open) {
+      setHandler('cb.lead_open');
       await handleDetailOpen({ cb, page: Number(open[1]), leadId: open[2], binding, answer });
       return;
     }
@@ -1079,17 +1302,31 @@ async function handleCallback(cb, binding) {
     // C/D/Y/N/R on the browser detail (same handlers, page-aware keyboards).
     const m = CB_LEAD.exec(data);
     const md = CB_LEAD_DETAIL.exec(data);
-    if (!m && !md) { await answer(GENERIC_NOT_FOUND); return; }
+    if (!m && !md) { setHandler('cb.unknown'); await answer(GENERIC_NOT_FOUND); return; }
     const kind = m ? m[1] : md[1].toLowerCase();
     const leadId = m ? m[2] : md[3];
     const surface = m ? 'alert' : 'detail';
     const detailPage = md ? Number(md[2]) : 0;
 
+    // The handler name says which button and on which surface: the alert
+    // message or the /leads detail. A fixed name per kind; never the lead.
+    setHandler(`cb.${LEAD_HANDLER_NAMES[kind] || 'unknown'}.${surface}`);
+
     if (kind === 'o') { await handleOpenLead({ cb, leadId, binding, answer }); return; }
 
-    const lead = await getClientLead(leadId, binding.business_id);
+    // One read of the lead, scoped by id AND the binding's business, and one
+    // of the business row. Neither needs the other, so they run together; the
+    // outcomes are then judged in the order they used to be read, so a failed
+    // or empty lead read is still what decides the answer first.
+    const [leadRead, businessRead] = await together([
+      settle(getClientLead(leadId, binding.business_id)),
+      settle(getBusinessById(binding.business_id)),
+    ]);
+    if (leadRead.error) throw leadRead.error;
+    const lead = leadRead.value;
     if (!lead) { await answer(GENERIC_NOT_FOUND); return; }
-    const business = await getBusinessById(binding.business_id);
+    if (businessRead.error) throw businessRead.error;
+    const business = businessRead.value;
     if (!business) { await answer(GENERIC_NOT_FOUND); return; }
 
     const handler = CALLBACK_HANDLERS[kind];
@@ -1121,6 +1358,106 @@ async function handleChatMember(m) {
   if (business) await notifyOperatorUnreachable({ business, chatId: chat.id });
 }
 
+/** Timing-log names for the commands. A typed word that is not one of these
+ *  is logged as 'text.plain', so the log can only ever hold these strings. */
+const COMMAND_HANDLER_NAMES = {
+  '/start': 'cmd.start', '/leads': 'cmd.leads', '/invite': 'cmd.invite', '/recipients': 'cmd.recipients',
+  '/remove_lead': 'cmd.remove_lead', '/help': 'cmd.help', '/id': 'cmd.id',
+  '/code': 'cmd.operator_code', '/phones': 'cmd.operator_phones', '/businesses': 'cmd.operator_businesses',
+  '/operator': 'cmd.operator_help',
+};
+/** For anyone but the operator these are not commands at all (plain text). */
+const OPERATOR_ONLY_COMMANDS = new Set(['/code', '/phones', '/businesses', '/operator']);
+
+/**
+ * One authenticated update from a private chat: resolve the binding, then
+ * route a command, a keyboard press, free text, a button tap or a block.
+ * Runs under the timing context, so every step below is measured.
+ */
+async function handleUpdate(u, chat) {
+  const chatId = chat.id;
+  const binding = await getChatBinding(chatId);
+
+  if (u.message && typeof u.message.text === 'string') {
+    const text = u.message.text.trim();
+    // A persistent-keyboard press arrives as the button's plain text. Map the
+    // known labels onto their commands here; every handler still applies its
+    // own permission checks, exactly as if the command had been typed. An
+    // unknown text is not a press at all and takes the plain-text path.
+    const pressed = Object.prototype.hasOwnProperty.call(KEYBOARD_LABELS, text) ? KEYBOARD_LABELS[text] : null;
+    const token = pressed || text.split(/\s+/)[0];
+    let first = token.toLowerCase();
+    // /command@botname is how a command arrives from a client that appends the
+    // bot. Only this bot's own username is stripped; another bot's suffix is
+    // not a command at all, and falls through to the plain-text path.
+    const at = first.indexOf('@');
+    if (at > 0) {
+      const suffix = first.slice(at + 1);
+      const own = (await botUsername()) || String(process.env.TELEGRAM_BOT_USERNAME || '').toLowerCase();
+      if (!own || suffix !== String(own).toLowerCase()) {
+        setHandler('text.plain');
+        await handlePlainText(chatId, binding, text);
+        return;
+      }
+      first = first.slice(0, at);
+    }
+    const arg = pressed ? '' : text.slice(token.length).trim();
+    const operator = isOperatorChat(chatId, chat.type);
+    // The command's own fixed name, or 'text.plain' for anything else: what
+    // was typed never reaches the log.
+    setHandler(COMMAND_HANDLER_NAMES[first] && (operator || !OPERATOR_ONLY_COMMANDS.has(first))
+      ? COMMAND_HANDLER_NAMES[first] : 'text.plain');
+    // Operator answers for the owner commands: the role comes from the env,
+    // not from a binding. No new callbacks: the pickers reuse pc:/pb:.
+    if (operator && first === '/invite') {
+      await operatorPick(chatId, 'pc', OPERATOR_USAGE_CODE);
+    } else if (operator && first === '/recipients') {
+      await operatorPick(chatId, 'pb', OPERATOR_USAGE_PHONES);
+    } else if (operator && first === '/help') {
+      await replyRole(chatId, OPERATOR_HELP, binding);
+    } else if (operator && first === '/remove_lead') {
+      await reply(chatId, OPERATOR_REMOVE_LEAD);
+    } else if (operator && first === '/leads') {
+      await reply(chatId, OPERATOR_LEADS_HINT);
+    } else if (first === '/start') {
+      await handleStart(chatId, arg);
+    } else if (first === '/leads') {
+      await handleLeads(chatId, binding);
+    } else if (first === '/invite') {
+      await handleInvite(chatId, binding);
+    } else if (first === '/recipients') {
+      await handleRecipients(chatId, binding);
+    } else if (first === '/remove_lead') {
+      await handleRemoveLead(chatId, binding);
+    } else if (first === '/help') {
+      await replyRole(chatId, binding ? BOT_HELP : BOT_NOT_CONNECTED, binding);
+    } else if (first === '/id') {
+      // Every private chat, bound or not, operator or not: it is how the
+      // operator learns OPERATOR_CHAT_ID without a third-party bot. Not in
+      // the command menu.
+      await replyMessage(chatId, operatorIdMessage(chatId, { operator: isOperatorChat(chatId) }));
+    } else if (operator) {
+      // Operator commands. A non-operator never reaches this branch, so the
+      // reply they get is the same as for any unknown text.
+      if (first === '/code') await handleOperatorCode(chatId, arg);
+      else if (first === '/phones') await handleOperatorPhones(chatId, arg);
+      else if (first === '/businesses') await handleOperatorBusinesses(chatId);
+      else if (first === '/operator') await replyRole(chatId, OPERATOR_HELP, binding);
+      else await handlePlainText(chatId, binding, text);
+    } else {
+      await handlePlainText(chatId, binding, text);
+    }
+  } else if (u.callback_query) {
+    setHandler('cb.unknown');
+    await handleCallback(u.callback_query, binding);
+  } else if (u.my_chat_member) {
+    setHandler('member.status');
+    await handleChatMember(u.my_chat_member);
+  } else {
+    setHandler('message.other');
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
@@ -1142,78 +1479,9 @@ export default async function handler(req, res) {
     // my_chat_member carries the chat at the top level, not inside a message.
     const chat = (msg && msg.chat) || (u.my_chat_member && u.my_chat_member.chat);
     if (!chat || chat.type !== 'private') return res.status(200).json({ ok: true });
-    const chatId = chat.id;
-    const binding = await getChatBinding(chatId);
-
-    if (u.message && typeof u.message.text === 'string') {
-      const text = u.message.text.trim();
-      // A persistent-keyboard press arrives as the button's plain text. Map the
-      // known labels onto their commands here; every handler still applies its
-      // own permission checks, exactly as if the command had been typed. An
-      // unknown text is not a press at all and takes the plain-text path.
-      const pressed = Object.prototype.hasOwnProperty.call(KEYBOARD_LABELS, text) ? KEYBOARD_LABELS[text] : null;
-      const token = pressed || text.split(/\s+/)[0];
-      let first = token.toLowerCase();
-      // /command@botname is how a command arrives from a client that appends the
-      // bot. Only this bot's own username is stripped; another bot's suffix is
-      // not a command at all, and falls through to the plain-text path.
-      const at = first.indexOf('@');
-      if (at > 0) {
-        const suffix = first.slice(at + 1);
-        const own = (await botUsername()) || String(process.env.TELEGRAM_BOT_USERNAME || '').toLowerCase();
-        if (!own || suffix !== String(own).toLowerCase()) {
-          await handlePlainText(chatId, binding, text);
-          return res.status(200).json({ ok: true });
-        }
-        first = first.slice(0, at);
-      }
-      const arg = pressed ? '' : text.slice(token.length).trim();
-      const operator = isOperatorChat(chatId, chat.type);
-      // Operator answers for the owner commands: the role comes from the env,
-      // not from a binding. No new callbacks: the pickers reuse pc:/pb:.
-      if (operator && first === '/invite') {
-        await operatorPick(chatId, 'pc', OPERATOR_USAGE_CODE);
-      } else if (operator && first === '/recipients') {
-        await operatorPick(chatId, 'pb', OPERATOR_USAGE_PHONES);
-      } else if (operator && first === '/help') {
-        await replyRole(chatId, OPERATOR_HELP, binding);
-      } else if (operator && first === '/remove_lead') {
-        await reply(chatId, OPERATOR_REMOVE_LEAD);
-      } else if (operator && first === '/leads') {
-        await reply(chatId, OPERATOR_LEADS_HINT);
-      } else if (first === '/start') {
-        await handleStart(chatId, arg);
-      } else if (first === '/leads') {
-        await handleLeads(chatId, binding);
-      } else if (first === '/invite') {
-        await handleInvite(chatId, binding);
-      } else if (first === '/recipients') {
-        await handleRecipients(chatId, binding);
-      } else if (first === '/remove_lead') {
-        await handleRemoveLead(chatId, binding);
-      } else if (first === '/help') {
-        await replyRole(chatId, binding ? BOT_HELP : BOT_NOT_CONNECTED, binding);
-      } else if (first === '/id') {
-        // Every private chat, bound or not, operator or not: it is how the
-        // operator learns OPERATOR_CHAT_ID without a third-party bot. Not in
-        // the command menu.
-        await replyMessage(chatId, operatorIdMessage(chatId, { operator: isOperatorChat(chatId) }));
-      } else if (operator) {
-        // Operator commands. A non-operator never reaches this branch, so the
-        // reply they get is the same as for any unknown text.
-        if (first === '/code') await handleOperatorCode(chatId, arg);
-        else if (first === '/phones') await handleOperatorPhones(chatId, arg);
-        else if (first === '/businesses') await handleOperatorBusinesses(chatId);
-        else if (first === '/operator') await replyRole(chatId, OPERATOR_HELP, binding);
-        else await handlePlainText(chatId, binding, text);
-      } else {
-        await handlePlainText(chatId, binding, text);
-      }
-    } else if (u.callback_query) {
-      await handleCallback(u.callback_query, binding);
-    } else if (u.my_chat_member) {
-      await handleChatMember(u.my_chat_member);
-    }
+    // One "[tg-timing]" line per update from here on: the handler name, the
+    // cold-start flag, the region, and how long each step took. No PII.
+    await runTimed(u.callback_query ? 'callback' : (u.my_chat_member ? 'member' : 'message'), () => handleUpdate(u, chat));
   } catch (e) {
     console.error('tg_update_failed', (e && e.code) || 'no_code');
   }
