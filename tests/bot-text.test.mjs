@@ -177,6 +177,8 @@ const samples = sampleTelegramTexts();
     ...C.operatorInviteListKeyboard(fiveBiz, 1, true).reply_markup.inline_keyboard.flat().map((b) => b.text),
     ...C.operatorBackToInviteListKeyboard(1).reply_markup.inline_keyboard.flat().map((b) => b.text),
     ...C.operatorBackToBusinessKeyboard(bizId, 1).reply_markup.inline_keyboard.flat().map((b) => b.text),
+    ...['list', 'business'].flatMap((from) => [C.operatorAlreadyConnectedKeyboard(bizId, 1, from), C.operatorReplaceConfirmKeyboard(bizId, 1, from),
+      C.operatorInviteBackKeyboard(bizId, 1, from)].flatMap((k) => k.reply_markup.inline_keyboard.flat().map((b) => b.text))),
     ...C.operatorLeadDetailKeyboard({ businessId: bizId, leadPage: 1, page: 1 }).reply_markup.inline_keyboard.flat().map((b) => b.text),
     ...listKb.flat().map((b) => b.text),
     ...removeKb.flat().map((b) => b.text),
@@ -202,9 +204,11 @@ const samples = sampleTelegramTexts();
     C.operatorBusinessDetailText({ business: opBiz, rows: [{ label: null }], stats: { total: 1, recent: 1, lastAt: new Date().toISOString() } }),
     C.operatorSuspendConfirmText(opBiz), C.operatorSuspendedText({ business: opBiz, failed: 1 }), C.operatorReactivatedText(opBiz),
     C.operatorAlreadySuspendedText(opBiz), C.operatorAlreadyActiveText(opBiz), C.operatorInviteSuspendedText(opBiz),
-    C.operatorInviteResultText({ business: opBiz, code: 'K7M2QPX9RT4W', username: 'alder_alerts_bot' }),
-    C.operatorInviteResultText({ business: opBiz, code: 'K7M2QPX9RT4W', username: null }),
-    C.operatorCodeText({ slug: 'a', code: 'K7M2QPX9RT4W', cancelled: 2 }).text, C.operatorCodeResendText({ code: 'K7M2QPX9RT4W' }).text,
+    C.operatorAlreadyConnectedText({ business: opBiz, phones: 2 }), C.operatorReplaceConfirmText({ business: opBiz, phones: 2 }),
+    C.operatorInviteFailedText({ business: opBiz }), C.operatorInviteFailedText({ business: opBiz, capped: true, replace: true }),
+    C.operatorReplaceFailedText(opBiz), C.OPERATOR_ALREADY_REPLACED, C.OPERATOR_NO_PHONE_NOW, C.BOT_ACCESS_ENDED,
+    C.operatorCodeText({ slug: 'a', code: 'K7M2QPX9RT4W', cancelled: 2, removed: 2, failed: 1 }).text,
+    C.operatorCodeResendText({ code: 'K7M2QPX9RT4W', removed: 1 }).text,
     C.operatorLeadListText(opBiz, fiveOpLeads), C.operatorLeadCardText(opBiz, fiveOpLeads[0])].join('\n');
   // (The blocked-phone notice names the OWNER's /recipients on purpose: it
   // says who can remove the phone. It is checked for the rest only.)
@@ -216,10 +220,13 @@ const samples = sampleTelegramTexts();
     'operatorPhonesText', 'operatorPhonesKeyboard', 'operatorConfirmRemoveText', 'operatorConfirmRemoveKeyboard', 'operatorBusinessesText',
     'OPERATOR_LEADS_HINT', 'OPERATOR_USAGE_CODE', 'OPERATOR_PICK_TEXT', 'operatorPickerKeyboard', 'OPERATOR_REMOVE_LEAD',
     'OPERATOR_TERMINATE_STILL', 'OPERATOR_TERMINATED', 'OPERATOR_NOT_CONNECTED', 'operatorTerminateConfirmText',
-    'operatorTerminateConfirmKeyboard', 'operatorTerminatedText', 'botAccessEndedText']
+    'operatorTerminateConfirmKeyboard', 'operatorTerminatedText', 'botAccessEndedText',
+    // The in-place "Invite link · works once" output and its toast.
+    'operatorInviteResultText', 'operatorInviteCancelledToast']
     .filter((k) => k in C);
+  const oldInviteOutput = /Invite link|Forward this link to the business owner|works once ·/.test(operatorCopy);
   line(longActions.length === 0 && numbers.length === 20 && badNumbers.length === 0 && !banned.test(copy)
-    && !bannedOperator.test(operatorCopy) && goneExports.length === 0,
+    && !bannedOperator.test(operatorCopy) && !oldInviteOutput && goneExports.length === 0,
     'T9', 'every button <= 20 chars; list buttons are one digit',
     `buttons=${navAndActions.length} numbers=${numbers.map((b) => b.text).join('')} long=${longActions.join(',') || 'none'} gone=${goneExports.join(',') || 'none'} banned=${banned.test(copy)}/${bannedOperator.test(operatorCopy)}`);
 }
@@ -235,8 +242,15 @@ const samples = sampleTelegramTexts();
   const opKb = C.operatorSuspendConfirmKeyboard(bizId, 3).reply_markup.inline_keyboard[0];
   const opDetail = C.operatorBusinessDetailKeyboard(bizId, 3).reply_markup.inline_keyboard;
   const opSuspended = C.operatorBusinessDetailKeyboard(bizId, 3, { suspended: true }).reply_markup.inline_keyboard;
-  const danger = [kb[0], opKb[0], opDetail[0][0]];
-  const cancel = [kb[1], opKb[1], opDetail[0][1], opDetail[1][1], opSuspended[0][1], opSuspended[1][0]];
+  // Replace phone, opened from the /invite list and from a business screen.
+  const kbRows = (k) => k.reply_markup.inline_keyboard;
+  const connectedList = kbRows(C.operatorAlreadyConnectedKeyboard(bizId, 3, 'list'));
+  const connectedBiz = kbRows(C.operatorAlreadyConnectedKeyboard(bizId, 3, 'business'));
+  const replaceList = kbRows(C.operatorReplaceConfirmKeyboard(bizId, 3, 'list'));
+  const replaceBiz = kbRows(C.operatorReplaceConfirmKeyboard(bizId, 3, 'business'));
+  const danger = [kb[0], opKb[0], opDetail[0][0], connectedList[0][0], connectedBiz[0][0], replaceList[0][0], replaceBiz[0][0]];
+  const cancel = [kb[1], opKb[1], opDetail[0][1], opDetail[1][1], opSuspended[0][1], opSuspended[1][0],
+    connectedList[0][1], connectedBiz[0][1], replaceList[0][1], replaceBiz[0][1]];
   const JSONsame = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   // The exact layouts. Served: Suspend (danger) left and Leads right, then
   // Invite (primary) left and Back right. Suspended: Reactivate (primary) and
@@ -255,6 +269,25 @@ const samples = sampleTelegramTexts();
     { text: 'Confirm suspend', callback_data: `bS:3:${bizId}`, style: 'danger' },
     { text: 'Cancel', callback_data: `bd:3:${bizId}` },
   ])
+    // Already connected: Replace phone (danger) left, Back right. The
+    // question: Confirm replace (danger) left, Cancel right, side by side.
+    && JSONsame(connectedList, [[{ text: 'Replace phone', callback_data: `bp:3:${bizId}`, style: 'danger' }, { text: 'Back', callback_data: 'bn:3' }]])
+    && JSONsame(connectedBiz, [[{ text: 'Replace phone', callback_data: `bw:3:${bizId}`, style: 'danger' }, { text: 'Back', callback_data: `bd:3:${bizId}` }]])
+    && JSONsame(replaceList, [[{ text: 'Confirm replace', callback_data: `bP:3:${bizId}`, style: 'danger' }, { text: 'Cancel', callback_data: `bc:3:${bizId}` }]])
+    && JSONsame(replaceBiz, [[{ text: 'Confirm replace', callback_data: `bW:3:${bizId}`, style: 'danger' }, { text: 'Cancel', callback_data: `bu:3:${bizId}` }]])
+    && JSONsame(kbRows(C.operatorInviteBackKeyboard(bizId, 3, 'list')), [[{ text: 'Back', callback_data: 'bn:3' }]])
+    && JSONsame(kbRows(C.operatorInviteBackKeyboard(bizId, 3, 'business')), [[{ text: 'Back', callback_data: `bd:3:${bizId}` }]])
+    && [connectedList, connectedBiz, replaceList, replaceBiz].flat(2).every((b) => Buffer.byteLength(b.callback_data, 'utf8') <= 64)
+    && C.operatorAlreadyConnectedText({ business: biz, phones: 1 }) === 'Alder Roofing · Already connected · 1 phone'
+    && C.operatorAlreadyConnectedText({ business: biz, phones: 3 }) === 'Alder Roofing · Already connected · 3 phones'
+    && C.operatorReplaceConfirmText({ business: biz, phones: 1 }) === 'Replace the phone of Alder Roofing? The 1 current phone stops receiving alerts and loses access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.'
+    && C.operatorReplaceConfirmText({ business: biz, phones: 3 }) === 'Replace the phones of Alder Roofing? The 3 current phones stop receiving alerts and lose access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.'
+    && C.BOT_ACCESS_ENDED === 'Your access to lead alerts for this business was ended by support.'
+    && C.OPERATOR_ALREADY_REPLACED === 'Already replaced.'
+    && C.operatorInviteSuspendedText(biz) === 'Alder Roofing is suspended. Reactivate it first.'
+    && C.operatorInviteFailedText({ business: biz, replace: true }) === 'Could not create an invite for Alder Roofing. Try again. No phone was removed.'
+    && C.operatorCodeText({ slug: 'alder-demo', code: 'K7M2QPX9RT4W', removed: 2, failed: 1, cancelled: 2 }).text
+      === 'Code for alder-demo: K7M2QPX9RT4W\n\nExpires in 24 hours. 2 phones removed (1 notice not delivered). 2 older invites were cancelled. The next message is for the client — forward it as it is.'
     && C.operatorSuspendConfirmText(biz) === 'Suspend Alder Roofing? Telegram alerts, emails and the website form stop for this business. Data is kept and you can reactivate at any time.'
     && C.BOT_SUSPENDED_NOTICE === 'Your service has been suspended. Contact support if this is a mistake.'
     && C.BOT_SUSPENDED === 'This service is suspended. Contact support.'
@@ -598,58 +631,117 @@ const samples = sampleTelegramTexts();
 /* T20: the actual setMyCommands scopes. The script is spawned against a
    loopback fake, so what is asserted is what Telegram would receive: the owner
    commands in the DEFAULT scope, the operator commands in the operator CHAT
-   scope — and nothing else gets a menu. (The spawn is async, not spawnSync: a
-   synchronous wait would freeze this process and the fake with it.) */
+   scope — and nothing else gets a menu. The fake keeps what was set per scope
+   and answers getMyCommands with it, so "info" after "set" reads the same
+   lists back. (The spawn is async, not spawnSync: a synchronous wait would
+   freeze this process and the fake with it.) */
 {
   const requests = [];
+  const menus = new Map();
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const c of req) chunks.push(c);
     const entry = { path: req.url, body: JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') };
     requests.push(entry);
+    const scopeKey = JSON.stringify(entry.body.scope || null);
+    let result = [];
+    if (entry.path.endsWith('/setMyCommands')) { menus.set(scopeKey, entry.body.commands); result = true; }
+    if (entry.path.endsWith('/getMyCommands')) result = menus.get(scopeKey) || [];
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, result: [] }));
+    res.end(JSON.stringify({ ok: true, result }));
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = 'http://127.0.0.1:' + server.address().port;
   const opChat = '5150000000000123';
-  let status = null;
-  try {
-    status = await new Promise((resolve) => {
-      const child = spawn(process.execPath, ['scripts/tg-commands.mjs', 'set'], {
-        env: {
-          ...process.env,
-          VERCEL_ENV: 'development',
-          TELEGRAM_API_BASE: base,
-          TELEGRAM_BOT_TOKEN: 'test-token',
-          OPERATOR_CHAT_ID: opChat,
-          TELEGRAM_CHAT_ID: '',
-        },
-      });
-      const timer = setTimeout(() => child.kill('SIGKILL'), 15000);
-      child.on('exit', (code) => { clearTimeout(timer); resolve(code == null ? -1 : code); });
+  const token = 'test-token';
+  const runScript = (mode) => new Promise((resolve) => {
+    const child = spawn(process.execPath, ['scripts/tg-commands.mjs', mode], {
+      env: {
+        ...process.env,
+        VERCEL_ENV: 'development',
+        TELEGRAM_API_BASE: base,
+        TELEGRAM_BOT_TOKEN: token,
+        OPERATOR_CHAT_ID: opChat,
+        TELEGRAM_CHAT_ID: '',
+      },
     });
+    let out = '';
+    child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { out += d; });
+    const timer = setTimeout(() => child.kill('SIGKILL'), 15000);
+    child.on('exit', (code) => { clearTimeout(timer); resolve({ status: code == null ? -1 : code, out }); });
+  });
+  let set = { status: null, out: '' };
+  let info = { status: null, out: '' };
+  let stale = { status: null, out: '' };
+  try {
+    set = await runScript('set');
+    info = await runScript('info');
+    // What the live bot had: the operator chat still listing /code and /phones.
+    menus.set(JSON.stringify({ type: 'chat', chat_id: Number(opChat) }), [{ command: 'businesses', description: 'x' },
+      { command: 'code', description: 'x' }, { command: 'phones', description: 'x' }, { command: 'help', description: 'x' }]);
+    stale = await runScript('info');
   } finally {
     server.close();
   }
-  const { COMMANDS, OPERATOR_COMMANDS } = await import('../scripts/tg-commands.mjs');
+  const { COMMANDS, OPERATOR_COMMANDS, menuLine, operatorScope, operatorSkippedLines } = await import('../scripts/tg-commands.mjs');
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const calls = requests.filter((x) => x.path.endsWith('/setMyCommands'));
   const defaultScope = calls.find((x) => !('scope' in x.body));
   const chatScope = calls.find((x) => x.body.scope && x.body.scope.type === 'chat');
   const otherScopes = calls.filter((x) => x.body.scope && x.body.scope.type !== 'chat');
-  const ok = status === 0 && calls.length === 2
-    && !!defaultScope && JSON.stringify(defaultScope.body.commands) === JSON.stringify(COMMANDS)
-    && !!chatScope && JSON.stringify(chatScope.body.commands) === JSON.stringify(OPERATOR_COMMANDS)
-    // The operator menu is exactly the operator's commands: no /code, no
-    // /phones, none of the owner's commands.
-    && JSON.stringify(OPERATOR_COMMANDS.map((c) => c.command)) === JSON.stringify(['businesses', 'invite', 'help', 'id'])
+  // The two lists, exactly: names, order and descriptions.
+  const WANT_DEFAULT = [
+    { command: 'leads', description: 'Your latest requests' },
+    { command: 'invite', description: 'Connect another phone' },
+    { command: 'recipients', description: 'Who receives alerts' },
+    { command: 'remove_lead', description: 'Remove a request' },
+    { command: 'help', description: 'How this works' },
+  ];
+  const WANT_OPERATOR = [
+    { command: 'businesses', description: 'Businesses: phones, leads, suspend' },
+    { command: 'invite', description: 'Invite or replace a phone' },
+    { command: 'help', description: 'Operator commands' },
+    { command: 'id', description: "This chat's ID" },
+  ];
+  const DEFAULT_LINE = '/leads, /invite, /recipients, /remove_lead, /help';
+  const OPERATOR_LINE = '/businesses, /invite, /help, /id';
+  const listsOk = same(COMMANDS, WANT_DEFAULT) && same(OPERATOR_COMMANDS, WANT_OPERATOR)
+    && new Set(OPERATOR_COMMANDS.map((c) => c.command)).size === 4
+    // No /code, no /phones, no /recipients, and /operator is an unlisted alias.
+    && !OPERATOR_COMMANDS.some((c) => ['code', 'phones', 'recipients', 'operator', 'leads', 'remove_lead'].includes(c.command))
     && !OPERATOR_COMMANDS.some((c) => /request|terminate|phones list/i.test(c.description))
-    && chatScope.body.scope.chat_id === Number(opChat)
+    && [...COMMANDS, ...OPERATOR_COMMANDS].every((c) => /^[a-z0-9_]{1,32}$/.test(c.command) && c.description.length >= 3 && c.description.length <= 40)
+    && menuLine(COMMANDS) === DEFAULT_LINE && menuLine(OPERATOR_COMMANDS) === OPERATOR_LINE && menuLine([]) === '(empty)';
+  // What Telegram received is those lists, in that order, in those scopes.
+  const sentOk = set.status === 0 && calls.length === 2
+    && !!defaultScope && same(defaultScope.body.commands, WANT_DEFAULT)
+    && !!chatScope && same(chatScope.body.commands, WANT_OPERATOR)
+    && same(chatScope.body.scope, { type: 'chat', chat_id: Number(opChat) })
     && otherScopes.length === 0
     && requests.some((x) => x.path.endsWith('/setMyDescription'))
     && requests.some((x) => x.path.endsWith('/setMyShortDescription'));
-  line(ok, 'T20', 'setMyCommands: owner commands default scope, operator chat scope',
-    `exit=${status} calls=${calls.length} scopes=${calls.map((x) => (x.body.scope && x.body.scope.type) || 'default').join(',')}`);
+  // What the script prints: both menus as plain text, and never the chat id
+  // or the token.
+  const quiet = [set, info, stale].every((x) => !x.out.includes(opChat) && !x.out.includes(token) && !/https?:/.test(x.out));
+  const printOk = set.out.includes('default menu (every private chat): ' + DEFAULT_LINE)
+    && set.out.includes('operator menu (operator chat only): ' + OPERATOR_LINE)
+    && info.status === 0 && info.out.includes('default menu (every private chat): ' + DEFAULT_LINE)
+    && info.out.includes('operator menu (operator chat only): ' + OPERATOR_LINE) && info.out.includes('operator menu is up to date')
+    && stale.status === 0 && stale.out.includes('operator menu (operator chat only): /businesses, /code, /phones, /help')
+    && stale.out.includes('OPERATOR MENU IS OUT OF DATE: run npm run tg:commands (expected ' + OPERATOR_LINE + ')')
+    && !stale.out.includes('up to date');
+  // Without a usable OPERATOR_CHAT_ID there is no chat to address: the script
+  // says, in capitals, that the operator chat keeps its old menu.
+  const skipped = operatorSkippedLines('OPERATOR_CHAT_ID is not set');
+  const scopeOk = same(operatorScope({ OPERATOR_CHAT_ID: ' 42 ' }), { scope: { type: 'chat', chat_id: 42 } })
+    && same(operatorScope({}), { reason: 'OPERATOR_CHAT_ID is not set' })
+    && same(operatorScope({ OPERATOR_CHAT_ID: '' }), { reason: 'OPERATOR_CHAT_ID is not set' })
+    && same(operatorScope({ OPERATOR_CHAT_ID: '@someone' }), { reason: 'OPERATOR_CHAT_ID is not a numeric chat id' })
+    && skipped[0] === 'OPERATOR MENU NOT UPDATED: OPERATOR_CHAT_ID is not set.' && skipped.length === 3
+    && /keeps the menu it had before/.test(skipped[1]);
+  line(listsOk && sentOk && printOk && quiet && scopeOk, 'T20', 'command menus: exact lists and order, per scope, printed',
+    `exit=${set.status}/${info.status}/${stale.status} calls=${calls.length} scopes=${calls.map((x) => (x.body.scope && x.body.scope.type) || 'default').join(',')} lists=${listsOk} sent=${sentOk} print=${printOk} quiet=${quiet} scope=${scopeOk}`);
 }
 
 console.log('');
