@@ -18,7 +18,7 @@ Use JSON POST bodies. The HTML is fixed/static; row data arrives separately in `
 }
 ```
 
-Omit `width` and `height` for automatic width and content height. `html` and `chat_data` are separate fields; never interpolate a lead value into HTML or JavaScript. The `chat_id` comes from the current `business_chats` binding, not the widget request.
+Omit `width` for full bubble width and omit `height` for automatic content height. `html` and `chat_data` are separate fields; never interpolate a lead value into HTML or JavaScript. The `chat_id` comes from the current `business_chats` binding, not the widget request.
 
 ### `answerWidgetQuery`
 
