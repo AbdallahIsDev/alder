@@ -1470,9 +1470,10 @@ try {
       // OP24: /businesses opens the business browser; a button of the old
       // /phones picker (pb:) says the screen expired and shows that business
       // in it. /invite is the invite list; a number in it, and a button of
-      // the old /code picker (pc:), edit the same message into the invite; a
-      // forged or stale id is answered with the current list; a non-operator
-      // gets nothing from any of them.
+      // the old /code picker (pc:), edit the same message into the guidance
+      // ("Code for <slug>: <code>") and send the client message as a new one;
+      // a forged or stale id is answered with the current list; a
+      // non-operator gets nothing from any of them.
       {
         const C2 = await import('../lib/content.js');
         await reset();
@@ -1521,21 +1522,37 @@ try {
           const out = await sent();
           const edit = out.filter((x) => x.path.includes('/editMessageText')).pop();
           const text = String((edit && edit.body.text) || '');
-          const code = (text.match(/\?start=([A-Z2-9]{12})\n/) || text.match(/\n\/start ([A-Z2-9]{12})\n/) || [])[1] || '';
-          const row = code ? (await svc.from('bind_codes').select('business_id, used_at, expires_at').eq('code', code).maybeSingle()).data : null;
-          if (code) createdCodes.push(code);
+          const ent = ((edit && edit.body.entities) || []).find((e) => e.type === 'code') || null;
+          const code = ent ? text.slice(ent.offset, ent.offset + ent.length) : '';
+          const row = /^[A-Z2-9]{12}$/.test(code)
+            ? (await svc.from('bind_codes').select('business_id, used_at, expires_at').eq('code', code).maybeSingle()).data : null;
+          if (row) createdCodes.push(code);
+          // The client message: a new message, the same code as a code entity,
+          // the link as a text_link, and neither the slug nor a visible URL.
+          const sends = out.filter((x) => x.path.includes('/sendMessage'));
+          const client = sends[0] ? sends[0].body : {};
+          const clientText = String(client.text || '');
+          const clientEnts = client.entities || [];
+          const clientOk = sends.length === 1
+            && clientText.startsWith('Tap here to connect your lead alerts on Telegram, then press Start.')
+            && clientEnts.some((e) => e.type === 'text_link' && clientText.slice(e.offset, e.offset + e.length) === 'connect your lead alerts'
+              && String(e.url).endsWith('?start=' + code))
+            && clientEnts.some((e) => e.type === 'code' && clientText.slice(e.offset, e.offset + e.length) === code)
+            && !clientText.includes(CODE_SLUG) && !/https?:|t\.me/.test(clientText) && !('parse_mode' in client) && !('reply_markup' in client);
           return {
-            sends: out.filter((x) => x.path.includes('/sendMessage')).length, text, row,
+            sends: sends.length, text, row,
             kb: (edit && edit.body.reply_markup && edit.body.reply_markup.inline_keyboard) || [],
             ok: !!row && row.business_id === codeBiz.id && !row.used_at && new Date(row.expires_at) > new Date()
-              && /\n\nForward this (link|code) to the business owner/.test(text),
+              && text.startsWith(`Code for ${CODE_SLUG}: ${code}\n\nExpires in 24 hours.`)
+              && text.endsWith(' The next message is for the client — forward it as it is.')
+              && !('parse_mode' in edit.body) && clientOk,
           };
         };
         const fromList = await inviteTap('bi:0:' + codeBiz.id);
         const fromPicker = await inviteTap('pc:' + codeBiz.id);
-        const inviteOk = fromList.ok && fromList.sends === 0
+        const inviteOk = fromList.ok && fromList.sends === 1
           && JSON.stringify(fromList.kb) === JSON.stringify([[{ text: 'Back', callback_data: 'bn:0' }]])
-          && fromPicker.ok && fromPicker.sends === 0
+          && fromPicker.ok && fromPicker.sends === 1
           && JSON.stringify(fromPicker.kb) === JSON.stringify([[{ text: 'Back', callback_data: 'bn:0' }]]);
 
         await reset();
@@ -1555,7 +1572,8 @@ try {
         let foreignSends = 0;
         let foreignRefused = true;
         for (const data of ['pb:' + bizA.id, 'bl:0', 'bn:0', 'bd:0:' + bizA.id, 'bt:0:' + bizA.id, 'bT:0:' + bizA.id, 'bs:0:' + bizA.id, 'bS:0:' + bizA.id,
-          'br:0:' + bizA.id, 'bv:0:' + bizA.id, 'bi:0:' + bizA.id, 'bq:0:0:' + bizA.id]) {
+          'br:0:' + bizA.id, 'bv:0:' + bizA.id, 'bi:0:' + bizA.id, 'bq:0:0:' + bizA.id,
+          'bp:0:' + bizA.id, 'bP:0:' + bizA.id, 'bc:0:' + bizA.id, 'bw:0:' + bizA.id, 'bW:0:' + bizA.id, 'bu:0:' + bizA.id]) {
           await reset();
           await good(cb(chatA, data));
           const out = await sent();
@@ -1573,6 +1591,90 @@ try {
           && foreignSends === 0 && foreignRefused && boundAfter === boundBefore && boundBefore > 0,
           'OP24', 'browser and /invite: in place, forged/stale/foreign refused',
           `k=${codeKb ? codeKb.flat().map((b) => b.callback_data.slice(0,3)).join(',') : 'none'} pt=${JSON.stringify(pickText.slice(0, 12))} pk=${phKeys} detail=${detailOk} invite=${inviteOk} gone=${goneOk} f=${foreignSends}/${foreignRefused}`);
+      }
+
+      // OP63: Replace phone against real rows (the "every other code"
+      // predicate and the one scoped DELETE are SQL; the in-memory fake cannot
+      // prove them). A connected business gets no invite; Confirm replace
+      // stores the new invite, expires the older one, removes every binding of
+      // THAT business and no other, tells each removed chat once, and a second
+      // Confirm changes nothing.
+      {
+        const C2 = await import('../lib/content.js');
+        const phoneA = FIXTURE_CHATS.webhookOpA, phoneB = FIXTURE_CHATS.webhookOpB;
+        await svc.from('business_chats').delete().in('tg_chat_id', [phoneA, phoneB]);
+        await svc.from('rate_limits').delete().in('key', ['opcode:' + CODE_SLUG, 'opreplace:' + codeBiz.id]);
+        const t0 = Date.now();
+        await svc.from('business_chats').insert([
+          { business_id: codeBiz.id, tg_chat_id: phoneA, created_at: new Date(t0 - 2000).toISOString() },
+          { business_id: codeBiz.id, tg_chat_id: phoneB, created_at: new Date(t0 - 1000).toISOString() },
+        ]);
+        const older = 'RPLC' + mkCode(8), foreign = 'RPLF' + mkCode(8);
+        createdCodes.push(older, foreign);
+        await createBindCode(older, codeBiz.id, new Date(Date.now() + 3600000).toISOString());
+        await createBindCode(foreign, bindBiz.id, new Date(Date.now() + 3600000).toISOString());
+        const liveOf = async (id) => (await svc.from('bind_codes').select('code').eq('business_id', id)
+          .is('used_at', null).gt('expires_at', new Date().toISOString())).data.map((r) => r.code).sort();
+        const boundTo = async (id) => (await svc.from('business_chats').select('id').eq('business_id', id)).data.length;
+        const othersBefore = [await boundTo(bizA.id), await boundTo(bizB.id)].join('/');
+        const liveBefore = await liveOf(codeBiz.id);
+        const tap = async (data) => {
+          await reset();
+          await good(cb(OP, data));
+          const out = await sent();
+          return {
+            edits: out.filter((x) => x.path.includes('/editMessageText')).map((x) => x.body),
+            sends: out.filter((x) => x.path.includes('/sendMessage')).map((x) => x.body),
+            answers: out.filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text || '')),
+          };
+        };
+        // Connected: the screen, and nothing written.
+        const open = await tap('bi:0:' + codeBiz.id);
+        const openOk = open.edits.length === 1 && open.sends.length === 0
+          && open.edits[0].text === 'ZZ Code Fixture · Already connected · 2 phones'
+          && JSON.stringify(open.edits[0].reply_markup.inline_keyboard) === JSON.stringify([[
+            { text: 'Replace phone', callback_data: 'bp:0:' + codeBiz.id, style: 'danger' }, { text: 'Back', callback_data: 'bn:0' }]])
+          && JSON.stringify(await liveOf(codeBiz.id)) === JSON.stringify(liveBefore) && (await boundTo(codeBiz.id)) === 2;
+        const ask = await tap('bp:0:' + codeBiz.id);
+        const askOk = ask.edits.length === 1 && ask.edits[0].text === C2.operatorReplaceConfirmText({ business: { name: 'ZZ Code Fixture' }, phones: 2 })
+          && (await boundTo(codeBiz.id)) === 2;
+        // Confirm.
+        const done = await tap('bP:0:' + codeBiz.id);
+        const liveAfter = await liveOf(codeBiz.id);
+        const fresh = liveAfter[0] || '';
+        if (fresh) createdCodes.push(fresh);
+        const notices = done.sends.filter((m) => [String(phoneA), String(phoneB)].includes(String(m.chat_id)));
+        const toOp = done.sends.filter((m) => String(m.chat_id) === String(OP));
+        const guide = done.edits[0] || {};
+        const doneOk = liveAfter.length === 1 && fresh !== older && !liveBefore.includes(fresh)
+          && (await boundTo(codeBiz.id)) === 0
+          && [await boundTo(bizA.id), await boundTo(bizB.id)].join('/') === othersBefore
+          && (await liveOf(bindBiz.id)).includes(foreign)
+          && notices.length === 2 && notices.every((m) => m.text === C2.BOT_ACCESS_ENDED
+            && JSON.stringify(m.reply_markup) === JSON.stringify({ remove_keyboard: true }) && !('parse_mode' in m))
+          && done.edits.length === 1 && String(guide.text).startsWith(`Code for ${CODE_SLUG}: ${fresh}\n\nExpires in 24 hours. 2 phones removed.`)
+          && String(guide.text).includes('cancelled.')
+          && toOp.length === 1 && String(toOp[0].text).endsWith('\n\n' + fresh) && !String(toOp[0].text).includes(CODE_SLUG)
+          && (await svc.from('rate_limits').select('key').eq('key', 'opreplace:' + codeBiz.id)).data.length === 0
+          && (await svc.from('businesses').select('status').eq('id', codeBiz.id).single()).data.status === 'demo';
+        // A second Confirm: one toast, nothing changed.
+        const again = await tap('bP:0:' + codeBiz.id);
+        const againOk = again.answers.includes(C2.OPERATOR_ALREADY_REPLACED) && again.edits.length === 0 && again.sends.length === 0
+          && JSON.stringify(await liveOf(codeBiz.id)) === JSON.stringify(liveAfter);
+        // A replaced phone is just an unconnected chat; the older invite is dead.
+        await reset();
+        await good(msg(phoneA, '/leads'));
+        const exText = await allText();
+        await reset();
+        await good(msg(phoneA, '/start ' + older));
+        const exStart = await allText();
+        const exOk = exText === C2.BOT_NOT_CONNECTED && exStart === C2.BOT_BAD_CODE && (await boundTo(codeBiz.id)) === 0;
+        await svc.from('business_chats').delete().in('tg_chat_id', [phoneA, phoneB]);
+        await svc.from('bind_codes').update({ expires_at: new Date().toISOString() }).eq('business_id', codeBiz.id).is('used_at', null);
+        await svc.from('rate_limits').delete().in('key', ['opcode:' + CODE_SLUG, 'opreplace:' + codeBiz.id]);
+        line(openOk && askOk && doneOk && againOk && exOk,
+          'OP63', 'Replace phone on real rows: invite, scoped removal, notices',
+          `open=${openOk} ask=${askOk} done=${doneOk} again=${againOk} old=${exOk} live=${liveAfter.length}`);
       }
 
       // OP17-OP20 run against real rows on a throwaway business: the cancel
@@ -2365,7 +2467,8 @@ try {
           'rl:' + lead, 'RL:' + lead, 'rc:' + lead, 'rm:1', 'Q:0:' + lead, 'E:0:' + lead,
           'i:c', 'pc:' + bizA.id, 'pb:' + bizA.id,
           'bl:0', 'bn:0', 'bd:0:' + invBiz.id, 'bt:0:' + invBiz.id, 'bT:0:' + invBiz.id, 'bs:0:' + invBiz.id, 'bS:0:' + invBiz.id,
-          'br:0:' + invBiz.id, 'bv:0:' + invBiz.id, 'bi:0:' + invBiz.id, 'bq:0:0:' + invBiz.id]) {
+          'br:0:' + invBiz.id, 'bv:0:' + invBiz.id, 'bi:0:' + invBiz.id, 'bq:0:0:' + invBiz.id,
+          'bp:0:' + invBiz.id, 'bP:0:' + invBiz.id, 'bc:0:' + invBiz.id, 'bw:0:' + invBiz.id, 'bW:0:' + invBiz.id, 'bu:0:' + invBiz.id]) {
           await reset();
           await good(cb(invStaff, data));
           answers[data.split(':')[0]] = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
@@ -2379,7 +2482,7 @@ try {
         // The operator's lists and its business browser, Suspend, Reactivate
         // and Invite included and aimed at this phone's OWN business: not
         // found, like any unknown tap.
-        const pickerRefused = ['pc', 'pb', 'bl', 'bn', 'bd', 'bt', 'bT', 'bs', 'bS', 'br', 'bv', 'bi', 'bq']
+        const pickerRefused = ['pc', 'pb', 'bl', 'bn', 'bd', 'bt', 'bT', 'bs', 'bS', 'br', 'bv', 'bi', 'bq', 'bp', 'bP', 'bc', 'bw', 'bW', 'bu']
           .every((k) => (answers[k] || []).length === 1 && answers[k][0] === C2.TOAST_NOT_FOUND);
         line(refused && inviteRefused && pickerRefused && rowsKept === rowsAtStart && leadKept === 1 && liveAfter === liveBefore,
           'OP43', 'staff forged callbacks: refused, owner row, lead and codes intact',

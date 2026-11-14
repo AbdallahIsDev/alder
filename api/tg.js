@@ -29,8 +29,10 @@ import {
   operatorBusinessListText, operatorBusinessListKeyboard, operatorBusinessDetailText, operatorBusinessDetailKeyboard,
   operatorSuspendConfirmText, operatorSuspendConfirmKeyboard, operatorSuspendedText, operatorReactivatedText,
   operatorAlreadySuspendedText, operatorAlreadyActiveText, operatorInviteSuspendedText,
-  operatorInviteListText, operatorInviteListKeyboard, operatorInviteResultText, operatorInviteCancelledToast,
-  operatorBackToBusinessKeyboard, operatorBackToInviteListKeyboard,
+  operatorInviteListText, operatorInviteListKeyboard, operatorInviteBackKeyboard,
+  operatorAlreadyConnectedText, operatorAlreadyConnectedKeyboard, operatorReplaceConfirmText, operatorReplaceConfirmKeyboard,
+  operatorInviteFailedText, operatorReplaceFailedText, OPERATOR_ALREADY_REPLACED, OPERATOR_NO_PHONE_NOW, BOT_ACCESS_ENDED,
+  operatorBackToBusinessKeyboard,
   operatorLeadListText, operatorLeadCardText, operatorLeadColumns, operatorLeadListKeyboard, operatorLeadDetailKeyboard,
   unpackUuid,
   OPERATOR_BUSINESS_GONE, OPERATOR_SCREEN_EXPIRED, OPERATOR_PAGE_GONE,
@@ -54,6 +56,7 @@ const {
   listClientLeads, getClientLead, transitionLead, getDoneLeadForRetry, hasReviewSent, getReviewFailureInfo, addEvent, hitRateLimit,
   countBusinessChats, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
   listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
+  expireOtherBindCodes, expireBindCode, removeAllBusinessChats,
   getBusinessBySlug, setBusinessStatus,
   listBusinessesPage, countChatsForBusinesses, getLeadTotals, countClientLeadsSince,
   listLeadsColumns, getLeadColumns,
@@ -90,6 +93,9 @@ const {
   countLiveBindCodes: 'db.invite_count',
   listLiveBindCodes: 'db.invite_list',
   expireLiveBindCodes: 'db.invite_expire',
+  expireOtherBindCodes: 'db.invite_expire_others',
+  expireBindCode: 'db.invite_take_back',
+  removeAllBusinessChats: 'db.chat_remove_all',
 });
 const { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup, botUsername } = timedAll(tgApi, {
   sendMessage: 'tg.send_message',
@@ -672,29 +678,234 @@ async function handlePlainText(chatId, binding, text = '') {
 const SLUG_RE = /^[a-z0-9-]{2,60}$/;
 const CODES_PER_SLUG_HOUR = 10;
 
+/* ---------- operator invites ----------
+   One set of rules for every way the operator asks for an invite: a number in
+   the /invite list, the Invite button under a business, "/invite <slug>", and
+   a button of the old /code picker.
+
+     suspended           one short line and Back; nothing is created
+     a phone is bound    "<Name> · Already connected · N phones" with Replace
+                         phone and Back; nothing is created and NOTHING is
+                         written, not even the hourly counter
+     no phone            one new invite, shown as the two messages below
+
+   An invite is never added next to a connected phone: more phones are the
+   owner's own /invite. The operator can only REPLACE the phones, after one
+   confirmation (replaceOperatorPhones).
+
+   The two messages. (1) The guidance: slug, code, expiry and "the next
+   message is for the client". From a button it is the browser message
+   itself, edited, with Back to where the tap came from; typed, it is a new
+   message. (2) A NEW message that is the only text a client may ever see: no
+   slug, no business name, no operator wording. They are separate on purpose:
+   forwarding the first would leak the slug. `at` is { chatId, page, from }
+   plus { messageId, answer } when the request is a button tap. */
+
+/** Draw one screen of the flow: an edit of the browser message for a tap
+ *  (the toast goes out with it), one new message for a typed command. */
+async function showInviteScreen(at, text, markup, toast = '') {
+  if (at.messageId) {
+    const [, edited] = await together([at.answer(toast), editList(at.chatId, at.messageId, text, markup)]);
+    return edited;
+  }
+  return sendMessage(at.chatId, text, markup);
+}
+
+/** The screen the flow was opened from, redrawn from current data. */
+async function showInviteOrigin(at, businessId, toast) {
+  if (!at.messageId) return sendOperatorList({ kind: 'invite', chatId: at.chatId, page: 0 });
+  if (at.from === 'business' && businessId) {
+    return sendBusinessDetail({ chatId: at.chatId, messageId: at.messageId, businessId, page: at.page, answer: at.answer, toast });
+  }
+  return sendOperatorList({
+    kind: at.from === 'business' ? 'businesses' : 'invite', chatId: at.chatId, page: at.page, messageId: at.messageId, answer: at.answer, toast,
+  });
+}
+
 /**
- * One new invite for a business the caller has just read from the database
- * and found served. A new code supersedes the business's older unused ones:
- * leaving them live fills the owner's invite cap with codes nobody will use.
- * Used codes are never touched (they are the record of who connected).
+ * Store ONE new invite for a business the caller has just read from the
+ * database and found served. In this order: the hourly cap (10 per business,
+ * fails closed: an unreachable counter means no code, not an unlimited one);
+ * the new code; then every OTHER live unused code of the business is expired,
+ * so the new code is the only one that can still connect a phone. Used codes
+ * are never touched (they are the record of who connected).
+ *
+ * Returns { code, cancelled }, or { failed: 'capped' | 'error' } with nothing
+ * usable left behind: if the older codes cannot be expired the new one is
+ * taken back, because an invite that leaves an old link working is not the
+ * invite that was asked for.
  */
-async function mintOperatorInvite(business) {
-  let cancelled = 0;
+async function createOperatorInvite(business) {
+  let within;
+  try { within = await hitRateLimit('opcode:' + business.slug, 3600, CODES_PER_SLUG_HOUR); } catch { return { failed: 'error' }; }
+  if (!within) return { failed: 'capped' };
+  let code;
   try {
-    // Count only codes that were actually live; the update also touches rows
-    // that expired long ago, and telling the operator about those would lie.
-    cancelled = (await listLiveBindCodes(business.id)).length;
-    await expireLiveBindCodes(business.id);
-  } catch { cancelled = 0; }
-  const { code } = await mintBindCode(business.id);
+    ({ code } = await mintBindCode(business.id));
+  } catch (e) {
+    console.error('operator_invite_mint_failed', (e && e.code) || 'no_code');
+    return { failed: 'error' };
+  }
+  try {
+    return { code, cancelled: await expireOtherBindCodes(business.id, code) };
+  } catch (e) {
+    console.error('operator_invite_expire_failed', (e && e.code) || 'no_code');
+    await expireBindCode(business.id, code).catch(() => {});
+    return { failed: 'error' };
+  }
+}
+
+/**
+ * The two messages of one invite, in order: the guidance first (an edit for a
+ * tap; if the edit does not land it is sent as a new message, so the operator
+ * is never left without the code), then the client message. If the client
+ * message cannot be sent, the guidance says so and repeats the code: the code
+ * exists and is valid, only the forwardable copy failed.
+ */
+async function sendInviteOutput(at, business, { code, cancelled = 0, removed = 0, failed = 0 }) {
   const username = await botUsername();
-  return { code, username, cancelled };
+  const notes = { code, hours: BIND_CODE_HOURS, cancelled, removed, failed };
+  const back = operatorInviteBackKeyboard(business.id, at.page, at.from);
+  const guidance = operatorCodeText({ slug: business.slug, ...notes });
+  const asMarkup = (m) => ({ ...back, entities: m.entities });
+  let edited = false;
+  if (at.messageId) {
+    const [, r] = await together([at.answer(''), editList(at.chatId, at.messageId, guidance.text, asMarkup(guidance))]);
+    edited = !!(r && r.ok);
+  }
+  if (!edited) await sendMessage(at.chatId, guidance.text, asMarkup(guidance)).catch(() => {});
+  const forward = await replyMessage(at.chatId, botForwardText({ code, username, hours: BIND_CODE_HOURS })).catch(() => null);
+  if (forward && forward.ok) return;
+  console.error('code_forward_send_failed');
+  const resend = operatorCodeResendText(notes);
+  if (edited) await editList(at.chatId, at.messageId, resend.text, asMarkup(resend)).catch(() => {});
+  else await sendMessage(at.chatId, resend.text, asMarkup(resend)).catch(() => {});
+}
+
+/**
+ * Replace phone, confirmed. In this order:
+ *  (a) the new invite is stored FIRST. If that fails (the cap, the counter,
+ *      the database) nothing is removed and the screen says so;
+ *  (b) every other pending invite of the business is expired (inside
+ *      createOperatorInvite), so an old link cannot be redeemed;
+ *  (c) ALL bindings of the business are deleted in one statement scoped by
+ *      its id; the statement returns the chats it removed. If it fails, the
+ *      new invite is taken back and the screen says no phone was removed;
+ *  (d) each removed chat gets one plain notice with ReplyKeyboardRemove; a
+ *      notice that fails is counted and blocks nothing;
+ *  (e) the two messages of the new invite.
+ * The business status is not touched. The first phone that redeems the new
+ * invite is the oldest binding, which is what "main phone" means.
+ *
+ * Two confirms at the same moment would each expire the other's new code, so
+ * the step is taken under a short claim on the rate-limit table (one per
+ * business per minute, released when the step ends). The tap that does not
+ * get the claim changes nothing and is told "Already replaced."; so is a tap
+ * that finds no phone left to remove.
+ */
+async function replaceOperatorPhones(at, business) {
+  const back = operatorInviteBackKeyboard(business.id, at.page, at.from);
+  const lockKey = 'opreplace:' + business.id;
+  let claimed;
+  // Fail closed: without the claim nothing is created and nothing is removed.
+  try { claimed = await hitRateLimit(lockKey, 60, 1); } catch { await at.answer(TOAST_GENERIC_ERROR); return; }
+  if (!claimed) { await at.answer(OPERATOR_ALREADY_REPLACED); return; }
+  try {
+    const made = await createOperatorInvite(business);
+    if (made.failed) {
+      await showInviteScreen(at, operatorInviteFailedText({ business, capped: made.failed === 'capped', replace: true }), back);
+      return;
+    }
+    let removedChats;
+    try {
+      removedChats = await removeAllBusinessChats(business.id);
+    } catch (e) {
+      console.error('operator_replace_remove_failed', (e && e.code) || 'no_code');
+      await expireBindCode(business.id, made.code).catch(() => {});
+      await showInviteScreen(at, operatorReplaceFailedText(business), back);
+      return;
+    }
+    if (!removedChats.length) {
+      // Another request removed them between the count and this statement.
+      await expireBindCode(business.id, made.code).catch(() => {});
+      await at.answer(OPERATOR_ALREADY_REPLACED);
+      return;
+    }
+    const notices = await together(removedChats.map((chat) => settle(
+      sendMessage(chat, BOT_ACCESS_ENDED, { reply_markup: { remove_keyboard: true } }))));
+    await sendInviteOutput(at, business, {
+      code: made.code, cancelled: made.cancelled, removed: removedChats.length, failed: notices.filter(sendFailed).length,
+    });
+  } finally {
+    await clearRateLimit(lockKey).catch(() => {});
+  }
+}
+
+/**
+ * One step of the flow for a business the caller addressed by id (a tap) or
+ * has just read by slug (the typed command; `known` is that row).
+ *   open     the rules at the top of this section
+ *   ask      the Replace question
+ *   cancel   back to "Already connected"; never creates anything
+ *   confirm  replaceOperatorPhones
+ * The business and its phone count are read on EVERY step, together. Gone: a
+ * toast and the current list. Suspended: the one line and Back, whatever the
+ * step. A phone count that cannot be read stops the step (the dispatcher
+ * answers with the generic error): nothing is created on a guess. ask, cancel
+ * and confirm need a phone to act on; with none left, confirm says "Already
+ * replaced." and leaves the message alone (it may be showing the new invite),
+ * and the other two redraw the screen the flow was opened from.
+ */
+async function operatorInviteStep(at, { step, businessId, known = null }) {
+  const [biz, count] = await together([
+    known ? { value: known } : settle(getBusinessById(businessId)),
+    settle(countBusinessChats(businessId)),
+  ]);
+  if (biz.error) throw biz.error;
+  const business = biz.value;
+  if (!business) { await showInviteOrigin(at, null, OPERATOR_BUSINESS_GONE); return; }
+  const back = operatorInviteBackKeyboard(business.id, at.page, at.from);
+  if (isSuspendedStatus(business.status)) {
+    await showInviteScreen(at, operatorInviteSuspendedText(business), back);
+    return;
+  }
+  if (count.error) throw count.error;
+  const phones = count.value;
+
+  if (step === 'open') {
+    if (phones > 0) {
+      await showInviteScreen(at, operatorAlreadyConnectedText({ business, phones }),
+        operatorAlreadyConnectedKeyboard(business.id, at.page, at.from));
+      return;
+    }
+    const made = await createOperatorInvite(business);
+    if (made.failed) {
+      await showInviteScreen(at, operatorInviteFailedText({ business, capped: made.failed === 'capped' }), back);
+      return;
+    }
+    await sendInviteOutput(at, business, made);
+    return;
+  }
+  if (phones === 0) {
+    if (step === 'confirm') await at.answer(OPERATOR_ALREADY_REPLACED);
+    else await showInviteOrigin(at, business.id, OPERATOR_NO_PHONE_NOW);
+    return;
+  }
+  if (step === 'ask') {
+    await showInviteScreen(at, operatorReplaceConfirmText({ business, phones }),
+      operatorReplaceConfirmKeyboard(business.id, at.page, at.from));
+  } else if (step === 'cancel') {
+    await showInviteScreen(at, operatorAlreadyConnectedText({ business, phones }),
+      operatorAlreadyConnectedKeyboard(business.id, at.page, at.from));
+  } else {
+    await replaceOperatorPhones(at, business);
+  }
 }
 
 /**
  * /invite in the operator chat. With no word after it: the list, one message
- * edited in place. With a slug: the shortcut, unchanged from the old /code
- * <slug> — the same cap, the same single-use code, the same two messages.
+ * edited in place. With a slug: the same rules as a pick from that list,
+ * answered with new messages (Back leads to the first page of the list).
  */
 async function handleOperatorInvite(chatId, arg) {
   const slug = String(arg || '').trim();
@@ -707,25 +918,13 @@ async function handleOperatorInvite(chatId, arg) {
     }
   }
   if (!SLUG_RE.test(slug)) return reply(chatId, OPERATOR_USAGE_INVITE);
-  // Fail closed: an unreachable counter means no code, not an unlimited one.
-  let within;
-  try { within = await hitRateLimit('opcode:' + slug, 3600, CODES_PER_SLUG_HOUR); } catch { return; }
-  if (!within) return reply(chatId, OPERATOR_CAPPED);
   const business = await getBusinessBySlug(slug).catch(() => null);
   if (!business) return reply(chatId, OPERATOR_UNKNOWN_SLUG);
-  if (isSuspendedStatus(business.status)) return reply(chatId, operatorInviteSuspendedText(business));
-  const { code, username, cancelled } = await mintOperatorInvite(business);
-  // TWO messages, strictly. The first is the operator's (slug, code, human
-  // expiry); the second is the only text a client may ever see. They are
-  // separate sends on purpose: forwarding the first would leak the slug, and
-  // editing one message in place is not something Telegram guarantees.
-  await replyMessage(chatId, operatorCodeText({ slug: business.slug, code, hours: BIND_CODE_HOURS, cancelled }));
-  const forward = await replyMessage(chatId, botForwardText({ code, username, hours: BIND_CODE_HOURS }));
-  if (!forward || !forward.ok) {
-    // The code exists and is valid; only the forwardable copy failed. Say so
-    // and repeat the code, or the operator is left with a half-finished flow.
-    console.error('code_forward_send_failed');
-    await replyMessage(chatId, operatorCodeResendText({ code, hours: BIND_CODE_HOURS }));
+  try {
+    return await operatorInviteStep({ chatId, page: 0, from: 'list' }, { step: 'open', businessId: business.id, known: business });
+  } catch (e) {
+    console.error('operator_invite_failed', (e && e.code) || 'no_code');
+    return reply(chatId, TOAST_GENERIC_ERROR);
   }
 }
 
@@ -871,46 +1070,6 @@ async function handleOperatorLeadOpen({ chatId, messageId, businessId, leadId, l
     editList(chatId, messageId, operatorLeadCardText(business, lead),
       operatorLeadDetailKeyboard({ businessId: business.id, leadPage, page })),
   ]);
-}
-
-/**
- * An invite from a button: a number in the /invite list (from 'list'), the
- * Invite button under a business (from 'business'), or a button of the old
- * /code picker (from 'list', page 0). The same message becomes the result:
- * the business, the single-use link, one line on what to do with it, and Back
- * to where the tap came from.
- *
- * The business is read by id first. Gone: a toast and the current list.
- * Suspended: one short line as the toast, and the screen under it is redrawn
- * from current data, so no button that cannot work is left behind. The cap
- * and the code are the old /code's: 10 per business per hour, single use.
- */
-async function handleOperatorInviteTap({ chatId, messageId, businessId, page, answer, from }) {
-  const fromBusiness = from === 'business';
-  const business = await getBusinessById(businessId);
-  if (!business) {
-    await sendOperatorList({ kind: fromBusiness ? 'businesses' : 'invite', chatId, page, messageId, answer, toast: OPERATOR_BUSINESS_GONE });
-    return;
-  }
-  if (isSuspendedStatus(business.status)) {
-    const line = operatorInviteSuspendedText(business);
-    if (fromBusiness) await sendBusinessDetail({ chatId, messageId, businessId: business.id, page, answer, toast: line });
-    else await sendOperatorList({ kind: 'invite', chatId, page, messageId, answer, toast: line });
-    return;
-  }
-  // Fail closed: an unreachable counter means no code, not an unlimited one.
-  let within;
-  try { within = await hitRateLimit('opcode:' + business.slug, 3600, CODES_PER_SLUG_HOUR); } catch { await answer(TOAST_GENERIC_ERROR); return; }
-  if (!within) { await answer(OPERATOR_CAPPED); return; }
-  const { code, username, cancelled } = await mintOperatorInvite(business);
-  const text = operatorInviteResultText({ business, code, username, hours: BIND_CODE_HOURS });
-  const back = fromBusiness ? operatorBackToBusinessKeyboard(business.id, page) : operatorBackToInviteListKeyboard(page);
-  // The link is the content; a preview card of t.me under it is noise.
-  const markup = { ...back, disable_web_page_preview: true };
-  const [, edited] = await together([answer(operatorInviteCancelledToast(cancelled)), editList(chatId, messageId, text, markup)]);
-  // The code is live whether or not the edit landed: an invite the operator
-  // cannot see is a wasted code, so it is sent as a new message instead.
-  if (!(edited && edited.ok)) await sendMessage(chatId, text, markup).catch(() => {});
 }
 
 /** Whether a send reached Telegram and was accepted. */
@@ -1318,21 +1477,33 @@ const CB_REMOVE_DO = /^E:(\d{1,3}):([0-9a-f-]{36})$/;
 // The invite-cap button. No business id in the payload: the business comes from
 // the binding, so a forged callback can only ever act on the sender's own.
 const CB_INVITE_CANCEL = /^i:c$/;
-// Buttons of the operator's old pickers. pc was the /code picker: it still
-// makes an invite for that business. pb was the /phones picker: retired.
+// Buttons of the operator's old pickers. pc was the /code picker: it follows
+// today's invite rules for that business. pb was the /phones picker: retired.
 const CB_OPERATOR_PICK = /^(pb|pc):([0-9a-f-]{36})$/;
 // The operator's business browser (see lib/content.js for the table). Pages are
 // bounded digits and every id is a uuid, as text or as 22 packed characters.
 // bl = the business list, bn = the /invite list.
 const CB_OP_LIST = /^(bl|bn):(\d{1,3})$/;
-// bd open, bs ask to suspend, bS suspend, br reactivate, bv invite (from the
-// business), bi invite (from the /invite list); bt and bT were Terminate.
-const CB_OP_BUSINESS = /^(bd|bs|bS|br|bv|bi|bt|bT):(\d{1,3}):([0-9a-f-]{36})$/;
+// bd open, bs ask to suspend, bS suspend, br reactivate; bt and bT were
+// Terminate. The invite flow, once per origin (see OP_INVITE_STEPS): from the
+// /invite list bi open, bp ask to replace, bP replace, bc cancel; from the
+// business bv, bw, bW, bu.
+const CB_OP_BUSINESS = /^(bd|bs|bS|br|bi|bp|bP|bc|bv|bw|bW|bu|bt|bT):(\d{1,3}):([0-9a-f-]{36})$/;
 const CB_OP_LEADS = /^bq:(\d{1,2}):(\d{1,3}):([0-9a-f-]{36})$/;
 const CB_OP_LEAD = /^bo:(\d{1,2}):(\d{1,3}):([A-Za-z0-9_-]{22})([A-Za-z0-9_-]{22})$/;
+/** The invite flow's callbacks: which step, and where Back leads. */
+const OP_INVITE_STEPS = {
+  bi: { step: 'open', from: 'list' }, bp: { step: 'ask', from: 'list' },
+  bP: { step: 'confirm', from: 'list' }, bc: { step: 'cancel', from: 'list' },
+  bv: { step: 'open', from: 'business' }, bw: { step: 'ask', from: 'business' },
+  bW: { step: 'confirm', from: 'business' }, bu: { step: 'cancel', from: 'business' },
+};
 const OP_BUSINESS_HANDLER_NAMES = {
   bd: 'cb.operator_business_open', bs: 'cb.operator_suspend_ask', bS: 'cb.operator_suspend',
   br: 'cb.operator_reactivate', bv: 'cb.operator_invite_business', bi: 'cb.operator_invite_open',
+  bp: 'cb.operator_replace_ask', bw: 'cb.operator_replace_ask',
+  bP: 'cb.operator_replace', bW: 'cb.operator_replace',
+  bc: 'cb.operator_replace_cancel', bu: 'cb.operator_replace_cancel',
   bt: 'cb.operator_expired', bT: 'cb.operator_expired',
 };
 
@@ -1445,7 +1616,9 @@ async function handleCallback(cb, binding) {
         if (kind === 'bd') await sendBusinessDetail(at);
         else if (kind === 'bs' || kind === 'bS') await handleOperatorSuspend({ ...at, confirmed: kind === 'bS' });
         else if (kind === 'br') await handleOperatorReactivate(at);
-        else if (kind === 'bv' || kind === 'bi') await handleOperatorInviteTap({ ...at, from: kind === 'bv' ? 'business' : 'list' });
+        else if (OP_INVITE_STEPS[kind]) {
+          await operatorInviteStep({ ...at, from: OP_INVITE_STEPS[kind].from }, { step: OP_INVITE_STEPS[kind].step, businessId: at.businessId });
+        }
         // bt / bT: the Terminate buttons of a message sent before Suspend
         // existed. Nothing is ended: the tap says the screen expired and the
         // message becomes that business as it is now.
@@ -1477,9 +1650,9 @@ async function handleCallback(cb, binding) {
       // An old /phones picker button: that screen is gone. The tap says so
       // and the message becomes that business as it is now.
       if (pick[1] === 'pb') await sendBusinessDetail({ ...at, toast: OPERATOR_SCREEN_EXPIRED });
-      // An old /code picker button still does what it said: an invite for
-      // that business, now in the same message (Back leads to the /invite list).
-      else await handleOperatorInviteTap({ ...at, from: 'list' });
+      // An old /code picker button is a pick from the /invite list: the same
+      // rules, in the same message (Back leads to the first page of the list).
+      else await operatorInviteStep({ ...at, from: 'list' }, { step: 'open', businessId: pick[2] });
       return;
     }
 

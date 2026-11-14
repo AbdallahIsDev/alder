@@ -132,10 +132,23 @@ for any unknown text, so the commands are not discoverable. `/id` works in
 every private chat: it is how you learn `OPERATOR_CHAT_ID` without a
 third-party bot.
 
-Register the menus once with `npm run tg:commands` (owner commands as the default
-menu, the operator commands as a chat-scoped menu when `OPERATOR_CHAT_ID` is
-set). Run it again after a deploy that changes either list; the operator menu
-is `/businesses`, `/invite`, `/help`, `/id`.
+Register the menus with `npm run tg:commands` (owner commands as the default
+menu, the operator commands as a chat-scoped menu). Telegram keeps a menu
+until it is set again, so run it after every deploy that changes either list:
+a deploy alone changes nothing on a phone. The script prints both lists:
+
+```
+default menu (every private chat): /leads, /invite, /recipients, /remove_lead, /help
+operator menu (operator chat only): /businesses, /invite, /help, /id
+```
+
+It needs `TELEGRAM_BOT_TOKEN` and a numeric `OPERATOR_CHAT_ID` where it runs
+(the shell, `.env.local` or `.env`). Without `OPERATOR_CHAT_ID` it sets the
+default menu only and prints `OPERATOR MENU NOT UPDATED: …`; the operator chat
+then keeps whatever menu it had, old commands included. `npm run
+tg:commands:info` prints both live menus and either `operator menu is up to
+date` or `OPERATOR MENU IS OUT OF DATE`. If the chat still shows the old list
+after a successful run, close and reopen it in Telegram.
 
 ## 3. Add or remove a phone
 
@@ -161,24 +174,55 @@ Caps (env-overridable, `RECIPIENTS_MAX` / `INVITES_MAX`):
 
 **Add (operator).** `/invite` in the operator chat opens a list of the served
 businesses (five a page, a number button per row, Newer / Older only where
-they lead somewhere). A number edits the same message into the invite: the
-business name, the single-use link, one line telling you to forward it to the
-business owner, and **Back** to the list. The same invite is under **Invite**
-on a business's screen. It works whether or not the business has a phone
-connected, which is the case the owner's own `/invite` cannot cover. The code
-is the same single-use, 24-hour code; a new one cancels that business's older
-unused ones; the limit is 10 per business per hour. `/invite <slug>` is the
-shortcut: two messages, the second one forwardable as it is. A suspended
-business gets no invite, only one line saying so.
+they lead somewhere). A number, **Invite** on a business's screen and
+`/invite <slug>` follow the same rules, read from the database on every tap:
+
+- **No phone connected.** One invite is created and shown as two messages. The
+  browser message becomes `Code for <slug>: <code>`, `Expires in 24 hours. The
+  next message is for the client — forward it as it is.`, with **Back**. The
+  next message is new and is the only one to forward: "Tap here to connect
+  your lead alerts on Telegram, then press Start." (the link is under the
+  words, no address is visible), the fallback line, and the code on its own
+  line. It names no business and holds nothing meant for you. If it cannot be
+  sent, the first message says so and repeats the code.
+- **A phone is connected.** Nothing is created. The message becomes
+  `<Name> · Already connected · N phone(s)` with **Replace phone** and
+  **Back**. Adding a phone to a connected business is the owner's own
+  `/invite`; the operator has no button for it.
+- **Suspended.** One line, `<Name> is suspended. Reactivate it first.`, and
+  **Back**.
+
+The code is the same single-use, 24-hour code; a new one cancels that
+business's older unused ones (the first message says how many); the limit is
+10 per business per hour.
+
+**Replace phone (operator).** For a client who lost the phone, changed number
+or handed the business over. **Replace phone** asks first and says what
+happens; **Cancel** goes back. **Confirm replace** does this, in this order:
+
+1. creates the new invite. If that fails (the hourly limit, the database) the
+   screen says so and **no phone is removed**;
+2. expires every other unused invite of that business, so an old link is dead;
+3. removes every phone of that business in one statement;
+4. sends each removed phone one message, "Your access to lead alerts for this
+   business was ended by support.", which also takes its keyboard away. A
+   message that cannot be delivered is counted and blocks nothing;
+5. shows the two invite messages; the first also says `N phones removed`.
+
+The business status does not change. Until the new phone connects, Telegram
+alerts are off; leads are still saved and emailed. The first phone to use the
+new invite is the main phone. A removed phone is an unconnected chat: the bot
+answers it "This chat isn't connected yet." and its old buttons do nothing. A
+second **Confirm replace** answers "Already replaced." and changes nothing.
 
 **Lost or stolen phone.** The owner removes it: `/recipients`, Remove on that
-row, confirm. The code that phone held is already used; mint a new one with
-`/invite` (or the operator's `/invite <slug>`) for the replacement. If the
-phone may still have the chat open, remove it first — the binding is the
-authorisation. The operator does not remove a single phone. If the lost phone
-IS the owner phone, Suspend the business (below) to stop everything at once;
-taking that one binding out is then a database operation
-(`business_chats`), after which the oldest remaining phone is the owner.
+row, confirm. The code that phone held is already used; the owner mints a new
+one with `/invite` for the replacement. If the phone may still have the chat
+open, remove it first — the binding is the authorisation. The operator does
+not remove a single phone. If the lost phone IS the owner phone, or the only
+one, use **Replace phone** (above): it removes every phone of the business and
+gives you a new invite for the client. To stop everything at once instead,
+Suspend the business (below).
 
 **The business browser (operator).** `/businesses` is one message that is
 edited in place: five businesses a page as `Name · Status · N phones`, a
@@ -247,7 +291,7 @@ re-onboarding.
 Buttons of messages sent before Suspend existed (Terminate, Confirm terminate,
 the old `/phones` and Remove Phone screens) answer "That screen expired. Here
 is the current screen." and change nothing. A button of the old `/code` picker
-still makes an invite for that business.
+follows the invite rules above, as a pick from the first page of the list.
 
 **Remove.** `/recipients` lists every phone as "Recipient 1, 2, …" (or the stored
 `business_chats.label` when set) with one **Remove** button each. Removing asks once;
@@ -546,7 +590,9 @@ set, so it cannot be pointed at a fake by accident.
    is `/leads`, `/invite`, `/recipients`, `/remove_lead`, `/help`, and the operator chat's own menu
    is `/businesses`, `/invite`, `/help`, `/id`; the script also sets the bot
    description and short description. Run it after any deploy that changes either menu (the
-   operator menu lost `/code` and `/phones`). `npm run tg:commands:info` lists what is live.
+   operator menu lost `/code` and `/phones`), from a shell that has `OPERATOR_CHAT_ID`: without
+   it the operator chat keeps its old menu and the script says `OPERATOR MENU NOT UPDATED`.
+   `npm run tg:commands:info` prints both live menus and whether the operator one is up to date.
 3b. **Re-register the webhook** if this deploy adds an update type the bot has never
    received: `node scripts/tg-webhook.mjs set https://<host>/api/tg`, then
    `node scripts/tg-webhook.mjs info`. The `set` call drops updates Telegram queued
