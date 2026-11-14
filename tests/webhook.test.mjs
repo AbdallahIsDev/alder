@@ -1303,10 +1303,13 @@ try {
         const list = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
         const kb = (list && list.body.reply_markup && list.body.reply_markup.inline_keyboard) || [];
         const listText = (list && list.body.text) || '';
-        // Before the browser: five number buttons in one row + nav. After: one
-        // labeled row button per lead (Q:page:leadId) + nav, so 6 rows.
-        const rowBtns = kb.slice(0, -1).map((r) => r[0]).filter(Boolean);
-        const nav = kb[kb.length - 1] || [];
+        // The compact layout: ONE row of number buttons (Q:page:leadId) matching
+        // the numbers in the text, then one navigation row holding only the
+        // useful end — six rows on one page of five means Older alone. (The
+        // labeled row buttons, one per lead, are gone: kb was 6 rows, now 2.)
+        const rowBtns = kb[0] || [];
+        const nav = kb[1] || [];
+        const numberedLines = listText.split('\n').filter((t) => /^\d+\. /.test(t));
         await reset();
         await good(cb(bindA, 'rl:' + ids[0]));
         const confirm = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop();
@@ -1322,8 +1325,11 @@ try {
         await reset();
         await good(cb(bindA, 'rl:' + ids[0]));
         const stale = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
-        line(listText.startsWith(C2.REMOVE_LEAD_TITLE) && rowBtns.length === 5 && nav.some((b) => b.text === 'Older')
-          && rowBtns.every((b) => /^Q:0:/.test(b.callback_data) && b.text.includes('Remove Me'))
+        line(listText.startsWith(C2.REMOVE_LEAD_TITLE) && kb.length === 2 && rowBtns.length === 5
+          && JSON.stringify(nav) === JSON.stringify([{ text: 'Older', callback_data: 'rm:1' }])
+          && rowBtns.every((b, i) => /^Q:0:[0-9a-f-]{36}$/.test(b.callback_data) && b.text === String(i + 1))
+          && numberedLines.length === 5 && numberedLines.every((t, i) => new RegExp(`^${i + 1}\\. Remove Me \\d$`).test(t))
+          && !kb.flat().some((b) => 'disabled' in b)
           && confirm && confirm.body.text.includes('Remove Me 1') && ckb[0].style === 'danger'
           && ckb[1].text === 'Cancel' && gone === 0
           && afterText === 'Removed: Remove Me 1 · Repair' && removedToast.includes(afterText)
@@ -1588,18 +1594,22 @@ try {
         const first = (await sends()).pop();
         const lines = String(first.body.text).split('\n');
         const kb1 = (first.body.reply_markup && first.body.reply_markup.inline_keyboard) || [];
-        // Before the browser: one row of five number buttons + nav (kb.length
-        // 2, rows 'o:' callbacks). After: one labeled button per lead on its
-        // own row (L:page:leadId), so page 0 of twelve is 6 keyboard rows.
+        // The compact layout: the text lists the leads; under it ONE row of
+        // number buttons 1..5 (L:page:leadId, in the text's order) and one
+        // navigation row. Page 0 of twelve has older rows and nothing newer,
+        // so the navigation row is Older alone — no disabled Newer. (Layout
+        // history: number row + nav with 'o:' callbacks; then one labeled
+        // button per lead, 6 rows; now the number row again, 2 rows.)
+        const numbered1 = lines.filter((t) => /^\d+\. /.test(t));
         line(ids.length === 12 && lines[2] === '1. Paging 12' && lines[3] === 'Repair · +15155550100'
           && /^\u{1F7E1} New · \d+m ago$/u.test(lines[4])
-          && kb1.length === 6 && kb1[0].length === 1
-          && kb1[0][0].text.includes('Paging 12') && kb1[0][0].text.includes('Repair')
-          && kb1[0][0].callback_data === 'L:0:' + ids[11]
-          && kb1[5].some((b) => b.text === 'Older' && !('disabled' in b))
-          && kb1[5].some((b) => b.text === 'Newer' && b.disabled === true),
-          'OP36', '/leads rows: name, job type, phone, status, age last',
-          `third=${JSON.stringify(lines[4])} rows=${kb1.length} first=${JSON.stringify(kb1[0][0] && kb1[0][0].text)}`);
+          && numbered1.length === 5 && numbered1.every((t, i) => t === `${i + 1}. Paging ${12 - i}`)
+          && kb1.length === 2 && kb1[0].length === 5
+          && kb1[0].every((b, i) => b.text === String(i + 1) && b.callback_data === 'L:0:' + ids[11 - i])
+          && JSON.stringify(kb1[1]) === JSON.stringify([{ text: 'Older', callback_data: 'l:1' }])
+          && !kb1.flat().some((b) => 'disabled' in b || b.copy_text),
+          'OP36', '/leads: text rows in order, one number row, Older alone',
+          `third=${JSON.stringify(lines[4])} rows=${kb1.length} numbers=${(kb1[0] || []).map((b) => b.text).join('')} nav=${(kb1[1] || []).map((b) => b.text).join('/')}`);
 
         // A page that still has an older one keeps the button after the tap.
         await reset();
@@ -1607,12 +1617,14 @@ try {
         const page1 = (await edits()).pop();
         const page1Lines = String(page1 && page1.body.text).split('\n');
         const kb2 = (page1 && page1.body.reply_markup && page1.body.reply_markup.inline_keyboard) || [];
+        // A middle page: Newer and Older side by side, in that order.
         line(/^1\. Paging 7$/.test(page1Lines[2] || '')
-          && kb2.length === 6 && kb2[0][0].callback_data === 'L:1:' + ids[6]
-          && kb2[5].some((b) => b.text === 'Older') && kb2[5].some((b) => b.text === 'Newer')
-          && kb2[5].every((b) => !('disabled' in b)),
-          'OP37', 'a page with older rows keeps the Older button',
-          `first=${JSON.stringify(page1Lines[2])} nav=${(kb2[5] || []).map((b) => b.text).join(',')}`);
+          && kb2.length === 2 && kb2[0].length === 5
+          && kb2[0].every((b, i) => b.text === String(i + 1) && b.callback_data === 'L:1:' + ids[6 - i])
+          && JSON.stringify(kb2[1]) === JSON.stringify([{ text: 'Newer', callback_data: 'l:0' }, { text: 'Older', callback_data: 'l:2' }])
+          && !kb2.flat().some((b) => 'disabled' in b),
+          'OP37', 'a middle page keeps Newer and Older side by side',
+          `first=${JSON.stringify(page1Lines[2])} nav=${(kb2[1] || []).map((b) => b.text).join(',')}`);
 
         // The last page is deleted behind the message's back, then Older is
         // tapped: toast, then the message itself is rewritten with no buttons.
@@ -1698,9 +1710,10 @@ try {
         const leadOnPage0 = ids[6];   // Browser 7, newest after the long name
         const leadOnPage1 = ids[1];   // Browser 2, on page 1
 
-        // OP46: /leads opens ONE message; a row tap edits THAT message to the
-        // detail (status, contact information, actions, Back, copy phone) and
-        // sends nothing new.
+        // OP46: /leads opens ONE message; a number tap edits THAT message to
+        // the detail (status, contact information, the status action, then
+        // plain "Back") and sends nothing new. There is no "Copy phone" button
+        // any more: the number in the text is already tappable.
         await reset();
         await good(msg(invOwner, '/leads'));
         const listMsg = (await sends()).pop();
@@ -1714,16 +1727,23 @@ try {
         const flat = dKb.flat();
         const copyBtn = flat.find((b) => b.copy_text);
         const backBtn = flat.find((b) => b.callback_data === 'l:0');
-        line(listMsg && listKb.length === 6 && listKb[0][0].callback_data === `L:0:${longLead.id}`
+        // Eight rows: page 0 is the number row 1..5 (the long name first, then
+        // Browser 7) and Older alone.
+        line(listMsg && listKb.length === 2 && listKb[0].length === 5
+          && listKb[0].every((b, i) => b.text === String(i + 1) && /^L:0:[0-9a-f-]{36}$/.test(b.callback_data))
+          && listKb[0][0].callback_data === `L:0:${longLead.id}` && listKb[0][1].callback_data === `L:0:${leadOnPage0}`
+          && JSON.stringify(listKb[1]) === JSON.stringify([{ text: 'Older', callback_data: 'l:1' }])
           && detailEdits.length === 1 && detailNew.length === 0
           && String(detail.body.text).includes('Browser 7')
           && String(detail.body.text).includes('Phone: +15155550100')
+          && dKb.length === 2 && dKb[0].length === 1
           && dKb[0][0].text === 'Mark contacted' && dKb[0][0].callback_data === `C:0:${leadOnPage0}`
-          && copyBtn && copyBtn.copy_text.text === '+15155550100' && !copyBtn.callback_data
-          && backBtn && backBtn.text.includes('Back')
+          && !copyBtn && !JSON.stringify(dKb).includes('Copy')
+          && JSON.stringify(dKb[1]) === JSON.stringify([{ text: 'Back', callback_data: 'l:0' }])
+          && backBtn && backBtn.text === 'Back'
           && !(await sends()).length,
-          'OP46', 'row tap edits the same message to the detail; no second message',
-          `edits=${detailEdits.length} sends=${detailNew.length} copy=${!!copyBtn} back=${!!backBtn}`);
+          'OP46', 'number tap edits the same message to the detail; no second message',
+          `edits=${detailEdits.length} sends=${detailNew.length} copy=${!!copyBtn} back=${JSON.stringify(backBtn && backBtn.text)}`);
 
         // OP47: Back restores the exact page it came from (page 1 = rows
         // Browser 3, 2, 1 of the eight seeded).
@@ -1735,10 +1755,13 @@ try {
         const back = backEdits[0] || {};
         const bKb = kbOf(back);
         const backText = String(back.body && back.body.text);
+        // Page 1 is the last page: three numbers, then Newer alone (no
+        // disabled Older).
         line(backEdits.length === 1 && backText.includes('1. Browser 3') && backText.includes('3. Browser 1')
-          && bKb.length === 4 && bKb[0][0].callback_data === `L:1:${ids[2]}`
-          && bKb[3].some((x) => x.text === 'Newer' && !('disabled' in x))
-          && bKb[3].some((x) => x.text === 'Older' && x.disabled === true),
+          && bKb.length === 2 && bKb[0].length === 3
+          && bKb[0].every((x, i) => x.text === String(i + 1) && x.callback_data === `L:1:${ids[2 - i]}`)
+          && JSON.stringify(bKb[1]) === JSON.stringify([{ text: 'Newer', callback_data: 'l:0' }])
+          && !bKb.flat().some((x) => 'disabled' in x),
           'OP47', 'Back restores the exact page it came from',
           `edits=${backEdits.length} first=${JSON.stringify((backText.split('\n')[2] || ''))} rows=${bKb.length}`);
 
@@ -1756,13 +1779,13 @@ try {
         line(cEdits.length === 1 && cNew.length === 0
           && String(cEdits[0].body.text).includes('Status: Contacted')
           && cKb[0][0].text === 'Job completed' && cKb[0][0].callback_data === `D:0:${leadOnPage0}`
-          && cKb[1].some((x) => x.callback_data === 'l:0')
+          && cKb.length === 2 && JSON.stringify(cKb[1]) === JSON.stringify([{ text: 'Back', callback_data: 'l:0' }])
           && twice.includes(C2.TOAST_ALREADY_UPDATED) && twiceEdits.length === 1,
           'OP48', 'status change edits in place; repeat tap says already updated',
           `edits=${cEdits.length} sends=${cNew.length} twice=${twice.join('|')}`);
 
         // OP49: D: asks in place, Y: completes and sends exactly one review
-        // email, and the done detail keeps Back and the copy button.
+        // email, and the done detail keeps Back and nothing else.
         await resetResend();
         await reset();
         await good(cb(invOwner, `D:0:${leadOnPage0}`));
@@ -1779,9 +1802,9 @@ try {
           && doneEdits.length === 1 && doneNew.length === 0 && doneEmails === 1
           && row.status === 'done' && !!row.review_token
           && String(doneEdits[0].body.text).includes('Status: Done')
-          && kbOf(doneEdits[0]).every((r) => r.every((x) => !x.callback_data || x.callback_data === 'l:0'))
-          && kbOf(doneEdits[0]).flat().some((x) => x.copy_text),
-          'OP49', 'browser confirm flow edits in place; done keeps Back and copy',
+          && aKb.length === 2 && JSON.stringify(aKb[1]) === JSON.stringify([{ text: 'Back', callback_data: 'l:0' }])
+          && JSON.stringify(kbOf(doneEdits[0])) === JSON.stringify([[{ text: 'Back', callback_data: 'l:0' }]]),
+          'OP49', 'browser confirm flow edits in place; done keeps Back only',
           `ask=${askEdits.length} done=${doneEdits.length} emails=${doneEmails}`);
 
         // OP50: /remove_lead is the same browser in removal mode. A row tap
@@ -1805,8 +1828,13 @@ try {
         const removedNow = (await svc.from('leads').select('id').eq('id', ids[5])).data.length;
         const afterDel = (await edits())[0];
         const gone = (await answers());
+        // The removal list is the same layout: one number row, Older alone.
         line(String(rmList.body.text).startsWith(C2.REMOVE_LEAD_TITLE)
+          && rmKb0.length === 2 && rmKb0[0].length === 5
+          && rmKb0[0].every((b, i) => b.text === String(i + 1) && /^Q:0:[0-9a-f-]{36}$/.test(b.callback_data))
+          && JSON.stringify(rmKb0[1]) === JSON.stringify([{ text: 'Older', callback_data: 'rm:1' }])
           && rmKb0[0][0].callback_data === `Q:0:${longLead.id}`
+          && askKb.length === 1 && askKb[0][0].text === 'Remove'
           && askKb[0][0].style === 'danger' && askKb[0][0].callback_data === `E:0:${ids[5]}`
           && askKb[0][1].text === 'Cancel' && askKb[0][1].callback_data === 'rm:0'
           && String(cancelled.body.text).startsWith(C2.REMOVE_LEAD_TITLE)
@@ -1863,14 +1891,13 @@ try {
 
         // OP53: a stale detail tap shows the lead in its CURRENT state. The
         // lead on page 0 is done (OP49); the detail must say so and offer no
-        // status action, only Back and the copy button.
+        // status action, only Back.
         await reset();
         await good(cb(invOwner, `L:0:${leadOnPage0}`));
         const staleDetail = (await edits())[0];
         const sKb = kbOf(staleDetail);
         line(String(staleDetail.body.text).includes('Status: Done')
-          && sKb.every((r) => r.every((x) => !x.callback_data || x.callback_data === 'l:0'))
-          && sKb.flat().some((x) => x.copy_text),
+          && JSON.stringify(sKb) === JSON.stringify([[{ text: 'Back', callback_data: 'l:0' }]]),
           'OP53', 'stale detail tap renders the current state',
           `actions=${sKb.flat().filter((x) => x.callback_data && x.callback_data !== 'l:0').length}`);
 
@@ -1934,15 +1961,20 @@ try {
           && String(foreignEdits[0].body.chat_id) === String(chatB);
         const ownText = !!ownList && foreignEdits.length === 1
           && stableListText(foreignEdits[0].body.text) === stableListText(ownList.body.text);
+        // The number buttons carry no age (or any other lead detail), so the
+        // refreshed keyboard must equal the chat's own list keyboard exactly —
+        // the whole keyboard, navigation row included. Before: the row labels
+        // held a relative age and were compared with the age normalized.
         const rowButtons = (req) => ((req && req.body.reply_markup && req.body.reply_markup.inline_keyboard) || [])
           .flat().filter((button) => /^L:0:/.test(button.callback_data || ''))
           .map((button) => [button.text, button.callback_data]);
-        const stableRowButtons = (req) => rowButtons(req).map(([text, data]) => [
-          String(text).replace(/( · [^·]+ · )(?:just now|\d+[mhd] ago)$/, '$1<age>'), data,
-        ]);
-        const ownRows = stableRowButtons(ownList);
-        const refreshedRows = stableRowButtons(foreignEdits[0]);
-        const ownLeadButtons = ownRows.length > 0 && JSON.stringify(refreshedRows) === JSON.stringify(ownRows);
+        const wholeKeyboard = (req) => JSON.stringify((req && req.body.reply_markup && req.body.reply_markup.inline_keyboard) || []);
+        const ownRows = rowButtons(ownList);
+        const refreshedRows = rowButtons(foreignEdits[0]);
+        const ownLeadButtons = ownRows.length > 0 && JSON.stringify(refreshedRows) === JSON.stringify(ownRows)
+          && ownRows.every(([text], i) => text === String(i + 1))
+          && wholeKeyboard(foreignEdits[0]) === wholeKeyboard(ownList)
+          && !wholeKeyboard(foreignEdits[0]).includes(ids[2]);
         const ownRefresh = ownChat && ownText && ownLeadButtons;
         const foreignUnchanged = foreignBefore.length === 1 && foreignAfter.length === 1
           && JSON.stringify(foreignBefore[0]) === JSON.stringify(foreignAfter[0]);
@@ -1953,10 +1985,14 @@ try {
           'OP56', 'cross-business browser taps: not found, nothing changed',
           `toast=${foreignL.some((text) => text.includes(C2.TOAST_LEAD_GONE))} own=${ownRefresh}[chat=${ownChat},text=${ownText},rows=${ownLeadButtons}] kept=${foreignKept} unchanged=${foreignUnchanged}`);
 
-        // OP57: the disabled ends. Four rows remain, so page 0 is both the
-        // first and the last page: Newer and Older are both disabled with the
-        // CURRENT page as callback; tapping one anyway (a client that ignores
-        // `disabled`) is a harmless no-op.
+        // OP57: a single page has NO navigation row. Four rows remain, so page
+        // 0 is both the first and the last page: the keyboard is the number
+        // row alone — no Newer, no Older, nothing disabled, no placeholder.
+        // A message sent before this layout still carries a disabled end whose
+        // callback is the CURRENT page (l:0); tapping it must stay a harmless
+        // no-op (one empty answer, one refresh of the same message), and a tap
+        // for a page past the end is answered with a short toast. Neither
+        // changes a lead. (Before: both ends rendered disabled.)
         await reset();
         await good(cb(invOwner, 'l:0'));
         const firstPage = (await edits())[0];
@@ -1983,27 +2019,48 @@ try {
             && noop[0].body.message_id === noopCallback.callback_query.message.message_id
             && noopSends.length === 0;
           const nothingChanged = JSON.stringify(noopLeadsBefore) === JSON.stringify(noopLeadsAfter);
-          line(fpKb[fpKb.length - 1].some((x) => x.text === 'Newer' && x.disabled === true && x.callback_data === 'l:0')
-            && fpKb[fpKb.length - 1].some((x) => x.text === 'Older' && x.disabled === true && x.callback_data === 'l:0')
+          const noNavRow = fpKb.length === 1 && fpKb[0].length === 4
+            && fpKb[0].every((x, i) => x.text === String(i + 1) && /^L:0:[0-9a-f-]{36}$/.test(x.callback_data))
+            && !fpKb.flat().some((x) => x.text === 'Newer' || x.text === 'Older' || 'disabled' in x);
+          const refreshedKb = (noop[0] && noop[0].body.reply_markup && noop[0].body.reply_markup.inline_keyboard) || [];
+          const refreshSame = JSON.stringify(refreshedKb) === JSON.stringify(fpKb);
+          // A stale Older: the page it asks for does not exist.
+          await reset();
+          await good(cb(invOwner, 'l:1'));
+          const pastRequests = await sent();
+          const pastAnswers = pastRequests.filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+          const pastSends = pastRequests.filter((x) => x.path.includes('/sendMessage'));
+          const pastLeads = (await svc.from('leads').select('*').eq('business_id', invBiz.id).order('id')).data || [];
+          const pastHarmless = pastAnswers.length === 1 && pastAnswers[0] === C2.TOAST_NO_OLDER && pastSends.length === 0
+            && JSON.stringify(pastLeads) === JSON.stringify(noopLeadsBefore);
+          line(noNavRow && refreshSame
             && answeredExactlyOnce && noErrorText && sameMessageRefreshedOnce && nothingChanged
+            && pastHarmless
             && !errors.some((l) => l.includes('tg_edit_failed')),
-            'OP57', 'disabled ends render and a forced tap is a harmless no-op',
-            `answer=${answeredExactlyOnce} noErrorText=${noErrorText} sameEdit=${sameMessageRefreshedOnce} unchanged=${nothingChanged}`);
+            'OP57', 'single page: no nav row; stale nav taps are harmless',
+            `noNav=${noNavRow} answer=${answeredExactlyOnce} noErrorText=${noErrorText} sameEdit=${sameMessageRefreshedOnce} unchanged=${nothingChanged} past=${pastHarmless}`);
         } finally {
           console.error = realError;
         }
 
-        // OP58: a very long name shortens in the row button, never in the
-        // callback; the message text keeps its own truncation.
+        // OP58: a very long name never reaches a button. Its button is the
+        // number "1" (it is the newest row), the callback is the plain lead
+        // address, and the message text keeps its own truncation (27 chars
+        // and an ellipsis). No button on the page repeats a name or a job.
+        // (Before: the row label carried the shortened name and the job.)
         await reset();
         await good(cb(invOwner, 'l:0'));
         const longPage = (await edits())[0];
         const longBtn = kbOf(longPage).flat().find((b) => b.callback_data === `L:0:${longLead.id}`);
-        line(!!longBtn && longBtn.text.length <= 40 && longBtn.text.includes('…')
-          && !longBtn.text.includes('Vanderberg') && longBtn.text.includes('Roof replacement')
-          && longBtn.callback_data === `L:0:${longLead.id}`,
-          'OP58', 'long name: row label shortened, callback unchanged',
-          `label=${JSON.stringify(longBtn && longBtn.text)} cb=${longBtn && longBtn.callback_data.length}B`);
+        const longShown = 'Maximilian Constantine Vanderberg-Roofington The Third Esquire'.slice(0, 27) + '…';
+        const longLines = String(longPage && longPage.body.text).split('\n');
+        const pageLabels = kbOf(longPage).flat().map((b) => String(b.text));
+        line(!!longBtn && longBtn.text === '1'
+          && longBtn.callback_data === `L:0:${longLead.id}`
+          && longLines[2] === `1. ${longShown}` && /^Roof replacement · /.test(longLines[3] || '')
+          && pageLabels.length > 0 && pageLabels.every((t) => /^[1-5]$/.test(t)),
+          'OP58', 'long name: stays in the text, the button is its number',
+          `label=${JSON.stringify(longBtn && longBtn.text)} line=${JSON.stringify(longLines[2])} cb=${longBtn && longBtn.callback_data.length}B`);
 
         // OP59: every callback the live flow emits fits Telegram's 64 bytes.
         await reset();
@@ -2013,13 +2070,19 @@ try {
           .flat().filter((b) => b.callback_data).map((b) => b.callback_data);
         const tooLong = liveCbs.filter((d) => Buffer.byteLength(d, 'utf8') > 64);
         const longest = liveCbs.reduce((a, b) => (Buffer.byteLength(b) > Buffer.byteLength(a) ? b : a), '');
-        line(liveCbs.length > 10 && tooLong.length === 0,
+        // Four rows, one page: each list emits its four number buttons and no
+        // navigation row, so eight callbacks. (Before: four row buttons plus
+        // two navigation ends per list, twelve, and the floor was "> 10".)
+        const liveShapes = liveCbs.filter((d) => !/^[LQ]:\d{1,3}:[0-9a-f-]{36}$/.test(d));
+        line(liveCbs.length === 8 && tooLong.length === 0 && liveShapes.length === 0,
           'OP59', 'live flow: every callback_data is within 64 bytes',
           `callbacks=${liveCbs.length} longest=${longest} (${Buffer.byteLength(longest)}B)`);
 
         // OP60: the persistent keyboard per role, attached to /help, /start
-        // and the bind confirmation. A press arrives as text and maps onto the
-        // command through the same permission checks.
+        // and the bind confirmation: at most TWO plain-text buttons, side by
+        // side in ONE row. A press arrives as text and maps onto the command
+        // through the same permission checks. (Before: four buttons for the
+        // owner and the operator, two for staff, one per row.)
         const kbText = (req) => (req && req.body.reply_markup) || null;
         await reset();
         await good(msg(invOwner, '/help'));
@@ -2040,20 +2103,58 @@ try {
         await good(msg(chatA, '/start'));
         const boundStart = (await sends()).pop();
         const labels = (kb) => (kb && kb.keyboard ? kb.keyboard.flat().map((b) => b.text) : null);
+        // The exact layout: the rows as sent, every button text-only, and the
+        // two flags. Literal on purpose.
+        const layoutIs = (kb, rows) => !!kb && kb.is_persistent === true && kb.resize_keyboard === true
+          && JSON.stringify(kb.keyboard) === JSON.stringify(rows.map((row) => row.map((text) => ({ text }))));
+        const OWNER_ROWS = [['Leads', 'Invite']];
+        const STAFF_ROWS = [['Leads']];
+        const OPERATOR_ROWS = [['Businesses', 'Code']];
         await reset();
         await good(msg(invStaff, 'Invite'));
         const staffPress = (await sends()).map((x) => x.body.text).join('|');
-        line(kbText(ownerHelp) && kbText(ownerHelp).is_persistent === true && kbText(ownerHelp).resize_keyboard === true
-          && JSON.stringify(labels(kbText(ownerHelp))) === JSON.stringify(['Leads', 'Invite', 'Recipients', 'Help'])
-          && JSON.stringify(labels(kbText(staffHelp))) === JSON.stringify(['Leads', 'Help'])
-          && JSON.stringify(labels(kbText(opHelp))) === JSON.stringify(['Businesses', 'Code', 'Phones', 'Operator'])
-          && kbText(unboundStart) && kbText(unboundStart).remove_keyboard === true
+        line(layoutIs(kbText(ownerHelp), OWNER_ROWS)
+          && layoutIs(kbText(staffHelp), STAFF_ROWS)
+          && layoutIs(kbText(opHelp), OPERATOR_ROWS)
+          && kbText(unboundStart) && kbText(unboundStart).remove_keyboard === true && !('keyboard' in kbText(unboundStart))
           && unboundRowsBefore === 0 && unboundRowsAfter === 0
-          && JSON.stringify(labels(kbText(boundStart))) === JSON.stringify(['Leads', 'Invite', 'Recipients', 'Help'])
+          && layoutIs(kbText(boundStart), OWNER_ROWS)
           && !labels(kbText(opHelp)).includes('Leads')
+          && !labels(kbText(ownerHelp)).includes('Businesses') && !labels(kbText(staffHelp)).includes('Invite')
           && staffPress === C2.BOT_OWNER_ONLY,
           'OP60', 'persistent keyboard per role; presses go through permission checks',
-          `owner=${!!kbText(ownerHelp)} staff=${!!kbText(staffHelp)} op=${!!kbText(opHelp)} unbound=${unboundRowsBefore}/${unboundRowsAfter} press=${staffPress === C2.BOT_OWNER_ONLY}`);
+          `owner=${layoutIs(kbText(ownerHelp), OWNER_ROWS)} staff=${layoutIs(kbText(staffHelp), STAFF_ROWS)} op=${layoutIs(kbText(opHelp), OPERATOR_ROWS)} unbound=${unboundRowsBefore}/${unboundRowsAfter} press=${staffPress === C2.BOT_OWNER_ONLY}`);
+
+        // OP62: a reply to free text carries the chat's own role keyboard, so
+        // the keyboard reopens after the user typed. The operator chat gets
+        // the operator keyboard, owner and staff their own, an unbound chat
+        // ReplyKeyboardRemove; a business chat never gets an operator label.
+        // The hint is rate limited per chat (3 an hour), so the counters are
+        // cleared before and after: this block must neither depend on nor
+        // spend another test's budget.
+        const hintKeys = [invOwner, invStaff, unboundKeyboardChat].map((c) => 'tghint:' + c);
+        await svc.from('rate_limits').delete().in('key', hintKeys);
+        const freeText = async (chat) => {
+          await reset();
+          await good(msg(chat, 'hello there'));
+          return sends();
+        };
+        const opFree = await freeText(OP);
+        const ownerFree = await freeText(invOwner);
+        const staffFree = await freeText(invStaff);
+        const unboundFree = await freeText(unboundKeyboardChat);
+        await svc.from('rate_limits').delete().in('key', hintKeys);
+        const oneWith = (list, text) => list.length === 1 && String(list[0].body.text) === text;
+        const unboundMarkup = kbText(unboundFree[0]);
+        line(oneWith(opFree, C2.OPERATOR_WELCOME) && layoutIs(kbText(opFree[0]), OPERATOR_ROWS)
+          && oneWith(ownerFree, C2.BOT_PLAIN_TEXT) && layoutIs(kbText(ownerFree[0]), OWNER_ROWS)
+          && oneWith(staffFree, C2.BOT_PLAIN_TEXT) && layoutIs(kbText(staffFree[0]), STAFF_ROWS)
+          && oneWith(unboundFree, C2.BOT_NOT_CONNECTED)
+          && !!unboundMarkup && unboundMarkup.remove_keyboard === true && !('keyboard' in unboundMarkup)
+          && ![ownerFree, staffFree, unboundFree].flat().some((x) => /Businesses|Code/.test(JSON.stringify(kbText(x))))
+          && !/Leads|Invite/.test(JSON.stringify(kbText(opFree[0]))),
+          'OP62', 'free text reply carries the role keyboard; unbound gets none',
+          `op=${layoutIs(kbText(opFree[0]), OPERATOR_ROWS)} owner=${layoutIs(kbText(ownerFree[0]), OWNER_ROWS)} staff=${layoutIs(kbText(staffFree[0]), STAFF_ROWS)} unbound=${!!unboundMarkup && unboundMarkup.remove_keyboard === true}`);
       }
 
       // OP45: an edit that changes nothing is a success. Telegram answers 400
@@ -2329,13 +2430,17 @@ try {
       line(nowOwner, 'OP11', 'ownership moves to the oldest remaining phone', `owner=${nowOwner}`);
       await svc.from('businesses').delete().eq('id', opBiz.id);
 
-      // OP12: /leads has row buttons; the old o: callback still sends the
-      // current card as a new message; another business's lead is "Not found.".
+      // OP12: /leads has number buttons (L:page:leadId); the old o: callback
+      // still sends the current card as a new message; another business's
+      // lead is "Not found.".
       const leadA = await seedLead(bizA.id, 'Open Me', 'open@example.com');
       await reset();
       await good(msg(chatA2, '/leads'));
       const listSent = (await sent()).filter((x) => x.path.includes('/sendMessage'));
       const kb = listSent.length ? JSON.stringify(listSent[listSent.length - 1].body.reply_markup || {}) : '';
+      const openBtn = listSent.length
+        ? ((listSent[listSent.length - 1].body.reply_markup || {}).inline_keyboard || []).flat().find((b) => b.callback_data === 'L:0:' + leadA)
+        : null;
       await reset();
       await good(cb(chatA2, 'o:' + leadA));
       const card = await allText();
@@ -2343,8 +2448,9 @@ try {
       await reset();
       await good(cb(chatA2, 'o:' + foreign));
       const foreignAnswer = await answersNow();
-      line(kb.includes('L:0:' + leadA) && card.includes('Open Me') && foreignAnswer.includes('no longer here'), 'OP12',
-        '/leads row button opens the browser; old o: still works; foreign is Not found',
+      line(kb.includes('L:0:' + leadA) && !!openBtn && /^[1-5]$/.test(String(openBtn.text))
+        && card.includes('Open Me') && foreignAnswer.includes('no longer here'), 'OP12',
+        '/leads number button opens the browser; old o: still works; foreign is Not found',
         `kb=${kb.includes('L:0:')} card=${card.includes('Open Me')}`);
 
       // OP13: my_chat_member (blocked) reaches the operator.

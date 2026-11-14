@@ -58,13 +58,20 @@ async function replyMessage(chatId, msg) {
 }
 
 /* ---------- persistent reply keyboard ----------
-   One keyboard per role, attached to the /start and /help replies and to the
-   bind confirmation, so a role always sees its shortcuts and nothing else. A
+   One keyboard per role (at most two buttons in one row), attached to the
+   /start and /help replies, to the bind confirmation, and to every reply to
+   free text, so the keyboard reopens after the user has typed something. A
    press arrives as plain text and is mapped back onto the command through
    KEYBOARD_LABELS; the handlers' permission checks are the authorization, so
    the keyboard itself grants nothing. When a chat is disconnected it gets one
    short notice carrying ReplyKeyboardRemove, because its keyboard went stale
-   the moment the binding row was deleted. */
+   the moment the binding row was deleted.
+
+   What Telegram allows: a reply keyboard can only travel as the reply_markup
+   of a message the bot SENDS, and a message has exactly one reply_markup. So
+   a reply that already carries inline buttons (a lead list, a picker) cannot
+   also carry this keyboard, and when the bot sends nothing (the plain-text
+   hint is rate limited) there is nothing to attach it to. */
 
 async function roleKeyboardMarkup(chatId, binding) {
   // A bound chat is a business chat and must never be offered the operator
@@ -155,14 +162,14 @@ async function finishBind(chatId, code, badText = BOT_CODE_BAD) {
 async function handlePastedCode(chatId, code) {
   let within;
   try { within = await hitRateLimit('bindtry:' + chatId, 3600, BIND_TRIES_PER_HOUR); } catch { return; }
-  if (!within) return reply(chatId, BOT_CODE_BAD);
+  if (!within) return replyRole(chatId, BOT_CODE_BAD, null);
   let global;
   try { global = await hitRateLimit('bindtry:all', 3600, bindTriesGlobal()); } catch { return; }
   if (!global) {
     // A global ceiling protects the table from a distributed guessing run. It
     // is not a per-chat answer, so say nothing new to the chat and log it.
     console.error('bind_ceiling_hit');
-    return reply(chatId, BOT_CODE_BAD);
+    return replyRole(chatId, BOT_CODE_BAD, null);
   }
   return finishBind(chatId, code);
 }
@@ -212,9 +219,10 @@ async function handleStart(chatId, arg) {
 }
 
 /* ---------- lead list and lead recovery ----------
-   Newest 5, one Open button each, one Older button when more exist. The page
-   number is the only thing in the callback, bounded, and the business always
-   comes from the binding. */
+   Newest 5 in the text, one row of number buttons under it, then Newer/Older
+   only where they lead somewhere. The page number and the lead id are the only
+   things in a callback, bounded, and the business always comes from the
+   binding. */
 
 const LEADS_PAGE = 5;
 const LEADS_PAGE_MAX = 50;
@@ -240,14 +248,17 @@ async function editList(chatId, messageId, text, markup) {
  * A page with nothing on it is never left as it was: the message is rewritten
  * from current data, because a button that answers with a toast and then does
  * nothing is a button that lies. The toast explains the tap, the edit repairs
- * the message — numbers for what is there now, Older only when it is real, and
- * the empty text with no buttons when the page is gone. `answer` is the
- * callback's once-only responder, absent on the /leads command path.
+ * the message — numbers for what is there now, Newer/Older only when they are
+ * real, and the empty text with no buttons when the page is gone. No lead is
+ * read for writing and nothing is changed, so a stale Newer/Older (including a
+ * disabled end from a message sent before the ends were dropped) is harmless.
+ * Older is not offered on the last page the browser can address. `answer` is
+ * the callback's once-only responder, absent on the /leads command path.
  */
 async function sendLeadsPage(chatId, businessId, page, messageId, answer = null) {
   const safePage = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
   const leads = await listClientLeads(businessId, LEADS_PAGE + 1, safePage * LEADS_PAGE);
-  const hasOlder = leads.length > LEADS_PAGE;
+  const hasOlder = leads.length > LEADS_PAGE && safePage < LEADS_PAGE_MAX;
   const shown = leads.slice(0, LEADS_PAGE);
   const empty = !shown.length;
   const text = empty ? 'No requests yet.' : renderLeadList(shown);
@@ -267,12 +278,13 @@ async function handleLeads(chatId, binding) {
 
 const REMOVE_PAGE = 5;
 
-/** The /remove_lead list: five per page, numbers only, no actions. Same rule:
- *  an empty page is rewritten, never left with a button that does nothing. */
+/** The /remove_lead list: five per page, one row of number buttons, the same
+ *  navigation rule as /leads. Same rule for an empty page: it is rewritten,
+ *  never left with a button that does nothing. */
 async function sendRemovePage(chatId, businessId, page, messageId, answer = null) {
   const safePage = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
   const leads = await listClientLeads(businessId, REMOVE_PAGE + 1, safePage * REMOVE_PAGE);
-  const hasOlder = leads.length > REMOVE_PAGE;
+  const hasOlder = leads.length > REMOVE_PAGE && safePage < LEADS_PAGE_MAX;
   const shown = leads.slice(0, REMOVE_PAGE);
   const empty = !shown.length;
   const text = empty ? 'No requests to remove.' : removeLeadListText(shown);
@@ -476,25 +488,35 @@ async function handleRecipientCallback({ cb, kind, rowId, binding, answer }) {
   return sendRecipients(chatId, binding.business_id, messageId);
 }
 
-/** Plain-text hint, at most 3 per chat per hour; fail closed (no reply). */
+/**
+ * Plain-text hint, at most 3 per chat per hour; fail closed (no reply).
+ *
+ * Every reply to free text goes out through replyRole, so it carries this
+ * chat's own keyboard and the keyboard reopens after the user typed: the
+ * owner or staff keyboard for a bound chat, the operator keyboard for the
+ * unbound operator chat, ReplyKeyboardRemove for an unbound chat. The role is
+ * resolved from the binding first, so an operator keyboard can never reach a
+ * business chat. When the hint is rate limited the bot sends nothing, and a
+ * keyboard cannot be sent without a message.
+ */
 async function handlePlainText(chatId, binding, text = '') {
   const shaped = bindCodeShape(text);
   if (binding) {
     // A bound chat never moves between businesses by pasting a code.
     if (shaped) {
-      return reply(chatId, isOperatorChat(chatId) ? await operatorLinkReply(shaped) : BOT_ALREADY_CONNECTED_CODE);
+      return replyRole(chatId, isOperatorChat(chatId) ? await operatorLinkReply(shaped) : BOT_ALREADY_CONNECTED_CODE, binding);
     }
   } else if (shaped) {
-    if (isOperatorChat(chatId)) return reply(chatId, OPERATOR_DO_NOT_OPEN);
+    if (isOperatorChat(chatId)) return replyRole(chatId, OPERATOR_DO_NOT_OPEN, null);
     return handlePastedCode(chatId, shaped);
   }
-  if (isOperatorChat(chatId)) return reply(chatId, OPERATOR_WELCOME);
+  if (isOperatorChat(chatId)) return replyRole(chatId, OPERATOR_WELCOME, binding);
   let within;
   try {
     within = await hitRateLimit('tghint:' + chatId, 3600, 3);
   } catch { return; }
   if (!within) return;
-  await reply(chatId, binding ? BOT_PLAIN_TEXT : BOT_NOT_CONNECTED);
+  await replyRole(chatId, binding ? BOT_PLAIN_TEXT : BOT_NOT_CONNECTED, binding);
 }
 
 /* ---------- operator commands ----------
@@ -637,8 +659,8 @@ function makeContext({ cb, business, lead, leadId, businessId, answer, surface =
   /**
    * The keyboard for a card state, on the surface the tap came from. The alert
    * surface keeps today's keyboards exactly. The browser detail (surface
-   * 'detail') keeps the same actions and styles, adds Back to the page it came
-   * from, and adds the detail-only copy_text button for the phone.
+   * 'detail') keeps the same actions and styles and adds Back to the page it
+   * came from.
    */
   const keyboardFor = (view, reviewResult, fresh) => {
     if (surface === 'detail') {
@@ -863,7 +885,7 @@ const CB_LEAD = /^([cdynrvxo]):([0-9a-f-]{36})$/;
 const CB_RECIPIENT = /^([xXv]):([0-9a-f-]{36})$/;
 const CB_OPERATOR_PHONE = /^([pPq]):([0-9a-f-]{36})$/;
 const CB_PAGE = /^l:(\d{1,3})$/;
-// The in-place /leads browser. Row taps and detail actions carry the page the
+// The in-place /leads browser. Number taps and detail actions carry the page the
 // list came from, so Back restores that exact page; the lead address is a uuid
 // and the page is bounded digits, so nothing a customer typed can ride along.
 const CB_LEAD_OPEN = /^L:(\d{1,3}):([0-9a-f-]{36})$/;
@@ -873,7 +895,7 @@ const CB_REMOVE_OPEN = /^rl:([0-9a-f-]{36})$/;
 const CB_REMOVE_DELETE = /^RL:([0-9a-f-]{36})$/;
 const CB_REMOVE_CANCEL = /^rc:([0-9a-f-]{36})$/;
 const CB_REMOVE_PAGE = /^rm:(\d{1,3})$/;
-// The /remove_lead browser: a row tap asks, E: confirms. Same owner gate.
+// The /remove_lead browser: a number tap asks, E: confirms. Same owner gate.
 const CB_REMOVE_ASK = /^Q:(\d{1,3}):([0-9a-f-]{36})$/;
 const CB_REMOVE_DO = /^E:(\d{1,3}):([0-9a-f-]{36})$/;
 // The invite-cap button. No business id in the payload: the business comes from
@@ -900,10 +922,10 @@ async function handleOpenLead({ cb, leadId, binding, answer }) {
 }
 
 /**
- * L: — open one lead INSIDE the list message: the same message is edited to
- * the detail, never a second one. The page travels in the callback so Back can
- * restore the exact list page. A lead that is gone answers and refreshes the
- * page, so no dead row button is left behind.
+ * L: — a number tap opens one lead INSIDE the list message: the same message
+ * is edited to the detail, never a second one. The page travels in the
+ * callback so Back can restore the exact list page. A lead that is gone
+ * answers and refreshes the page, so no dead number button is left behind.
  */
 async function handleDetailOpen({ cb, page, leadId, binding, answer }) {
   const chatId = cb.message && cb.message.chat && cb.message.chat.id;
@@ -921,7 +943,7 @@ async function handleDetailOpen({ cb, page, leadId, binding, answer }) {
   await answer('');
   const r = await editList(chatId, messageId, text, markup);
   // Too old to edit: send the detail as a new message rather than leaving a
-  // dead row button on screen. Its Back edits the new message instead.
+  // dead number button on screen. Its Back edits the new message instead.
   if (!(r && r.ok)) await sendMessage(chatId, text, markup).catch(() => {});
 }
 
@@ -929,7 +951,7 @@ async function handleDetailOpen({ cb, page, leadId, binding, answer }) {
  * After a removal, redraw the removal list on the page the confirm came from.
  * If that page emptied (its last row was the one deleted), step back to the
  * newest page that still has rows, so the owner is never left staring at an
- * empty page with only a disabled Older above nothing.
+ * empty page.
  */
 async function refreshRemovePage(chatId, businessId, page, messageId) {
   let p = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
@@ -995,7 +1017,7 @@ async function handleCallback(cb, binding) {
       if (!(await isOwnerChat(binding.business_id, chatId))) { await answer(TOAST_OWNER_ONLY); return; }
       const messageId = cb.message && cb.message.message_id;
       if (rmPage) { return sendRemovePage(chatId, binding.business_id, Number(rmPage[1]), messageId, answer); }
-      // The /remove_lead browser: a row tap asks, E: re-checks the row and the
+      // The /remove_lead browser: a number tap asks, E: re-checks the row and the
       // binding (both re-read above and here), deletes, then refreshes that
       // page — stepping back if the deletion emptied it.
       if (rmAsk) {
@@ -1046,7 +1068,7 @@ async function handleCallback(cb, binding) {
       return;
     }
 
-    // L: — the /leads browser's row tap: the same message becomes the detail.
+    // L: — the /leads browser's number tap: the same message becomes the detail.
     const open = CB_LEAD_OPEN.exec(data);
     if (open) {
       await handleDetailOpen({ cb, page: Number(open[1]), leadId: open[2], binding, answer });

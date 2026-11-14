@@ -30,7 +30,7 @@ Two rules that prevent most mistakes:
 | 2 | A sends `/businesses` | One block per business: name, status, phone count. `Alder Roofing · Demo · 1 phone` and `Second Demo Roofing · Demo · 1 phone` after step 6. No lead details |
 | 3 | A sends `/code alder-demo` | **Two** messages. The first names `alder-demo` and says the code expires in 24 hours. The second is the forwardable one: a `t.me/...?start=` link, the code, and no slug |
 | 4 | A forwards the **second** message to B; B taps the link and presses Start | B is connected: "You're all set. New requests will appear here." |
-| 5 | B sends `/leads` | `Recent requests` and only `alder-demo`'s leads, five per page, one numbered **Open** button each, **Older** only when there are more than five. Each row is name, job type, phone, then status and age |
+| 5 | B sends `/leads` | `Recent requests` and only `alder-demo`'s leads, five per page. Under the text, one row of number buttons (`1` to `5`) that match the numbers in the text, then at most one navigation row: **Older** alone on the first page, **Newer** and **Older** side by side in the middle, **Newer** alone on the last page, no row at all when everything fits on one page. Each text row is name, job type, phone, then status and age. Tapping a number opens that lead in the same message with its status button and **Back** |
 | 6 | A sends `/code second-demo`, forwards the **second** message to C, C taps and presses Start | C is connected with the same "You're all set" message |
 | 7 | C sends `/leads` | Only `second-demo`'s leads. Never one of B's |
 | 8 | B sends `/code second-demo` | Nothing is minted. A non-operator gets the plain-text hint ("I only respond to commands…"), so the command leaves no trace |

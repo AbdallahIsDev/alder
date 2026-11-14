@@ -147,32 +147,45 @@ const samples = sampleTelegramTexts();
 }
 
 /* T9: buttons stay short for narrow phones, and the obvious is not spelled out.
-   Row buttons in the /leads browser are the exception: they carry
-   "name · service · age" on a full-width row of their own, so they get their
-   own cap (40, enforced by leadRowLabel) instead of 20. Before the browser,
-   list rows were number buttons sharing one row and the cap was 20 for
-   everything; the split is the recorded change. */
+   Every button is capped at 20 characters. The /leads and /remove_lead lists
+   carry number buttons sharing ONE row ("1".."5"), so the list buttons are a
+   single character each. Recorded history of this assertion: the cap was 20
+   for everything; the labeled-row browser then split it (rows <= 40, actions
+   <= 20); the labeled rows are gone again, so it is 20 for everything and
+   exactly one digit for a list button — stricter than both earlier forms. */
 {
   const C = await import('../lib/content.js');
   const lead = { id: 'x', name: 'Daniel Whitaker', service: 'repair', created_at: new Date().toISOString() };
-  const rows = C.leadListKeyboard([lead, lead], 0, true).reply_markup.inline_keyboard.flat()
-    .filter((b) => b.callback_data && b.callback_data.startsWith('L:'));
+  const five = [lead, lead, lead, lead, lead];
+  const listKb = C.leadListKeyboard(five, 1, true).reply_markup.inline_keyboard;
+  const removeKb = C.removeLeadKeyboard(five, 1, true).reply_markup.inline_keyboard;
+  const numbers = [...listKb[0], ...removeKb[0]];
   const navAndActions = [
     C.BOT_INVITE_CANCEL_BUTTON,
     ...C.recipientsKeyboard([{ id: 'a', label: null }], {}).inline_keyboard.flat().map((b) => b.text),
+    ...C.recipientConfirmKeyboard('a').inline_keyboard.flat().map((b) => b.text),
     ...C.operatorPhonesKeyboard([{ id: 'a', label: null }]).reply_markup.inline_keyboard.flat().map((b) => b.text),
-    ...C.leadListKeyboard([lead], 0, true).reply_markup.inline_keyboard[1].map((b) => b.text),
-    'Mark contacted', 'Job completed', 'Send request', 'Cancel', 'Try again',
-    ...C.leadDetailKeyboard('contacted', 'x', 0, lead).reply_markup.inline_keyboard.flat().map((b) => b.text),
+    ...C.operatorConfirmRemoveKeyboard('a').reply_markup.inline_keyboard.flat().map((b) => b.text),
+    ...C.operatorPickerKeyboard([{ id: 'a', name: 'A Very Long Business Name Roofing & Exteriors', slug: 's' }], 'pb').reply_markup.inline_keyboard.flat().map((b) => b.text),
+    ...listKb.flat().map((b) => b.text),
+    ...removeKb.flat().map((b) => b.text),
+    ...C.removeLeadConfirmKeyboard('x', 0).reply_markup.inline_keyboard.flat().map((b) => b.text),
+    ...C.alertKeyboard('x').inline_keyboard.flat().map((b) => b.text),
+    ...C.jobDoneKeyboard('x').inline_keyboard.flat().map((b) => b.text),
+    ...C.tryAgainKeyboard('x').inline_keyboard.flat().map((b) => b.text),
+    ...C.confirmKeyboard('x', true).inline_keyboard.flat().map((b) => b.text),
+    ...C.confirmKeyboard('x', false).inline_keyboard.flat().map((b) => b.text),
+    ...['new', 'contacted', 'confirm', 'done', 'error'].flatMap((k) => C.leadDetailKeyboard(k, 'x', 0, lead).reply_markup.inline_keyboard.flat().map((b) => b.text)),
+    ...[C.OWNER_KEYBOARD_LABELS, C.STAFF_KEYBOARD_LABELS, C.OPERATOR_KEYBOARD_LABELS].flatMap((l) => C.persistentKeyboard(l).keyboard.flat().map((b) => b.text)),
   ];
   const longActions = navAndActions.filter((t) => t.length > 20);
-  const longRows = rows.filter((b) => b.text.length > 40);
+  const badNumbers = numbers.filter((b) => !/^[1-5]$/.test(b.text));
   const copy = [C.OPERATOR_USAGE_PHONES, C.OPERATOR_USAGE_CODE, C.OPERATOR_HELP, C.BOT_INVITE_CANCEL_BUTTON,
     C.botRecipientsText([{ id: 'a', label: null }]), C.botInvitePendingText({ hours: [5] })].join('\n');
   const banned = /with a Remove button each|Tap Remove to disconnect|The main phone is the one connected first|Cancel them to make a new one/i;
-  line(longActions.length === 0 && longRows.length === 0 && !banned.test(copy),
-    'T9', 'action buttons <= 20 chars, browser rows <= 40', 
-    `actions=${navAndActions.length} rows=${rows.length} long=${longActions.concat(longRows.map((b) => b.text)).join(',') || 'none'}`);
+  line(longActions.length === 0 && numbers.length === 10 && badNumbers.length === 0 && !banned.test(copy),
+    'T9', 'every button <= 20 chars; list buttons are one digit',
+    `buttons=${navAndActions.length} numbers=${numbers.map((b) => b.text).join('')} long=${longActions.join(',') || 'none'}`);
 }
 
 /* T10: destructive confirms say what happens, and only they carry danger. */
@@ -244,81 +257,127 @@ const samples = sampleTelegramTexts();
     JSON.stringify(withName));
 }
 
-/* T14: the persistent reply keyboard. KeyboardButton text only, persistent and
-   resized, one fixed set per role, and every label maps back onto a command —
-   the permission checks live in the handlers, never in the keyboard. */
+/* T14: the persistent reply keyboard. At most TWO buttons, side by side in ONE
+   row, KeyboardButton text only (no emoji), persistent and resized; one fixed
+   set per role; every label maps back onto a command — the permission checks
+   live in the handlers, never in the keyboard. Everything else stays in the
+   native command menu (T20). */
 {
   const owner = C.persistentKeyboard(C.OWNER_KEYBOARD_LABELS);
   const staff = C.persistentKeyboard(C.STAFF_KEYBOARD_LABELS);
   const op = C.persistentKeyboard(C.OPERATOR_KEYBOARD_LABELS);
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const btnKeys = (kb) => kb.keyboard.flat().map((b) => Object.keys(b).sort().join(','));
   const shapeOk = [owner, staff, op].every((kb) =>
     kb.is_persistent === true && kb.resize_keyboard === true
-    && Array.isArray(kb.keyboard) && kb.keyboard.every((row) => row.length === 1)
-    && btnKeys(kb).every((k) => k === 'text'));
-  const setsOk = JSON.stringify(C.OWNER_KEYBOARD_LABELS) === JSON.stringify(['Leads', 'Invite', 'Recipients', 'Help'])
-    && JSON.stringify(C.STAFF_KEYBOARD_LABELS) === JSON.stringify(['Leads', 'Help'])
-    && JSON.stringify(C.OPERATOR_KEYBOARD_LABELS) === JSON.stringify(['Businesses', 'Code', 'Phones', 'Operator']);
+    && same(Object.keys(kb).sort(), ['is_persistent', 'keyboard', 'resize_keyboard'])
+    && Array.isArray(kb.keyboard) && kb.keyboard.length === 1
+    && kb.keyboard[0].length >= 1 && kb.keyboard[0].length <= 2
+    && btnKeys(kb).every((k) => k === 'text')
+    && kb.keyboard[0].every((b) => /^[A-Za-z]+$/.test(b.text)));
+  // The exact layouts, left to right.
+  const setsOk = same(owner.keyboard, [[{ text: 'Leads' }, { text: 'Invite' }]])
+    && same(staff.keyboard, [[{ text: 'Leads' }]])
+    && same(op.keyboard, [[{ text: 'Businesses' }, { text: 'Code' }]]);
   const labels = [...C.OWNER_KEYBOARD_LABELS, ...C.STAFF_KEYBOARD_LABELS, ...C.OPERATOR_KEYBOARD_LABELS];
   const mapped = labels.map((l) => C.KEYBOARD_LABELS[l]);
-  const mapOk = Object.keys(C.KEYBOARD_LABELS).length === new Set(labels).size
-    && mapped.every((cmd) => typeof cmd === 'string' && /^\/[a-z_]+$/.test(cmd))
-    && mapped.every((cmd) => cmd.length <= 32);
-  line(shapeOk && setsOk && mapOk, 'T14', 'persistent keyboard: text-only buttons, one set per role',
-    `shape=${shapeOk} sets=${setsOk} map=${mapOk} labels=${labels.length}`);
+  // The map is the current labels plus the four a phone may still be showing
+  // from before the cut to two buttons — and nothing else.
+  const legacy = Object.keys(C.LEGACY_KEYBOARD_LABELS);
+  const mapOk = same(Object.keys(C.KEYBOARD_LABELS).sort(), [...new Set([...labels, ...legacy])].sort())
+    && same(legacy.sort(), ['Help', 'Operator', 'Phones', 'Recipients'])
+    && same(mapped, ['/leads', '/invite', '/leads', '/businesses', '/code'])
+    && C.KEYBOARD_LABELS.Recipients === '/recipients' && C.KEYBOARD_LABELS.Help === '/help'
+    && C.KEYBOARD_LABELS.Phones === '/phones' && C.KEYBOARD_LABELS.Operator === '/operator'
+    && Object.values(C.KEYBOARD_LABELS).every((cmd) => typeof cmd === 'string' && /^\/[a-z_]+$/.test(cmd) && cmd.length <= 32);
+  line(shapeOk && setsOk && mapOk, 'T14', 'persistent keyboard: one row, <= 2 text-only buttons per role',
+    `shape=${shapeOk} sets=${setsOk} map=${mapOk} owner=${C.OWNER_KEYBOARD_LABELS.join('|')} staff=${C.STAFF_KEYBOARD_LABELS.join('|')} op=${C.OPERATOR_KEYBOARD_LABELS.join('|')}`);
 }
 
-/* T15: the /leads browser row label: name · service · age, shortened to fit,
-   and never a contact detail. The message text stays the source of truth. */
+/* T15: the list buttons are numbers and nothing else. The message text is the
+   only place a lead's details appear: the number in front of a lead in the
+   text is the label of its button, in the same order, in ONE row. (Before:
+   one labeled row button per lead, "name · service · age" — a second copy of
+   the text. That builder, leadRowLabel, is gone.) */
 {
-  const lead = { name: 'Daniel Whitaker', service: 'repair', created_at: new Date(Date.now() - 5 * 60000).toISOString(), phone: '5155550100', email: 'd@example.com' };
-  const label = C.leadRowLabel(lead);
-  const long = C.leadRowLabel({ ...lead, name: 'Maximilian Constantine Vanderberg-Roofington III', service: 'replacement' });
-  const parts = label.split(' · ');
-  const ok = parts.length === 3
-    && parts[0] === 'Daniel Whitaker' && parts[1] === 'Repair' && parts[2] === '5m ago'
-    && !label.includes('5155550100') && !label.includes('@')
-    && label.length <= 40
-    && long.length <= 40 && long.includes('…') && long.startsWith('Maximilian')
-    && long.endsWith('5m ago') && long.includes('Roof replacement')
-    && !long.includes('Vanderberg');
-  line(ok, 'T15', 'row label: name · service · age, <= 40, no contact details',
-    `label=${JSON.stringify(label)} long=${JSON.stringify(long)}`);
+  const now = Date.now();
+  const leads = [1, 2, 3, 4, 5].map((n) => ({
+    id: `0000000${n}-e29b-41d4-a716-446655440000`, name: `Customer ${n}`, service: 'repair', status: 'open',
+    phone: '5155550100', email: `c${n}@example.com`, created_at: new Date(now - n * 60000).toISOString(),
+  }));
+  const text = C.renderLeadList(leads, now);
+  const removeText = C.removeLeadListText(leads, now);
+  const listKb = C.leadListKeyboard(leads, 0, false).reply_markup.inline_keyboard;
+  const removeKb = C.removeLeadKeyboard(leads, 0, false).reply_markup.inline_keyboard;
+  const numbered = (t) => t.split('\n').filter((l) => /^\d+\. /.test(l));
+  const rowOk = (kb, prefix) => kb.length === 1 && kb[0].length === 5
+    && kb[0].every((b, i) => b.text === String(i + 1) && b.callback_data === `${prefix}:0:${leads[i].id}`
+      && Object.keys(b).sort().join(',') === 'callback_data,text');
+  const textOk = numbered(text).length === 5 && numbered(text).every((l, i) => l === `${i + 1}. Customer ${i + 1}`)
+    && numbered(removeText).every((l, i) => l === `${i + 1}. Customer ${i + 1}`)
+    && text.includes('Repair · +15155550100') && /\d+m ago/.test(text);
+  // No detail from the text may appear on a button.
+  const allLabels = [...listKb.flat(), ...removeKb.flat()].map((b) => b.text).join('|');
+  const noDuplicate = !/Customer|Repair|ago|just now|·|515|@/.test(allLabels);
+  const ok = rowOk(listKb, 'L') && rowOk(removeKb, 'Q') && textOk && noDuplicate
+    && typeof C.leadRowLabel === 'undefined'
+    && C.leadListKeyboard([], 0, false).reply_markup.inline_keyboard.length === 0
+    && C.leadListKeyboard(leads.slice(0, 2), 0, false).reply_markup.inline_keyboard[0].length === 2;
+  line(ok, 'T15', 'list buttons: one row of numbers matching the text, no duplication',
+    `list=${rowOk(listKb, 'L')} remove=${rowOk(removeKb, 'Q')} text=${textOk} labels=${allLabels}`);
 }
 
-/* T16: Newer/Older both ends are always rendered; the unavailable end is
-   disabled and points at the page it is already on, so a client that ignores
-   `disabled` asks for a harmless no-op refresh. */
+/* T16: navigation renders only what is useful. First page with older rows:
+   Older alone. Middle pages: Newer and Older side by side. Last page: Newer
+   alone. A single page: no navigation row. No button is ever disabled and no
+   placeholder is rendered; the whole keyboard is the number row plus at most
+   one navigation row. (Before: both ends always present, the unavailable one
+   disabled with a same-page callback.) */
 {
   const lead = { id: 'x', name: 'A', service: 'repair', created_at: new Date().toISOString() };
-  const first = C.leadListKeyboard([lead], 0, true).reply_markup.inline_keyboard[1];
-  const mid = C.leadListKeyboard([lead], 1, true).reply_markup.inline_keyboard[1];
-  const last = C.leadListKeyboard([lead], 2, false).reply_markup.inline_keyboard[1];
-  const rmFirst = C.removeLeadKeyboard([lead], 0, true).reply_markup.inline_keyboard[1];
-  const ok = first[0].text === 'Newer' && first[0].disabled === true && first[0].callback_data === 'l:0'
-    && first[1].text === 'Older' && !('disabled' in first[1]) && first[1].callback_data === 'l:1'
-    && mid.every((b) => !('disabled' in b)) && mid[0].callback_data === 'l:0' && mid[1].callback_data === 'l:2'
-    && last[0].callback_data === 'l:1' && last[1].disabled === true && last[1].callback_data === 'l:2'
-    && rmFirst[0].disabled === true && rmFirst[0].callback_data === 'rm:0' && rmFirst[1].callback_data === 'rm:1';
-  line(ok, 'T16', 'nav ends always present; unavailable end disabled, same-page callback',
-    `first=${first.map((b) => b.text + (b.disabled ? '(off)' : '')).join('/')} last=${last.map((b) => b.text + (b.disabled ? '(off)' : '')).join('/')}`);
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const kbs = (build, prefix) => {
+    const first = build([lead], 0, true).reply_markup.inline_keyboard;
+    const mid = build([lead], 1, true).reply_markup.inline_keyboard;
+    const last = build([lead], 2, false).reply_markup.inline_keyboard;
+    const single = build([lead], 0, false).reply_markup.inline_keyboard;
+    // Explicit arguments that would produce a useless button are ignored: a
+    // Newer on page 0 and an Older past the last addressable page.
+    const forcedNewer = build([lead], 0, false, true).reply_markup.inline_keyboard;
+    const capped = build([lead], 999, true, true).reply_markup.inline_keyboard;
+    const all = [first, mid, last, single, forcedNewer, capped];
+    return same(first[1], [{ text: 'Older', callback_data: `${prefix}:1` }])
+      && same(mid[1], [{ text: 'Newer', callback_data: `${prefix}:0` }, { text: 'Older', callback_data: `${prefix}:2` }])
+      && same(last[1], [{ text: 'Newer', callback_data: `${prefix}:1` }])
+      && single.length === 1 && forcedNewer.length === 1
+      && same(capped[1], [{ text: 'Newer', callback_data: `${prefix}:998` }])
+      && all.every((kb) => kb.length <= 2 && kb[0].length === 1 && kb[0][0].text === '1')
+      && all.every((kb) => !JSON.stringify(kb).includes('disabled'));
+  };
+  const listOk = kbs(C.leadListKeyboard, 'l');
+  const removeOk = kbs(C.removeLeadKeyboard, 'rm');
+  line(listOk && removeOk, 'T16', 'nav: Older / Newer+Older / Newer / none, never disabled',
+    `leads=${listOk} remove=${removeOk}`);
 }
 
 /* T17: Telegram caps callback_data at 1-64 bytes. Every keyboard builder is
    exercised with the worst case (three-digit page, real uuid) and every
-   emitted callback must fit; copy_text must be 1-256 characters and never
-   share a button with callback_data. */
+   emitted callback must fit. No button carries copy_text any more (the
+   "Copy phone" button is gone), and every button has exactly one action. */
 {
   const C2 = await import('../lib/content.js');
   const uuid = '550e8400-e29b-41d4-a716-446655440000';
   const lead = { id: uuid, name: 'Daniel Whitaker', service: 'repair', phone: '5155550100', email: 'd@example.com', created_at: new Date().toISOString() };
   const keyboards = [
+    C2.leadListKeyboard([lead, lead, lead, lead, lead], 998, true, true),
     C2.leadListKeyboard([lead, lead, lead, lead, lead], 999, true, true),
+    C2.removeLeadKeyboard([lead, lead, lead, lead, lead], 998, true, true),
     C2.removeLeadKeyboard([lead, lead, lead, lead, lead], 999, true, true),
     C2.removeLeadConfirmKeyboard(uuid, 999),
     C2.removeLeadConfirmKeyboard(uuid),
     C2.alertKeyboard(uuid), C2.jobDoneKeyboard(uuid), C2.tryAgainKeyboard(uuid), C2.confirmKeyboard(uuid, true),
     C2.recipientsKeyboard([{ id: uuid, label: null }], {}),
+    C2.recipientConfirmKeyboard(uuid),
     C2.operatorPhonesKeyboard([{ id: uuid, label: null }]),
     C2.operatorPickerKeyboard([{ id: uuid, name: 'n', slug: 's' }], 'pb'),
     C2.operatorConfirmRemoveKeyboard(uuid),
@@ -332,72 +391,99 @@ const samples = sampleTelegramTexts();
   // Nothing a customer typed can ride along: a known one- or two-letter kind,
   // then only digits, colons and uuid hex.
   const shaped = cbs.filter((d) => !/^[A-Za-z]{1,2}:/.test(d) || !/^[0-9a-f:-]*$/.test(d.replace(/^[A-Za-z]{1,2}:/, '')));
-  const both = buttons.filter((b) => b.callback_data && b.copy_text);
-  const copies = buttons.filter((b) => b.copy_text).map((b) => b.copy_text.text);
-  const badCopy = copies.filter((t) => typeof t !== 'string' || t.length < 1 || t.length > 256);
+  // Every page a button addresses must pass the anchored page regex (1-3 digits).
+  const pages = cbs.map((d) => /^(?:l|rm):(\d+)$/.exec(d) || /^[LQCDYNRE]:(\d+):/.exec(d)).filter(Boolean).map((m) => m[1]);
+  const badPages = pages.filter((n) => n.length > 3);
+  const noAction = buttons.filter((b) => !b.callback_data);
+  const copies = buttons.filter((b) => 'copy_text' in b);
   const longest = cbs.reduce((a, b) => (Buffer.byteLength(b) > Buffer.byteLength(a) ? b : a), '');
   line(cbs.length > 20 && tooLong.length === 0 && empty.length === 0 && shaped.length === 0
-    && both.length === 0 && badCopy.length === 0,
-    'T17', 'every callback_data <= 64 bytes; copy_text 1-256, never both',
+    && badPages.length === 0 && pages.length > 20
+    && noAction.length === 0 && copies.length === 0,
+    'T17', 'every callback_data <= 64 bytes; no copy_text button anywhere',
     `callbacks=${cbs.length} longest=${longest} (${Buffer.byteLength(longest)}B) copies=${copies.length}`);
 }
 
 /* T18: the lead detail keyboard — the browser's card. Same actions and styles
-   as the alert, plus Back to the page it came from, plus the detail-only
-   copy_text phone button (never in a list view). */
+   as the alert, then "Back" alone on its own row, plain text, to the page it
+   came from. The "Copy phone" button is gone: the number is already tappable
+   in the message text. */
 {
   const C2 = await import('../lib/content.js');
   const uuid = '550e8400-e29b-41d4-a716-446655440000';
   const lead = { id: uuid, name: 'A', service: 'repair', phone: '5155550100', email: 'd@example.com', created_at: new Date().toISOString() };
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const kb = (kind, l = lead) => C2.leadDetailKeyboard(kind, uuid, 3, l).reply_markup.inline_keyboard;
-  const copyOf = (rows) => rows.flat().find((b) => b.copy_text);
-  const backOf = (rows) => rows.flat().find((b) => b.callback_data === 'l:3');
+  const BACK = [{ text: 'Back', callback_data: 'l:3' }];
   const fresh = kb('new');
   const contacted = kb('contacted');
   const confirm = kb('confirm');
   const done = kb('done');
   const error = kb('error');
   const noPhone = kb('new', { ...lead, phone: null });
-  const ok = fresh[0][0].text === 'Mark contacted' && fresh[0][0].callback_data === `C:3:${uuid}` && fresh[0][0].style === 'primary'
-    && contacted[0][0].text === 'Job completed' && contacted[0][0].callback_data === `D:3:${uuid}` && contacted[0][0].style === 'primary'
-    && confirm[0][0].text === 'Send request' && confirm[0][0].callback_data === `Y:3:${uuid}` && confirm[0][0].style === 'success'
-    && confirm[0][1].text === 'Cancel' && confirm[0][1].callback_data === `N:3:${uuid}` && confirm[0][1].style === 'danger'
+  const ok = same(fresh, [[{ text: 'Mark contacted', callback_data: `C:3:${uuid}`, style: 'primary' }], BACK])
+    && same(contacted, [[{ text: 'Job completed', callback_data: `D:3:${uuid}`, style: 'primary' }], BACK])
+    && same(confirm, [[
+      { text: 'Send request', callback_data: `Y:3:${uuid}`, style: 'success' },
+      { text: 'Cancel', callback_data: `N:3:${uuid}`, style: 'danger' },
+    ], BACK])
     && kb('confirm', { ...lead, email: null })[0][0].text === 'Mark done'
-    && done.length === 1
-    && error[0][0].text === 'Try again' && error[0][0].callback_data === `R:3:${uuid}` && error[0][0].style === 'primary'
-    && [fresh, contacted, confirm, done, error].every((rows) => {
-      const c = copyOf(rows);
-      return c && c.copy_text.text === '+15155550100' && !c.callback_data;
-    })
-    && [fresh, contacted, confirm, done, error].every((rows) => backOf(rows) && !backOf(rows).copy_text)
-    && noPhone.flat().every((b) => !b.copy_text) && backOf(noPhone)
-    && !JSON.stringify(C2.leadListKeyboard([lead], 0, true)).includes('copy_text')
-    && !JSON.stringify(C2.removeLeadKeyboard([lead], 0, true)).includes('copy_text');
-  line(ok, 'T18', 'detail keyboard: alert actions + styles + Back + phone copy_text',
-    `kinds=new/contacted/confirm/done/error phoneless=${noPhone.flat().length}`);
+    && same(done, [BACK])
+    && same(error, [[{ text: 'Try again', callback_data: `R:3:${uuid}`, style: 'primary' }], BACK])
+    && same(noPhone, fresh)
+    && same(kb('new', null), fresh)
+    && ![fresh, contacted, confirm, done, error, noPhone].some((rows) => /copy_text|Copy/.test(JSON.stringify(rows)))
+    // The phone the button used to copy is still in the detail text.
+    && C2.renderAlert({ business: { name: 'B', timezone: 'America/Chicago' }, lead: { ...lead, status: 'open', zip: '50265' }, view: 'new' }).includes('+15155550100');
+  line(ok, 'T18', 'detail keyboard: alert actions + styles, then plain Back; no copy',
+    `kinds=new/contacted/confirm/done/error back=${JSON.stringify(done)}`);
 }
 
-/* T19: the button icon seam. Plain Unicode emoji today; the custom-emoji
-   extension point must stay a comment, not a field. */
+/* T19: the button icon seam, and no emoji on any button. The seam is kept for
+   the future (custom emoji) but returns NO icon today: every name answers
+   null and every label comes back unchanged. That the seam still works is
+   proved with an injected table, never with a shipped icon. Every button
+   label the builders can emit is checked for emoji. (Before: back was a left
+   arrow emoji and copy a clipboard emoji.) */
 {
   const C2 = await import('../lib/content.js');
   const uuid = '550e8400-e29b-41d4-a716-446655440000';
-  const lead = { id: uuid, name: 'A', service: 'repair', phone: '5155550100', created_at: new Date().toISOString() };
-  const all = JSON.stringify({
-    list: C2.leadListKeyboard([lead], 0, true),
-    remove: C2.removeLeadKeyboard([lead], 0, true),
-    detail: C2.leadDetailKeyboard('new', uuid, 0, lead),
-    confirm: C2.removeLeadConfirmKeyboard(uuid, 0),
-    owner: C2.persistentKeyboard(C2.OWNER_KEYBOARD_LABELS),
-  });
-  const ok = C2.buttonIcon('back') === '⬅️' && C2.buttonIcon('copy') === '📋'
+  const lead = { id: uuid, name: 'A', service: 'repair', phone: '5155550100', email: 'd@example.com', created_at: new Date().toISOString() };
+  const five = [lead, lead, lead, lead, lead];
+  const inline = [
+    C2.leadListKeyboard(five, 1, true), C2.removeLeadKeyboard(five, 1, true),
+    C2.removeLeadConfirmKeyboard(uuid, 0), C2.removeLeadConfirmKeyboard(uuid),
+    C2.alertKeyboard(uuid), C2.jobDoneKeyboard(uuid), C2.tryAgainKeyboard(uuid),
+    C2.confirmKeyboard(uuid, true), C2.confirmKeyboard(uuid, false),
+    C2.recipientsKeyboard([{ id: uuid, label: null }, { id: uuid, label: null }], {}), C2.recipientConfirmKeyboard(uuid),
+    C2.operatorPhonesKeyboard([{ id: uuid, label: null }]), C2.operatorConfirmRemoveKeyboard(uuid),
+    C2.operatorPickerKeyboard([{ id: uuid, name: 'Alder Roofing', slug: 'alder-demo' }], 'pc'),
+    ...['new', 'contacted', 'confirm', 'done', 'error'].map((k) => C2.leadDetailKeyboard(k, uuid, 0, lead)),
+  ].flatMap((kb) => (kb.reply_markup || kb).inline_keyboard.flat());
+  const reply = [C2.OWNER_KEYBOARD_LABELS, C2.STAFF_KEYBOARD_LABELS, C2.OPERATOR_KEYBOARD_LABELS]
+    .flatMap((l) => C2.persistentKeyboard(l).keyboard.flat());
+  const labels = [...inline, ...reply].map((b) => String(b.text)).concat([C2.BOT_INVITE_CANCEL_BUTTON]);
+  const EMOJI = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{FE0F}\u{200D}\u{2190}-\u{21FF}]/u;
+  const withEmoji = labels.filter((t) => EMOJI.test(t));
+  const all = JSON.stringify([inline, reply]);
+  const injected = { back: '\u2B05\uFE0F' };
+  const ok = Object.keys(C2.BUTTON_ICONS).length === 0 && Object.isFrozen(C2.BUTTON_ICONS)
+    && C2.buttonIcon('back') === null && C2.buttonIcon('copy') === null
     && C2.buttonIcon('unknown') === null && C2.buttonIcon('') === null
-    && C2.iconLabel('back', 'Back') === '⬅️ Back'
+    && C2.buttonIcon('toString') === null && C2.buttonIcon('constructor') === null
+    && C2.iconLabel('back', 'Back') === 'Back'
+    && C2.iconLabel('copy', 'Copy phone') === 'Copy phone'
     && C2.iconLabel('unknown', 'Back') === 'Back'
     && C2.iconLabel('back') === ''
+    // The seam itself: with a table that has an icon, it is used.
+    && C2.buttonIcon('back', injected) === injected.back
+    && C2.iconLabel('back', 'Back', injected) === `${injected.back} Back`
+    && C2.iconLabel('other', 'Back', injected) === 'Back'
+    && EMOJI.test(C2.iconLabel('back', 'Back', injected))
+    && labels.length > 40 && withEmoji.length === 0
     && !all.includes('icon_custom_emoji_id');
-  line(ok, 'T19', 'icon seam: Unicode emoji only, no custom emoji field',
-    `icons=${Object.keys(C2.BUTTON_ICONS).join(',')} custom=${all.includes('icon_custom_emoji_id')}`);
+  line(ok, 'T19', 'icon seam kept, returns no icon; no emoji on any button',
+    `icons=${Object.keys(C2.BUTTON_ICONS).length} labels=${labels.length} emoji=${withEmoji.join(',') || 'none'} custom=${all.includes('icon_custom_emoji_id')}`);
 }
 
 /* T20: the actual setMyCommands scopes. The script is spawned against a
