@@ -19,15 +19,17 @@ Two rules that prevent most mistakes:
 - **Never press a client's link from A.** Opening a link is how a phone joins a
   business. The bot refuses, but the refusal exists to catch the mistake.
 - **One account belongs to one business at a time.** `business_chats.tg_chat_id`
-  is unique. Moving an account needs the operator to remove it first
-  (`/phones <slug>`, then **Remove**).
+  is unique. Moving an account needs it removed first: the owner removes it in
+  `/recipients`, or the operator ends every phone of that business
+  (`/businesses`, the business, **Terminate**).
 
 ## The script
 
 | # | Do this | Expect exactly this |
 | --- | --- | --- |
 | 1 | A sends `/id` | A's chat id, and the line telling A to put it in `OPERATOR_CHAT_ID`. No business name, no slug |
-| 2 | A sends `/businesses` | One block per business: name, status, phone count. `Alder Roofing · Demo · 1 phone` and `Second Demo Roofing · Demo · 1 phone` after step 6. No lead details |
+| 2 | A sends `/businesses` | **One** message titled `Businesses`, up to five numbered rows a page, sorted by name: `1. Alder Roofing · Demo · 1 phone` and `Second Demo Roofing · Demo · 1 phone` after step 6. Under the text one row of number buttons that match the rows, then at most one navigation row (**Older** alone on the first page, **Newer** and **Older** in the middle, **Newer** alone on the last, none when everything fits). No lead details on this screen |
+| 2a | A taps a number | The **same** message becomes that business: name, `Demo · alder-demo`, `Telegram: connected · 1 phone` with `Phone 1 · main phone` (or `Telegram: not connected`), `Requests: N`. Buttons: **Terminate** (red) on the left, **Leads** on the right, **Back** below. **Back** returns to the same page of the list |
 | 3 | A sends `/code alder-demo` | **Two** messages. The first names `alder-demo` and says the code expires in 24 hours. The second is the forwardable one: a `t.me/...?start=` link, the code, and no slug |
 | 4 | A forwards the **second** message to B; B taps the link and presses Start | B is connected: "You're all set. New requests will appear here." |
 | 5 | B sends `/leads` | `Recent requests` and only `alder-demo`'s leads, five per page. Under the text, one row of number buttons (`1` to `5`) that match the numbers in the text, then at most one navigation row: **Older** alone on the first page, **Newer** and **Older** side by side in the middle, **Newer** alone on the last page, no row at all when everything fits on one page. Each text row is name, job type, phone, then status and age. Tapping a number opens that lead in the same message with its status button and **Back** |
@@ -51,8 +53,15 @@ Two rules that prevent most mistakes:
 | 23 | A sends a lead for `second-demo` | Only C gets the alert. B gets nothing |
 | 24 | B opens the alert and taps **Mark contacted**, then **Job completed**, then **Send request** | The review email goes to the address on that lead, and the page it links to carries `alder-demo`'s name and `alder-demo`'s Google link |
 | 25 | C does the same on a `second-demo` lead | The page carries `second-demo`'s name and its Google link, never Alder's |
-| 26 | A sends `/leads` | "This is the operator chat. Pick a business with /phones or /code. Lead lists are on the owner phones." The operator never sees a lead list |
-| 27 | A sends `/phones alder-demo` | `Phone 1 · main phone` for the oldest phone, the others listed, one **Remove** button each |
+| 26 | A sends `/leads` | "This is the operator chat. Send /businesses, open a business and tap Leads." No list is sent for `/leads` itself |
+| 27 | A sends `/phones` (or `/phones alder-demo`) | The same `Businesses` message as step 2. There is no picker and no **Remove** button any more; a single phone is removed by the owner in `/recipients` |
+| 27a | A opens `alder-demo` in `/businesses` and taps **Leads** | The same message becomes `Alder Roofing`, `Recent requests` and B's five newest requests, with number buttons, **Newer** / **Older** where real, and **Back**. A number shows that request's card with **Back** only: no Mark contacted, no Job completed, no Remove. Nothing A taps here changes a request |
+| 27b | A opens `second-demo` and taps **Terminate** | A question: "Terminate Telegram access for Second Demo Roofing? 1 phone will stop receiving alerts and can no longer use this bot." and one line saying new website requests are still saved and emailed to the owner email. **Confirm terminate** (red) and **Cancel**. **Cancel** returns to the business; C still gets alerts |
+| 27c | A taps **Terminate**, then **Confirm terminate** | C gets "Your Telegram access for Second Demo Roofing was ended. New requests will no longer be sent to this chat. Contact support if this is a mistake." and C's bottom keyboard disappears. A's message becomes `Second Demo Roofing terminated · 1 phone removed · 0 notices failed` with **Back** |
+| 27d | C sends `/leads`, then taps a button on an old alert | "This chat isn't connected yet…" for the command and "Not found" for the tap, the same as any chat that was never connected |
+| 27e | A sends a lead for `second-demo` | The lead is stored and the owner email goes out; C gets nothing in Telegram; A gets one "no phone is connected" notice. `/businesses` shows `Second Demo Roofing · Demo · 0 phones` and the status is still `Demo` |
+| 27f | A taps **Terminate** on `second-demo` again | A toast "Already not connected." Nothing is sent to anyone |
+| 27g | A sends `/code second-demo`, forwards the second message to C, C presses Start | C is connected again, exactly as in step 6. Any invite that was pending before step 27c no longer works |
 | 28 | B sends `/invite` a fourth time in one hour | "Too many invites this hour. Try again later." Nothing is minted |
 | 29 | B deletes the bot chat, searches the bot and presses Start | "You're all set" again. The binding is keyed by chat id, so it survives |
 | 30 | B blocks the bot, then a lead arrives for `alder-demo` | The lead is stored, the owner email still goes out, and A gets one "blocked" notice for that business |
@@ -75,8 +84,10 @@ reading the database.
   owner.
 - A review link opens the page of the business whose lead it belongs to, with
   that business's Google link.
-- The operator sees counts per business and never a lead's name, phone, email or
-  note.
+- The operator's list, alarms and notices carry counts per business and never a
+  lead's name, phone, email or note. The one place the operator can read
+  requests is `/businesses` → a business → **Leads**, read-only, in the operator
+  chat only.
 
 ## Sending a test lead
 

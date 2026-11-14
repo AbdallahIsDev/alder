@@ -28,7 +28,8 @@
 //   LB11 the persistent keyboard per role: one row, at most two plain-text
 //       buttons; presses map onto commands through the same permission
 //       checks; the operator keyboard never reaches a business chat
-//   LB12 an unbind sends one notice carrying ReplyKeyboardRemove (both paths)
+//   LB12 an unbind sends one notice carrying ReplyKeyboardRemove; the
+//       operator's retired per-phone Remove (P:) removes nothing
 //   LB13 a chat whose binding is gone fails closed on the next tap
 //   LB14 the lead pages are queried created_at desc, id desc (deterministic)
 //   LB15 no request carried parse_mode
@@ -645,7 +646,9 @@ try {
       && same(kbText(unbound), REMOVE_KB)
       && String(pressLeads.body.text).startsWith('Recent requests')
       && String(pressInvite.body.text) === C.BOT_OWNER_ONLY
-      && /Alder Roofing/.test(String(pressBiz.body.text))
+      // The operator's business browser: the list, with its number row.
+      && String(pressBiz.body.text) === 'Businesses\n\n1. Alder Roofing · Demo · 2 phones\n2. Beta Roofing · Active · 1 phone'
+      && same(kbOf(pressBiz), [[{ text: '1', callback_data: `bd:0:${BIZ_A}` }, { text: '2', callback_data: `bd:0:${BIZ_B}` }]])
       && String(pressCode.body.text) === C.OPERATOR_PICK_TEXT
       && String(ownerPressBiz.body.text) === C.BOT_PLAIN_TEXT && same(kbText(ownerPressBiz), OWNER_KB)
       && String(legacyHelp.body.text) === C.BOT_HELP && same(kbText(legacyHelp), OWNER_KB),
@@ -653,16 +656,21 @@ try {
       `owner=${same(kbText(ownerHelp), OWNER_KB)} staff=${same(kbText(staffHelp), STAFF_KB)} op=${same(kbText(opHelp), OPERATOR_KB)} unbound=${same(kbText(unbound), REMOVE_KB)}`);
   }
 
-  /* LB12: an unbind sends one notice carrying ReplyKeyboardRemove. */
+  /* LB12: an unbind sends one notice carrying ReplyKeyboardRemove. The
+     operator's old per-phone "Remove" (P:) no longer removes anything: the
+     tap says the screen expired and shows the business list. (The operator's
+     Terminate, which unbinds a whole business, is tests/operator-browser.) */
   store = freshStore();
   {
-    // The operator's /phones P: path.
     const staffRow = store.chats.find((r) => String(r.tg_chat_id) === String(STAFF));
     await tgReset();
     await call(cb(OP, 'P:' + staffRow.id));
     const pSends = await sends();
-    const pNotice = pSends.find((x) => String(x.body.chat_id) === String(STAFF));
-    const opRemoved = !store.chats.some((r) => r.id === staffRow.id);
+    const pEdits = await edits();
+    const pAnswers = await answers();
+    const opKept = store.chats.some((r) => r.id === staffRow.id) && store.chats.length === 3
+      && pSends.length === 0 && same(pAnswers, [C.OPERATOR_SCREEN_EXPIRED])
+      && pEdits.length === 1 && String(pEdits[0].body.text).startsWith('Businesses\n\n1. Alder Roofing · Demo · 2 phones');
     // The owner's /recipients X: path (the staff row comes back first).
     store = freshStore();
     const again = store.chats.find((r) => String(r.tg_chat_id) === String(STAFF));
@@ -675,9 +683,10 @@ try {
     const ownerRemoved = !store.chats.some((r) => r.id === again.id);
     const noticeOk = (req) => !!req && req.body.text === C.BOT_DISCONNECTED
       && req.body.reply_markup && req.body.reply_markup.remove_keyboard === true;
-    line(opRemoved && noticeOk(pNotice) && ownerRemoved && noticeOk(xNotice),
-      'LB12', 'unbind: one notice and ReplyKeyboardRemove, both paths',
-      `op=${noticeOk(pNotice)} owner=${noticeOk(xNotice)}`);
+    line(opKept && ownerRemoved && noticeOk(xNotice)
+      && xSends.filter((x) => String(x.body.chat_id) === String(STAFF)).length === 1,
+      'LB12', 'unbind: one notice + ReplyKeyboardRemove; old operator P: inert',
+      `opKept=${opKept} owner=${noticeOk(xNotice)}`);
   }
 
   /* LB13: a chat whose binding is gone fails closed on the next tap. */

@@ -156,10 +156,33 @@ Caps (env-overridable, `RECIPIENTS_MAX` / `INVITES_MAX`):
 message you can forward as-is. Use it when a client has no phone connected yet,
 which is the one case `/invite` cannot cover.
 
-**Lost or stolen phone.** `/phones <slug>`, Remove on that row, confirm. The code
-that phone held is already used; mint a new one with `/code <slug>` for the
-replacement. If the phone may still have the chat open, remove it first — the
-binding is the authorisation.
+**Lost or stolen phone.** The owner removes it: `/recipients`, Remove on that
+row, confirm. The code that phone held is already used; mint a new one with
+`/invite` (or `/code <slug>`) for the replacement. If the phone may still have
+the chat open, remove it first — the binding is the authorisation. The operator
+no longer removes a single phone; if the lost phone IS the owner phone, use
+Terminate below and reconnect with `/code <slug>`.
+
+**The business browser (operator).** `/businesses` (and `/phones`, which opens
+the same thing) is one message that is edited in place: five businesses a page
+as `Name · Status · N phones`, a number button per row, and Newer / Older only
+where they lead somewhere. A number opens the business: status, slug, its
+phones (`Phone 1 · main phone`, …) and its request count, with **Terminate**,
+**Leads** and **Back**. **Leads** shows that business's requests read-only
+(the owner's list and card, no status or remove button).
+
+**Terminate (operator).** Ends a business's Telegram access after one
+confirmation. Every connected phone first gets one plain notice (with its
+keyboard removed), then every binding of that business is deleted in one
+statement and its unused invites are expired, so an old code cannot connect a
+phone again. The business row, its status and its leads are not touched. With
+status `demo` or `active` the website keeps working: a new request is still
+stored and still emailed to the owner email, and you get one "no phone
+connected" notice per request; the daily digest and self-check go to the owner
+email instead of Telegram, and the self-check alarm lists an `active` business
+with no phone every day. The terminated chat gets the same "not connected"
+reply as any unbound chat. Reconnect with `/code <slug>`. There is no grace
+period: Terminate is immediate.
 
 **Remove.** `/recipients` lists every phone as "Recipient 1, 2, …" (or the stored
 `business_chats.label` when set) with one **Remove** button each. Removing asks once;
@@ -353,7 +376,7 @@ never changes that stored-lead success into a failure.
 `hit_rate_limit()` counts inside a fixed bucket (`floor(epoch / window)`), not a
 sliding window. A burst that straddles a boundary can therefore get up to twice
 the limit in that instant — 10 `/code` mints before the hour turns, 10 after.
-That is accepted for the operator-only commands (`/code`, `/phones`) because the
+That is accepted for the operator-only command `/code` because the
 operator is trusted and the cap is there to stop a runaway loop, not an attacker.
 The bind and invite paths use the same primitive; there the cap is one of several
 guards, and the code itself is single-use.

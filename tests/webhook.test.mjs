@@ -1103,6 +1103,26 @@ try {
       .map((x) => x.body.text).join('\n');
     const answersNow = async () => (await sent()).filter((x) => x.path.includes('/answerCallbackQuery'))
       .map((x) => (x.body && x.body.text) || '').join('|');
+    // Every row of the operator's business list ("Name · Status · N phones"),
+    // walking the pages the way the operator does: /businesses, then Older on
+    // the same message until there is none. `first` is the message /businesses sent.
+    const opBusinessLines = async () => {
+      const rows = [];
+      await reset();
+      await good(msg(OP, '/businesses'));
+      const first = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || null;
+      let req = first;
+      for (let page = 0; req && page < 60; page++) {
+        rows.push(...String(req.body.text).split('\n').filter((l) => /^\d+\. /.test(l)).map((l) => l.replace(/^\d+\. /, '')));
+        const kb = (req.body.reply_markup && req.body.reply_markup.inline_keyboard) || [];
+        const older = kb.flat().find((b) => b.text === 'Older');
+        if (!older) break;
+        await reset();
+        await good(cb(OP, older.callback_data));
+        req = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop() || null;
+      }
+      return { rows, first };
+    };
     try {
       // Ownership order, without minting a code on a real business. Explicit,
       // distinct created_at: one INSERT gives every row the same timestamp.
@@ -1378,7 +1398,10 @@ try {
         await reset(); await good(msg(chatA, '/leads second-demo'));
         const own = await lastText();
         line(inv === C2.OPERATOR_PICK_TEXT && invKb.flat().some((b) => String(b.callback_data).startsWith('pc:'))
-          && rec === C2.OPERATOR_PICK_TEXT && recKb.flat().some((b) => String(b.callback_data).startsWith('pb:'))
+          // /recipients is the business browser now: the list, number buttons
+          // that open a business, and no button of the retired pb: picker.
+          && rec.startsWith('Businesses\n\n1. ') && recKb.flat().some((b) => /^bd:0:[0-9a-f-]{36}$/.test(String(b.callback_data)))
+          && !recKb.flat().some((b) => String(b.callback_data).startsWith('pb:'))
           && help === C2.OPERATOR_HELP && rm === C2.OPERATOR_REMOVE_LEAD
           && leads1 === C2.OPERATOR_LEADS_HINT && leads2 === C2.OPERATOR_LEADS_HINT
           && client === C2.BOT_NOT_CONNECTED && !/Beta|Second/.test(own),
@@ -1394,12 +1417,10 @@ try {
           owner_email: 'paused@zz-test.invalid', google_review_url: 'https://g.page/r/zz', status: 'paused',
         }).select('id').single();
         await svc.from('business_chats').insert({ business_id: paused.data.id, tg_chat_id: FIXTURE_CHATS.webhookX });
-        await reset();
-        await good(msg(OP, '/businesses'));
-        const text = ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text || '';
+        const { rows: listed } = await opBusinessLines();
         await svc.from('businesses').delete().eq('id', paused.data.id);
-        line(/ZZ Paused Fixture · Paused · 1 phone/.test(text), 'OP34',
-          '/businesses counts a paused business phone', text.split('\n').find((l) => l.includes('ZZ Paused')) || 'missing');
+        line(listed.includes('ZZ Paused Fixture · Paused · 1 phone'), 'OP34',
+          '/businesses counts a paused business phone', listed.find((l) => l.includes('ZZ Paused')) || 'missing');
       }
 
       // OP35: when the phone-count query fails, /businesses says "?" — never
@@ -1410,24 +1431,25 @@ try {
         globalThis.fetch = async (input, init) => {
           const u = typeof input === 'string' ? input : (input && input.url) || '';
           const method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
-          // countBusinessChats is the HEAD request; a GET on the same table is
-          // the handler's own binding lookup and must keep working.
-          if (method === 'HEAD' && u.includes('/rest/v1/business_chats')) {
+          // The page's phone counts are ONE GET filtered by business_id=in.(…);
+          // the GET by tg_chat_id on the same table is the handler's own
+          // binding lookup and must keep working.
+          if (method === 'GET' && u.includes('/rest/v1/business_chats') && u.includes('business_id=in.')) {
             seen++;
             return new Response('{"message":"count failed"}', { status: 500, headers: { 'content-type': 'application/json' } });
           }
           return realFetch(input, init);
         };
-        let text = '';
+        let listed = [];
         try {
-          await reset();
-          await good(msg(OP, '/businesses'));
-          text = ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text || '';
+          ({ rows: listed } = await opBusinessLines());
         } finally {
           globalThis.fetch = realFetch;
         }
-        const alder = text.split('\n\n').find((l) => l.startsWith('Alder Roofing')) || '';
-        line(seen > 0 && /·\s\?$/.test(alder.trim()) && !/0 phones/.test(alder),
+        const alder = listed.find((l) => l.startsWith('Alder Roofing')) || '';
+        // Every row of every page says "?": no row may claim a number it could not read.
+        line(seen > 0 && /·\s\?$/.test(alder.trim()) && !/0 phones/.test(alder)
+          && listed.length > 0 && listed.every((l) => / · \?$/.test(l)),
           'OP35', '/businesses shows ? when the count fails', `seen=${seen} line=${JSON.stringify(alder)}`);
       }
 
@@ -1442,21 +1464,39 @@ try {
           'bindChat refuses the operator chat', `code=${err} rows=${rows}`);
       }
 
-      // OP24: pickers. No slug -> names as buttons; the tap runs the same
-      // action; a forged or stale id is unknown; a non-operator gets nothing.
+      // OP24: /phones opens the business browser; a button of the old /phones
+      // picker (pb:) opens that business in it. The /code picker is as it
+      // was: names as buttons, the tap runs the same action, a forged or
+      // stale id is unknown; a non-operator gets nothing from any of them.
       {
         const C2 = await import('../lib/content.js');
         await reset();
         await good(msg(OP, '/phones'));
         const ph = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
         const phKb = (ph && ph.body.reply_markup && ph.body.reply_markup.inline_keyboard) || [];
-        const phBtn = phKb.flat().find((b) => b.callback_data === 'pb:' + bizA.id);
-        const pickText = ph && ph.body && ph.body.text;
+        const pickText = String((ph && ph.body && ph.body.text) || '');
         const phKeys = ph && ph.body ? Object.keys(ph.body).join('+') : 'none';
+        // One number row (and at most one navigation row); every number opens a business.
+        const numbersOk = phKb.length >= 1 && phKb.length <= 2 && phKb[0].length >= 1 && phKb[0].length <= 5
+          && phKb[0].every((b, i) => b.text === String(i + 1) && /^bd:0:[0-9a-f-]{36}$/.test(b.callback_data));
         await reset();
         await good(cb(OP, 'pb:' + bizA.id));
-        const phText = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
-        const phonesTitle = (phText && phText.body.text) || '';
+        const phSends = (await sent()).filter((x) => x.path.includes('/sendMessage')).length;
+        const phEdit = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop();
+        const phonesTitle = (phEdit && phEdit.body.text) || '';
+        const detailKb = (phEdit && phEdit.body.reply_markup && phEdit.body.reply_markup.inline_keyboard) || [];
+        // The same business through the browser's own button: the same screen.
+        await reset();
+        await good(cb(OP, 'bd:0:' + bizA.id));
+        const bdEdit = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop();
+        const detailOk = phSends === 0 && phonesTitle.split('\n')[0] === 'Alder Roofing'
+          && phonesTitle.split('\n')[1] === 'Demo · alder-demo' && /\nTelegram: connected · \d+ phones?\nPhone 1 · main phone/.test(phonesTitle)
+          && /\n\nRequests: \d+$/.test(phonesTitle)
+          && JSON.stringify(detailKb) === JSON.stringify([
+            [{ text: 'Terminate', callback_data: 'bt:0:' + bizA.id, style: 'danger' }, { text: 'Leads', callback_data: 'bq:0:0:' + bizA.id }],
+            [{ text: 'Back', callback_data: 'bl:0' }],
+          ])
+          && !!bdEdit && bdEdit.body.text === phonesTitle;
 
         await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
         await reset();
@@ -1469,19 +1509,35 @@ try {
         await reset();
         await good(cb(OP, 'pc:00000000-0000-0000-0000-000000000000'));
         const stale = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
-        // A non-operator tap must not act. The same isOperatorChat gate is
-        // exercised by OP6 (forged p: from a client), so this checks silence.
+        // An unknown business in the browser: a toast and the current list.
         await reset();
-        await good(cb(chatA, 'pb:' + bizA.id));
-        const foreignSends = (await sent()).filter((x) => x.path.includes('/sendMessage')).length;
+        await good(cb(OP, 'bd:0:00000000-0000-0000-0000-000000000000'));
+        const goneAnswers = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        const goneEdit = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop();
+        const goneOk = goneAnswers.includes(C2.OPERATOR_BUSINESS_GONE) && !!goneEdit && String(goneEdit.body.text).startsWith('Businesses\n\n1. ');
+        // A non-operator tap must not act. The same isOperatorChat gate is
+        // exercised by OP6 (forged p: from a client), so this checks silence:
+        // nothing sent, nothing edited, and the bindings are all still there.
+        const boundBefore = (await svc.from('business_chats').select('id').eq('business_id', bizA.id)).data.length;
+        let foreignSends = 0;
+        let foreignRefused = true;
+        for (const data of ['pb:' + bizA.id, 'bl:0', 'bd:0:' + bizA.id, 'bt:0:' + bizA.id, 'bT:0:' + bizA.id, 'bq:0:0:' + bizA.id]) {
+          await reset();
+          await good(cb(chatA, data));
+          const out = await sent();
+          foreignSends += out.filter((x) => x.path.includes('/sendMessage') || x.path.includes('/editMessageText')).length;
+          if (!out.filter((x) => x.path.includes('/answerCallbackQuery')).some((x) => String(x.body.text) === C2.TOAST_NOT_FOUND)) foreignRefused = false;
+        }
+        const boundAfter = (await svc.from('business_chats').select('id').eq('business_id', bizA.id)).data.length;
 
-        line(!!phBtn && phBtn.text.length <= 20 && pickText === C2.OPERATOR_PICK_TEXT
-          && phonesTitle.startsWith('Alder Roofing') && !phonesTitle.includes('alder-demo')
+        line(numbersOk && pickText.startsWith('Businesses\n\n1. ') && phKeys === 'chat_id+text+disable_web_page_preview+reply_markup'
+          && detailOk
           && !!codeKb && codeKb.flat().some((b) => b.callback_data === 'pc:' + codeBiz.id)
           && codeMsgs.length === 2
-          && stale.includes(C2.OPERATOR_UNKNOWN_SLUG) && foreignSends === 0,
-          'OP24', 'pickers: names, same action, forged/stale/foreign refused',
-          `k=${codeKb ? codeKb.flat().map((b) => b.callback_data.slice(0,3)).join(',') : 'none'} pt=${JSON.stringify(pickText)} pk=${phKeys} ti=${phonesTitle.startsWith('Alder Roofing')} f=${foreignSends}`);
+          && stale.includes(C2.OPERATOR_UNKNOWN_SLUG) && goneOk
+          && foreignSends === 0 && foreignRefused && boundAfter === boundBefore && boundBefore > 0,
+          'OP24', 'browser and /code picker: same action, forged/stale/foreign refused',
+          `k=${codeKb ? codeKb.flat().map((b) => b.callback_data.slice(0,3)).join(',') : 'none'} pt=${JSON.stringify(pickText.slice(0, 12))} pk=${phKeys} detail=${detailOk} gone=${goneOk} f=${foreignSends}/${foreignRefused}`);
       }
 
       // OP17-OP20 run against real rows on a throwaway business: the cancel
@@ -2272,7 +2328,8 @@ try {
         const answers = {};
         for (const data of ['x:' + ownerRow.id, 'X:' + ownerRow.id, 'v:' + ownerRow.id,
           'rl:' + lead, 'RL:' + lead, 'rc:' + lead, 'rm:1', 'Q:0:' + lead, 'E:0:' + lead,
-          'i:c', 'pc:' + bizA.id, 'pb:' + bizA.id]) {
+          'i:c', 'pc:' + bizA.id, 'pb:' + bizA.id,
+          'bl:0', 'bd:0:' + invBiz.id, 'bt:0:' + invBiz.id, 'bT:0:' + invBiz.id, 'bq:0:0:' + invBiz.id]) {
           await reset();
           await good(cb(invStaff, data));
           answers[data.split(':')[0]] = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
@@ -2283,37 +2340,95 @@ try {
         const refused = ['x', 'X', 'v', 'rl', 'RL', 'rc', 'rm', 'Q', 'E']
           .every((k) => (answers[k] || []).includes(C2.TOAST_OWNER_ONLY));
         const inviteRefused = (answers.i || []).includes(C2.BOT_OWNER_ONLY);
-        const pickerRefused = (answers.pc || []).includes(C2.TOAST_NOT_FOUND)
-          && (answers.pb || []).includes(C2.TOAST_NOT_FOUND);
+        // The operator's pickers and its business browser, Terminate included
+        // and aimed at this phone's OWN business: not found, like any unknown tap.
+        const pickerRefused = ['pc', 'pb', 'bl', 'bd', 'bt', 'bT', 'bq']
+          .every((k) => (answers[k] || []).length === 1 && answers[k][0] === C2.TOAST_NOT_FOUND);
         line(refused && inviteRefused && pickerRefused && rowsKept === rowsAtStart && leadKept === 1 && liveAfter === liveBefore,
           'OP43', 'staff forged callbacks: refused, owner row, lead and codes intact',
           `rows=${rowsKept} lead=${leadKept} live=${liveBefore === liveAfter}`);
       }
 
       // OP61: a chat that is disconnected gets its persistent keyboard taken
-      // away — one short notice carrying ReplyKeyboardRemove — through both
-      // removal paths: the operator's /phones P: and the owner's /recipients
-      // X:. The staff phone is re-bound afterwards (later tests still use it).
+      // away — one notice carrying ReplyKeyboardRemove — through both removal
+      // paths: the operator's Terminate (every phone of the business, notice
+      // first) and the owner's /recipients X:. The operator's retired
+      // per-phone Remove (P:) removes nothing. The phones are re-bound
+      // afterwards (later tests still use them).
       {
         const C2 = await import('../lib/content.js');
         const sends = async () => (await sent()).filter((x) => x.path.includes('/sendMessage'));
         const edits = async () => (await sent()).filter((x) => x.path.includes('/editMessageText'));
-        await svc.from('business_chats').delete().eq('business_id', invBiz.id);
-        await svc.from('business_chats').insert([
-          { business_id: invBiz.id, tg_chat_id: invOwner, created_at: new Date(Date.now() - 3600000).toISOString() },
-          { business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date(Date.now() - 1800000).toISOString() },
-        ]);
+        const bindBoth = async () => {
+          await svc.from('business_chats').delete().eq('business_id', invBiz.id);
+          await svc.from('business_chats').insert([
+            { business_id: invBiz.id, tg_chat_id: invOwner, created_at: new Date(Date.now() - 3600000).toISOString() },
+            { business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date(Date.now() - 1800000).toISOString() },
+          ]);
+        };
+        await bindBoth();
         const startingBindings = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
         const staffRow = (await svc.from('business_chats').select('id, tg_chat_id')
           .eq('business_id', invBiz.id).order('created_at').order('id')).data.find((r) => String(r.tg_chat_id) === String(invStaff));
 
-        // The operator's path.
+        // The retired button: the row stays, the phone hears nothing, the tap says so.
         await reset();
         await good(cb(OP, 'P:' + staffRow.id));
-        const opRemoved = (await svc.from('business_chats').select('id').eq('id', staffRow.id)).data.length;
-        const opNotices = (await sends()).filter((x) => String(x.body.chat_id) === String(invStaff));
-        // Re-bind as the newer phone (invOwner stays the main phone).
-        await svc.from('business_chats').insert({ business_id: invBiz.id, tg_chat_id: invStaff, created_at: new Date().toISOString() });
+        const pKept = (await svc.from('business_chats').select('id').eq('id', staffRow.id)).data.length;
+        const pNotices = (await sends()).filter((x) => String(x.body.chat_id) === String(invStaff)).length;
+        const pToast = (await answersNow()) === C2.OPERATOR_SCREEN_EXPIRED;
+
+        // The operator's path: ask, then confirm. A pending invite of this
+        // business must not survive it; the business row and its status must.
+        const pending = mkCode(12); createdCodes.push(pending);
+        await createBindCode(pending, invBiz.id, new Date(Date.now() + 3600000).toISOString());
+        const bizBefore = JSON.stringify((await svc.from('businesses').select('id, slug, name, status, owner_email').eq('id', invBiz.id).single()).data);
+        const leadsBefore = (await svc.from('leads').select('id').eq('business_id', invBiz.id)).data.length;
+        await reset();
+        await good(cb(OP, 'bt:0:' + invBiz.id));
+        const askText = ((await edits()).pop() || { body: {} }).body.text;
+        const askSends = (await sends()).length;
+        const askRows = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
+        await reset();
+        await good(cb(OP, 'bT:0:' + invBiz.id));
+        const termRows = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
+        const termSends = await sends();
+        const termEdit = (await edits()).pop() || { body: {} };
+        const termToast = await answersNow();
+        const liveAfter = (await svc.from('bind_codes').select('code').eq('business_id', invBiz.id)
+          .is('used_at', null).gt('expires_at', new Date().toISOString())).data.length;
+        const bizAfter = JSON.stringify((await svc.from('businesses').select('id, slug, name, status, owner_email').eq('id', invBiz.id).single()).data);
+        const leadsAfter = (await svc.from('leads').select('id').eq('business_id', invBiz.id)).data.length;
+        const endedOk = (req) => !!req && req.body.text === C2.botAccessEndedText({ name: 'ZZ Invite Fixture' })
+          && req.body.reply_markup && req.body.reply_markup.remove_keyboard === true && !('parse_mode' in req.body);
+        const termOk = askText === `Terminate Telegram access for ZZ Invite Fixture? 2 phones will stop receiving alerts and can no longer use this bot.\n\n${C2.OPERATOR_TERMINATE_STILL}`
+          && askSends === 0 && askRows === 2
+          && termRows === 0 && termSends.length === 2
+          && [invOwner, invStaff].every((chat) => termSends.filter((x) => String(x.body.chat_id) === String(chat)).length === 1)
+          && termSends.every(endedOk)
+          && termEdit.body.text === 'ZZ Invite Fixture terminated · 2 phones removed · 0 notices failed'
+          && JSON.stringify(termEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[{ text: 'Back', callback_data: 'bd:0:' + invBiz.id }]])
+          && termToast === C2.OPERATOR_TERMINATED
+          && liveAfter === 0 && bizAfter === bizBefore && leadsAfter === leadsBefore;
+        // The terminated chat is told what any unbound chat is told, and its
+        // old invite does not connect it again.
+        await reset();
+        await good(msg(invOwner, '/leads'));
+        const exOwner = await allText();
+        await svc.from('rate_limits').delete().in('key', ['bindtry:' + invOwner, 'bindtry:all']);
+        await reset();
+        await good(msg(invOwner, pending));
+        const oldCode = await allText();
+        const stillOut = (await svc.from('business_chats').select('id').eq('tg_chat_id', invOwner)).data.length;
+        // A second tap: nothing sent, nothing to remove.
+        await reset();
+        await good(cb(OP, 'bT:0:' + invBiz.id));
+        const againSends = (await sends()).length;
+        const againToast = await answersNow();
+        const afterOk = exOwner === C2.BOT_NOT_CONNECTED && oldCode === C2.BOT_CODE_BAD && stillOut === 0
+          && againSends === 0 && againToast === C2.OPERATOR_NOT_CONNECTED;
+        // Re-bind both phones (invOwner stays the main phone).
+        await bindBoth();
 
         // The owner's path: ask, then confirm.
         const again = (await svc.from('business_chats').select('id, tg_chat_id')
@@ -2330,19 +2445,25 @@ try {
 
         const noticeOk = (req) => !!req && req.body.text === C2.BOT_DISCONNECTED
           && req.body.reply_markup && req.body.reply_markup.remove_keyboard === true;
-        line(startingBindings === 2 && opRemoved === 0 && ownerRemoved === 0
-          && opNotices.length === 1 && ownerNotices.length === 1
-          && noticeOk(opNotices[0]) && noticeOk(ownerNotices[0]) && rebound === 2,
-          'OP61', 'unbind: the removed chat gets one notice and ReplyKeyboardRemove',
-          `start=${startingBindings} op=${opNotices.length}/${opNotices.every(noticeOk)} owner=${ownerNotices.length}/${ownerNotices.every(noticeOk)} rebound=${rebound}`);
+        line(startingBindings === 2 && pKept === 1 && pNotices === 0 && pToast
+          && termOk && afterOk && ownerRemoved === 0
+          && ownerNotices.length === 1 && noticeOk(ownerNotices[0]) && rebound === 2,
+          'OP61', 'unbind: one notice + ReplyKeyboardRemove (terminate, /recipients)',
+          `start=${startingBindings} P=${pKept}/${pNotices}/${pToast} term=${termOk} after=${afterOk} owner=${ownerNotices.length}/${ownerNotices.every(noticeOk)} rebound=${rebound}`);
       }
 
-      // OP4: /phones marks the owner (oldest) and lists the others.
+      // OP4: /phones (a word after it changes nothing) is the business list;
+      // the business screen marks the owner (oldest) and lists the others.
       await reset();
       await good(msg(OP, '/phones alder-demo'));
+      const phonesList = await allText();
+      await reset();
+      await good(cb(OP, 'bd:0:' + bizA.id));
       const phonesText = await allText();
-      line(/Phone 1 · main phone/.test(phonesText) && /Phone 3/.test(phonesText), 'OP4',
-        '/phones: owner marked, other phones listed', `lines=${phonesText.split('\n').length}`);
+      line(phonesList.startsWith('Businesses\n\n1. ') && !/Phone \d/.test(phonesList)
+        && /Phone 1 · main phone/.test(phonesText) && /Phone 3/.test(phonesText)
+        && /Telegram: connected · \d+ phones/.test(phonesText), 'OP4',
+        '/phones: the list; the business marks the owner, lists the others', `lines=${phonesText.split('\n').length}`);
 
       // OP6: a forged p: from a client changes nothing.
       const rows = (await svc.from('business_chats').select('id, tg_chat_id').eq('business_id', bizA.id).order('created_at')).data;
@@ -2353,22 +2474,38 @@ try {
       line((await answersNow()).includes('Not found') && stillThere === 1, 'OP6',
         'forged operator callback from a client: Not found, nothing removed', `rows=${stillThere}`);
 
-      // OP5: the operator asks, then removes.
-      await reset();
-      await good(cb(OP, 'p:' + thirdRow));
-      const confirmText = await allText();
-      await reset();
-      await good(cb(OP, 'P:' + thirdRow));
+      // OP5: the operator's old per-phone buttons (p: ask, P: remove, q:
+      // cancel) are retired. Each says the screen expired, shows the business
+      // list in the same message, and removes nothing. Single-phone removal
+      // is the owner's /recipients.
+      const retired = [];
+      for (const kind of ['p', 'P', 'q']) {
+        await reset();
+        await good(cb(OP, kind + ':' + thirdRow));
+        const shown = await allText();
+        const sentNew = (await sent()).filter((x) => x.path.includes('/sendMessage')).length;
+        if ((await answersNow()) !== C.OPERATOR_SCREEN_EXPIRED
+          || !shown.startsWith('Businesses\n\n1. ') || sentNew !== 0) retired.push(kind);
+      }
       const gone = (await svc.from('business_chats').select('id').eq('id', thirdRow)).data.length;
-      line(/It will stop receiving alerts\./.test(confirmText) && gone === 0, 'OP5',
-        'operator remove: confirm, then the row is gone', `confirm=${/stop receiving/.test(confirmText)} gone=${gone}`);
+      line(retired.length === 0 && gone === 1, 'OP5',
+        'old operator Remove buttons: expired, list shown, nothing removed', `bad=${retired.join(',') || 'none'} rows=${gone}`);
+      // The tests below were written for the state the old flow left behind:
+      // that phone no longer connected. Remove the row directly.
+      await svc.from('business_chats').delete().eq('id', thirdRow);
 
       // OP7: /businesses lists both slugs with a phone count.
-      await reset();
-      await good(msg(OP, '/businesses'));
-      const bizText = await allText();
-      line(bizText.includes('Alder Roofing · Demo ·') && bizText.includes('Second Demo Roofing · Demo ·'), 'OP7',
-        '/businesses: slug, status, phone count', `len=${bizText.length}`);
+      const { rows: bizRows, first: bizFirst } = await opBusinessLines();
+      const bizKb = (bizFirst && bizFirst.body.reply_markup && bizFirst.body.reply_markup.inline_keyboard) || [];
+      const rowShape = /^.+ · (Demo|Active|Paused|Churned) · (\d+ phones?|\?)$/;
+      line(bizRows.some((l) => /^Alder Roofing · Demo · \d+ phones?$/.test(l))
+        && bizRows.some((l) => /^Second Demo Roofing · Demo · \d+ phones?$/.test(l))
+        && bizRows.every((l) => rowShape.test(l))
+        // One message; five rows a page; a number button per row of the page.
+        && !!bizFirst && String(bizFirst.body.text).startsWith('Businesses\n\n1. ')
+        && bizKb.length >= 1 && bizKb[0].length === Math.min(5, bizRows.length)
+        && bizKb[0].every((b, i) => b.text === String(i + 1) && /^bd:0:[0-9a-f-]{36}$/.test(b.callback_data)), 'OP7',
+        '/businesses: name, status, phone count, five per page', `rows=${bizRows.length}`);
 
       // OP8: /id works unbound and says nothing else.
       await svc.from('business_chats').delete().eq('tg_chat_id', chatX);
@@ -2419,15 +2556,19 @@ try {
       line(t1 === C.BOT_OWNER_ONLY && t2 === C.BOT_OWNER_ONLY, 'OP10',
         'second phone: /invite and /recipients are owner-only', `invite=${t1.length} recipients=${t2.length}`);
 
-      // OP11: the operator removes the owner phone; the oldest remaining phone
+      // OP11: once the owner phone's row is gone, the oldest remaining phone
       // becomes owner. (The owner can no longer remove itself from /recipients.)
       const ownerRows = (await svc.from('business_chats').select('id').eq('business_id', opBiz.id).order('created_at').order('id')).data;
+      // The operator's old Remove (p:, P:) no longer does this: the taps leave
+      // the row where it is, so the owner row is deleted directly here.
       await good(cb(OP, 'p:' + ownerRows[0].id));
       await good(cb(OP, 'P:' + ownerRows[0].id));
+      const tapKept = (await svc.from('business_chats').select('id').eq('id', ownerRows[0].id)).data.length;
+      await svc.from('business_chats').delete().eq('id', ownerRows[0].id);
       await reset();
       await good(msg(opChatB, '/invite'));
       const nowOwner = (await allText()) !== C.BOT_OWNER_ONLY;
-      line(nowOwner, 'OP11', 'ownership moves to the oldest remaining phone', `owner=${nowOwner}`);
+      line(tapKept === 1 && nowOwner, 'OP11', 'ownership moves to the oldest remaining phone', `kept=${tapKept} owner=${nowOwner}`);
       await svc.from('businesses').delete().eq('id', opBiz.id);
 
       // OP12: /leads has number buttons (L:page:leadId); the old o: callback
