@@ -78,10 +78,10 @@ const WEBHOOK_CHATS = [chatA, chatB, chatX, bindA, bindB, bindX,
 const { data: bizA } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
 const { data: bizB } = await svc.from('businesses').select('id').eq('slug', 'second-demo').single();
 
-// A throwaway business for every /code mint. Real businesses must never carry
+// A throwaway business for every operator /invite <slug> mint. Real businesses must never carry
 // a suite-minted code: the owner's /invite cap counts live unused rows, and a
 // killed run would leave ten of them behind. status must be demo/active because
-// /code resolves through getActiveBusinessBySlug; it is deleted in the finally.
+// a suspended business is refused an invite; it is deleted in the finally.
 const CODE_SLUG = `zz-test-${RUN}`;
 let codeBiz = null;
 // A second throwaway for every bind test. No suite may mint a code on a real
@@ -1149,7 +1149,7 @@ try {
       // OP2: exactly TWO messages. The first names the slug; the second is the
       // only forwardable text and must not name the business.
       await reset();
-      await good(msg(OP, `/code ${CODE_SLUG}`));
+      await good(msg(OP, `/invite ${CODE_SLUG}`));
       const pair = (await sent()).filter((x) => x.path.includes('/sendMessage'));
       const opLine = (pair[0] && pair[0].body.text) || '';
       const forward = (pair[1] && pair[1].body.text) || '';
@@ -1169,7 +1169,7 @@ try {
         && ((pair[1].body.entities) || []).some((e) => e.type === 'code'
           && forward.slice(e.offset, e.offset + e.length) === theCode)
         && pair.every((x) => !('parse_mode' in x.body)),
-        'OP2', 'operator /code: two messages, slug only in the first',
+        'OP2', 'operator /invite <slug>: two messages, slug only in the first',
         `messages=${pair.length} code=${theCode.slice(0, 4)}… stored=${stored.length}`);
 
       // OP3: cap per slug, fail closed at 10/hour. OP2 already used one slot,
@@ -1183,14 +1183,14 @@ try {
         okCount = 0; capped = false;
         for (let i = 0; i < 11; i++) {
           await reset();
-          await good(msg(OP, `/code ${CODE_SLUG}`));
+          await good(msg(OP, `/invite ${CODE_SLUG}`));
           const t = await allText();
           if (t === C.OPERATOR_CAPPED) capped = true; else okCount++;
         }
         const rows = (await svc.from('rate_limits').select('window_start').eq('key', 'opcode:' + CODE_SLUG)).data;
         if ((rows || []).length <= 1) break;
       }
-      line(okCount === 10 && capped, 'OP3', 'operator /code capped at 10 per slug per hour',
+      line(okCount === 10 && capped, 'OP3', 'operator /invite <slug> capped at 10 per slug per hour',
         `ok=${okCount} capped=${capped} attempts=${attempts}`);
 
       // OP14: the second message fails. The code is still valid, so the
@@ -1198,7 +1198,7 @@ try {
       await reset();
       await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
       await control({ mode: 'fail_nth', nth: 2 });
-      await good(msg(OP, `/code ${CODE_SLUG}`));
+      await good(msg(OP, `/invite ${CODE_SLUG}`));
       const afterFail = (await sent()).filter((x) => x.path.includes('/sendMessage'));
       await control({ mode: 'ok' });
       const resendReq = afterFail[2] || {};
@@ -1216,26 +1216,26 @@ try {
       // is minted. The slug regex is the only gate that matters here.
       await reset();
       const codesBeforeBad = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
-      await good(msg(OP, '/code alder-demo;drop'));
+      await good(msg(OP, '/invite alder-demo;drop'));
       const badReply = await allText();
       const codesAfterBad = (await svc.from('bind_codes').select('code').eq('business_id', bizA.id)).data.length;
-      line(badReply === C.OPERATOR_USAGE_CODE && codesAfterBad === codesBeforeBad,
+      line(badReply === C.OPERATOR_USAGE_INVITE && codesAfterBad === codesBeforeBad,
         'OP15', 'injection-shaped slug: usage text, no code minted',
         `codes ${codesBeforeBad}->${codesAfterBad}`);
 
-      // OP16: two /code taps mint two different, valid codes (the cap is the
+      // OP16: two /invite <slug> messages mint two different, valid codes (the cap is the
       // only limit, and the bucket was cleared above).
       await reset();
       await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
-      await good(msg(OP, `/code ${CODE_SLUG}`));
-      await good(msg(OP, `/code ${CODE_SLUG}`));
+      await good(msg(OP, `/invite ${CODE_SLUG}`));
+      await good(msg(OP, `/invite ${CODE_SLUG}`));
       const two = (await sent()).filter((x) => x.path.includes('/sendMessage')).map((x) => x.body);
       const codes = two.map((t) => {
         const e = (t.entities || []).find((x) => x.type === 'text_link');
         return e ? (e.url.match(/\?start=([A-Z2-9]{12})/) || [])[1] : null;
       }).filter(Boolean);
       line(codes.length === 2 && codes[0] !== codes[1] && two.length === 4,
-        'OP16', 'two /code taps: two distinct codes, two messages each',
+        'OP16', 'two /invite <slug>: two distinct codes, two messages each',
         `codes=${codes.length} unique=${new Set(codes).size} messages=${two.length}`);
 
       // OP22: /id speaks differently to the operator chat, and the id is a
@@ -1261,7 +1261,7 @@ try {
           'OP22', '/id: operator says so, id is a code entity', `opEnt=${ent.type}`);
       }
 
-      // OP23: a new /code expires the business's older UNUSED codes, leaves a
+      // OP23: a new operator invite expires the business's older UNUSED codes, leaves a
       // used code and another business alone, and says how many it cancelled.
       {
         await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
@@ -1273,7 +1273,7 @@ try {
         const liveBefore = (await svc.from('bind_codes').select('code').eq('business_id', codeBiz.id)
           .is('used_at', null).gt('expires_at', new Date().toISOString())).data.length;
         await reset();
-        await good(msg(OP, `/code ${CODE_SLUG}`));
+        await good(msg(OP, `/invite ${CODE_SLUG}`));
         const reqs = (await sent()).filter((x) => x.path.includes('/sendMessage'));
         const m1 = (reqs[0] && reqs[0].body.text) || '';
         const states = (await svc.from('bind_codes').select('code, used_at, expires_at').in('code', [oldA, oldB, usedC, other])).data;
@@ -1284,7 +1284,7 @@ try {
         const otherKept = new Date(by.get(other).expires_at) > new Date();
         const phrase = `${liveBefore} older ${liveBefore === 1 ? 'invite was' : 'invites were'} cancelled`;
         line(expiredA && expiredB && usedKept && otherKept && m1.includes(phrase),
-          'OP23', '/code cancels older unused codes, keeps used and other business',
+          'OP23', '/invite <slug> cancels older unused codes, keeps used and other',
           `n=${liveBefore} has=${m1.includes('cancelled')} m1=${m1.slice(60, 130)}`);
       }
 
@@ -1376,40 +1376,43 @@ try {
           `staff=${staff === C2.BOT_OWNER_ONLY} kept=${stillThere} foreign=${foreignKept}`);
       }
 
-      // OP33: operator answers for the owner commands, no client text.
+      // OP33: the operator chat has four commands. /invite with no word is
+      // the invite list (one message, number buttons); the owner's commands
+      // and the retired /code and /phones get the one fallback line, which
+      // points to /help, and nothing else.
       {
         const C2 = await import('../lib/content.js');
         const lastText = async () => ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.text || '';
         const lastKb = async () => ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body?.reply_markup?.inline_keyboard || [];
+        const count = async () => (await sent()).filter((x) => x.path.includes('/sendMessage')).length;
         await reset(); await good(msg(OP, '/invite'));
         const inv = await lastText(); const invKb = await lastKb();
-        await reset(); await good(msg(OP, '/recipients'));
-        const rec = await lastText(); const recKb = await lastKb();
         await reset(); await good(msg(OP, '/help'));
         const help = await lastText();
-        await reset(); await good(msg(OP, '/remove_lead'));
-        const rm = await lastText();
-        await reset(); await good(msg(OP, '/leads'));
-        const leads1 = await lastText();
-        await reset(); await good(msg(OP, '/leads second-demo'));
-        const leads2 = await lastText();
+        await reset(); await good(msg(OP, '/operator'));
+        const alias = await lastText();
+        const fallbacks = [];
+        for (const text of ['/recipients', '/remove_lead', '/leads', '/leads second-demo', '/phones', '/phones alder-demo', '/code', `/code ${CODE_SLUG}`]) {
+          const codesBefore33 = (await svc.from('bind_codes').select('code', { count: 'exact', head: true })).count;
+          await reset(); await good(msg(OP, text));
+          const codesAfter33 = (await svc.from('bind_codes').select('code', { count: 'exact', head: true })).count;
+          if ((await count()) !== 1 || (await lastText()) !== C2.OPERATOR_WELCOME || (await lastKb()).length || codesAfter33 !== codesBefore33) fallbacks.push(text);
+        }
         await reset(); await good(msg(chatX, '/leads'));
         const client = await lastText();
         await reset(); await good(msg(chatA, '/leads second-demo'));
         const own = await lastText();
-        line(inv === C2.OPERATOR_PICK_TEXT && invKb.flat().some((b) => String(b.callback_data).startsWith('pc:'))
-          // /recipients is the business browser now: the list, number buttons
-          // that open a business, and no button of the retired pb: picker.
-          && rec.startsWith('Businesses\n\n1. ') && recKb.flat().some((b) => /^bd:0:[0-9a-f-]{36}$/.test(String(b.callback_data)))
-          && !recKb.flat().some((b) => String(b.callback_data).startsWith('pb:'))
-          && help === C2.OPERATOR_HELP && rm === C2.OPERATOR_REMOVE_LEAD
-          && leads1 === C2.OPERATOR_LEADS_HINT && leads2 === C2.OPERATOR_LEADS_HINT
+        line(inv.startsWith('Invite: pick a business\n\n1. ')
+          && invKb.length >= 1 && invKb[0].every((b, i) => b.text === String(i + 1) && /^bi:0:[0-9a-f-]{36}$/.test(String(b.callback_data)))
+          && !invKb.flat().some((b) => /^(pc|pb):/.test(String(b.callback_data)))
+          && help === C2.OPERATOR_HELP && alias === C2.OPERATOR_HELP
+          && fallbacks.length === 0 && /\/help/.test(C2.OPERATOR_WELCOME)
           && client === C2.BOT_NOT_CONNECTED && !/Beta|Second/.test(own),
-          'OP33', 'operator answers for /invite /recipients /help /remove_lead /leads',
-          `help=${help === C2.OPERATOR_HELP} rm=${JSON.stringify(rm)} client=${client === C2.BOT_NOT_CONNECTED} own=${!/Beta|Second/.test(own)}`);
+          'OP33', 'operator: /invite list, /help; retired commands get the fallback',
+          `help=${help === C2.OPERATOR_HELP} fallbacks=${fallbacks.join(',') || 'ok'} client=${client === C2.BOT_NOT_CONNECTED} own=${!/Beta|Second/.test(own)}`);
       }
 
-      // OP34: /businesses counts phones for a paused business, not 0.
+      // OP34: /businesses counts phones for a suspended (paused) business, not 0.
       {
         const C2 = await import('../lib/content.js');
         const paused = await svc.from('businesses').insert({
@@ -1419,7 +1422,7 @@ try {
         await svc.from('business_chats').insert({ business_id: paused.data.id, tg_chat_id: FIXTURE_CHATS.webhookX });
         const { rows: listed } = await opBusinessLines();
         await svc.from('businesses').delete().eq('id', paused.data.id);
-        line(listed.includes('ZZ Paused Fixture · Paused · 1 phone'), 'OP34',
+        line(listed.includes('ZZ Paused Fixture · Suspended · 1 phone'), 'OP34',
           '/businesses counts a paused business phone', listed.find((l) => l.includes('ZZ Paused')) || 'missing');
       }
 
@@ -1464,14 +1467,16 @@ try {
           'bindChat refuses the operator chat', `code=${err} rows=${rows}`);
       }
 
-      // OP24: /phones opens the business browser; a button of the old /phones
-      // picker (pb:) opens that business in it. The /code picker is as it
-      // was: names as buttons, the tap runs the same action, a forged or
-      // stale id is unknown; a non-operator gets nothing from any of them.
+      // OP24: /businesses opens the business browser; a button of the old
+      // /phones picker (pb:) says the screen expired and shows that business
+      // in it. /invite is the invite list; a number in it, and a button of
+      // the old /code picker (pc:), edit the same message into the invite; a
+      // forged or stale id is answered with the current list; a non-operator
+      // gets nothing from any of them.
       {
         const C2 = await import('../lib/content.js');
         await reset();
-        await good(msg(OP, '/phones'));
+        await good(msg(OP, '/businesses'));
         const ph = (await sent()).filter((x) => x.path.includes('/sendMessage')).pop();
         const phKb = (ph && ph.body.reply_markup && ph.body.reply_markup.inline_keyboard) || [];
         const pickText = String((ph && ph.body && ph.body.text) || '');
@@ -1482,6 +1487,7 @@ try {
         await reset();
         await good(cb(OP, 'pb:' + bizA.id));
         const phSends = (await sent()).filter((x) => x.path.includes('/sendMessage')).length;
+        const pbToast = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
         const phEdit = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop();
         const phonesTitle = (phEdit && phEdit.body.text) || '';
         const detailKb = (phEdit && phEdit.body.reply_markup && phEdit.body.reply_markup.inline_keyboard) || [];
@@ -1489,26 +1495,53 @@ try {
         await reset();
         await good(cb(OP, 'bd:0:' + bizA.id));
         const bdEdit = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop();
-        const detailOk = phSends === 0 && phonesTitle.split('\n')[0] === 'Alder Roofing'
-          && phonesTitle.split('\n')[1] === 'Demo · alder-demo' && /\nTelegram: connected · \d+ phones?\nPhone 1 · main phone/.test(phonesTitle)
-          && /\n\nRequests: \d+$/.test(phonesTitle)
+        // The business screen against the real view: the Telegram line says
+        // Connected and nothing else, the lead numbers are one line (two
+        // aggregates) plus the age of the newest, and "Requests" is gone.
+        const detailOk = phSends === 0 && pbToast.includes(C2.OPERATOR_SCREEN_EXPIRED) && phonesTitle.split('\n')[0] === 'Alder Roofing'
+          && phonesTitle.split('\n')[1] === 'Demo · alder-demo' && /\n\nTelegram: Connected\nPhone 1 · main phone/.test(phonesTitle)
+          && /\n\nLeads: \d+ total · \d+ in the last 30 days(\nLast lead: [^\n]+)?$/.test(phonesTitle)
+          && !/Requests|\d phones?/.test(phonesTitle)
           && JSON.stringify(detailKb) === JSON.stringify([
-            [{ text: 'Terminate', callback_data: 'bt:0:' + bizA.id, style: 'danger' }, { text: 'Leads', callback_data: 'bq:0:0:' + bizA.id }],
-            [{ text: 'Back', callback_data: 'bl:0' }],
+            [{ text: 'Suspend', callback_data: 'bs:0:' + bizA.id, style: 'danger' }, { text: 'Leads', callback_data: 'bq:0:0:' + bizA.id }],
+            [{ text: 'Invite', callback_data: 'bv:0:' + bizA.id, style: 'primary' }, { text: 'Back', callback_data: 'bl:0' }],
           ])
           && !!bdEdit && bdEdit.body.text === phonesTitle;
 
         await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
         await reset();
-        await good(msg(OP, '/code'));
+        // The fixture business may be on any page of the list, so its number
+        // is not looked for: the list is checked for its shape, and the tap
+        // is sent with the business's own id, as a button of any page would.
+        await good(msg(OP, '/invite'));
         const codeKb = ((await sent()).filter((x) => x.path.includes('/sendMessage')).pop() || {}).body.reply_markup.inline_keyboard;
-        await reset();
-        await good(cb(OP, 'pc:' + codeBiz.id));
-        const codeMsgs = (await sent()).filter((x) => x.path.includes('/sendMessage'));
+        const inviteTap = async (data) => {
+          await reset();
+          await good(cb(OP, data));
+          const out = await sent();
+          const edit = out.filter((x) => x.path.includes('/editMessageText')).pop();
+          const text = String((edit && edit.body.text) || '');
+          const code = (text.match(/\?start=([A-Z2-9]{12})\n/) || text.match(/\n\/start ([A-Z2-9]{12})\n/) || [])[1] || '';
+          const row = code ? (await svc.from('bind_codes').select('business_id, used_at, expires_at').eq('code', code).maybeSingle()).data : null;
+          if (code) createdCodes.push(code);
+          return {
+            sends: out.filter((x) => x.path.includes('/sendMessage')).length, text, row,
+            kb: (edit && edit.body.reply_markup && edit.body.reply_markup.inline_keyboard) || [],
+            ok: !!row && row.business_id === codeBiz.id && !row.used_at && new Date(row.expires_at) > new Date()
+              && /\n\nForward this (link|code) to the business owner/.test(text),
+          };
+        };
+        const fromList = await inviteTap('bi:0:' + codeBiz.id);
+        const fromPicker = await inviteTap('pc:' + codeBiz.id);
+        const inviteOk = fromList.ok && fromList.sends === 0
+          && JSON.stringify(fromList.kb) === JSON.stringify([[{ text: 'Back', callback_data: 'bn:0' }]])
+          && fromPicker.ok && fromPicker.sends === 0
+          && JSON.stringify(fromPicker.kb) === JSON.stringify([[{ text: 'Back', callback_data: 'bn:0' }]]);
 
         await reset();
         await good(cb(OP, 'pc:00000000-0000-0000-0000-000000000000'));
         const stale = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
+        const staleEdit = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop();
         // An unknown business in the browser: a toast and the current list.
         await reset();
         await good(cb(OP, 'bd:0:00000000-0000-0000-0000-000000000000'));
@@ -1521,7 +1554,8 @@ try {
         const boundBefore = (await svc.from('business_chats').select('id').eq('business_id', bizA.id)).data.length;
         let foreignSends = 0;
         let foreignRefused = true;
-        for (const data of ['pb:' + bizA.id, 'bl:0', 'bd:0:' + bizA.id, 'bt:0:' + bizA.id, 'bT:0:' + bizA.id, 'bq:0:0:' + bizA.id]) {
+        for (const data of ['pb:' + bizA.id, 'bl:0', 'bn:0', 'bd:0:' + bizA.id, 'bt:0:' + bizA.id, 'bT:0:' + bizA.id, 'bs:0:' + bizA.id, 'bS:0:' + bizA.id,
+          'br:0:' + bizA.id, 'bv:0:' + bizA.id, 'bi:0:' + bizA.id, 'bq:0:0:' + bizA.id]) {
           await reset();
           await good(cb(chatA, data));
           const out = await sent();
@@ -1532,12 +1566,13 @@ try {
 
         line(numbersOk && pickText.startsWith('Businesses\n\n1. ') && phKeys === 'chat_id+text+disable_web_page_preview+reply_markup'
           && detailOk
-          && !!codeKb && codeKb.flat().some((b) => b.callback_data === 'pc:' + codeBiz.id)
-          && codeMsgs.length === 2
-          && stale.includes(C2.OPERATOR_UNKNOWN_SLUG) && goneOk
+          && !!codeKb && codeKb.length >= 1 && codeKb[0].every((b, i) => b.text === String(i + 1) && /^bi:0:[0-9a-f-]{36}$/.test(String(b.callback_data)))
+          && inviteOk
+          && stale.includes(C2.OPERATOR_BUSINESS_GONE) && !!staleEdit && String(staleEdit.body.text).startsWith('Invite: pick a business')
+          && goneOk
           && foreignSends === 0 && foreignRefused && boundAfter === boundBefore && boundBefore > 0,
-          'OP24', 'browser and /code picker: same action, forged/stale/foreign refused',
-          `k=${codeKb ? codeKb.flat().map((b) => b.callback_data.slice(0,3)).join(',') : 'none'} pt=${JSON.stringify(pickText.slice(0, 12))} pk=${phKeys} detail=${detailOk} gone=${goneOk} f=${foreignSends}/${foreignRefused}`);
+          'OP24', 'browser and /invite: in place, forged/stale/foreign refused',
+          `k=${codeKb ? codeKb.flat().map((b) => b.callback_data.slice(0,3)).join(',') : 'none'} pt=${JSON.stringify(pickText.slice(0, 12))} pk=${phKeys} detail=${detailOk} invite=${inviteOk} gone=${goneOk} f=${foreignSends}/${foreignRefused}`);
       }
 
       // OP17-OP20 run against real rows on a throwaway business: the cancel
@@ -2165,7 +2200,7 @@ try {
           && JSON.stringify(kb.keyboard) === JSON.stringify(rows.map((row) => row.map((text) => ({ text }))));
         const OWNER_ROWS = [['Invite', 'Leads']];
         const STAFF_ROWS = [['Leads']];
-        const OPERATOR_ROWS = [['Code', 'Businesses']];
+        const OPERATOR_ROWS = [['Invite', 'Businesses']];
         await reset();
         await good(msg(invStaff, 'Invite'));
         const staffPress = (await sends()).map((x) => x.body.text).join('|');
@@ -2208,7 +2243,7 @@ try {
           && oneWith(unboundFree, C2.BOT_NOT_CONNECTED)
           && !!unboundMarkup && unboundMarkup.remove_keyboard === true && !('keyboard' in unboundMarkup)
           && ![ownerFree, staffFree, unboundFree].flat().some((x) => /Businesses|Code/.test(JSON.stringify(kbText(x))))
-          && !/Leads|Invite/.test(JSON.stringify(kbText(opFree[0]))),
+          && !/Leads|Code/.test(JSON.stringify(kbText(opFree[0]))),
           'OP62', 'free text reply carries the role keyboard; unbound gets none',
           `op=${layoutIs(kbText(opFree[0]), OPERATOR_ROWS)} owner=${layoutIs(kbText(ownerFree[0]), OWNER_ROWS)} staff=${layoutIs(kbText(staffFree[0]), STAFF_ROWS)} unbound=${!!unboundMarkup && unboundMarkup.remove_keyboard === true}`);
       }
@@ -2246,7 +2281,7 @@ try {
           `answers=${second.join('|')} logged=${failures.length}`);
       }
 
-      // OP40: /invite is TWO messages, like the operator's /code. The first is an
+      // OP40: /invite is TWO messages, like the operator's /invite <slug>. The first is an
       // instruction the owner must not forward; the second is the only text a
       // client may see.
       {
@@ -2329,7 +2364,8 @@ try {
         for (const data of ['x:' + ownerRow.id, 'X:' + ownerRow.id, 'v:' + ownerRow.id,
           'rl:' + lead, 'RL:' + lead, 'rc:' + lead, 'rm:1', 'Q:0:' + lead, 'E:0:' + lead,
           'i:c', 'pc:' + bizA.id, 'pb:' + bizA.id,
-          'bl:0', 'bd:0:' + invBiz.id, 'bt:0:' + invBiz.id, 'bT:0:' + invBiz.id, 'bq:0:0:' + invBiz.id]) {
+          'bl:0', 'bn:0', 'bd:0:' + invBiz.id, 'bt:0:' + invBiz.id, 'bT:0:' + invBiz.id, 'bs:0:' + invBiz.id, 'bS:0:' + invBiz.id,
+          'br:0:' + invBiz.id, 'bv:0:' + invBiz.id, 'bi:0:' + invBiz.id, 'bq:0:0:' + invBiz.id]) {
           await reset();
           await good(cb(invStaff, data));
           answers[data.split(':')[0]] = (await sent()).filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text));
@@ -2340,21 +2376,26 @@ try {
         const refused = ['x', 'X', 'v', 'rl', 'RL', 'rc', 'rm', 'Q', 'E']
           .every((k) => (answers[k] || []).includes(C2.TOAST_OWNER_ONLY));
         const inviteRefused = (answers.i || []).includes(C2.BOT_OWNER_ONLY);
-        // The operator's pickers and its business browser, Terminate included
-        // and aimed at this phone's OWN business: not found, like any unknown tap.
-        const pickerRefused = ['pc', 'pb', 'bl', 'bd', 'bt', 'bT', 'bq']
+        // The operator's lists and its business browser, Suspend, Reactivate
+        // and Invite included and aimed at this phone's OWN business: not
+        // found, like any unknown tap.
+        const pickerRefused = ['pc', 'pb', 'bl', 'bn', 'bd', 'bt', 'bT', 'bs', 'bS', 'br', 'bv', 'bi', 'bq']
           .every((k) => (answers[k] || []).length === 1 && answers[k][0] === C2.TOAST_NOT_FOUND);
         line(refused && inviteRefused && pickerRefused && rowsKept === rowsAtStart && leadKept === 1 && liveAfter === liveBefore,
           'OP43', 'staff forged callbacks: refused, owner row, lead and codes intact',
           `rows=${rowsKept} lead=${leadKept} live=${liveBefore === liveAfter}`);
+        const statusKept = (await svc.from('businesses').select('status').eq('id', invBiz.id).single()).data.status;
+        line(['demo', 'active'].includes(statusKept), 'OP43b', 'staff forged Suspend: the business is still served', `status=${statusKept}`);
       }
 
-      // OP61: a chat that is disconnected gets its persistent keyboard taken
-      // away — one notice carrying ReplyKeyboardRemove — through both removal
-      // paths: the operator's Terminate (every phone of the business, notice
-      // first) and the owner's /recipients X:. The operator's retired
-      // per-phone Remove (P:) removes nothing. The phones are re-bound
-      // afterwards (later tests still use them).
+      // OP61: a phone that stops being served has its persistent keyboard
+      // taken away by one notice carrying ReplyKeyboardRemove. Two paths: the
+      // operator's Suspend (every phone of the business, notice first; the
+      // bindings, invites and leads stay) and the owner's /recipients X:
+      // (that one phone is disconnected). The operator's retired per-phone
+      // Remove (P:) and the retired Terminate (bt:/bT:) change nothing.
+      // Reactivate gives every phone its own role keyboard back. The status
+      // is put back afterwards (later tests still use the business).
       {
         const C2 = await import('../lib/content.js');
         const sends = async () => (await sent()).filter((x) => x.path.includes('/sendMessage'));
@@ -2370,64 +2411,108 @@ try {
         const startingBindings = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
         const staffRow = (await svc.from('business_chats').select('id, tg_chat_id')
           .eq('business_id', invBiz.id).order('created_at').order('id')).data.find((r) => String(r.tg_chat_id) === String(invStaff));
+        const statusNow = async () => (await svc.from('businesses').select('status').eq('id', invBiz.id).single()).data.status;
+        const bindingsNow = async () => (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
+        const liveNow = async () => (await svc.from('bind_codes').select('code').eq('business_id', invBiz.id)
+          .is('used_at', null).gt('expires_at', new Date().toISOString())).data.length;
+        const statusAtStart = await statusNow();
 
-        // The retired button: the row stays, the phone hears nothing, the tap says so.
+        // The retired buttons: the row stays, the phone hears nothing, the tap says so.
         await reset();
         await good(cb(OP, 'P:' + staffRow.id));
         const pKept = (await svc.from('business_chats').select('id').eq('id', staffRow.id)).data.length;
         const pNotices = (await sends()).filter((x) => String(x.body.chat_id) === String(invStaff)).length;
         const pToast = (await answersNow()) === C2.OPERATOR_SCREEN_EXPIRED;
+        let oldTerminate = true;
+        for (const data of ['bt:0:' + invBiz.id, 'bT:0:' + invBiz.id]) {
+          await reset();
+          await good(cb(OP, data));
+          if ((await answersNow()) !== C2.OPERATOR_SCREEN_EXPIRED || (await sends()).length !== 0
+            || (await bindingsNow()) !== 2 || (await statusNow()) !== statusAtStart) oldTerminate = false;
+        }
 
         // The operator's path: ask, then confirm. A pending invite of this
-        // business must not survive it; the business row and its status must.
+        // business, its bindings and its leads all survive; only the status moves.
         const pending = mkCode(12); createdCodes.push(pending);
         await createBindCode(pending, invBiz.id, new Date(Date.now() + 3600000).toISOString());
-        const bizBefore = JSON.stringify((await svc.from('businesses').select('id, slug, name, status, owner_email').eq('id', invBiz.id).single()).data);
+        const liveBefore = await liveNow();
         const leadsBefore = (await svc.from('leads').select('id').eq('business_id', invBiz.id)).data.length;
         await reset();
-        await good(cb(OP, 'bt:0:' + invBiz.id));
-        const askText = ((await edits()).pop() || { body: {} }).body.text;
+        await good(cb(OP, 'bs:0:' + invBiz.id));
+        const askEdit = (await edits()).pop() || { body: {} };
         const askSends = (await sends()).length;
-        const askRows = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
+        const askStatus = await statusNow();
+        // The owner email of the suspension goes to the Resend fake; a failed
+        // email would be counted as a failed notice, so the fake must answer ok.
+        await fetch(process.env.FAKE_RESEND_URL + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'ok', clearIdempotency: true }) });
+        await resetResend();
         await reset();
-        await good(cb(OP, 'bT:0:' + invBiz.id));
-        const termRows = (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
+        await good(cb(OP, 'bS:0:' + invBiz.id));
+        const suspensionMails = await resendCalls();
         const termSends = await sends();
         const termEdit = (await edits()).pop() || { body: {} };
         const termToast = await answersNow();
-        const liveAfter = (await svc.from('bind_codes').select('code').eq('business_id', invBiz.id)
-          .is('used_at', null).gt('expires_at', new Date().toISOString())).data.length;
-        const bizAfter = JSON.stringify((await svc.from('businesses').select('id, slug, name, status, owner_email').eq('id', invBiz.id).single()).data);
         const leadsAfter = (await svc.from('leads').select('id').eq('business_id', invBiz.id)).data.length;
-        const endedOk = (req) => !!req && req.body.text === C2.botAccessEndedText({ name: 'ZZ Invite Fixture' })
+        const noticeSent = (req) => !!req && req.body.text === C2.BOT_SUSPENDED_NOTICE
           && req.body.reply_markup && req.body.reply_markup.remove_keyboard === true && !('parse_mode' in req.body);
-        const termOk = askText === `Terminate Telegram access for ZZ Invite Fixture? 2 phones will stop receiving alerts and can no longer use this bot.\n\n${C2.OPERATOR_TERMINATE_STILL}`
-          && askSends === 0 && askRows === 2
-          && termRows === 0 && termSends.length === 2
+        const termOk = askEdit.body.text === 'Suspend ZZ Invite Fixture? Telegram alerts, emails and the website form stop for this business. Data is kept and you can reactivate at any time.'
+          && JSON.stringify(askEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[
+            { text: 'Confirm suspend', callback_data: 'bS:0:' + invBiz.id, style: 'danger' },
+            { text: 'Cancel', callback_data: 'bd:0:' + invBiz.id },
+          ]])
+          && askSends === 0 && askStatus === statusAtStart
+          && (await statusNow()) === 'paused' && termSends.length === 2
           && [invOwner, invStaff].every((chat) => termSends.filter((x) => String(x.body.chat_id) === String(chat)).length === 1)
-          && termSends.every(endedOk)
-          && termEdit.body.text === 'ZZ Invite Fixture terminated · 2 phones removed · 0 notices failed'
+          && termSends.every(noticeSent)
+          && termEdit.body.text === 'ZZ Invite Fixture suspended · 0 notices failed'
+          && suspensionMails.length === 1 && suspensionMails[0].body.text === C2.BOT_SUSPENDED_NOTICE
           && JSON.stringify(termEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[{ text: 'Back', callback_data: 'bd:0:' + invBiz.id }]])
-          && termToast === C2.OPERATOR_TERMINATED
-          && liveAfter === 0 && bizAfter === bizBefore && leadsAfter === leadsBefore;
-        // The terminated chat is told what any unbound chat is told, and its
-        // old invite does not connect it again.
+          && termToast === C2.OPERATOR_SUSPENDED
+          && (await bindingsNow()) === 2 && (await liveNow()) === liveBefore && leadsAfter === leadsBefore;
+        // A phone of the suspended business: one neutral line for a command
+        // and for a button, and no data. (The binding lookup reads the status
+        // through the real foreign key here; the fake cannot prove that.)
         await reset();
         await good(msg(invOwner, '/leads'));
-        const exOwner = await allText();
-        await svc.from('rate_limits').delete().in('key', ['bindtry:' + invOwner, 'bindtry:all']);
+        const exOwnerReq = (await sends()).pop() || { body: {} };
         await reset();
-        await good(msg(invOwner, pending));
-        const oldCode = await allText();
-        const stillOut = (await svc.from('business_chats').select('id').eq('tg_chat_id', invOwner)).data.length;
-        // A second tap: nothing sent, nothing to remove.
+        await good(cb(invStaff, 'l:0'));
+        const exStaffToast = await answersNow();
+        const exStaffDrawn = (await sends()).length + (await edits()).length;
+        // A new phone cannot connect, and the invite is still unused.
+        await svc.from('rate_limits').delete().in('key', ['bindtry:' + chatX, 'bindtry:all']);
         await reset();
-        await good(cb(OP, 'bT:0:' + invBiz.id));
+        await good(msg(chatX, pending));
+        const newPhone = await allText();
+        const newPhoneBound = (await svc.from('business_chats').select('id').eq('tg_chat_id', chatX).eq('business_id', invBiz.id)).data.length;
+        const pendingRow = (await svc.from('bind_codes').select('used_at').eq('code', pending).single()).data;
+        // A second tap: nothing sent, nothing written.
+        await reset();
+        await good(cb(OP, 'bS:0:' + invBiz.id));
         const againSends = (await sends()).length;
         const againToast = await answersNow();
-        const afterOk = exOwner === C2.BOT_NOT_CONNECTED && oldCode === C2.BOT_CODE_BAD && stillOut === 0
-          && againSends === 0 && againToast === C2.OPERATOR_NOT_CONNECTED;
-        // Re-bind both phones (invOwner stays the main phone).
+        const afterOk = exOwnerReq.body.text === C2.BOT_SUSPENDED && exOwnerReq.body.reply_markup && exOwnerReq.body.reply_markup.remove_keyboard === true
+          && exStaffToast === C2.BOT_SUSPENDED && exStaffDrawn === 0
+          && newPhone === C2.BOT_SUSPENDED && newPhoneBound === 0 && !!pendingRow && pendingRow.used_at === null
+          && againSends === 0 && againToast === C2.OPERATOR_ALREADY_SUSPENDED && (await statusNow()) === 'paused';
+        // Reactivate: active again, each phone told with its own keyboard.
+        await reset();
+        await good(cb(OP, 'br:0:' + invBiz.id));
+        const backSends = await sends();
+        const backEdit = (await edits()).pop() || { body: {} };
+        const rowsOf = (req) => ((req && req.body.reply_markup && req.body.reply_markup.keyboard) || []).map((r) => r.map((b) => b.text));
+        const toOwner = backSends.filter((x) => String(x.body.chat_id) === String(invOwner));
+        const toStaff = backSends.filter((x) => String(x.body.chat_id) === String(invStaff));
+        await reset();
+        await good(msg(invOwner, '/help'));
+        const servedAgain = await allText();
+        const reactivateOk = (await statusNow()) === 'active' && backSends.length === 2
+          && toOwner.length === 1 && toOwner[0].body.text === C2.BOT_REACTIVATED && JSON.stringify(rowsOf(toOwner[0])) === JSON.stringify([['Invite', 'Leads']])
+          && toStaff.length === 1 && toStaff[0].body.text === C2.BOT_REACTIVATED && JSON.stringify(rowsOf(toStaff[0])) === JSON.stringify([['Leads']])
+          && backEdit.body.text === 'ZZ Invite Fixture reactivated' && servedAgain === C2.BOT_HELP;
+        // Put the fixture back as it was.
+        await svc.from('businesses').update({ status: statusAtStart }).eq('id', invBiz.id);
+        await svc.from('bind_codes').update({ expires_at: new Date().toISOString() }).eq('code', pending);
         await bindBoth();
 
         // The owner's path: ask, then confirm.
@@ -2445,25 +2530,25 @@ try {
 
         const noticeOk = (req) => !!req && req.body.text === C2.BOT_DISCONNECTED
           && req.body.reply_markup && req.body.reply_markup.remove_keyboard === true;
-        line(startingBindings === 2 && pKept === 1 && pNotices === 0 && pToast
-          && termOk && afterOk && ownerRemoved === 0
+        line(startingBindings === 2 && pKept === 1 && pNotices === 0 && pToast && oldTerminate
+          && termOk && afterOk && reactivateOk && ownerRemoved === 0
           && ownerNotices.length === 1 && noticeOk(ownerNotices[0]) && rebound === 2,
-          'OP61', 'unbind: one notice + ReplyKeyboardRemove (terminate, /recipients)',
-          `start=${startingBindings} P=${pKept}/${pNotices}/${pToast} term=${termOk} after=${afterOk} owner=${ownerNotices.length}/${ownerNotices.every(noticeOk)} rebound=${rebound}`);
+          'OP61', 'suspend / reactivate / owner remove: one notice + keyboard each',
+          `start=${startingBindings} P=${pKept}/${pNotices}/${pToast} old=${oldTerminate} suspend=${termOk} after=${afterOk} reactivate=${reactivateOk} owner=${ownerNotices.length}/${ownerNotices.every(noticeOk)} rebound=${rebound}`);
       }
 
-      // OP4: /phones (a word after it changes nothing) is the business list;
-      // the business screen marks the owner (oldest) and lists the others.
+      // OP4: /businesses is the business list; the business screen marks the
+      // owner (oldest) and lists the others.
       await reset();
-      await good(msg(OP, '/phones alder-demo'));
+      await good(msg(OP, '/businesses'));
       const phonesList = await allText();
       await reset();
       await good(cb(OP, 'bd:0:' + bizA.id));
       const phonesText = await allText();
       line(phonesList.startsWith('Businesses\n\n1. ') && !/Phone \d/.test(phonesList)
         && /Phone 1 · main phone/.test(phonesText) && /Phone 3/.test(phonesText)
-        && /Telegram: connected · \d+ phones/.test(phonesText), 'OP4',
-        '/phones: the list; the business marks the owner, lists the others', `lines=${phonesText.split('\n').length}`);
+        && /\nTelegram: Connected\n/.test(phonesText) && !/Requests/.test(phonesText), 'OP4',
+        '/businesses: the list; the business marks the owner, lists the others', `lines=${phonesText.split('\n').length}`);
 
       // OP6: a forged p: from a client changes nothing.
       const rows = (await svc.from('business_chats').select('id, tg_chat_id').eq('business_id', bizA.id).order('created_at')).data;

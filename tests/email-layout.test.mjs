@@ -51,6 +51,7 @@ const FIXTURES = {
   selfCheckEmail: [opsDay, '2026-11-07', business],
   digestEmail: [digestDay, '2026-11-07', business],
   operatorAlarmEmail: ['⚠️ Needs attention\nalder-demo: 1 alert could not be delivered', '2026-11-07'],
+  suspendedEmail: [business],
 };
 
 /* L1: every registered builder, and only registered ones, produces shell HTML. */

@@ -120,15 +120,22 @@ Two roles, and they never mix.
   one that may `/invite` or remove a phone. Every phone keeps alerts, the alert
   buttons and `/leads`.
 
-Operator commands (`/code`, `/phones`, `/businesses`, `/operator`) work only in
-the operator chat. A client who types one gets the same reply as for any unknown
-text, so the commands are not discoverable. `/id` works in every private chat and
-is not listed in the menu: it is how you learn `OPERATOR_CHAT_ID` without a
+Operator commands work only in the operator chat, and there are four:
+`/businesses`, `/invite`, `/help` and `/id` (`/operator` still answers as an
+alias of `/help`). The operator keyboard is one row, `Invite` then
+`Businesses`. Anything else typed there, including the retired `/code` and
+`/phones` and the owner's `/leads`, `/recipients` and `/remove_lead`, gets one
+line that points to `/help`. A button labelled `Code` or `Phones` on a
+keyboard the chat was sent earlier still opens the invite list and the
+business list. A client who types an operator command gets the same reply as
+for any unknown text, so the commands are not discoverable. `/id` works in
+every private chat: it is how you learn `OPERATOR_CHAT_ID` without a
 third-party bot.
 
 Register the menus once with `npm run tg:commands` (owner commands as the default
 menu, the operator commands as a chat-scoped menu when `OPERATOR_CHAT_ID` is
-set).
+set). Run it again after a deploy that changes either list; the operator menu
+is `/businesses`, `/invite`, `/help`, `/id`.
 
 ## 3. Add or remove a phone
 
@@ -152,37 +159,95 @@ Caps (env-overridable, `RECIPIENTS_MAX` / `INVITES_MAX`):
 - 5 bound phones per business, 3 unused live invites per business;
 - `/invite` itself is limited to 5 per chat per hour and fails closed (no reply).
 
-**Add (operator).** `/code <slug>` mints the same single-use code and returns a
-message you can forward as-is. Use it when a client has no phone connected yet,
-which is the one case `/invite` cannot cover.
+**Add (operator).** `/invite` in the operator chat opens a list of the served
+businesses (five a page, a number button per row, Newer / Older only where
+they lead somewhere). A number edits the same message into the invite: the
+business name, the single-use link, one line telling you to forward it to the
+business owner, and **Back** to the list. The same invite is under **Invite**
+on a business's screen. It works whether or not the business has a phone
+connected, which is the case the owner's own `/invite` cannot cover. The code
+is the same single-use, 24-hour code; a new one cancels that business's older
+unused ones; the limit is 10 per business per hour. `/invite <slug>` is the
+shortcut: two messages, the second one forwardable as it is. A suspended
+business gets no invite, only one line saying so.
 
 **Lost or stolen phone.** The owner removes it: `/recipients`, Remove on that
 row, confirm. The code that phone held is already used; mint a new one with
-`/invite` (or `/code <slug>`) for the replacement. If the phone may still have
-the chat open, remove it first — the binding is the authorisation. The operator
-no longer removes a single phone; if the lost phone IS the owner phone, use
-Terminate below and reconnect with `/code <slug>`.
+`/invite` (or the operator's `/invite <slug>`) for the replacement. If the
+phone may still have the chat open, remove it first — the binding is the
+authorisation. The operator does not remove a single phone. If the lost phone
+IS the owner phone, Suspend the business (below) to stop everything at once;
+taking that one binding out is then a database operation
+(`business_chats`), after which the oldest remaining phone is the owner.
 
-**The business browser (operator).** `/businesses` (and `/phones`, which opens
-the same thing) is one message that is edited in place: five businesses a page
-as `Name · Status · N phones`, a number button per row, and Newer / Older only
-where they lead somewhere. A number opens the business: status, slug, its
-phones (`Phone 1 · main phone`, …) and its request count, with **Terminate**,
-**Leads** and **Back**. **Leads** shows that business's requests read-only
-(the owner's list and card, no status or remove button).
+**The business browser (operator).** `/businesses` is one message that is
+edited in place: five businesses a page as `Name · Status · N phones`, a
+number button per row, and Newer / Older only where they lead somewhere. A
+number opens the business:
 
-**Terminate (operator).** Ends a business's Telegram access after one
-confirmation. Every connected phone first gets one plain notice (with its
-keyboard removed), then every binding of that business is deleted in one
-statement and its unused invites are expired, so an old code cannot connect a
-phone again. The business row, its status and its leads are not touched. With
-status `demo` or `active` the website keeps working: a new request is still
-stored and still emailed to the owner email, and you get one "no phone
-connected" notice per request; the daily digest and self-check go to the owner
-email instead of Telegram, and the self-check alarm lists an `active` business
-with no phone every day. The terminated chat gets the same "not connected"
-reply as any unbound chat. Reconnect with `/code <slug>`. There is no grace
-period: Terminate is immediate.
+```
+Alder Roofing
+Demo · alder-demo
+
+Telegram: Connected
+Phone 1 · main phone
+Phone 2 (Van)
+
+Leads: 7 total · 3 in the last 30 days
+Last lead: 2d ago
+```
+
+The status is Demo, Active or Suspended (`paused` in the database; `churned`
+shows as Churned and is treated as suspended). `Telegram: Not connected` has
+no phone lines under it. The lead numbers come from two queries (a count
+with the newest `created_at`, and a count since 30 days ago): the only lead
+column read for this screen is that one timestamp, and `Last lead` is left
+out when there are none. Under
+it: **Suspend** and **Leads**, then **Invite** and **Back**. For a suspended
+business: **Reactivate** and **Leads**, then **Back**.
+
+**What the operator can see of a lead.** **Leads** is read-only and minimal:
+every row and every card shows only the service, the status and the age of the
+lead. The customer's name, phone, email, address, ZIP, notes and any other
+free text are never shown in the operator chat and are not read from the
+database for it. The allowed fields are one constant, `OPERATOR_LEAD_FIELDS`
+in `lib/content.js`; showing the name later is one word added there.
+
+**Suspend (operator).** Stops the whole service for one business, after one
+confirmation. It replaces Terminate. In this order: every connected phone gets
+one plain notice ("Your service has been suspended. Contact support if this is
+a mistake.") with its keyboard removed, and the owner email address gets one
+plain email with the same sentence; then the business's status is set to
+`paused` in one statement. A notice or an email that fails is counted
+("N notices failed") and never blocks the suspension. Nothing is deleted:
+bindings, invites, leads and events stay as they are. While a business is
+suspended:
+
+- the website form's request is refused with the same plain 404 an unknown
+  site gets, before anything is stored; the visitor sees the form's generic
+  failure panel (the one a server error shows) and the page does not retry;
+- so there is no Telegram alert, no owner email and no auto-reply;
+- every command, keyboard press and button in its bound chats answers "This
+  service is suspended. Contact support." and shows no data (`/id` still
+  answers); free text gets that line at most three times an hour;
+- no new phone can connect: the invite is handed back unused and works again
+  after reactivation;
+- review links of that site answer 404; the daily digest and the daily
+  self-check skip the business.
+
+A second tap on Suspend changes nothing and tells nobody. A request that was
+already past the tenant check when the status changed is still delivered.
+
+**Reactivate (operator).** One tap on a suspended business sets the status to
+`active` — a business that was `demo` before it was suspended comes back as
+`active`, not `demo` — and tells every connected phone "Your service is active
+again." with its own keyboard. Everything works as before without
+re-onboarding.
+
+Buttons of messages sent before Suspend existed (Terminate, Confirm terminate,
+the old `/phones` and Remove Phone screens) answer "That screen expired. Here
+is the current screen." and change nothing. A button of the old `/code` picker
+still makes an invite for that business.
 
 **Remove.** `/recipients` lists every phone as "Recipient 1, 2, …" (or the stored
 `business_chats.label` when set) with one **Remove** button each. Removing asks once;
@@ -375,8 +440,8 @@ never changes that stored-lead success into a failure.
 
 `hit_rate_limit()` counts inside a fixed bucket (`floor(epoch / window)`), not a
 sliding window. A burst that straddles a boundary can therefore get up to twice
-the limit in that instant — 10 `/code` mints before the hour turns, 10 after.
-That is accepted for the operator-only command `/code` because the
+the limit in that instant — 10 operator invites before the hour turns, 10 after.
+That is accepted for the operator-only `/invite` because the
 operator is trusted and the cap is there to stop a runaway loop, not an attacker.
 The bind and invite paths use the same primitive; there the cap is one of several
 guards, and the code itself is single-use.
@@ -478,8 +543,10 @@ set, so it cannot be pointed at a fake by accident.
 2. **Remove `MAIL_REDIRECT_TO`** from Production, then confirm
    `/api/health` → `mail_redirect_active: false`.
 3. **Run `npm run tg:commands`** after the first deploy that adds a command. The menu
-   is `/leads`, `/invite`, `/recipients`, `/remove_lead`, `/help`; the script also sets the bot
-   description and short description. `npm run tg:commands:info` lists what is live.
+   is `/leads`, `/invite`, `/recipients`, `/remove_lead`, `/help`, and the operator chat's own menu
+   is `/businesses`, `/invite`, `/help`, `/id`; the script also sets the bot
+   description and short description. Run it after any deploy that changes either menu (the
+   operator menu lost `/code` and `/phones`). `npm run tg:commands:info` lists what is live.
 3b. **Re-register the webhook** if this deploy adds an update type the bot has never
    received: `node scripts/tg-webhook.mjs set https://<host>/api/tg`, then
    `node scripts/tg-webhook.mjs info`. The `set` call drops updates Telegram queued

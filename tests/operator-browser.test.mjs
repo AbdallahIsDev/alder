@@ -1,57 +1,79 @@
 #!/usr/bin/env node
-// tests/operator-browser.test.mjs — Gate OB (the operator's /businesses browser).
+// tests/operator-browser.test.mjs — Gate OB (the operator chat: /businesses,
+// /invite, the minimised leads view, Suspend and Reactivate).
 // HARNESS: in-process handler call, no HTTP server, no database. PostgREST is
 // faked at the fetch layer with a small in-memory store (the same pattern as
-// tests/lead-browser.test.mjs); Telegram is the loopback fake.
+// tests/lead-browser.test.mjs); Telegram and Resend are the loopback fakes.
 //
 // The DB-backed half is the OP series in tests/webhook.test.mjs. This suite
-// runs everywhere, so the invariants of the browser are pinned here.
+// runs everywhere, so the invariants of the operator chat are pinned here.
 //
 // What it proves:
 //   OB1  /businesses: ONE message, five per page as "N. Name · Status · N
 //        phones" in name-then-id order, one number row and Older alone; the
-//        phone counts of the page come from ONE query (no query per business);
-//        a paused business shows its real count; more than eight businesses
-//        are listed, not refused; /phones (with or without a word after it),
-//        the operator's /recipients and both keyboard labels open the same
-//        screen
-//   OB2  paging edits the same message: middle page Newer and Older side by
-//        side, last page Newer alone, a single page no navigation row, no
-//        disabled button; a page that no longer exists becomes the first one;
-//        a failed count says "?" and never "0 phones"
-//   OB3  a number tap edits the same message into the business: name, status,
-//        Telegram status with the phone lines, request count; Terminate
-//        (danger) left, Leads right, Back to the exact list page
-//   OB4  Leads is read-only: the owner's list and card text, numbers, the
-//        navigation rule, Back; no status, remove or copy button; every lead
-//        read is scoped by the validated business id and ordered created_at
-//        desc, id desc; nothing is written; a lead of another business is
-//        not found
-//   OB5  Terminate asks first; Cancel returns to the business; nothing is
-//        sent or changed by either
+//        phone counts of the page come from ONE query; the keyboard label and
+//        the old "Phones" label open the same screen
+//   OB1b the retired operator commands (/phones, /recipients, /leads, /code,
+//        /remove_lead, with or without a word after them) get ONLY the
+//        fallback line, which points to /help: nothing is read, nothing is
+//        written; /help and /operator list exactly the four commands; /id is
+//        unchanged
+//   OB2  paging edits the same message; only the ends that lead somewhere; a
+//        page that is gone becomes the first; a failed count says "?"
+//   OB3  the business screen, exact text, for connected / not connected /
+//        suspended: no line twice, no "Requests", the phone count nowhere on
+//        the Telegram line; the lead numbers are two aggregates (no lead row
+//        content is read); the button rows and styles of each state
+//   OB4  the operator's leads: every row and card shows ONLY service, status
+//        and age; the name, phone, email, ZIP and notes of a lead never reach
+//        the operator chat, and are not even asked of the database; the
+//        allowed fields are one constant; scoped, ordered, read-only
+//   OB5  Suspend asks first (exact text, Confirm suspend danger left, Cancel
+//        right); Cancel returns to the business; nothing sent or changed
 //   OB6  Confirm: every bound phone gets ONE notice with ReplyKeyboardRemove
-//        BEFORE the bindings are deleted; the delete is one statement scoped
-//        by the business; its unused invites are expired; the business row,
-//        its status, its leads and every other business are untouched; the
-//        operator's message becomes the result with Back
-//   OB7  a second tap, and a business with no phone, are harmless: "already
-//        not connected", nothing sent, nothing written
-//   OB8  a notice that fails is counted and blocks nothing
-//   OB9  the terminated chat gets today's "not connected" reply for every
-//        command and "not found" for every tap; an old code cannot connect it
-//        again; a new /code connects it as before
-//   OB10 an unknown business in any callback answers and shows the list; a
-//        malformed callback is not a callback at all; nothing is written
-//   OB11 a chat that is not the operator (owner, staff, unbound, or the
+//        and the owner address ONE email, all BEFORE the status is written;
+//        the write is one UPDATE scoped by the id and the served statuses;
+//        bindings, invites, leads and every other business are untouched
+//   OB7  a second tap is harmless: "already suspended", nothing sent or written
+//   OB8  a notice that fails is counted and blocks nothing; a phone list that
+//        cannot be read sends and changes nothing; a status that cannot be
+//        written is not reported as done
+//   OB9  a suspended business: every command and keyboard press of its phones
+//        answers the one neutral line with no data and nothing read beyond
+//        the binding; every button answers the same line as a toast; free
+//        text is rate limited; /id still answers; a new phone cannot connect
+//        and its invite stays unused; the website form's request is refused
+//        with a plain 404 before anything is stored or sent; another business
+//        is unaffected
+//   OB10 Reactivate: one scoped UPDATE to active (a demo business comes back
+//        as active); every bound phone is told, with its own role keyboard;
+//        a second tap is harmless; the phones work again
+//   OB11 an unknown business in any callback answers and shows the current
+//        list; a malformed callback is not a callback at all; the retired
+//        Terminate (bt/bT), picker (pb) and Remove Phone (p/P/q) buttons say
+//        the screen expired, show the current screen and change NOTHING
+//   OB12 a chat that is not the operator (owner, staff, unbound, or the
 //        operator id after OPERATOR_CHAT_ID changed) never reaches these
 //        callbacks: one "not found", no read beyond the binding, no edit
-//   OB12 buttons of the retired screens: pb: opens that business in the
-//        browser, p:/P:/q: say "expired" and show the list and remove
-//        NOTHING; pc: and the /code picker are unchanged
-//   OB13 one "[tg-timing]" line per update with fixed handler and step names,
+//   OB13 /invite: the list (served businesses only, 5 per page, numbers,
+//        Newer/Older) as one message; a number edits it into the invite:
+//        name, single-use link, one forward line, Back to the list page; the
+//        same from the business screen (Back to the business); connected or
+//        not; the older unused invite is cancelled; a suspended business gets
+//        one line and no code; 10 per business per hour; /invite <slug> is
+//        the old two-message shortcut; the old "Code" label and the old pc:
+//        button still make an invite
+//   OB14 one "[tg-timing]" line per update with fixed handler and step names,
 //        no business, lead or chat value; and the call budget of each flow
-//   OB14 no request carried parse_mode; no button carries an emoji; every
-//        callback is at most 64 bytes and matches one anchored pattern
+//   OB15 no request carried parse_mode; no button carries an emoji; every
+//        callback is at most 64 bytes and matches one anchored pattern;
+//        danger only on Suspend / Confirm suspend, primary only on Invite /
+//        Reactivate
+//   OB16 the owner's rules did not move: a phone that is not the main phone
+//        cannot use /invite, cannot cancel an invite, cannot open /recipients
+//        and cannot remove a phone
+//   OB17 a new lead's alert goes to EVERY bound phone of its business, once
+//        each, and to nobody else; a retry targets only the phone that failed
 
 import { loadEnv } from './env.mjs';
 import { fakeRes } from './helpers.mjs';
@@ -75,15 +97,25 @@ const CHAT_X = FIXTURE_CHATS.browserX;
 const OP = FIXTURE_CHATS.browserOperator;
 
 const saved = {};
-for (const k of ['TELEGRAM_WEBHOOK_SECRET', 'TELEGRAM_API_BASE', 'VERCEL_ENV', 'OPERATOR_CHAT_ID', 'TELEGRAM_BOT_USERNAME', 'TELEGRAM_CHAT_ID']) saved[k] = process.env[k];
+for (const k of ['TELEGRAM_WEBHOOK_SECRET', 'TELEGRAM_API_BASE', 'VERCEL_ENV', 'OPERATOR_CHAT_ID', 'TELEGRAM_BOT_USERNAME', 'TELEGRAM_CHAT_ID',
+  'RESEND_API_BASE', 'RESEND_API_KEY', 'MAIL_FROM', 'MAIL_REDIRECT_TO', 'IP_HASH_SALT']) saved[k] = process.env[k];
 process.env.TELEGRAM_WEBHOOK_SECRET = SECRET;
 process.env.TELEGRAM_API_BASE = process.env.FAKE_TG_URL;
 process.env.VERCEL_ENV = 'development';
 process.env.OPERATOR_CHAT_ID = String(OP);
 process.env.TELEGRAM_BOT_USERNAME = 'alder_test_bot';
 delete process.env.TELEGRAM_CHAT_ID;
+// The suspension email goes to the loopback Resend fake, from a sender that
+// is not the unverified default, to the address it was written for.
+process.env.RESEND_API_BASE = process.env.FAKE_RESEND_URL;
+process.env.RESEND_API_KEY = process.env.RESEND_API_KEY || 'operator-browser-test-key';
+process.env.MAIL_FROM = 'alerts@fixture.invalid';
+delete process.env.MAIL_REDIRECT_TO;
+// The lead intake check (OB9) hashes the caller's address; it never stores it.
+process.env.IP_HASH_SALT = process.env.IP_HASH_SALT || 'operator-browser-test-salt-0123456789';
 
 const TG = process.env.FAKE_TG_URL;
+const MAIL = process.env.FAKE_RESEND_URL;
 const realFetch = globalThis.fetch;
 const tgCtl = (body) => realFetch(TG + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const allTg = []; // every Telegram request of the suite, for OB14
@@ -92,6 +124,9 @@ const tgReset = async () => {
   try { allTg.push(...(await tgReqs())); } catch {}
   await realFetch(TG + '/__reset', { method: 'POST' });
 };
+const mailReqs = async () => (await (await realFetch(MAIL + '/__requests')).json()).requests.filter((x) => x.path === '/emails');
+const mailReset = () => realFetch(MAIL + '/__reset', { method: 'POST' });
+const mailCtl = (body) => realFetch(MAIL + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 /* ---------- a very small PostgREST ---------- */
 
@@ -99,7 +134,9 @@ const uuid = (n) => `${String(n).padStart(8, '0')}-0000-0000-0000-${String(n).pa
 const biz = (n) => `b${String(n).padStart(7, '0')}-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const BIZ_A = biz(1);   // Alder Roofing, two phones
 const BIZ_B = biz(2);   // Beta Roofing, one phone
-const BIZ_P = biz(3);   // paused, one phone
+const BIZ_P = biz(3);   // paused (suspended), one phone
+const BIZ_G = biz(7);   // Gable Works (gable-one), demo, no phone
+const BIZ_C = biz(10);  // Juniper Roofing, churned
 const BIZ_GONE = 'ffffffff-0000-4000-8000-00000000dead';
 
 let store;
@@ -111,6 +148,7 @@ let sbHook = null;
 
 const business = (id, slug, name, status) => ({
   id, slug, name, status, timezone: 'America/Chicago', owner_email: `${slug}@fixture.invalid`, google_review_url: 'https://g.page/r/x',
+  site_host: `${slug}.test`,
 });
 
 /** Twelve businesses, so the list has three pages (5, 5, 2). Two share a name:
@@ -160,6 +198,7 @@ const match = (row, params) => {
     if (raw === 'is.null') { if (v !== null && v !== undefined) return false; continue; }
     if (raw === 'not.is.null') { if (v === null || v === undefined) return false; continue; }
     if (raw.startsWith('gt.')) { if (!(new Date(v) > new Date(raw.slice(3)))) return false; continue; }
+    if (raw.startsWith('gte.')) { if (!(new Date(v) >= new Date(raw.slice(4)))) return false; continue; }
     if (raw.startsWith('lt.')) { if (!(new Date(v) < new Date(raw.slice(3)))) return false; continue; }
     if (raw.startsWith('in.(')) {
       const list = raw.slice(4, -1).split(',').map((x) => x.replace(/^"|"$/g, ''));
@@ -194,16 +233,19 @@ const install = () => {
       let chat = null;
       try { chat = JSON.parse(init.body || '{}').chat_id; } catch { chat = null; }
       const method = url.split('/').pop();
-      trace.push({ kind: 'tg', method, chat: chat == null ? null : String(chat), phase: 'start' });
+      const kind = url.startsWith(MAIL) ? 'mail' : 'tg';
+      trace.push({ kind, method, chat: chat == null ? null : String(chat), phase: 'start' });
       try { return await realFetch(input, init); } finally {
-        trace.push({ kind: 'tg', method, chat: chat == null ? null : String(chat), phase: 'end' });
+        trace.push({ kind, method, chat: chat == null ? null : String(chat), phase: 'end' });
       }
     }
     const u = new URL(url);
     const table = u.pathname.replace('/rest/v1/', '');
     const method = String(init.method || 'GET').toUpperCase();
     const params = [...u.searchParams.entries()];
-    sbRequests.push({ table, method, params });
+    let sent = null;
+    try { sent = init.body ? JSON.parse(init.body) : null; } catch { sent = null; }
+    sbRequests.push({ table, method, params, body: sent });
     trace.push({ kind: 'sb', table, method });
     if (sbHook) {
       const forced = await sbHook({ table, method, params });
@@ -241,7 +283,13 @@ const install = () => {
       let rows = store.chats.filter((r) => match(r, params));
       rows = rows.slice().sort(byOrder(u.searchParams.get('order')));
       if (countRequested(init)) return countHeader(rows.length);
-      return json(rows.map((r) => ({ ...r })));
+      // The binding lookup embeds the business status through the foreign key.
+      const embed = String(u.searchParams.get('select') || '').includes('businesses(');
+      const out = rows.map((r) => {
+        const b = store.businesses.find((x) => x.id === r.business_id);
+        return embed ? { ...r, businesses: b ? { status: b.status } : null } : { ...r };
+      });
+      return json(out);
     }
     if (table === 'bind_codes') {
       if (method === 'POST') {
@@ -261,6 +309,11 @@ const install = () => {
       return json(rows);
     }
     if (table === 'businesses') {
+      if (method === 'PATCH') {
+        const hit = store.businesses.filter((r) => match(r, params));
+        for (const r of hit) Object.assign(r, sent || {});
+        return json(hit.map((r) => ({ id: r.id })));
+      }
       if (method !== 'GET' && method !== 'HEAD') return json([]);
       let rows = store.businesses.filter((r) => match(r, params));
       rows = rows.slice().sort(byOrder(u.searchParams.get('order')));
@@ -270,10 +323,14 @@ const install = () => {
     }
     if (table === 'v_client_leads') {
       let rows = store.leads.filter((r) => match(r, params));
-      if (countRequested(init)) return countHeader(rows.length);
+      if (method === 'HEAD') return countHeader(rows.length);
       rows = rows.slice().sort(byOrder(u.searchParams.get('order')));
       if (u.searchParams.get('id')) return json(rows[0] ? { ...rows[0] } : null);
-      return json(paged(rows).map((r) => ({ ...r })));
+      // The fake answers with WHOLE rows whatever was selected, on purpose:
+      // what the operator sees must not depend on the database being asked
+      // for less. (What it IS asked for is checked on the request itself.)
+      const total = rows.length;
+      return json(paged(rows).map((r) => ({ ...r })), countRequested(init) ? { 'content-range': `0-0/${total}` } : {});
     }
     if (table === 'lead_events') {
       if (method === 'POST') { store.events.push(JSON.parse(init.body || '{}')); return json([]); }
@@ -316,62 +373,101 @@ const run = async (update) => {
     if (text.startsWith(TIMING)) lines.push(text); else realLog(...args);
   };
   await tgReset();
+  await mailReset();
   sbRequests = [];
   trace = [];
   try { await call(update); } finally { console.log = realLog; }
   const tg = await tgReqs();
+  const mail = await mailReqs();
   let obj = null;
   try { obj = lines.length === 1 ? JSON.parse(lines[0].slice(TIMING.length)) : null; } catch { obj = null; }
   return {
-    tg, sb: sbRequests.slice(), trace: trace.slice(), lines, obj,
+    tg, mail, sb: sbRequests.slice(), trace: trace.slice(), lines, obj,
     sends: of(tg, 'sendMessage'), edits: of(tg, 'editMessageText'),
     // An empty toast is sent without a text at all.
     answers: of(tg, 'answerCallbackQuery').map((x) => (x.body.text === undefined ? '' : String(x.body.text))),
   };
 };
 
+/* ---------- fixtures ---------- */
+
+const DAY = 86400000;
+/** `d` days and one hour ago: "Nd ago" whatever the minute the suite runs. */
+const daysAgo = (d) => new Date(Date.now() - d * DAY - 3600000).toISOString();
+
+// Everything a customer typed. None of it may reach the operator chat.
+const PII = {
+  name: 'Zed Customer', phone: '5155550100', email: 'zed.customer@fixture.invalid',
+  zip: '50265', notes: 'gate code 4471', address: '12 Elm Street',
+};
 let seq = 1;
-function seedLead(businessId, { name = 'A Lead', status = 'open', created_at = null, phone = '5155550100', email = 'lead@fixture.invalid' } = {}) {
+function seedLead(businessId, { name = PII.name, status = 'open', created_at = null, phone = PII.phone, email = PII.email, service = 'repair' } = {}) {
   const row = {
-    id: uuid(1000 + seq), business_id: businessId, name, phone, email, zip: '50265',
-    service: 'repair', home: 'house', timing: 'asap', roof_age: 'Not sure',
-    insurance_claim: false, notes: null, status,
+    id: uuid(1000 + seq), business_id: businessId, name, phone, email, zip: PII.zip, address: PII.address,
+    service, home: 'house', timing: 'asap', roof_age: 'Not sure',
+    insurance_claim: false, notes: PII.notes, status,
     created_at: created_at || new Date(Date.now() - seq * 60000).toISOString(),
   };
   seq++;
   store.leads.push(row);
   return row.id;
 }
+/** Seven leads of Alder Roofing: three in the last 30 days, the newest two
+ *  days old. One lead of Beta Roofing, which must never show under Alder. */
+const AGES = [2, 10, 20, 40, 50, 60, 70];
 const seedSeven = () => {
-  const ids = [];
-  for (let i = 0; i < 7; i++) ids.push(seedLead(BIZ_A, { name: `Request ${i + 1}`, created_at: `2026-11-${String(12 - i).padStart(2, '0')}T09:00:00Z` }));
-  seedLead(BIZ_B, { name: 'Beta Only', phone: '5155550999', created_at: '2026-11-12T10:00:00Z' });
+  const ids = AGES.map((d, i) => seedLead(BIZ_A, { name: `${PII.name} ${i + 1}`, created_at: daysAgo(d), status: i === 1 ? 'contacted' : 'open' }));
+  seedLead(BIZ_B, { name: 'Beta Only', phone: '5155550999', created_at: daysAgo(1), service: 'replacement' });
   return ids;
 };
+const seedCode = (businessId, code) => {
+  store.codes.push({ code, business_id: businessId, used_at: null, expires_at: new Date(Date.now() + 3600000).toISOString(), created_at: new Date().toISOString() });
+};
+const liveCodes = (businessId) => store.codes.filter((c) => c.business_id === businessId && !c.used_at && new Date(c.expires_at) > new Date());
 
 const PAGE0 = ['Alder Roofing · Demo · 2 phones', 'Beta Roofing · Active · 1 phone', 'Cedar Co · Active · 0 phones',
   'Delta Roofs · Active · 0 phones', 'Echo Roofing · Active · 0 phones'];
 const PAGE0_IDS = [BIZ_A, BIZ_B, biz(4), biz(5), biz(6)];
 const PAGE1_IDS = [biz(9), biz(7), biz(8), biz(11), biz(12)];
 const listText = (rows) => 'Businesses\n\n' + rows.map((r, i) => `${i + 1}. ${r}`).join('\n');
-const DETAIL_A = 'Alder Roofing\nDemo · alder-demo\n\nTelegram: connected · 2 phones\nPhone 1 · main phone\nPhone 2 (Van)\n\nRequests: 7';
+const DETAIL_A = 'Alder Roofing\nDemo · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total · 3 in the last 30 days\nLast lead: 2d ago';
+const DETAIL_FIR = 'Fir & Sons\nActive · fir\n\nTelegram: Not connected\n\nLeads: 0 total · 0 in the last 30 days';
+const DETAIL_P = 'Zz Paused\nSuspended · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total · 0 in the last 30 days';
 const detailKb = (id, page) => [
-  [{ text: 'Terminate', callback_data: `bt:${page}:${id}`, style: 'danger' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
+  [{ text: 'Suspend', callback_data: `bs:${page}:${id}`, style: 'danger' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
+  [{ text: 'Invite', callback_data: `bv:${page}:${id}`, style: 'primary' }, { text: 'Back', callback_data: `bl:${page}` }],
+];
+const suspendedKb = (id, page) => [
+  [{ text: 'Reactivate', callback_data: `br:${page}:${id}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
   [{ text: 'Back', callback_data: `bl:${page}` }],
 ];
 const backKb = (id, page) => [[{ text: 'Back', callback_data: `bd:${page}:${id}` }]];
 const packed = (businessId, leadId) => C.packUuid(businessId) + C.packUuid(leadId);
+const OPERATOR_KB = { keyboard: [[{ text: 'Invite' }, { text: 'Businesses' }]], is_persistent: true, resize_keyboard: true };
+const OWNER_KB = { keyboard: [[{ text: 'Invite' }, { text: 'Leads' }]], is_persistent: true, resize_keyboard: true };
+const STAFF_KB = { keyboard: [[{ text: 'Leads' }]], is_persistent: true, resize_keyboard: true };
+const REMOVED_KB = { remove_keyboard: true };
+const fail500 = () => new Response('{"message":"fake failure"}', { status: 500, headers: { 'content-type': 'application/json' } });
+const textOf = (req) => String((req && req.body && req.body.text) || '');
+const SUSPEND_ASK = 'Suspend Alder Roofing? Telegram alerts, emails and the website form stop for this business. Data is kept and you can reactivate at any time.';
+const NOTICE = 'Your service has been suspended. Contact support if this is a mistake.';
+const SUSPENDED_LINE = 'This service is suspended. Contact support.';
+const EXPIRED = 'That screen expired. Here is the current screen.';
+/** Every text the operator chat was shown, across the suite (for OB4). */
+const operatorTexts = [];
+const seen = (r) => { for (const m of [...r.sends, ...r.edits]) if (String(m.body.chat_id) === String(OP)) operatorTexts.push(textOf(m)); return r; };
 
 try {
   install();
   await tgCtl({ mode: 'ok', failChat: null });
-  // Whatever an earlier suite left in the fake's log is not this suite's.
+  // Whatever an earlier suite left in the fakes' logs is not this suite's.
   await realFetch(TG + '/__reset', { method: 'POST' });
+  await mailReset();
 
   /* OB1: the list, as one message. */
   store = freshStore();
   {
-    const r = await run(msg(OP, '/businesses'));
+    const r = seen(await run(msg(OP, '/businesses')));
     const list = r.sends[0] || { body: {} };
     const kb = kbOf(list);
     const pageReads = r.sb.filter((q) => q.table === 'businesses');
@@ -381,7 +477,8 @@ try {
       && PAGE0_IDS.every((id) => inList.includes(id)) && inList.startsWith('in.(')
       && r.sb.length === 3; // the binding, the page, the counts — never one per business
     const ordered = pageReads.length === 1 && param(pageReads[0], 'order') === 'name.asc,id.asc'
-      && param(pageReads[0], 'limit') === '6' && param(pageReads[0], 'offset') === '0';
+      && param(pageReads[0], 'limit') === '6' && param(pageReads[0], 'offset') === '0'
+      && !param(pageReads[0], 'status'); // every status is listed
     line(r.sends.length === 1 && r.edits.length === 0 && r.tg.length === 1
       && list.body.text === listText(PAGE0)
       && kb.length === 2 && numbersOk(kb[0], 5)
@@ -392,21 +489,47 @@ try {
       'OB1', '/businesses: one message, 5 rows, counts in one query',
       `sends=${r.sends.length} db=${r.sb.length} countQueries=${counts.length} order=${ordered}`);
 
-    // Every way in opens the same screen. A word after /phones changes nothing.
-    const ways = ['/phones', '/phones alder-demo', '/recipients', 'Businesses', 'Phones', '/businesses@alder_test_bot'];
+    // The keyboard label, the label of the keyboard before it, and the
+    // command with the bot's name all open the same screen.
     const bad = [];
-    for (const text of ways) {
+    for (const text of ['Businesses', 'Phones', '/businesses@alder_test_bot']) {
       const w = await run(msg(OP, text));
       const m = w.sends[0];
       if (w.sends.length !== 1 || !m || m.body.text !== list.body.text || !same(kbOf(m), kb) || writes(w.sb).length) bad.push(text);
     }
-    line(bad.length === 0, 'OB1b', '/phones, /recipients and the keyboard open the same list', `bad=${bad.join(',') || 'none'}`);
+    line(bad.length === 0, 'OB1a', 'the Businesses label and the old Phones label open it', `bad=${bad.join(',') || 'none'}`);
+  }
 
-    // /code is as it was: with more than eight served businesses its picker
-    // still answers with the usage line, and the list above did not refuse.
-    const code = await run(msg(OP, '/code'));
-    line(code.sends.length === 1 && code.sends[0].body.text === C.OPERATOR_USAGE_CODE,
-      'OB1c', '/code picker unchanged (usage line above eight)', `text=${code.sends[0] && code.sends[0].body.text}`);
+  /* OB1b: the retired commands. One fallback line, nothing read or written. */
+  store = freshStore();
+  seedSeven();
+  {
+    const before = snapshot();
+    const retired = ['/phones', '/phones alder-demo', '/recipients', '/leads', '/code', '/code alder-demo', '/remove_lead',
+      '/terminate', '/code@alder_test_bot', 'Recipients', 'Leads', 'hello'];
+    const bad = [];
+    for (const text of retired) {
+      const r = seen(await run(msg(OP, text)));
+      const m = r.sends[0];
+      const onlyBinding = r.sb.length === 1 && r.sb[0].table === 'business_chats' && param(r.sb[0], 'tg_chat_id') === `eq.${OP}`;
+      if (r.tg.length !== 1 || r.sends.length !== 1 || textOf(m) !== C.OPERATOR_WELCOME
+        || !same(m.body.reply_markup, OPERATOR_KB) || !onlyBinding) bad.push(text);
+    }
+    const fallbackOk = C.OPERATOR_WELCOME === 'This is the operator chat. Send /help for the commands.';
+    // /help and its alias, typed or pressed on an old keyboard.
+    const helps = [];
+    for (const text of ['/help', '/operator', 'Help', 'Operator']) {
+      const r = seen(await run(msg(OP, text)));
+      if (r.sends.length !== 1 || textOf(r.sends[0]) !== C.OPERATOR_HELP || !same(r.sends[0].body.reply_markup, OPERATOR_KB) || r.sb.length !== 1) helps.push(text);
+    }
+    const commands = (C.OPERATOR_HELP.match(/^\/[a-z_]+/gm) || []);
+    const helpOk = same(commands, ['/businesses', '/invite', '/help', '/id'])
+      && !/\/phones|\/code|\/recipients|\/leads|\/remove_lead|Terminate|Requests/.test(C.OPERATOR_HELP);
+    const id = await run(msg(OP, '/id'));
+    const idOk = id.sends.length === 1 && textOf(id.sends[0]) === C.operatorIdMessage(OP, { operator: true }).text;
+    line(bad.length === 0 && fallbackOk && helps.length === 0 && helpOk && idOk && snapshot() === before && store.codes.length === 0,
+      'OB1b', 'retired commands: only the fallback, which points to /help',
+      `bad=${bad.join(',') || 'none'} fallback=${fallbackOk} help=${helps.join(',') || 'ok'}/${helpOk} id=${idOk}`);
   }
 
   /* OB2: paging in place, the navigation rule, stale pages, a failed count. */
@@ -428,9 +551,9 @@ try {
       && mid.sb.length === 3;
     const last = await run(cb(OP, 'bl:2'));
     const lastKb = kbOf(last.edits[0]);
-    // The paused business is on the last page and shows its real phone.
+    // The suspended business is on the last page and shows its real phone.
     const lastOk = last.sends.length === 0 && last.edits.length === 1
-      && last.edits[0].body.text === listText(['Juniper Roofing · Churned · 0 phones', 'Zz Paused · Paused · 1 phone'])
+      && last.edits[0].body.text === listText(['Juniper Roofing · Churned · 0 phones', 'Zz Paused · Suspended · 1 phone'])
       && lastKb.length === 2 && numbersOk(lastKb[0], 2)
       && same(lastKb[1], [{ text: 'Newer', callback_data: 'bl:1' }]);
     const first = await run(cb(OP, 'bl:0'));
@@ -441,8 +564,7 @@ try {
     const staleOk = same(stale.answers, [C.OPERATOR_PAGE_GONE]) && stale.sends.length === 0
       && stale.edits.length === 1 && stale.edits[0].body.text === listText(PAGE0);
     // The count query fails: "?" for every row of the page, never "0 phones".
-    sbHook = ({ table, params }) => (table === 'business_chats' && String(param({ params }, 'business_id') || '').startsWith('in.(')
-      ? new Response('{"message":"count failed"}', { status: 500, headers: { 'content-type': 'application/json' } }) : null);
+    sbHook = ({ table, params }) => (table === 'business_chats' && String(param({ params }, 'business_id') || '').startsWith('in.(') ? fail500() : null);
     const unknown = await run(cb(OP, 'bl:0'));
     sbHook = null;
     const unknownText = String((unknown.edits[0] || { body: {} }).body.text);
@@ -455,279 +577,443 @@ try {
     const singleOk = singleKb.length === 1 && numbersOk(singleKb[0], 5);
     store.businesses = [];
     const none = await run(msg(OP, '/businesses'));
-    const noneOk = none.sends.length === 1 && none.sends[0].body.text === C.OPERATOR_NO_BUSINESSES && kbOf(none.sends[0]).length === 0;
+    const noneOk = none.sends.length === 1 && none.sends[0].body.text === 'No businesses yet.' && kbOf(none.sends[0]).length === 0;
     line(midOk && lastOk && firstOk && staleOk && unknownOk && singleOk && noneOk,
       'OB2', 'paging in place; only useful ends; stale page; "?" count',
       `mid=${midOk} last=${lastOk} first=${firstOk} stale=${staleOk} unknown=${unknownOk} single=${singleOk} none=${noneOk}`);
   }
 
-  /* OB3: one business, in the same message. */
+  /* OB3: one business, in the same message. The three states, exactly. */
   store = freshStore();
   let leadIds = seedSeven();
   {
-    const open = await run(cb(OP, `bd:0:${BIZ_A}`));
+    const open = seen(await run(cb(OP, `bd:0:${BIZ_A}`)));
+    const leadReads = open.sb.filter((q) => q.table === 'v_client_leads');
+    // Two aggregates and nothing else: a count with the newest created_at
+    // (one row, one column), and a count since a date (no row at all).
+    const head = leadReads.find((q) => q.method === 'HEAD');
+    const newest = leadReads.find((q) => q.method === 'GET');
+    const sinceMs = head ? Date.now() - new Date(String(param(head, 'created_at')).replace(/^gte\./, '')).getTime() : 0;
+    const aggregates = leadReads.length === 2 && !!head && !!newest
+      && leadReads.every((q) => param(q, 'business_id') === `eq.${BIZ_A}`)
+      && param(newest, 'select') === 'created_at' && param(newest, 'limit') === '1' && param(newest, 'order') === 'created_at.desc'
+      && String(param(head, 'created_at')).startsWith('gte.') && Math.abs(sinceMs - 30 * DAY) < 60000;
     const openOk = open.sends.length === 0 && open.edits.length === 1 && open.edits[0].body.message_id === 9
       && same(open.answers, ['']) && open.edits[0].body.text === DETAIL_A
       && same(kbOf(open.edits[0]), detailKb(BIZ_A, 0))
-      && writes(open.sb).length === 0
-      // The request count is a count, scoped by the business; no lead row is read.
-      && open.sb.filter((q) => q.table === 'v_client_leads').every((q) => q.method === 'HEAD' && param(q, 'business_id') === `eq.${BIZ_A}`);
+      && writes(open.sb).length === 0 && open.sb.length === 5; // binding, business, phones, two aggregates
     // From page 1, Back goes to page 1 — and that edit is the page-1 list again.
-    const other = await run(cb(OP, `bd:1:${biz(9)}`));
-    const otherOk = other.edits.length === 1
-      && other.edits[0].body.text === 'Fir & Sons\nActive · fir\n\nTelegram: not connected\n\nRequests: 0'
+    const other = seen(await run(cb(OP, `bd:1:${biz(9)}`)));
+    const otherOk = other.edits.length === 1 && other.edits[0].body.text === DETAIL_FIR
       && same(kbOf(other.edits[0]), detailKb(biz(9), 1));
     const back = await run(cb(OP, 'bl:1'));
     const backOk = back.sends.length === 0 && back.edits.length === 1 && back.edits[0].body.text === page1Text;
-    // A paused business is shown with its phones too.
-    const paused = await run(cb(OP, `bd:2:${BIZ_P}`));
-    const pausedOk = paused.edits.length === 1
-      && paused.edits[0].body.text === 'Zz Paused\nPaused · zz-paused\n\nTelegram: connected · 1 phone\nPhone 1 · main phone\n\nRequests: 0';
-    line(openOk && otherOk && backOk && pausedOk, 'OB3', 'business detail in place; Terminate left, Leads right, Back',
-      `open=${openOk} notConnected=${otherOk} back=${backOk} paused=${pausedOk}`);
+    // Suspended: Reactivate where Suspend was, no Invite; its phones still shown.
+    const paused = seen(await run(cb(OP, `bd:2:${BIZ_P}`)));
+    const pausedOk = paused.edits.length === 1 && paused.edits[0].body.text === DETAIL_P
+      && same(kbOf(paused.edits[0]), suspendedKb(BIZ_P, 2));
+    // No line twice, the word "Requests" nowhere, nothing after the Telegram
+    // status on its line, and each number once.
+    const texts = [open, other, paused].map((x) => textOf(x.edits[0]));
+    const clean = texts.every((t) => {
+      const lines = t.split('\n').filter(Boolean);
+      const telegram = lines.filter((l) => l.startsWith('Telegram:'));
+      return new Set(lines).size === lines.length && !/Requests?/i.test(t) && !/\d phones?/.test(t)
+        && telegram.length === 1 && ['Telegram: Connected', 'Telegram: Not connected'].includes(telegram[0])
+        && lines.filter((l) => l.startsWith('Leads:')).length === 1 && lines.filter((l) => l.startsWith('Last lead:')).length <= 1;
+    }) && !texts[1].includes('Last lead') && !texts[1].includes('Phone 1');
+    // A number that could not be read is "?", never 0.
+    sbHook = ({ table }) => (table === 'v_client_leads' ? fail500() : null);
+    const blind = await run(cb(OP, `bd:0:${BIZ_A}`));
+    sbHook = null;
+    const blindOk = blind.edits.length === 1 && textOf(blind.edits[0]).endsWith('Leads: ? total · ? in the last 30 days');
+    line(openOk && aggregates && otherOk && backOk && pausedOk && clean && blindOk,
+      'OB3', 'business screen: three states, exact text, rows and styles',
+      `open=${openOk} aggregates=${aggregates} notConnected=${otherOk} back=${backOk} suspended=${pausedOk} clean=${clean} unknown=${blindOk}`);
   }
 
-  /* OB4: the business's requests, read-only. */
+  /* OB4: the business's leads, read-only and minimal. */
   {
     const before = snapshot();
     const reads = [];
-    const p0 = await run(cb(OP, `bq:0:0:${BIZ_A}`));
+    const p0 = seen(await run(cb(OP, `bq:0:0:${BIZ_A}`)));
     reads.push(...p0.sb);
     const kb0 = kbOf(p0.edits[0]);
-    const text0 = String((p0.edits[0] || { body: {} }).body.text);
+    const text0 = textOf(p0.edits[0]);
     const listOk = p0.sends.length === 0 && p0.edits.length === 1 && p0.edits[0].body.message_id === 9
-      && text0 === `Alder Roofing\n${C.renderLeadList(store.leads.filter((l) => l.business_id === BIZ_A).slice(0, 5))}`
-      && text0.includes('1. Request 1') && text0.includes('5. Request 5') && !text0.includes('Request 6') && !text0.includes('Beta Only')
+      && text0 === 'Alder Roofing\nLeads\n\n1. Repair · New · 2d ago\n2. Repair · Contacted · 10d ago\n3. Repair · New · 20d ago\n4. Repair · New · 40d ago\n5. Repair · New · 50d ago'
       && kb0.length === 3 && numbersOk(kb0[0], 5)
       && leadIds.slice(0, 5).every((id, i) => kb0[0][i].callback_data === `bo:0:0:${packed(BIZ_A, id)}`)
       && same(kb0[1], [{ text: 'Older', callback_data: `bq:1:0:${BIZ_A}` }])
       && same(kb0[2], [{ text: 'Back', callback_data: `bd:0:${BIZ_A}` }]);
-    const p1 = await run(cb(OP, `bq:1:0:${BIZ_A}`));
+    const p1 = seen(await run(cb(OP, `bq:1:0:${BIZ_A}`)));
     reads.push(...p1.sb);
     const kb1 = kbOf(p1.edits[0]);
-    const lastOk = p1.edits.length === 1 && kb1.length === 3 && numbersOk(kb1[0], 2)
+    const lastOk = p1.edits.length === 1 && textOf(p1.edits[0]) === 'Alder Roofing\nLeads\n\n1. Repair · New · 60d ago\n2. Repair · New · 70d ago'
+      && kb1.length === 3 && numbersOk(kb1[0], 2)
       && same(kb1[1], [{ text: 'Newer', callback_data: `bq:0:0:${BIZ_A}` }])
       && same(kb1[2], [{ text: 'Back', callback_data: `bd:0:${BIZ_A}` }]);
-    // One request: the owner's card text, and only Back under it.
-    const lead = store.leads.find((l) => l.id === leadIds[5]);
-    const det = await run(cb(OP, kb1[0][0].callback_data));
+    // One lead: one line per allowed field, and only Back under it.
+    const det = seen(await run(cb(OP, kb0[0][1].callback_data)));
     reads.push(...det.sb);
     const detKb = kbOf(det.edits[0]);
     const detOk = det.sends.length === 0 && det.edits.length === 1 && det.edits[0].body.message_id === 9
-      && det.edits[0].body.text === C.renderAlert({ business: store.businesses.find((b) => b.id === BIZ_A), lead, view: 'new' })
-      && same(detKb, [[{ text: 'Back', callback_data: `bq:1:0:${BIZ_A}` }]]);
-    const backToList = await run(cb(OP, detKb[0][0].callback_data));
+      && textOf(det.edits[0]) === 'Alder Roofing\nLead\n\nService: Repair\nStatus: Contacted\nReceived: 10d ago'
+      && same(detKb, [[{ text: 'Back', callback_data: `bq:0:0:${BIZ_A}` }]]);
+    const backToList = seen(await run(cb(OP, detKb[0][0].callback_data)));
     reads.push(...backToList.sb);
-    const backOk = backToList.edits.length === 1 && backToList.edits[0].body.text === p1.edits[0].body.text;
+    const backOk = backToList.edits.length === 1 && textOf(backToList.edits[0]) === text0;
     const toBusiness = await run(cb(OP, kb1[2][0].callback_data));
     const upOk = toBusiness.edits.length === 1 && toBusiness.edits[0].body.text === DETAIL_A;
     // An empty business: a toast, the name, and Back.
-    const empty = await run(cb(OP, `bq:0:1:${biz(9)}`));
-    const emptyOk = same(empty.answers, [C.TOAST_NO_LEADS]) && empty.edits.length === 1
-      && empty.edits[0].body.text === 'Fir & Sons\nNo requests yet.'
+    const empty = seen(await run(cb(OP, `bq:0:1:${biz(9)}`)));
+    const emptyOk = same(empty.answers, ['No leads yet.']) && empty.edits.length === 1
+      && empty.edits[0].body.text === 'Fir & Sons\nNo leads yet.'
       && same(kbOf(empty.edits[0]), [[{ text: 'Back', callback_data: `bd:1:${biz(9)}` }]]);
-    // A request addressed under ANOTHER business is not found, and its text
-    // never reaches the screen: the read is by id AND that business.
-    const cross = await run(cb(OP, `bo:0:0:${packed(BIZ_B, leadIds[0])}`));
+    // A lead addressed under ANOTHER business is not found: the read is by id
+    // AND that business.
+    const cross = seen(await run(cb(OP, `bo:0:0:${packed(BIZ_B, leadIds[0])}`)));
     reads.push(...cross.sb);
-    const crossOk = same(cross.answers, [C.TOAST_LEAD_GONE]) && cross.edits.length === 1
-      && !String(cross.edits[0].body.text).includes('Request 1') && String(cross.edits[0].body.text).startsWith('Beta Roofing\n');
+    const crossOk = same(cross.answers, ['That lead is no longer here.']) && cross.edits.length === 1
+      && textOf(cross.edits[0]) === 'Beta Roofing\nLeads\n\n1. Roof replacement · New · 1d ago';
     const leadReads = reads.filter((q) => q.table === 'v_client_leads');
     const scoped = leadReads.length >= 5 && leadReads.every((q) => /^eq\.b000000[12]-/.test(String(param(q, 'business_id'))));
     const ordered = leadReads.filter((q) => !param(q, 'id')).every((q) => param(q, 'order') === 'created_at.desc,id.desc');
+    // The database is asked for these columns and no other. (The fake answers
+    // with whole rows all the same, so the screens are tested on their own.)
+    const columns = leadReads.every((q) => String(param(q, 'select')).replace(/\s/g, '') === 'id,service,status,created_at');
+    // Nothing a customer typed, on any screen the operator was shown so far.
+    const forbidden = [PII.name, 'Zed', 'Customer', PII.phone, '515', PII.email, '@', PII.zip, PII.notes, '4471', PII.address, 'Elm', 'Beta Only', '5155550999'];
+    const shown = [p0, p1, det, backToList, empty, cross].flatMap((x) => [...x.sends, ...x.edits].map(textOf));
+    const leaked = forbidden.filter((x) => shown.some((t) => t.includes(x)));
+    // The one constant, and what adding the name to it would do.
+    const withName = [...C.OPERATOR_LEAD_FIELDS, 'name'];
+    const sample = store.leads.find((l) => l.id === leadIds[0]);
+    const constantOk = same([...C.OPERATOR_LEAD_FIELDS], ['service', 'status', 'age'])
+      && same(C.operatorLeadColumns(), ['service', 'status', 'created_at'])
+      && same(C.operatorLeadColumns(withName), ['service', 'status', 'created_at', 'name'])
+      && C.operatorLeadCardText({ name: 'Alder Roofing' }, sample, Date.now(), withName).endsWith(`Name: ${PII.name} 1`)
+      && !C.operatorLeadCardText({ name: 'Alder Roofing' }, sample).includes(PII.name)
+      && same(C.operatorLeadColumns(['phone', 'email', 'notes', 'zip']), []);
     // Nothing a tap could change: no status, remove, copy or review button.
     const buttons = [kb0, kb1, detKb].flat(2);
     const actionFree = buttons.every((b) => /^(bo|bq|bd):/.test(b.callback_data) && !b.copy_text && !b.url && !b.style);
-    line(listOk && lastOk && detOk && backOk && upOk && emptyOk && crossOk && scoped && ordered && actionFree
-      && writes(reads).length === 0 && snapshot() === before,
-      'OB4', 'Leads: read-only list and card, scoped and ordered, Back',
-      `list=${listOk} last=${lastOk} detail=${detOk} back=${backOk}/${upOk} empty=${emptyOk} cross=${crossOk} scoped=${scoped} ordered=${ordered} free=${actionFree}`);
+    line(listOk && lastOk && detOk && backOk && upOk && emptyOk && crossOk && scoped && ordered && columns && leaked.length === 0
+      && constantOk && actionFree && writes(reads).length === 0 && snapshot() === before,
+      'OB4', 'leads: only service, status, age; scoped, ordered, read-only',
+      `list=${listOk} last=${lastOk} card=${detOk} back=${backOk}/${upOk} empty=${emptyOk} cross=${crossOk} scoped=${scoped} ordered=${ordered} columns=${columns} leaked=${leaked.join(',') || 'none'} constant=${constantOk} free=${actionFree}`);
   }
 
-  /* OB5: Terminate asks; Cancel goes back; nothing is sent or changed. */
+  /* OB5: Suspend asks; Cancel goes back; nothing is sent or changed. */
+  seedCode(BIZ_A, 'KEEPKEEPKEEP');
   {
     const before = snapshot();
-    const ask = await run(cb(OP, `bt:0:${BIZ_A}`));
+    const ask = seen(await run(cb(OP, `bs:0:${BIZ_A}`)));
     const askKb = kbOf(ask.edits[0]);
     const askOk = ask.sends.length === 0 && ask.edits.length === 1 && ask.edits[0].body.message_id === 9
-      && ask.edits[0].body.text === `Terminate Telegram access for Alder Roofing? 2 phones will stop receiving alerts and can no longer use this bot.\n\n${C.OPERATOR_TERMINATE_STILL}`
+      && ask.edits[0].body.text === SUSPEND_ASK && same(ask.answers, [''])
       && same(askKb, [[
-        { text: 'Confirm terminate', callback_data: `bT:0:${BIZ_A}`, style: 'danger' },
+        { text: 'Confirm suspend', callback_data: `bS:0:${BIZ_A}`, style: 'danger' },
         { text: 'Cancel', callback_data: `bd:0:${BIZ_A}` },
       ]])
-      && writes(ask.sb).length === 0;
-    // A paused business takes no website requests: no promise about them.
-    const askPaused = await run(cb(OP, `bt:2:${BIZ_P}`));
-    const pausedOk = askPaused.edits.length === 1
-      && askPaused.edits[0].body.text === 'Terminate Telegram access for Zz Paused? 1 phone will stop receiving alerts and can no longer use this bot.';
+      && writes(ask.sb).length === 0 && ask.mail.length === 0
+      // The question needs no phone list: the binding and the business.
+      && ask.sb.length === 2;
     const cancel = await run(cb(OP, askKb[0][1].callback_data));
     const cancelOk = cancel.sends.length === 0 && cancel.edits.length === 1 && cancel.edits[0].body.text === DETAIL_A
-      && same(kbOf(cancel.edits[0]), detailKb(BIZ_A, 0)) && writes(cancel.sb).length === 0;
-    line(askOk && pausedOk && cancelOk && snapshot() === before, 'OB5', 'Terminate asks first; Cancel returns; nothing changed',
-      `ask=${askOk} paused=${pausedOk} cancel=${cancelOk} unchanged=${snapshot() === before}`);
+      && same(kbOf(cancel.edits[0]), detailKb(BIZ_A, 0)) && writes(cancel.sb).length === 0 && cancel.mail.length === 0;
+    line(askOk && cancelOk && snapshot() === before, 'OB5', 'Suspend asks first; Cancel returns; nothing changed',
+      `ask=${askOk} cancel=${cancelOk} unchanged=${snapshot() === before}`);
   }
 
-  /* OB6: Confirm. Notices first, then one scoped delete, invites expired. */
-  const LIVE = new Date(Date.now() + 3600e3).toISOString();
-  store = freshStore();
-  leadIds = seedSeven();
-  store.codes = [
-    { code: 'ABCDEFGHJKMN', business_id: BIZ_A, expires_at: LIVE, used_at: null },
-    { code: 'PQRSTUVWXYZ2', business_id: BIZ_A, expires_at: LIVE, used_at: '2026-11-01T10:00:00Z' },
-    { code: 'MNPQRSTUVWXY', business_id: BIZ_B, expires_at: LIVE, used_at: null },
-  ];
+  /* OB6: Confirm. Notices and the email first, then one scoped UPDATE. */
   {
-    const bizBefore = JSON.stringify(store.businesses);
-    const leadsBefore = JSON.stringify(store.leads);
-    const r = await run(cb(OP, `bT:0:${BIZ_A}`));
-    const notices = r.sends.filter((x) => [String(OWNER), String(STAFF)].includes(String(x.body.chat_id)));
+    const others = () => JSON.stringify({
+      b: store.businesses.filter((b) => b.id !== BIZ_A), c: store.chats, k: store.codes, l: store.leads, e: store.events,
+    });
+    const before = others();
+    const r = seen(await run(cb(OP, `bS:0:${BIZ_A}`)));
+    const notices = r.sends.filter((m) => m.body.text === NOTICE);
     const noticeOk = r.sends.length === 2 && notices.length === 2
-      && new Set(notices.map((x) => String(x.body.chat_id))).size === 2
-      && notices.every((x) => x.body.text === 'Your Telegram access for Alder Roofing was ended. New requests will no longer be sent to this chat. Contact support if this is a mistake.'
-        && same(x.body.reply_markup, { remove_keyboard: true }) && !('parse_mode' in x.body));
-    // Order: both notices are answered before the DELETE is even started.
-    const del = r.trace.findIndex((t) => t.kind === 'sb' && t.table === 'business_chats' && t.method === 'DELETE');
-    const noticeEnds = r.trace.map((t, i) => (t.kind === 'tg' && t.method === 'sendMessage' && t.phase === 'end' ? i : -1)).filter((i) => i >= 0);
-    const orderOk = del > 0 && noticeEnds.length === 2 && noticeEnds.every((i) => i < del);
-    // One DELETE, addressed by the business and by nothing else.
-    const deletes = r.sb.filter((q) => q.method === 'DELETE');
-    const filters = (q) => q.params.filter(([k]) => k !== 'select').map(([k, v]) => `${k}=${v}`);
-    const scopedDelete = deletes.length === 1 && deletes[0].table === 'business_chats'
-      && same(filters(deletes[0]), [`business_id=eq.${BIZ_A}`]);
-    const unbound = !store.chats.some((c) => c.business_id === BIZ_A)
-      && store.chats.length === 2 && store.chats.some((c) => c.business_id === BIZ_B) && store.chats.some((c) => c.business_id === BIZ_P);
-    // Invites: A's unused one is expired, its used one keeps its record, B's is untouched.
-    const patches = r.sb.filter((q) => q.method === 'PATCH');
-    const code = (c) => store.codes.find((x) => x.code === c);
-    const invitesOk = patches.length === 1 && patches[0].table === 'bind_codes'
-      && param(patches[0], 'business_id') === `eq.${BIZ_A}` && param(patches[0], 'used_at') === 'is.null'
-      && new Date(code('ABCDEFGHJKMN').expires_at).getTime() <= Date.now() && code('ABCDEFGHJKMN').used_at === null
-      && code('PQRSTUVWXYZ2').expires_at === LIVE && code('PQRSTUVWXYZ2').used_at === '2026-11-01T10:00:00Z'
-      && code('MNPQRSTUVWXY').expires_at === LIVE && code('MNPQRSTUVWXY').used_at === null;
-    // The business row (status included) and every lead are exactly as before,
-    // and no request other than those two writes changed anything.
-    const untouched = JSON.stringify(store.businesses) === bizBefore && JSON.stringify(store.leads) === leadsBefore
-      && writes(r.sb).length === 2
-      && !r.sb.some((q) => ['businesses', 'leads', 'v_client_leads', 'lead_events'].includes(q.table) && !['GET', 'HEAD'].includes(q.method));
+      && same(notices.map((m) => String(m.body.chat_id)).sort(), [String(OWNER), String(STAFF)].sort())
+      && notices.every((m) => same(m.body.reply_markup, REMOVED_KB) && !('parse_mode' in m.body));
+    // One plain email to the owner address, with the same sentence.
+    const mail = r.mail[0] && r.mail[0].body;
+    const mailOk = r.mail.length === 1 && same([].concat(mail.to), ['alder-demo@fixture.invalid'])
+      && mail.subject === 'Your service has been suspended' && String(mail.text).includes(NOTICE)
+      && !/alder-demo|Suspend Alder/.test(String(mail.text));
+    // Order: every notice and the email were answered before the status write began.
+    const patchAt = r.trace.findIndex((t) => t.kind === 'sb' && t.table === 'businesses' && t.method === 'PATCH');
+    const lastNotice = r.trace.map((t, i) => (((t.kind === 'tg' && t.method === 'sendMessage') || t.kind === 'mail') && t.phase === 'end' ? i : -1))
+      .reduce((a, b) => Math.max(a, b), -1);
+    const orderOk = patchAt > 0 && lastNotice >= 0 && lastNotice < patchAt;
+    // The write: one statement, by the id and the served statuses.
+    const w = writes(r.sb);
+    const status = String(param(w[0] || { params: [] }, 'status') || '');
+    const writeOk = w.length === 1 && w[0].table === 'businesses' && w[0].method === 'PATCH'
+      && param(w[0], 'id') === `eq.${BIZ_A}` && /^in\.\("?demo"?,"?active"?\)$/.test(status)
+      && same(w[0].body, { status: 'paused' })
+      && store.businesses.find((b) => b.id === BIZ_A).status === 'paused';
+    // Bindings, invites, leads, every other business: as they were.
+    const untouched = others() === before && store.chats.filter((c) => c.business_id === BIZ_A).length === 2
+      && liveCodes(BIZ_A).length === 1 && store.leads.filter((l) => l.business_id === BIZ_A).length === 7;
     const resultOk = r.edits.length === 1 && r.edits[0].body.message_id === 9
-      && r.edits[0].body.text === 'Alder Roofing terminated · 2 phones removed · 0 notices failed'
-      && same(kbOf(r.edits[0]), backKb(BIZ_A, 0)) && same(r.answers, [C.OPERATOR_TERMINATED]);
-    line(noticeOk && orderOk && scopedDelete && unbound && invitesOk && untouched && resultOk,
-      'OB6', 'terminate: notices first, one scoped delete, invites expired',
-      `notice=${noticeOk} order=${orderOk} delete=${scopedDelete} unbound=${unbound} invites=${invitesOk} untouched=${untouched} result=${resultOk}`);
-
-    /* OB7: the second tap, and a business that never had a phone. */
-    const before = snapshot();
-    const again = await run(cb(OP, `bT:0:${BIZ_A}`));
-    const againOk = same(again.answers, [C.OPERATOR_NOT_CONNECTED]) && again.sends.length === 0
-      && again.edits.length === 1 && again.edits[0].body.text === 'Alder Roofing is already not connected.'
-      && same(kbOf(again.edits[0]), backKb(BIZ_A, 0)) && writes(again.sb).length === 0;
-    const askAgain = await run(cb(OP, `bt:0:${BIZ_A}`));
-    const askOk = same(askAgain.answers, [C.OPERATOR_NOT_CONNECTED]) && askAgain.sends.length === 0
-      && askAgain.edits.length === 1 && String(askAgain.edits[0].body.text).includes('Telegram: not connected')
-      && same(kbOf(askAgain.edits[0]), detailKb(BIZ_A, 0)) && writes(askAgain.sb).length === 0;
-    const never = await run(cb(OP, `bT:1:${biz(9)}`));
-    const neverOk = same(never.answers, [C.OPERATOR_NOT_CONNECTED]) && never.sends.length === 0
-      && never.edits.length === 1 && never.edits[0].body.text === 'Fir & Sons is already not connected.' && writes(never.sb).length === 0;
-    line(againOk && askOk && neverOk && snapshot() === before, 'OB7', 'second tap and 0 phones: already not connected, no writes',
-      `again=${againOk} ask=${askOk} never=${neverOk} unchanged=${snapshot() === before}`);
-
-    /* OB9: the terminated chat, and reconnecting. */
-    const replies = {};
-    for (const text of ['/leads', '/invite', '/recipients', '/remove_lead', '/help', '/start', 'hello']) {
-      const x = await run(msg(OWNER, text));
-      replies[text] = x.sends.length === 1 ? x.sends[0].body.text : `sends=${x.sends.length}`;
-    }
-    const notConnected = Object.values(replies).every((t) => t === C.BOT_NOT_CONNECTED);
-    const taps = [];
-    for (const data of ['l:0', `L:0:${leadIds[0]}`, `c:${leadIds[0]}`, 'rm:0', 'i:c']) {
-      const x = await run(cb(OWNER, data));
-      if (!same(x.answers, [C.TOAST_NOT_FOUND]) || x.edits.length || x.sends.length || writes(x.sb).length) taps.push(data);
-    }
-    // The invite that was pending before the terminate no longer connects.
-    const old = await run(msg(OWNER, 'ABCDEFGHJKMN'));
-    const oldOk = old.sends.length === 1 && old.sends[0].body.text === C.BOT_CODE_BAD
-      && !store.chats.some((c) => String(c.tg_chat_id) === String(OWNER));
-    // The operator reconnects the business with /code, as before.
-    const mint = await run(msg(OP, '/code alder-demo'));
-    const fresh = store.codes.find((c) => c.business_id === BIZ_A && c.used_at === null && new Date(c.expires_at).getTime() > Date.now());
-    const join = fresh ? await run(msg(OWNER, '/start ' + fresh.code)) : { sends: [] };
-    const joined = store.chats.some((c) => String(c.tg_chat_id) === String(OWNER) && c.business_id === BIZ_A);
-    line(notConnected && taps.length === 0 && oldOk && mint.sends.length === 2 && !!fresh && joined
-      && join.sends.length === 1 && join.sends[0].body.text === C.botLinkedText('Alder Roofing'),
-      'OB9', 'terminated chat: not connected; old code dead; /code reconnects',
-      `replies=${notConnected} taps=${taps.join(',') || 'ok'} old=${oldOk} mint=${mint.sends.length} joined=${joined}`);
+      && r.edits[0].body.text === 'Alder Roofing suspended · 0 notices failed'
+      && same(kbOf(r.edits[0]), backKb(BIZ_A, 0)) && same(r.answers, ['Suspended.']);
+    line(noticeOk && mailOk && orderOk && writeOk && untouched && resultOk,
+      'OB6', 'suspend: notices and email first, one scoped update',
+      `notice=${noticeOk} mail=${mailOk} order=${orderOk} write=${writeOk} untouched=${untouched} result=${resultOk}`);
   }
 
-  /* OB8: a notice that fails is counted and blocks nothing. */
-  store = freshStore();
+  /* OB7: a second tap changes nothing and tells nobody. */
   {
-    await tgCtl({ failChat: String(STAFF) });
-    const r = await run(cb(OP, `bT:0:${BIZ_A}`));
-    await tgCtl({ failChat: null });
-    line(r.sends.length === 2 && !store.chats.some((c) => c.business_id === BIZ_A)
-      && r.edits.length === 1 && r.edits[0].body.text === 'Alder Roofing terminated · 2 phones removed · 1 notice failed'
-      && same(r.answers, [C.OPERATOR_TERMINATED]),
-      'OB8', 'a failed notice is counted and never blocks the unbind',
-      `sends=${r.sends.length} text=${r.edits[0] && r.edits[0].body.text}`);
-    // The invites could not be expired: the result says so instead of hiding it.
-    store = freshStore();
-    sbHook = ({ table, method }) => (table === 'bind_codes' && method === 'PATCH'
-      ? new Response('{"message":"nope"}', { status: 500, headers: { 'content-type': 'application/json' } }) : null);
-    const kept = await run(cb(OP, `bT:0:${BIZ_A}`));
-    // The bindings could not be deleted: nothing is reported as done.
-    store = freshStore();
-    sbHook = ({ table, method }) => (table === 'business_chats' && method === 'DELETE'
-      ? new Response('{"message":"nope"}', { status: 500, headers: { 'content-type': 'application/json' } }) : null);
-    const stuck = await run(cb(OP, `bT:0:${BIZ_A}`));
-    sbHook = null;
-    line(kept.edits.length === 1 && String(kept.edits[0].body.text).startsWith('Alder Roofing terminated · 2 phones removed · 0 notices failed\n\nPending invites could not be cancelled.')
-      && same(stuck.answers, [C.TOAST_GENERIC_ERROR]) && stuck.edits.length === 0
-      && store.chats.filter((c) => c.business_id === BIZ_A).length === 2,
-      'OB8b', 'a failed write is said: invites kept, or nothing done',
-      `kept=${kept.edits.length} stuck=${stuck.answers.join('|')} edits=${stuck.edits.length}`);
+    const before = snapshot();
+    const again = await run(cb(OP, `bS:0:${BIZ_A}`));
+    const againOk = again.sends.length === 0 && again.mail.length === 0 && writes(again.sb).length === 0
+      && again.edits.length === 1 && again.edits[0].body.text === 'Alder Roofing is already suspended.'
+      && same(kbOf(again.edits[0]), backKb(BIZ_A, 0)) && same(again.answers, ['Already suspended.']);
+    // The question, asked from a screen that is out of date: the business as it is now.
+    const ask = await run(cb(OP, `bs:0:${BIZ_A}`));
+    const askOk = ask.sends.length === 0 && ask.mail.length === 0 && writes(ask.sb).length === 0 && ask.edits.length === 1
+      && textOf(ask.edits[0]).startsWith('Alder Roofing\nSuspended · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n')
+      && same(kbOf(ask.edits[0]), suspendedKb(BIZ_A, 0)) && same(ask.answers, ['Already suspended.']);
+    // A business that was suspended by hand, and one that has churned.
+    const paused = await run(cb(OP, `bS:2:${BIZ_P}`));
+    const churned = await run(cb(OP, `bS:2:${BIZ_C}`));
+    const neverOk = [paused, churned].every((x) => x.sends.length === 0 && x.mail.length === 0 && writes(x.sb).length === 0
+      && same(x.answers, ['Already suspended.']));
+    line(againOk && askOk && neverOk && snapshot() === before, 'OB7', 'second tap: already suspended, nothing sent or written',
+      `again=${againOk} ask=${askOk} others=${neverOk} unchanged=${snapshot() === before}`);
   }
 
-  /* OB10: unknown and malformed references. */
+  /* OB9: what a suspended business's phones, new phones and website get. */
+  {
+    const before = snapshot();
+    const lead = leadIds[0];
+    const row = uuid(2);
+    const onlyBinding = (x, chat) => x.sb.length === 1 && x.sb[0].table === 'business_chats' && param(x.sb[0], 'tg_chat_id') === `eq.${chat}`;
+    // Every command and every keyboard press: the one line, the keyboard
+    // removed, and nothing read beyond the chat's own binding.
+    const bad = [];
+    for (const chat of [OWNER, STAFF]) {
+      for (const text of ['/leads', '/invite', '/recipients', '/remove_lead', '/help', '/start', '/start KEEPKEEPKEEP', 'Leads', 'Invite', 'Recipients', 'Help']) {
+        const x = await run(msg(chat, text));
+        if (x.tg.length !== 1 || x.sends.length !== 1 || textOf(x.sends[0]) !== SUSPENDED_LINE
+          || !same(x.sends[0].body.reply_markup, REMOVED_KB) || !onlyBinding(x, chat)) bad.push(`${chat === OWNER ? 'owner' : 'staff'}:${text}`);
+      }
+    }
+    // Every button of a message sent before the suspension: the same line as
+    // a toast; nothing drawn, nothing read, nothing changed.
+    const taps = [];
+    for (const chat of [OWNER, STAFF]) {
+      for (const data of ['l:0', `L:0:${lead}`, `c:${lead}`, `d:${lead}`, `C:0:${lead}`, `D:0:${lead}`, `Y:0:${lead}`, `o:${lead}`,
+        'rm:0', `Q:0:${lead}`, `E:0:${lead}`, `rl:${lead}`, `RL:${lead}`, 'i:c', `x:${row}`, `X:${row}`, `v:${row}`, 'nonsense']) {
+        const x = await run(cb(chat, data));
+        if (!same(x.answers, [SUSPENDED_LINE]) || x.sends.length || x.edits.length || x.mail.length || !onlyBinding(x, chat)) taps.push(data.slice(0, 2));
+      }
+    }
+    // Free text: the same line, at most three times an hour.
+    let replies = 0;
+    for (let i = 0; i < 5; i++) {
+      const x = await run(msg(STAFF, 'is anyone there'));
+      replies += x.sends.filter((m) => textOf(m) === SUSPENDED_LINE && same(m.body.reply_markup, REMOVED_KB)).length;
+      if (x.sends.some((m) => textOf(m) !== SUSPENDED_LINE)) replies = -99;
+    }
+    // /id is the chat's own id and nothing else: still answered.
+    const id = await run(msg(OWNER, '/id'));
+    const idOk = id.sends.length === 1 && textOf(id.sends[0]) === C.operatorIdMessage(OWNER, { operator: false }).text;
+    // A new phone with a live invite of the suspended business: not connected,
+    // and the invite is still unused for the day the business is reactivated.
+    const link = await run(msg(CHAT_X, '/start KEEPKEEPKEEP'));
+    const pasted = await run(msg(CHAT_X, 'KEEPKEEPKEEP'));
+    const bindOk = [link, pasted].every((x) => x.sends.length === 1 && textOf(x.sends[0]) === SUSPENDED_LINE)
+      && !store.chats.some((c) => String(c.tg_chat_id) === String(CHAT_X))
+      && liveCodes(BIZ_A).length === 1 && liveCodes(BIZ_A)[0].code === 'KEEPKEEPKEEP';
+    // The website form. Host picks the tenant, and only a served one: the
+    // request is refused before anything is stored, alerted or mailed.
+    const { default: leadHandler } = await import('../api/lead.js');
+    const post = async (host, type = 'application/json') => {
+      await tgReset(); await mailReset(); sbRequests = [];
+      const body = {
+        service: 'repair', home: 'house', timing: 'asap', age: 'Not sure', zip: '50265', phone: '5155550142', name: 'Form Visitor',
+        email: 'visitor@fixture.invalid', notes: '', claim: false, website: '', elapsed: 5000, idempotencyKey: 'ob9-' + Math.random().toString(36).slice(2, 12),
+      };
+      const res = fakeRes();
+      await leadHandler({ method: 'POST', headers: { 'content-type': type, 'x-real-ip': '203.0.113.9', host }, body, socket: {} }, res);
+      return { res, sb: sbRequests.slice(), tg: await tgReqs(), mail: await mailReqs() };
+    };
+    const refused = await post('alder-demo.test');
+    const lookup = refused.sb.find((q) => q.table === 'businesses');
+    const refusedOk = refused.res.code === 404 && same(refused.res.body, { ok: false })
+      && !!lookup && param(lookup, 'site_host') === 'eq.alder-demo.test' && /^in\.\("?demo"?,"?active"?\)$/.test(String(param(lookup, 'status')))
+      && refused.sb.every((q) => q.table === 'businesses' || q.table === 'rpc/hit_rate_limit')
+      && refused.tg.length === 0 && refused.mail.length === 0;
+    const form = await post('alder-demo.test', 'application/x-www-form-urlencoded');
+    const formOk = form.res.code === 404 && /Not found/.test(String(form.res.body)) && !/suspend|Alder/i.test(String(form.res.body))
+      && form.tg.length === 0 && form.mail.length === 0;
+    // The same request for a served business gets past that check.
+    const served = await post('beta.test');
+    const servedOk = served.res.code !== 404 && served.sb.some((q) => q.table !== 'businesses' && q.table !== 'rpc/hit_rate_limit');
+    // Another business never notices.
+    const other = await run(msg(CHAT_B, '/leads'));
+    const otherOk = other.sends.length === 1 && textOf(other.sends[0]) !== SUSPENDED_LINE && textOf(other.sends[0]).includes('Beta Only')
+      && other.sb.some((q) => q.table === 'v_client_leads');
+    store.leads = store.leads.filter((l) => l.name !== 'Form Visitor');
+    store.events = [];
+    const unchanged = JSON.stringify({ b: store.businesses, c: store.chats, k: store.codes, l: store.leads }) === JSON.stringify((({ b, c, k, l }) => ({ b, c, k, l }))(JSON.parse(before)));
+    line(bad.length === 0 && taps.length === 0 && replies === 3 && idOk && bindOk && refusedOk && formOk && servedOk && otherOk && unchanged,
+      'OB9', 'suspended: one neutral line, no data, form refused',
+      `commands=${bad.slice(0, 3).join(',') || 'ok'} taps=${taps.join(',') || 'ok'} free=${replies} id=${idOk} bind=${bindOk} intake=${refusedOk}/${formOk}/${servedOk} other=${otherOk} unchanged=${unchanged}`);
+  }
+
+  /* OB10: Reactivate. */
+  {
+    const others = () => JSON.stringify({
+      b: store.businesses.filter((b) => b.id !== BIZ_A), c: store.chats, k: store.codes, l: store.leads,
+    });
+    const before = others();
+    const r = seen(await run(cb(OP, `br:0:${BIZ_A}`)));
+    const w = writes(r.sb);
+    const status = String(param(w[0] || { params: [] }, 'status') || '');
+    // A business that was demo before it was suspended comes back as active.
+    const writeOk = w.length === 1 && w[0].table === 'businesses' && w[0].method === 'PATCH'
+      && param(w[0], 'id') === `eq.${BIZ_A}` && /^in\.\("?paused"?,"?churned"?\)$/.test(status)
+      && same(w[0].body, { status: 'active' }) && store.businesses.find((b) => b.id === BIZ_A).status === 'active';
+    const told = (chat) => r.sends.filter((m) => String(m.body.chat_id) === String(chat));
+    const noticeOk = r.sends.length === 2 && r.mail.length === 0
+      && told(OWNER).length === 1 && textOf(told(OWNER)[0]) === 'Your service is active again.' && same(told(OWNER)[0].body.reply_markup, OWNER_KB)
+      && told(STAFF).length === 1 && textOf(told(STAFF)[0]) === 'Your service is active again.' && same(told(STAFF)[0].body.reply_markup, STAFF_KB);
+    const resultOk = r.edits.length === 1 && r.edits[0].body.text === 'Alder Roofing reactivated'
+      && same(kbOf(r.edits[0]), backKb(BIZ_A, 0)) && same(r.answers, ['Reactivated.']) && others() === before;
+    // Twice, and for a business that was never suspended: nothing.
+    const again = await run(cb(OP, `br:0:${BIZ_A}`));
+    const never = await run(cb(OP, `br:0:${BIZ_B}`));
+    const againOk = [again, never].every((x) => x.sends.length === 0 && x.mail.length === 0 && writes(x.sb).length === 0
+      && same(x.answers, ['Already active.']) && x.edits.length === 1)
+      && again.edits[0].body.text === 'Alder Roofing is already active.' && never.edits[0].body.text === 'Beta Roofing is already active.'
+      && same(kbOf(never.edits[0]), backKb(BIZ_B, 0));
+    // The business screen and the phones are back to normal.
+    const detail = await run(cb(OP, `bd:0:${BIZ_A}`));
+    const leads = await run(msg(OWNER, '/leads'));
+    const backOk = textOf(detail.edits[0]).startsWith('Alder Roofing\nActive · alder-demo\n') && same(kbOf(detail.edits[0]), detailKb(BIZ_A, 0))
+      && leads.sends.length === 1 && textOf(leads.sends[0]) !== SUSPENDED_LINE && leads.sb.some((q) => q.table === 'v_client_leads');
+    // A churned business is reactivated the same way.
+    const churned = await run(cb(OP, `br:2:${BIZ_C}`));
+    const churnedOk = churned.edits.length === 1 && churned.edits[0].body.text === 'Juniper Roofing reactivated'
+      && store.businesses.find((b) => b.id === BIZ_C).status === 'active' && churned.sends.length === 0;
+    line(writeOk && noticeOk && resultOk && againOk && backOk && churnedOk, 'OB10', 'reactivate: one scoped update, phones told with their keyboards',
+      `write=${writeOk} notice=${noticeOk} result=${resultOk} again=${againOk} back=${backOk} churned=${churnedOk}`);
+  }
+
+  /* OB8: failures on the way. */
+  {
+    // One phone cannot be reached: counted, and the suspension goes through.
+    store = freshStore();
+    leadIds = seedSeven();
+    await tgCtl({ mode: 'ok', failChat: String(STAFF) });
+    const one = await run(cb(OP, `bS:0:${BIZ_A}`));
+    await tgCtl({ mode: 'ok', failChat: null });
+    const oneOk = one.sends.length === 2 && one.edits.length === 1 && one.edits[0].body.text === 'Alder Roofing suspended · 1 notice failed'
+      && store.businesses.find((b) => b.id === BIZ_A).status === 'paused';
+    // The email cannot be sent: counted like a phone, and the suspension goes
+    // through. No owner address: there is no email to fail, so nothing is counted.
+    store = freshStore();
+    // (The Resend fake replays the first answer for a repeated idempotency
+    // key, as Resend does; this business was suspended earlier in the run.)
+    await mailCtl({ mode: '500', clearIdempotency: true });
+    const noMail = await run(cb(OP, `bS:0:${BIZ_A}`));
+    await mailCtl({ mode: 'ok', clearIdempotency: true });
+    store.businesses.find((b) => b.id === BIZ_B).owner_email = null;
+    const noAddress = await run(cb(OP, `bS:0:${BIZ_B}`));
+    const mailOk = noMail.edits.length === 1 && noMail.edits[0].body.text === 'Alder Roofing suspended · 1 notice failed'
+      && noMail.mail.length === 1 && noMail.sends.length === 2
+      && store.businesses.find((b) => b.id === BIZ_A).status === 'paused'
+      && noAddress.mail.length === 0 && noAddress.sends.length === 1 && noAddress.edits[0].body.text === 'Beta Roofing suspended · 0 notices failed'
+      && store.businesses.find((b) => b.id === BIZ_B).status === 'paused';
+    // The phone list cannot be read: nobody is told and nothing is changed.
+    store = freshStore();
+    const before = snapshot();
+    sbHook = ({ table, params }) => (table === 'business_chats' && param({ params }, 'business_id') === `eq.${BIZ_A}` ? fail500() : null);
+    const blind = await run(cb(OP, `bS:0:${BIZ_A}`));
+    sbHook = null;
+    const blindOk = blind.sends.length === 0 && blind.mail.length === 0 && blind.edits.length === 0 && writes(blind.sb).length === 0
+      && same(blind.answers, [C.TOAST_GENERIC_ERROR]) && snapshot() === before;
+    // The status cannot be written: it is not reported as done.
+    sbHook = ({ table, method }) => (table === 'businesses' && method === 'PATCH' ? fail500() : null);
+    const stuck = await run(cb(OP, `bS:0:${BIZ_A}`));
+    sbHook = null;
+    const stuckOk = stuck.edits.length === 0 && same(stuck.answers, [C.TOAST_GENERIC_ERROR])
+      && store.businesses.find((b) => b.id === BIZ_A).status === 'demo';
+    line(oneOk && mailOk && blindOk && stuckOk, 'OB8', 'a failed notice or email never blocks; a failed read or write is said',
+      `phone=${oneOk} mail=${mailOk} read=${blindOk} write=${stuckOk}`);
+  }
+
+  /* OB11: unknown businesses, malformed data, and the retired buttons. */
   store = freshStore();
   leadIds = seedSeven();
+  seedCode(BIZ_A, 'KEEPKEEPKEEP');
   {
     const before = snapshot();
     const bad = [];
-    for (const data of [`bd:0:${BIZ_GONE}`, `bt:0:${BIZ_GONE}`, `bT:0:${BIZ_GONE}`, `bq:0:0:${BIZ_GONE}`, `bo:0:0:${packed(BIZ_GONE, leadIds[0])}`]) {
+    for (const data of [`bd:0:${BIZ_GONE}`, `bs:0:${BIZ_GONE}`, `bS:0:${BIZ_GONE}`, `br:0:${BIZ_GONE}`, `bv:0:${BIZ_GONE}`,
+      `bq:0:0:${BIZ_GONE}`, `bo:0:0:${packed(BIZ_GONE, leadIds[0])}`, `bt:0:${BIZ_GONE}`, `pb:${BIZ_GONE}`]) {
       const x = await run(cb(OP, data));
-      if (!same(x.answers, [C.OPERATOR_BUSINESS_GONE]) || x.sends.length || x.edits.length !== 1
+      if (!same(x.answers, [C.OPERATOR_BUSINESS_GONE]) || x.sends.length || x.mail.length || x.edits.length !== 1
         || x.edits[0].body.text !== listText(PAGE0) || writes(x.sb).length) bad.push(data.slice(0, 2));
     }
-    // A request that is gone, under a real business: a toast and its list.
+    // From the /invite list (or the old /code picker) the current /invite list.
+    for (const data of [`bi:0:${BIZ_GONE}`, `pc:${BIZ_GONE}`]) {
+      const x = await run(cb(OP, data));
+      if (!same(x.answers, [C.OPERATOR_BUSINESS_GONE]) || x.sends.length || x.edits.length !== 1
+        || !textOf(x.edits[0]).startsWith('Invite: pick a business\n\n1. Alder Roofing · Demo') || writes(x.sb).length) bad.push(data.slice(0, 2));
+    }
+    // A lead that is gone, under a real business: a toast and its list.
     const goneLead = await run(cb(OP, `bo:0:0:${packed(BIZ_A, uuid(999999))}`));
-    const goneOk = same(goneLead.answers, [C.TOAST_LEAD_GONE]) && goneLead.edits.length === 1
-      && String(goneLead.edits[0].body.text).startsWith('Alder Roofing\nRecent requests');
+    const goneOk = same(goneLead.answers, ['That lead is no longer here.']) && goneLead.edits.length === 1
+      && textOf(goneLead.edits[0]).startsWith('Alder Roofing\nLeads\n\n1. Repair · New · 2d ago');
     // Not one of the anchored patterns: not a callback of this bot at all.
     const malformed = [];
-    for (const data of ['bd:0:not-a-uuid', `bT:0:${BIZ_A}x`, `bT:${BIZ_A}`, 'bl:1000', 'bl:-1', `bq:100:0:${BIZ_A}`, 'bo:0:0:short',
-      `bo:0:0:${packed(BIZ_A, leadIds[0])}=`, `bT:0:${BIZ_A}\n`, `bX:0:${BIZ_A}`, `BT:0:${BIZ_A}`]) {
+    for (const data of ['bd:0:not-a-uuid', `bS:0:${BIZ_A}x`, `bS:${BIZ_A}`, 'bl:1000', 'bl:-1', 'bn:1000', 'bn:', `bq:100:0:${BIZ_A}`, 'bo:0:0:short',
+      `bo:0:0:${packed(BIZ_A, leadIds[0])}=`, `bS:0:${BIZ_A}\n`, `bX:0:${BIZ_A}`, `BS:0:${BIZ_A}`, `br:0:${BIZ_A} `, `bi:${BIZ_A}`, `bv:0:0:${BIZ_A}`, `bs:0:${BIZ_A.toUpperCase()}`]) {
       const x = await run(cb(OP, data));
-      if (!same(x.answers, [C.TOAST_NOT_FOUND]) || x.sends.length || x.edits.length || writes(x.sb).length) malformed.push(JSON.stringify(data.slice(0, 8)));
+      if (!same(x.answers, [C.TOAST_NOT_FOUND]) || x.sends.length || x.edits.length || x.mail.length || writes(x.sb).length) malformed.push(JSON.stringify(data.slice(0, 8)));
     }
-    line(bad.length === 0 && goneOk && malformed.length === 0 && snapshot() === before,
-      'OB10', 'unknown business: toast and list; malformed: not found',
-      `unknown=${bad.join(',') || 'ok'} lead=${goneOk} malformed=${malformed.join(',') || 'ok'} unchanged=${snapshot() === before}`);
+    // Buttons of messages sent before this version. Terminate and its confirm
+    // end nothing now; the old pickers remove nothing. Each says the screen
+    // expired and shows the current one.
+    const row = uuid(2);
+    const retired = [];
+    for (const data of [`bt:0:${BIZ_A}`, `bT:0:${BIZ_A}`, `pb:${BIZ_A}`]) {
+      const x = seen(await run(cb(OP, data)));
+      if (!same(x.answers, [EXPIRED]) || x.sends.length || x.mail.length || writes(x.sb).length || x.edits.length !== 1
+        || x.edits[0].body.text !== DETAIL_A || !same(kbOf(x.edits[0]), detailKb(BIZ_A, 0))) retired.push(data.slice(0, 2));
+    }
+    for (const kind of ['p', 'P', 'q']) {
+      const x = await run(cb(OP, `${kind}:${row}`));
+      if (!same(x.answers, [EXPIRED]) || x.sends.length || x.edits.length !== 1
+        || x.edits[0].body.text !== listText(PAGE0) || writes(x.sb).length) retired.push(kind);
+    }
+    const expiredOk = C.OPERATOR_SCREEN_EXPIRED === EXPIRED;
+    line(bad.length === 0 && goneOk && malformed.length === 0 && retired.length === 0 && expiredOk && snapshot() === before
+      && store.chats.length === 4 && liveCodes(BIZ_A).length === 1,
+      'OB11', 'unknown: toast and list; malformed: not found; retired: expired',
+      `unknown=${bad.join(',') || 'ok'} lead=${goneOk} malformed=${malformed.join(',') || 'ok'} retired=${retired.join(',') || 'ok'} unchanged=${snapshot() === before}`);
   }
 
-  /* OB11: only the operator chat, checked on every tap. */
+  /* OB12: only the operator chat, checked on every tap. */
   {
     const before = snapshot();
     const row = uuid(2);
-    const taps = ['bl:0', `bd:0:${BIZ_A}`, `bt:0:${BIZ_A}`, `bT:0:${BIZ_A}`, `bq:0:0:${BIZ_A}`, `bo:0:0:${packed(BIZ_A, leadIds[0])}`,
-      `bT:0:${BIZ_B}`, `bo:0:0:${packed(BIZ_B, leadIds[0])}`, `pb:${BIZ_A}`, `pb:${BIZ_B}`, `p:${row}`, `P:${row}`, `q:${row}`];
+    const taps = ['bl:0', 'bn:0', `bd:0:${BIZ_A}`, `bs:0:${BIZ_A}`, `bS:0:${BIZ_A}`, `br:0:${BIZ_P}`, `bv:0:${BIZ_A}`, `bi:0:${BIZ_A}`,
+      `bq:0:0:${BIZ_A}`, `bo:0:0:${packed(BIZ_A, leadIds[0])}`, `bS:0:${BIZ_B}`, `bi:0:${BIZ_B}`, `bo:0:0:${packed(BIZ_B, leadIds[0])}`,
+      `bt:0:${BIZ_A}`, `bT:0:${BIZ_A}`, `pb:${BIZ_A}`, `pc:${BIZ_A}`, `pc:${BIZ_B}`, `p:${row}`, `P:${row}`, `q:${row}`];
     const leaks = [];
     for (const chat of [OWNER, STAFF, CHAT_B, CHAT_X]) {
       for (const data of taps) {
         const x = await run(cb(chat, data));
         // One database request: the chat's own binding. Nothing else is read.
         const onlyBinding = x.sb.length === 1 && x.sb[0].table === 'business_chats' && param(x.sb[0], 'tg_chat_id') === `eq.${chat}`;
-        if (!same(x.answers, [C.TOAST_NOT_FOUND]) || x.sends.length || x.edits.length || !onlyBinding) leaks.push(`${chat}:${data.slice(0, 2)}`);
+        if (!same(x.answers, [C.TOAST_NOT_FOUND]) || x.sends.length || x.edits.length || x.mail.length || !onlyBinding) leaks.push(`${chat}:${data.slice(0, 2)}`);
       }
     }
     // The operator id is read on every tap: once it changes, the old chat is
@@ -739,88 +1025,189 @@ try {
       if (!same(x.answers, [C.TOAST_NOT_FOUND]) || x.sends.length || x.edits.length || x.sb.length !== 1) demoted.push(data.slice(0, 2));
     }
     const typed = await run(msg(OP, '/businesses'));
+    const typedInvite = await run(msg(OP, '/invite alder-demo'));
     process.env.OPERATOR_CHAT_ID = String(OP);
-    // Typed by a business chat or a stranger, the commands are not commands.
+    // Typed by a business chat or a stranger, the commands are not commands;
+    // /invite in a business chat is the owner's own invite, never the list.
     const ownerTyped = await run(msg(OWNER, '/businesses'));
-    const ownerPhones = await run(msg(OWNER, '/phones alder-demo'));
+    const ownerSlug = await run(msg(OWNER, '/invite beta'));
     const strangerTyped = await run(msg(CHAT_X, '/businesses'));
     const typedOk = typed.sends.length === 1 && typed.sends[0].body.text === C.BOT_NOT_CONNECTED
+      && typedInvite.sends.length === 1 && typedInvite.sends[0].body.text === C.BOT_NOT_CONNECTED
       && ownerTyped.sends.length === 1 && ownerTyped.sends[0].body.text === C.BOT_PLAIN_TEXT
-      && ownerPhones.sends.length === 1 && ownerPhones.sends[0].body.text === C.BOT_PLAIN_TEXT
       && strangerTyped.sends.length === 1 && strangerTyped.sends[0].body.text === C.BOT_NOT_CONNECTED
-      && [typed, ownerTyped, ownerPhones, strangerTyped].every((x) => !x.sb.some((q) => q.table === 'businesses'));
+      && [typed, typedInvite, ownerTyped, ownerSlug, strangerTyped].every((x) => !x.sb.some((q) => q.table === 'businesses'))
+      && !ownerSlug.sends.some((m) => /Invite: pick a business|Beta Roofing/.test(textOf(m)))
+      && store.codes.every((c) => c.business_id === BIZ_A);
+    store.codes = store.codes.filter((c) => c.code === 'KEEPKEEPKEEP');
+    store.claims = new Map();
     line(leaks.length === 0 && demoted.length === 0 && typedOk && snapshot() === before,
-      'OB11', 'non-operator chats never reach the operator callbacks',
-      `taps=${taps.length * 4} leaks=${leaks.slice(0, 3).join(',') || 'none'} demoted=${demoted.join(',') || 'none'} typed=${typedOk}`);
+      'OB12', 'non-operator chats never reach the operator callbacks',
+      `taps=${taps.length * 4} leaks=${leaks.slice(0, 3).join(',') || 'none'} demoted=${demoted.join(',') || 'none'} typed=${typedOk} unchanged=${snapshot() === before}`);
   }
 
-  /* OB12: buttons of the retired /phones screens, and /code as it was. */
-  store = freshStore();
-  seedSeven();
-  store.businesses = store.businesses.filter((b) => [BIZ_A, BIZ_B, BIZ_P].includes(b.id));
-  {
-    const row = uuid(2);
-    const pb = await run(cb(OP, `pb:${BIZ_A}`));
-    const pbOk = pb.sends.length === 0 && pb.edits.length === 1 && pb.edits[0].body.text === DETAIL_A
-      && same(kbOf(pb.edits[0]), detailKb(BIZ_A, 0)) && writes(pb.sb).length === 0;
-    const pbGone = await run(cb(OP, `pb:${BIZ_GONE}`));
-    const pbGoneOk = same(pbGone.answers, [C.OPERATOR_BUSINESS_GONE]) && pbGone.edits.length === 1
-      && String(pbGone.edits[0].body.text).startsWith('Businesses\n\n1. Alder Roofing');
-    const before = snapshot();
-    const old = [];
-    for (const kind of ['p', 'P', 'q']) {
-      const x = await run(cb(OP, `${kind}:${row}`));
-      if (!same(x.answers, [C.OPERATOR_SCREEN_EXPIRED]) || x.sends.length || x.edits.length !== 1
-        || !String(x.edits[0].body.text).startsWith('Businesses\n\n1. Alder Roofing · Demo · 2 phones') || writes(x.sb).length) old.push(kind);
-    }
-    const kept = snapshot() === before && store.chats.some((c) => c.id === row);
-    // /code: the picker, its pc: tap and the typed form, exactly as before.
-    const picker = await run(msg(OP, '/code'));
-    const pickKb = kbOf(picker.sends[0]);
-    const pickerOk = picker.sends.length === 1 && picker.sends[0].body.text === C.OPERATOR_PICK_TEXT
-      && same(pickKb, [[{ text: 'Alder Roofing', callback_data: `pc:${BIZ_A}` }], [{ text: 'Beta Roofing', callback_data: `pc:${BIZ_B}` }]]);
-    const pc = await run(cb(OP, `pc:${BIZ_A}`));
-    const pcOk = pc.sends.length === 2 && pc.edits.length === 0 && store.codes.filter((c) => c.business_id === BIZ_A).length === 1;
-    const pcPaused = await run(cb(OP, `pc:${BIZ_P}`));
-    const pcPausedOk = same(pcPaused.answers, [C.OPERATOR_UNKNOWN_SLUG]) && pcPaused.sends.length === 0;
-    const invite = await run(msg(OP, '/invite'));
-    const inviteOk = invite.sends.length === 1 && invite.sends[0].body.text === C.OPERATOR_PICK_TEXT && same(kbOf(invite.sends[0]), pickKb);
-    const hint = await run(msg(OP, '/leads'));
-    const help = await run(msg(OP, '/operator'));
-    const copyOk = hint.sends[0].body.text === C.OPERATOR_LEADS_HINT && help.sends[0].body.text === C.OPERATOR_HELP
-      && C.OPERATOR_LEADS_HINT === 'This is the operator chat. Send /businesses, open a business and tap Leads.'
-      && /\/businesses · /.test(C.OPERATOR_HELP) && /\/phones · the same list/.test(C.OPERATOR_HELP)
-      && !/Remove|\/phones \[slug\]/.test(C.OPERATOR_HELP);
-    line(pbOk && pbGoneOk && old.length === 0 && kept && pickerOk && pcOk && pcPausedOk && inviteOk && copyOk,
-      'OB12', 'old pb:/p:/P:/q: taps are harmless; /code unchanged',
-      `pb=${pbOk}/${pbGoneOk} old=${old.join(',') || 'ok'} kept=${kept} picker=${pickerOk} pc=${pcOk}/${pcPausedOk} invite=${inviteOk} copy=${copyOk}`);
-  }
-
-  /* OB13: the timing line and the call budget of every new flow. The lists
-     are literal on purpose: a new handler name or step label has to be added
-     here by hand, which is the moment to ask what it carries. */
+  /* OB13: /invite. The list, the result in place, the old ways in. */
   store = freshStore();
   leadIds = seedSeven();
   {
-    const STEPS = ['db.binding_lookup', 'db.business_page', 'db.chat_count_page', 'db.business_by_id', 'db.chat_list',
-      'db.lead_count', 'db.lead_page', 'db.lead_by_id', 'db.chat_remove_all', 'db.invite_expire',
-      'tg.send_message', 'tg.answer_callback', 'tg.edit_message_text'];
+    const INVITE0 = 'Invite: pick a business\n\n1. Alder Roofing · Demo\n2. Beta Roofing · Active\n3. Cedar Co · Active\n4. Delta Roofs · Active\n5. Echo Roofing · Active';
+    const INVITE1 = 'Invite: pick a business\n\n1. Fir & Sons · Active\n2. Gable Works (gable-one) · Demo\n3. Gable Works (gable-two) · Active\n4. Hail Pros · Active\n5. Iron Roofing · Active';
+    const r = seen(await run(msg(OP, '/invite')));
+    const list = r.sends[0] || { body: {} };
+    const kb = kbOf(list);
+    const read = r.sb.filter((q) => q.table === 'businesses');
+    // Served businesses only, one query, and no phone count: connected or not
+    // makes no difference to an invite.
+    const listOk = r.tg.length === 1 && r.sends.length === 1 && list.body.text === INVITE0
+      && kb.length === 2 && numbersOk(kb[0], 5) && PAGE0_IDS.every((id, i) => kb[0][i].callback_data === `bi:0:${id}`)
+      && same(kb[1], [{ text: 'Older', callback_data: 'bn:1' }])
+      && r.sb.length === 2 && read.length === 1 && /^in\.\("?demo"?,"?active"?\)$/.test(String(param(read[0], 'status')))
+      && param(read[0], 'order') === 'name.asc,id.asc' && param(read[0], 'limit') === '6' && writes(r.sb).length === 0;
+    // The keyboard's Invite, and the "Code" label of the keyboard before it.
+    const ways = [];
+    for (const text of ['Invite', 'Code', '/invite@alder_test_bot']) {
+      const w = await run(msg(OP, text));
+      if (w.sends.length !== 1 || w.sends[0].body.text !== INVITE0 || !same(kbOf(w.sends[0]), kb) || writes(w.sb).length) ways.push(text);
+    }
+    const keyboardOk = same(C.OPERATOR_KEYBOARD_LABELS, ['Invite', 'Businesses']) && same(C.persistentKeyboard(C.OPERATOR_KEYBOARD_LABELS), OPERATOR_KB);
+    const p1 = await run(cb(OP, 'bn:1'));
+    const kb1 = kbOf(p1.edits[0]);
+    // Ten served businesses: the second page is the last. Newer alone.
+    const pageOk = p1.sends.length === 0 && p1.edits.length === 1 && p1.edits[0].body.message_id === 9 && p1.edits[0].body.text === INVITE1
+      && kb1.length === 2 && numbersOk(kb1[0], 5) && PAGE1_IDS.every((id, i) => kb1[0][i].callback_data === `bi:1:${id}`)
+      && same(kb1[1], [{ text: 'Newer', callback_data: 'bn:0' }]);
+    const gone = await run(cb(OP, 'bn:7'));
+    const goneOk = same(gone.answers, [C.OPERATOR_PAGE_GONE]) && gone.edits.length === 1 && gone.edits[0].body.text === INVITE0;
+    store.businesses = store.businesses.filter((b) => ['paused', 'churned'].includes(b.status));
+    const none = await run(msg(OP, '/invite'));
+    const noneOk = none.sends.length === 1 && none.sends[0].body.text === 'No business to invite.' && kbOf(none.sends[0]).length === 0;
+    store.businesses = freshStore().businesses;
+
+    // A number: the same message becomes the invite.
+    const resultText = (name, code) => `${name}\n\nInvite link · works once · expires in 24 hours\nhttps://t.me/alder_test_bot?start=${code}\n\nForward this link to the business owner.`;
+    const tap = seen(await run(cb(OP, `bi:0:${BIZ_A}`)));
+    const first = store.codes[0] || {};
+    const hours = (new Date(first.expires_at).getTime() - Date.now()) / 3600000;
+    const edit = tap.edits[0] || { body: {} };
+    const resultOk = tap.sends.length === 0 && tap.edits.length === 1 && edit.body.message_id === 9
+      && store.codes.length === 1 && first.business_id === BIZ_A && !first.used_at && /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{12}$/.test(String(first.code))
+      && hours > 23.9 && hours <= 24
+      && edit.body.text === resultText('Alder Roofing', first.code)
+      && same(kbOf(edit), [[{ text: 'Back', callback_data: 'bn:0' }]])
+      && edit.body.disable_web_page_preview === true && !('parse_mode' in edit.body) && !('entities' in edit.body)
+      && same(tap.answers, ['']);
+    // Again: a new code, and the older unused one no longer works.
+    const second = await run(cb(OP, `bi:0:${BIZ_A}`));
+    const live = liveCodes(BIZ_A);
+    const supersedeOk = same(second.answers, ['1 older invite was cancelled.']) && store.codes.length === 2 && live.length === 1
+      && live[0].code !== first.code && second.edits[0].body.text === resultText('Alder Roofing', live[0].code);
+    // A business with no phone at all, from the list and from its own screen.
+    const fir = await run(cb(OP, `bi:1:${biz(9)}`));
+    const firCode = liveCodes(biz(9))[0] || {};
+    const fromBusiness = await run(cb(OP, `bv:1:${biz(9)}`));
+    const firCode2 = liveCodes(biz(9))[0] || {};
+    const unconnectedOk = fir.edits.length === 1 && fir.edits[0].body.text === resultText('Fir & Sons', firCode.code)
+      && same(kbOf(fir.edits[0]), [[{ text: 'Back', callback_data: 'bn:1' }]])
+      && fromBusiness.sends.length === 0 && fromBusiness.edits.length === 1
+      && fromBusiness.edits[0].body.text === resultText('Fir & Sons', firCode2.code) && firCode2.code !== firCode.code
+      && same(kbOf(fromBusiness.edits[0]), backKb(biz(9), 1));
+    // Suspended: one short line, no code, and the screen under it is current.
+    const LINE = 'Zz Paused is suspended. Reactivate it first.';
+    const sList = await run(cb(OP, `bi:0:${BIZ_P}`));
+    const sPick = await run(cb(OP, `pc:${BIZ_P}`));
+    const sBusiness = await run(cb(OP, `bv:2:${BIZ_P}`));
+    const sTyped = seen(await run(msg(OP, '/invite zz-paused')));
+    const suspendedOk = [sList, sPick].every((x) => same(x.answers, [LINE]) && x.sends.length === 0 && x.edits.length === 1 && x.edits[0].body.text === INVITE0)
+      && same(sBusiness.answers, [LINE]) && sBusiness.edits.length === 1 && sBusiness.edits[0].body.text === DETAIL_P
+      && same(kbOf(sBusiness.edits[0]), suspendedKb(BIZ_P, 2))
+      && sTyped.sends.length === 1 && textOf(sTyped.sends[0]) === LINE
+      && !store.codes.some((c) => c.business_id === BIZ_P) && [sList, sPick, sBusiness, sTyped].every((x) => writes(x.sb).length === 0);
+    // /invite <slug>: the shortcut, as /code <slug> was. Two messages.
+    const typed = seen(await run(msg(OP, '/invite beta')));
+    const beta = liveCodes(BIZ_B)[0] || {};
+    const forward = C.botForwardText({ code: beta.code, username: 'alder_test_bot', hours: 24 });
+    const shortcutOk = typed.sends.length === 2 && typed.edits.length === 0 && store.codes.filter((c) => c.business_id === BIZ_B).length === 1
+      && textOf(typed.sends[0]) === `Code for beta: ${beta.code}\n\nExpires in 24 hours. The next message is for the client — forward it as it is.`
+      && textOf(typed.sends[1]) === (typeof forward === 'string' ? forward : forward.text)
+      && !/beta|Beta/.test(textOf(typed.sends[1]));
+    const unknown = await run(msg(OP, '/invite no-such-business'));
+    const usage = await run(msg(OP, '/invite Not_A_Slug'));
+    const wordsOk = unknown.sends.length === 1 && textOf(unknown.sends[0]) === 'No business with that slug. Send /businesses to see the list.'
+      && usage.sends.length === 1 && textOf(usage.sends[0]) === 'Usage: /invite [slug]'
+      && writes(unknown.sb).length === 0 && writes(usage.sb).length === 0;
+    // A button of the old /code picker still makes an invite, in place.
+    const pc = await run(cb(OP, `pc:${biz(4)}`));
+    const cedar = liveCodes(biz(4))[0] || {};
+    const pcOk = pc.sends.length === 0 && pc.edits.length === 1 && pc.edits[0].body.text === resultText('Cedar Co', cedar.code)
+      && same(kbOf(pc.edits[0]), [[{ text: 'Back', callback_data: 'bn:0' }]]);
+    // Ten an hour for one business, by any way in; then no code. And no code
+    // when the counter cannot be reached.
+    const count = () => store.codes.filter((c) => c.business_id === BIZ_A).length;
+    for (let i = count(); i < 10; i++) await run(cb(OP, `bi:0:${BIZ_A}`));
+    const atCap = count();
+    const over = await run(cb(OP, `bi:0:${BIZ_A}`));
+    const overTyped = await run(msg(OP, '/invite alder-demo'));
+    sbHook = ({ table }) => (table === 'rpc/hit_rate_limit' ? fail500() : null);
+    const blind = await run(cb(OP, `bi:0:${biz(5)}`));
+    sbHook = null;
+    const capOk = atCap === 10 && count() === 10 && same(over.answers, ['Too many invites for that business in the last hour. Wait, then try again.'])
+      && over.edits.length === 0 && over.sends.length === 0
+      && overTyped.sends.length === 1 && textOf(overTyped.sends[0]) === 'Too many invites for that business in the last hour. Wait, then try again.'
+      && store.claims.get('opcode:alder-demo') === 12
+      && same(blind.answers, [C.TOAST_GENERIC_ERROR]) && !store.codes.some((c) => c.business_id === biz(5));
+    // Nothing but invites was written: no binding, no status, no lead.
+    const fresh = freshStore();
+    const onlyCodes = JSON.stringify({ b: store.businesses, c: store.chats }) === JSON.stringify({ b: fresh.businesses, c: fresh.chats }) && store.leads.length === 8;
+    line(listOk && ways.length === 0 && keyboardOk && pageOk && goneOk && noneOk && resultOk && supersedeOk && unconnectedOk && suspendedOk
+      && shortcutOk && wordsOk && pcOk && capOk && onlyCodes,
+      'OB13', '/invite: list, result in place, old Code label and pc: route',
+      `list=${listOk} ways=${ways.join(',') || 'ok'} kb=${keyboardOk} page=${pageOk}/${goneOk}/${noneOk} result=${resultOk} again=${supersedeOk} unconnected=${unconnectedOk} suspended=${suspendedOk} slug=${shortcutOk}/${wordsOk} pc=${pcOk} cap=${capOk} only=${onlyCodes}`);
+  }
+
+  /* OB14: the timing line and the call budget of every flow. The lists are
+     literal on purpose: a new handler name or step label has to be added here
+     by hand, which is the moment to ask what it carries. */
+  store = freshStore();
+  leadIds = seedSeven();
+  {
+    const STEPS = ['db.binding_lookup', 'db.business_page', 'db.chat_count_page', 'db.business_by_id', 'db.business_by_slug', 'db.chat_list',
+      'db.lead_totals', 'db.lead_count_recent', 'db.operator_lead_page', 'db.operator_lead_by_id', 'db.business_status_update',
+      'db.rate_limit', 'db.invite_list', 'db.invite_expire', 'db.invite_mint', 'lookup.bot_username',
+      'mail.suspension_notice', 'tg.send_message', 'tg.answer_callback', 'tg.edit_message_text'];
     const row = uuid(2);
     // [update, handler name, type, database calls, Telegram calls]
     const flows = [
       [msg(OP, '/businesses'), 'cmd.operator_businesses', 'message', 3, 1],
-      [msg(OP, '/phones'), 'cmd.operator_phones', 'message', 3, 1],
+      [msg(OP, '/invite'), 'cmd.operator_invite', 'message', 2, 1],
+      [msg(OP, 'Code'), 'cmd.operator_invite', 'message', 2, 1],
+      [msg(OP, '/help'), 'cmd.operator_help', 'message', 1, 1],
+      [msg(OP, '/phones alder-demo'), 'text.operator_fallback', 'message', 1, 1],
+      [msg(OP, '/code'), 'text.operator_fallback', 'message', 1, 1],
       [cb(OP, 'bl:1'), 'cb.operator_business_page', 'callback', 3, 2],
-      [cb(OP, `bd:0:${BIZ_A}`), 'cb.operator_business_open', 'callback', 4, 2],
+      [cb(OP, 'bn:1'), 'cb.operator_invite_page', 'callback', 2, 2],
+      // Binding, business, phones, the two lead aggregates.
+      [cb(OP, `bd:0:${BIZ_A}`), 'cb.operator_business_open', 'callback', 5, 2],
       [cb(OP, `bq:0:0:${BIZ_A}`), 'cb.operator_leads_page', 'callback', 3, 2],
       [cb(OP, `bo:0:0:${packed(BIZ_A, leadIds[0])}`), 'cb.operator_lead_open', 'callback', 3, 2],
-      [cb(OP, `pb:${BIZ_A}`), 'cb.operator_pick_phones', 'callback', 4, 2],
-      [cb(OP, `P:${row}`), 'cb.operator_phone_legacy', 'callback', 3, 2],
-      [cb(OP, `bt:0:${BIZ_A}`), 'cb.operator_terminate_ask', 'callback', 3, 2],
-      // Binding, business, phones, one delete, one invite update; two notices, the toast, the edit.
-      [cb(OP, `bT:0:${BIZ_A}`), 'cb.operator_terminate', 'callback', 5, 4],
-      [cb(OP, `bT:0:${BIZ_A}`), 'cb.operator_terminate', 'callback', 3, 2],
-      [cb(OWNER, `bT:0:${BIZ_B}`), 'cb.operator_terminate', 'callback', 1, 1],
+      // Binding, business, the counter, the live invites, their expiry, the new one.
+      [cb(OP, `bi:0:${BIZ_A}`), 'cb.operator_invite_open', 'callback', 6, 2],
+      [cb(OP, `bv:0:${BIZ_A}`), 'cb.operator_invite_business', 'callback', 6, 2],
+      [cb(OP, `pc:${BIZ_B}`), 'cb.operator_pick_code', 'callback', 6, 2],
+      [cb(OP, `bt:0:${BIZ_A}`), 'cb.operator_expired', 'callback', 5, 2],
+      [cb(OP, `pb:${BIZ_A}`), 'cb.operator_expired', 'callback', 5, 2],
+      [cb(OP, `P:${row}`), 'cb.operator_expired', 'callback', 3, 2],
+      [cb(OP, `bs:0:${BIZ_A}`), 'cb.operator_suspend_ask', 'callback', 2, 2],
+      // Binding, business, phones, one update; two notices, the toast, the edit.
+      [cb(OP, `bS:0:${BIZ_A}`), 'cb.operator_suspend', 'callback', 4, 4],
+      [cb(OP, `bS:0:${BIZ_A}`), 'cb.operator_suspend', 'callback', 3, 2],
+      [msg(OWNER, '/leads'), 'cmd.suspended', 'message', 1, 1],
+      [msg(OWNER, 'Invite'), 'cmd.suspended', 'message', 1, 1],
+      [msg(OWNER, 'good morning'), 'text.suspended', 'message', 2, 1],
+      [cb(OWNER, `L:0:${leadIds[0]}`), 'cb.suspended', 'callback', 1, 1],
+      // Binding, business, phones, one update; two notices, the toast, the edit.
+      [cb(OP, `br:0:${BIZ_A}`), 'cb.operator_reactivate', 'callback', 4, 4],
+      [cb(OP, `br:0:${BIZ_A}`), 'cb.operator_reactivate', 'callback', 3, 2],
+      [cb(OWNER, `bS:0:${BIZ_B}`), 'cb.operator_suspend', 'callback', 1, 1],
     ];
     const problems = [];
     for (const [update, handlerName, type, db, tg] of flows) {
@@ -840,32 +1227,108 @@ try {
       const allowed = new Set([handlerName, type, ...STEPS]);
       if (strings.some((x) => !allowed.has(x))) problems.push(`${handlerName}: free string`);
       const cbq = update.callback_query;
-      const forbidden = [String(OP), String(OWNER), String(STAFF), BIZ_A, BIZ_B, 'Alder', 'alder-demo', 'Request 1', '5155550100',
-        'fixture.invalid', SECRET, ...leadIds, C.packUuid(BIZ_A), ...(cbq ? [cbq.id, cbq.data] : [update.message.text])];
+      const forbidden = [String(OP), String(OWNER), String(STAFF), BIZ_A, BIZ_B, 'Alder', 'alder-demo', PII.name, PII.phone,
+        'fixture.invalid', SECRET, ...leadIds, C.packUuid(BIZ_A), ...store.codes.map((c) => c.code), ...(cbq ? [cbq.id, cbq.data] : [update.message.text])];
       if (forbidden.some((x) => x && r.lines[0].includes(x))) problems.push(`${handlerName}: leaked`);
     }
-    line(problems.length === 0, 'OB13', 'timing line and call budget of every operator flow',
-      `flows=${flows.length} problems=${problems.slice(0, 2).join('; ') || 'none'}`);
+    line(problems.length === 0, 'OB14', 'timing line and call budget of every operator flow',
+      `flows=${flows.length} problems=${problems.slice(0, 4).join('; ') || 'none'}`);
+    if (problems.length > 4) console.log('NOTE       ' + problems.slice(4).join('; '));
   }
 
-  /* OB14: over the whole suite. */
+  /* OB16: the owner's own rules did not move. A phone that is not the main
+     phone cannot invite and cannot remove a phone. */
+  store = freshStore();
+  {
+    const before = snapshot();
+    const ownerRow = uuid(1);
+    const staffRow = uuid(2);
+    const typed = [];
+    for (const text of ['/invite', 'Invite', '/recipients', 'Recipients']) {
+      const x = await run(msg(STAFF, text));
+      if (x.sends.length !== 1 || textOf(x.sends[0]) !== C.BOT_OWNER_ONLY || kbOf(x.sends[0]).length || writes(x.sb).length) typed.push(text);
+    }
+    const taps = [];
+    for (const data of [`x:${ownerRow}`, `X:${ownerRow}`, `x:${staffRow}`, `X:${staffRow}`, `v:${ownerRow}`, 'i:c']) {
+      const x = await run(cb(STAFF, data));
+      const toast = x.answers.length === 1 && [C.TOAST_OWNER_ONLY, C.BOT_OWNER_ONLY].includes(x.answers[0]);
+      if (!toast || x.sends.length || x.edits.length || writes(x.sb).length) taps.push(data.slice(0, 3));
+    }
+    const refusedOk = typed.length === 0 && taps.length === 0 && snapshot() === before && store.codes.length === 0;
+    // The same taps by the main phone do work: the refusal above is the role.
+    const invite = await run(msg(OWNER, '/invite'));
+    const remove = await run(cb(OWNER, `X:${staffRow}`));
+    const ownerOk = store.codes.length === 1 && store.codes[0].business_id === BIZ_A && invite.sends.length === 2
+      && !store.chats.some((c) => c.id === staffRow) && store.chats.some((c) => c.id === ownerRow)
+      && writes(remove.sb).some((q) => q.table === 'business_chats' && q.method === 'DELETE' && param(q, 'business_id') === `eq.${BIZ_A}`);
+    line(refusedOk && ownerOk, 'OB16', 'a guest phone cannot invite or remove phones; the main phone can',
+      `typed=${typed.join(',') || 'ok'} taps=${taps.join(',') || 'ok'} refused=${refusedOk} owner=${ownerOk}`);
+  }
+
+  /* OB17: a new lead's alert reaches every bound phone of its business. */
+  store = freshStore();
+  {
+    const { sendTelegramAlert } = await import('../lib/notify.js');
+    store.chats.push({ id: uuid(5), business_id: BIZ_A, tg_chat_id: CHAT_X, label: 'Office', created_at: '2026-11-05T10:00:00Z' });
+    const leadId = seedLead(BIZ_A, { name: 'Fan Out' });
+    const lead = store.leads.find((l) => l.id === leadId);
+    const business = store.businesses.find((b) => b.id === BIZ_A);
+    const bound = [OWNER, STAFF, CHAT_X].map(String).sort();
+    const alert = async (extra = {}) => {
+      await tgReset(); sbRequests = [];
+      const result = await sendTelegramAlert({ leadId, business, lead, ...extra });
+      const sent = of(await tgReqs(), 'sendMessage');
+      return { result, sent, to: sent.map((m) => String(m.body.chat_id)).sort(), sb: sbRequests.slice() };
+    };
+    const all = await alert();
+    const phones = all.sb.filter((q) => q.table === 'business_chats');
+    const allOk = all.result.ok === true && same(all.to, bound) && all.sent.every((m) => textOf(m).includes('Fan Out'))
+      && phones.length === 1 && param(phones[0], 'business_id') === `eq.${BIZ_A}`
+      && !all.to.includes(String(CHAT_B)) && !all.to.includes(String(OP));
+    // One phone fails: the others still got theirs once, and the retry goes
+    // to the failed phone alone.
+    await tgCtl({ mode: 'ok', failChat: String(STAFF) });
+    const partial = await alert();
+    await tgCtl({ mode: 'ok', failChat: null });
+    const pending = (partial.result.pendingChats || []).map(String);
+    const retry = await alert({ fallback: true, onlyChats: partial.result.pendingChats });
+    const retryOk = partial.result.ok === false && same(partial.to, bound) && same(pending, [String(STAFF)])
+      && retry.result.ok === true && same(retry.to, [String(STAFF)]);
+    // No phone bound: nobody is sent the lead card.
+    const none = await (async () => {
+      await tgReset();
+      const result = await sendTelegramAlert({ leadId, business: store.businesses.find((b) => b.id === biz(4)), lead });
+      return { result, sent: of(await tgReqs(), 'sendMessage') };
+    })();
+    const noneOk = none.result.ok === false && none.result.status === 'no_chat' && !none.sent.some((m) => [...bound, String(CHAT_B)].includes(String(m.body.chat_id)));
+    line(allOk && retryOk && noneOk, 'OB17', 'lead alert: every bound phone once, nobody else',
+      `all=${allOk} to=${all.to.length} retry=${retryOk} pending=${pending.length} none=${noneOk}`);
+  }
+
+  /* OB15: over the whole suite, every message the operator chat was sent. */
   {
     await tgReset();
     const withParse = allTg.filter((x) => x.body && typeof x.body === 'object' && 'parse_mode' in x.body);
-    const inline = allTg.flatMap((x) => kbOf(x).flat());
+    const toOperator = allTg.filter((x) => x.body && String(x.body.chat_id) === String(OP));
+    const inline = toOperator.flatMap((x) => kbOf(x).flat());
     const EMOJI = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{FE0F}\u{200D}\u{2190}-\u{21FF}]/u;
-    const withEmoji = inline.filter((b) => EMOJI.test(String(b.text)));
-    const PATTERNS = [/^bl:\d{1,3}$/, /^(bd|bt|bT):\d{1,3}:[0-9a-f-]{36}$/, /^bq:\d{1,2}:\d{1,3}:[0-9a-f-]{36}$/,
-      /^bo:\d{1,2}:\d{1,3}:[A-Za-z0-9_-]{44}$/, /^pc:[0-9a-f-]{36}$/];
+    const withEmoji = allTg.flatMap((x) => kbOf(x).flat()).filter((b) => EMOJI.test(String(b.text)));
+    const PATTERNS = [/^(bl|bn):\d{1,3}$/, /^(bd|bs|bS|br|bv|bi):\d{1,3}:[0-9a-f-]{36}$/, /^bq:\d{1,2}:\d{1,3}:[0-9a-f-]{36}$/,
+      /^bo:\d{1,2}:\d{1,3}:[A-Za-z0-9_-]{44}$/];
     const data = inline.map((b) => String(b.callback_data));
     const unshaped = data.filter((d) => Buffer.byteLength(d, 'utf8') > 64 || !PATTERNS.some((p) => p.test(d)));
-    const styled = inline.filter((b) => b.style && !(b.style === 'danger' && ['Terminate', 'Confirm terminate'].includes(b.text)));
-    line(allTg.length > 150 && withParse.length === 0 && inline.length > 150 && withEmoji.length === 0
-      && unshaped.length === 0 && styled.length === 0
-      && inline.filter((b) => b.text === 'Terminate').every((b) => b.style === 'danger')
-      && inline.filter((b) => b.text === 'Confirm terminate').every((b) => b.style === 'danger'),
-      'OB14', 'no parse_mode, no emoji, callbacks anchored and <= 64 bytes',
-      `requests=${allTg.length} buttons=${inline.length} parse=${withParse.length} emoji=${withEmoji.length} unshaped=${unshaped.slice(0, 2).join(',') || 'none'}`);
+    const STYLES = { Suspend: 'danger', 'Confirm suspend': 'danger', Invite: 'primary', Reactivate: 'primary' };
+    const styled = inline.filter((b) => (b.style || null) !== (STYLES[b.text] || null));
+    const labels = [...new Set(inline.map((b) => b.text))].filter((t) => !/^\d$/.test(t)).sort();
+    const labelsOk = same(labels, ['Back', 'Cancel', 'Confirm suspend', 'Invite', 'Leads', 'Newer', 'Older', 'Reactivate', 'Suspend']);
+    // Nothing a customer typed, and no retired word, in anything the operator
+    // chat was shown by the flows above.
+    const words = operatorTexts.filter((t) => /Requests?\b|Terminate|\/phones|\/code\b/.test(t)
+      || [PII.name, PII.phone, PII.email, PII.notes, PII.address].some((x) => t.includes(x)));
+    line(allTg.length > 400 && withParse.length === 0 && inline.length > 150 && withEmoji.length === 0
+      && unshaped.length === 0 && styled.length === 0 && labelsOk && operatorTexts.length > 30 && words.length === 0,
+      'OB15', 'no parse_mode, no emoji, anchored callbacks <= 64 bytes, styles',
+      `requests=${allTg.length} buttons=${inline.length} parse=${withParse.length} emoji=${withEmoji.length} unshaped=${unshaped.slice(0, 2).join(',') || 'none'} styled=${styled.slice(0, 2).map((b) => b.text).join(',') || 'none'} labels=${labelsOk} words=${words.length}`);
   }
 } catch (e) {
   line(false, 'OB0', 'operator-browser suite threw', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e));
@@ -873,6 +1336,7 @@ try {
   globalThis.fetch = realFetch;
   for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
   await tgCtl({ mode: 'ok', failChat: null }).catch(() => {});
+  await mailCtl({ mode: 'ok' }).catch(() => {});
 }
 
 console.log('');

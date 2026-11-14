@@ -267,7 +267,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 /** The exact layouts. Literal on purpose: a changed constant must fail here. */
 const OWNER_KB = { keyboard: [[{ text: 'Invite' }, { text: 'Leads' }]], is_persistent: true, resize_keyboard: true };
 const STAFF_KB = { keyboard: [[{ text: 'Leads' }]], is_persistent: true, resize_keyboard: true };
-const OPERATOR_KB = { keyboard: [[{ text: 'Code' }, { text: 'Businesses' }]], is_persistent: true, resize_keyboard: true };
+const OPERATOR_KB = { keyboard: [[{ text: 'Invite' }, { text: 'Businesses' }]], is_persistent: true, resize_keyboard: true };
 const REMOVE_KB = { remove_keyboard: true };
 /** A list keyboard's first row is the number row: "1".."N", nothing else. */
 const numbersOk = (row, n) => Array.isArray(row) && row.length === n
@@ -624,8 +624,13 @@ try {
     await call(msg(OP, 'Businesses'));
     const pressBiz = (await sends()).pop();
     await tgReset();
+    // "Code" is the label of the operator keyboard before this one: a press
+    // on it still opens the invite flow, exactly like the Invite label.
     await call(msg(OP, 'Code'));
     const pressCode = (await sends()).pop();
+    await tgReset();
+    await call(msg(OP, 'Invite'));
+    const pressOpInvite = (await sends()).pop();
     // The operator's labels are not commands in a business chat: the same
     // check as the typed command, so the owner gets the plain-text hint.
     await tgReset();
@@ -649,7 +654,9 @@ try {
       // The operator's business browser: the list, with its number row.
       && String(pressBiz.body.text) === 'Businesses\n\n1. Alder Roofing · Demo · 2 phones\n2. Beta Roofing · Active · 1 phone'
       && same(kbOf(pressBiz), [[{ text: '1', callback_data: `bd:0:${BIZ_A}` }, { text: '2', callback_data: `bd:0:${BIZ_B}` }]])
-      && String(pressCode.body.text) === C.OPERATOR_PICK_TEXT
+      && String(pressCode.body.text) === 'Invite: pick a business\n\n1. Alder Roofing · Demo\n2. Beta Roofing · Active'
+      && same(kbOf(pressCode), [[{ text: '1', callback_data: `bi:0:${BIZ_A}` }, { text: '2', callback_data: `bi:0:${BIZ_B}` }]])
+      && String(pressOpInvite.body.text) === String(pressCode.body.text) && same(kbOf(pressOpInvite), kbOf(pressCode))
       && String(ownerPressBiz.body.text) === C.BOT_PLAIN_TEXT && same(kbText(ownerPressBiz), OWNER_KB)
       && String(legacyHelp.body.text) === C.BOT_HELP && same(kbText(legacyHelp), OWNER_KB),
       'LB11', 'keyboard per role: one row, <= 2 buttons; presses map onto commands',
@@ -659,7 +666,8 @@ try {
   /* LB12: an unbind sends one notice carrying ReplyKeyboardRemove. The
      operator's old per-phone "Remove" (P:) no longer removes anything: the
      tap says the screen expired and shows the business list. (The operator's
-     Terminate, which unbinds a whole business, is tests/operator-browser.) */
+     Suspend, which stops a whole business and unbinds nothing, is
+     tests/operator-browser.) */
   store = freshStore();
   {
     const staffRow = store.chats.find((r) => String(r.tg_chat_id) === String(STAFF));
@@ -803,7 +811,7 @@ try {
       // chat was never sent a business one.
       && [ownerFree, ownerUnknown, ownerCode, staffFree, bChat, ownerThird, boundOperator, unboundFree].flat()
         .every((x) => !/Businesses|Code/.test(JSON.stringify(kbText(x))))
-      && !/Leads|Invite/.test(JSON.stringify(kbText(opFree[0])));
+      && !/Leads|Code/.test(JSON.stringify(kbText(opFree[0])));
     line(ok, 'LB17', 'free text reply carries the role keyboard; unbound gets none',
       `op=${one(opFree, C.OPERATOR_WELCOME, OPERATOR_KB)} owner=${one(ownerFree, C.BOT_PLAIN_TEXT, OWNER_KB)} staff=${one(staffFree, C.BOT_PLAIN_TEXT, STAFF_KB)} unbound=${one(unboundFree, C.BOT_NOT_CONNECTED, REMOVE_KB)} fourth=${ownerFourth.length} boundOp=${one(boundOperator, C.OPERATOR_WELCOME, STAFF_KB)}`);
   }

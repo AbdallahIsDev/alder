@@ -114,6 +114,18 @@ lines after the Job section.
 digits starting with 1 to `+`, a leading `+` stays, anything else is the bare
 digits. Display text is never altered.
 
+## Suspension email
+
+`suspendedEmail(business)` in `lib/email-builders.js`, sent by
+`sendSuspensionEmail` in `lib/notify.js` when the operator suspends a
+business. It goes to the business's owner email address, from "Lead Alerts",
+with the subject "Your service has been suspended" and one sentence: "Your
+service has been suspended. Contact support if this is a mistake." It uses the
+same shell as the other operational emails and names no lead. The idempotency
+key is `suspended:<business id>:<UTC day>`, so suspending the same business
+twice in one day sends one email. A failed send is counted in the operator's
+result line and never blocks the suspension. Reactivation sends no email.
+
 ## Customer emails
 
 Both customer mails share the owner email's dark band but logo-only (no
