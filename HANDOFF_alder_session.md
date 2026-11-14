@@ -22,7 +22,8 @@ Living handoff for continuing sessions. Update after each task bundle. No secret
 - **One alarm.** `/api/selfcheck` sends one aggregated operator message (problems first,
   each affected business by slug), then owner messages per business. No recipient
   de-duplication: two businesses sharing an inbox get two messages.
-- **Operator commands**: `/code`, `/phones`, `/businesses`, `/operator`, all authorised by
+- **Operator commands** (as of this snapshot; since 2026-11-14 they are `/businesses`,
+  `/invite`, `/help`, `/id`, see `SESSION_HANDOFF.md`): `/code`, `/phones`, `/businesses`, `/operator`, all authorised by
   chat id in a private chat; `/id` works everywhere and is not in the menu. Menus are
   registered by `npm run tg:commands` (owner default, operator chat-scoped).
 - **Owner phone = oldest connected phone.** Only it may `/invite` or remove; every phone
