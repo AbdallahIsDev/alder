@@ -276,9 +276,9 @@ const samples = sampleTelegramTexts();
     && btnKeys(kb).every((k) => k === 'text')
     && kb.keyboard[0].every((b) => /^[A-Za-z]+$/.test(b.text)));
   // The exact layouts, left to right.
-  const setsOk = same(owner.keyboard, [[{ text: 'Leads' }, { text: 'Invite' }]])
+  const setsOk = same(owner.keyboard, [[{ text: 'Invite' }, { text: 'Leads' }]])
     && same(staff.keyboard, [[{ text: 'Leads' }]])
-    && same(op.keyboard, [[{ text: 'Businesses' }, { text: 'Code' }]]);
+    && same(op.keyboard, [[{ text: 'Code' }, { text: 'Businesses' }]]);
   const labels = [...C.OWNER_KEYBOARD_LABELS, ...C.STAFF_KEYBOARD_LABELS, ...C.OPERATOR_KEYBOARD_LABELS];
   const mapped = labels.map((l) => C.KEYBOARD_LABELS[l]);
   // The map is the current labels plus the four a phone may still be showing
@@ -286,7 +286,7 @@ const samples = sampleTelegramTexts();
   const legacy = Object.keys(C.LEGACY_KEYBOARD_LABELS);
   const mapOk = same(Object.keys(C.KEYBOARD_LABELS).sort(), [...new Set([...labels, ...legacy])].sort())
     && same(legacy.sort(), ['Help', 'Operator', 'Phones', 'Recipients'])
-    && same(mapped, ['/leads', '/invite', '/leads', '/businesses', '/code'])
+    && same(mapped, ['/invite', '/leads', '/leads', '/code', '/businesses'])
     && C.KEYBOARD_LABELS.Recipients === '/recipients' && C.KEYBOARD_LABELS.Help === '/help'
     && C.KEYBOARD_LABELS.Phones === '/phones' && C.KEYBOARD_LABELS.Operator === '/operator'
     && Object.values(C.KEYBOARD_LABELS).every((cmd) => typeof cmd === 'string' && /^\/[a-z_]+$/.test(cmd) && cmd.length <= 32);
