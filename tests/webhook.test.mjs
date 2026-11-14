@@ -2107,9 +2107,9 @@ try {
         // two flags. Literal on purpose.
         const layoutIs = (kb, rows) => !!kb && kb.is_persistent === true && kb.resize_keyboard === true
           && JSON.stringify(kb.keyboard) === JSON.stringify(rows.map((row) => row.map((text) => ({ text }))));
-        const OWNER_ROWS = [['Leads', 'Invite']];
+        const OWNER_ROWS = [['Invite', 'Leads']];
         const STAFF_ROWS = [['Leads']];
-        const OPERATOR_ROWS = [['Businesses', 'Code']];
+        const OPERATOR_ROWS = [['Code', 'Businesses']];
         await reset();
         await good(msg(invStaff, 'Invite'));
         const staffPress = (await sends()).map((x) => x.body.text).join('|');
