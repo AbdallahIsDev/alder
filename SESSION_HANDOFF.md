@@ -1,7 +1,7 @@
 # SESSION HANDOFF: Alder roofing lead platform (orchestrator continuation)
 
 > **Purpose.** Give this file to any cloud AI assistant so it can continue as the **orchestrator** for this project without the owner re-explaining anything.
-> **Last updated:** 2026-11-14 (keyboard button order swap on `arena/f38f9758-alder`: owner `Invite` `Leads`, operator `Code` `Businesses`).
+> **Last updated:** 2026-11-14 (Telegram widget docs added on `telegram-widgets`; TEST bot identity could not be compared with production, so no widget was sent).
 > **Rule for the local agent:** after every task, update the change log and any section whose facts changed. Never put secret values in it.
 
 ---
@@ -450,6 +450,7 @@ description may be edited; draft state and merges are the owner's decision.
 | 2026-11-14 | `arena/f38f9758-alder` | `9f04a9f` | Order only: the two persistent-keyboard buttons are swapped. Owner is now `Invite` (left) `Leads` (right); operator is `Code` (left) `Businesses` (right); staff (`Leads`) and unbound chats (`remove_keyboard`) unchanged. This supersedes the order recorded in the row above. Only `OWNER_KEYBOARD_LABELS` and `OPERATOR_KEYBOARD_LABELS` in `lib/content.js` changed (array order = on-screen order, left to right); no routing, permission, tenant, callback or text change. | DB-free suites via the scratch runner (no `.env.test` here): 21 suites, 175/175, incl. bot-text 19/19, lead-browser 18/18, recipients 25/25. `tests/webhook.test.mjs` edited and UNRUN (DB-backed): OP60 and OP62, through the shared `OWNER_ROWS` / `OPERATOR_ROWS` literals. All other DB-backed suites unrun. Assertion changes (before -> after), same strictness, exact equality kept: T14 owner `[Leads, Invite]` -> `[Invite, Leads]`, operator `[Businesses, Code]` -> `[Code, Businesses]`, and the label-to-command list follows the same order (`/leads,/invite,/leads,/businesses,/code` -> `/invite,/leads,/leads,/code,/businesses`); LB11/LB17 `OWNER_KB` / `OPERATOR_KB` literals reordered the same way; OP60/OP62 `OWNER_ROWS` / `OPERATOR_ROWS` reordered the same way. No mutation campaign. Review diff: `_debug/patches/arena/f38f9758-alder-review.diff` (gitignored). |
 
 | 2026-11-14 | `telegram-widgets` | (this commit) | Added `docs/audits/telegram-widgets.md` from Bot API 10.4 widget source snapshots; assessed owner/operator design, tenant and HTML-data boundaries, update subscription, and first slice. | Docs only; snapshots and smoke script gitignored under `_debug/`; one-shot smoke returned `Unauthorized`, no widget delivered. Project suites not run per instruction. Client build numbers and `sign_data` verification procedure are absent from fetched docs. |
+| 2026-11-14 | `telegram-widgets` | (this commit) | Merged `origin/main` at `28f6da2`; added cloud-agent implementation notes with request JSON, widget API/CSS, safe list example, and measured state byte budgets. TEST `getMe` succeeded (HTTP 200), but no production bot username was configured for a safe identity comparison; `sendWidget` skipped. | Docs only; no project suites run per instruction. Saved source snapshots remain under ignored `_debug/telegram-docs/widgets/`. Device rendering, identity comparison, and widget delivery remain unverified. |
 
 ### Edge cases — operator redirects (R1a) and T1
 | Case | Behaviour |
