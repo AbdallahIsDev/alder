@@ -85,7 +85,7 @@ The documented test card `4242 4242 4242 4242` succeeds with any future expiry a
 
 ## 7. Seller payouts, fees, and tax
 
-Payout choices vary by seller country; the docs say bank, mobile-wallet, and crypto payout coverage spans 200+ countries, but do not identify what an Egyptian seller will see. A payout bank must accept the payout currency; Whop says it does not automatically convert USD proceeds into the seller’s local currency before payout. PayPal payout is only available when the buyer originally paid with PayPal. Coinbase payout requires a Coinbase wallet and the buyer to have paid with crypto; the payout guide says crypto payouts require a one-time pricing plan, so that route does not fit a recurring-card subscription. Country-specific payout minimums and a generic settlement calendar were not found in the pages captured. [S20, S21]
+Payout choices vary by seller country; the docs say bank, mobile-wallet, and crypto payout coverage spans 200+ countries, but do not identify what an Egyptian seller will see. A payout bank must accept the payout currency; Whop says it does not automatically convert USD proceeds into the seller’s local currency before payout. PayPal payout is only available when the buyer originally paid with PayPal. Coinbase payout requires a Coinbase wallet and the buyer to have paid with crypto; the payout guide says crypto payouts require a one-time pricing plan, so that route does not fit a recurring-card subscription. The fee page names Bitcoin and Ethereum as examples but does not specify available payout networks/chains. Country-specific payout minimums and a generic settlement calendar were not found in the pages captured. [S20, S21]
 
 Published payout fees include next-day ACH to US banks: $2.50; instant bank deposit/RTP where supported: 4% + $2.50; crypto: 5% + $1.00; Venmo (US recipients): 5% + $2.50; bank wire: $23; international local bank: varies by country. The fees page says bank wire typically takes 1–2 business days in the US, international local timing varies, and same-day payout availability depends on the route. It does not give the international bank minimum or Egyptian schedule. [S21]
 
@@ -138,7 +138,7 @@ I did not find a numeric REST rate limit, burst policy, or `Retry-After` contrac
 3. Exact payment-list filters for fetching all payments for a single membership; endpoint reference and object relationship were captured, but the list filter was not confirmed.
 4. Numeric REST API rate/burst limits and `Retry-After` behavior.
 5. Exact subscription retry attempt count/timestamps and whether seller-controlled dunning settings exist; source only says retries over five days and email prompts.
-6. Exact Egypt payout instruments, payout minimums, schedule, and how payout fees vary in Egypt; generic country-specific docs do not settle this.
+6. Exact Egypt payout instruments, payout minimums, schedule, how payout fees vary in Egypt, and the supported crypto networks/chains; generic country-specific docs do not settle this.
 7. Hosted roofing SaaS plus onboarding/setup service acceptance under the referenced Prohibited Products and Services Policy.
 8. Full individual CLI subcommand inventory and CLI-specific permission controls; only the 74 command groups and key-based authentication were captured.
 9. The exact permissions required to read every desired customer/payment/membership field under Alder’s final key role.
