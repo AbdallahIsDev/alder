@@ -1,536 +1,386 @@
-# SESSION HANDOFF: Alder roofing lead platform (orchestrator continuation)
+# Alder — session handoff
 
-> **Purpose.** Give this file to any cloud AI assistant so it can continue as the **orchestrator** for this project without the owner re-explaining anything.
-> **Last updated:** 2026-11-16 (service lifecycle on `arena/586ca282-alder`: one config file for every duration; renewal reminder, 5-day grace, suspension with HELD leads, termination at 15 days, nothing deleted; `/status` for owners; operator **Terminate**; notice log `business_events` with a daily audit; the form's service options come from the services section; outside click no longer closes the form; migration `0007_lifecycle.sql` is written and NOT applied anywhere. Before that, 2026-11-14: billing stage 1 on `arena/e7a04353-alder` (merged as PR #37): `paid_until`, daily warnings and automatic suspension inside the daily self-check cron, operator **Extend 30 days**, `applyPayment()` seam; migration `0006_business_billing.sql`).
-> **Rule for the local agent:** after every task, update the change log and any section whose facts changed. Never put secret values in it.
+The one handoff file. It replaces `alder-session-history.md` and
+`HANDOFF_alder_session.md`, which were deleted on 2026-11-16 after their live
+content was folded in here. Everything below describes **the code as it is now**
+and **what is planned next**; the per-branch history that used to fill this file
+is gone on purpose, except for a short log at the end.
+
+> **Update rule (binding):** every task ends by editing this file. If a fact in
+> here stopped being true — a column, a command, a duration, a limit, a decision —
+> change it in the same task, not later. `AGENTS.md` carries the same rule for any
+> agent working in this repo. Never write a secret value in this file; names only.
+
+**Last updated:** 2026-11-17.
 
 ---
 
-## 1. How we work (read first)
+## 1. How we work
 
-### Review artefact rule (set 2026-11-07)
-
-Exactly ONE review file per task: `_debug/patches/<branch>-review.diff` =
-`git diff origin/main...<branch>` (every commit from main to the branch head,
-combined). For this task: `_debug/patches/multi-client-prep-review.diff`. No
-`.patch`, no last-N, no per-area splits. Report its size, line count,
-`git apply --check` against a fresh `origin/main` worktree, and a secret scan
-(counts only). Older `.patch` files may stay on disk; do not add more.
-
-### Test-project rule (updated 2026-11-12)
-
-Run suites only with `TEST_ENV=1` and `.env.test`. `tests/run.mjs` refuses a missing
-test URL or one equal to the production URL in `.env`, then checks that its canary
-lands in the test project. No production backup/reset/restore ritual is part of a test
-run. Never print env values, service credentials, chat identifiers, bind codes, or
-lead data.
-
-### Vercel CLI rule (set 2026-11-09)
-
-Never run `vercel dev` or any Vercel CLI command from a directory that has no
-`.vercel` link, and never create or link a remote project while probing. Measured
-the hard way: `vercel dev` in an unlinked directory creates a project on the
-account, and `vercel dev` in a directory with a `.env` gives that file precedence
-over the environment it was started with. The test runner avoids both by starting
-the server from a dev root that has a copied `.vercel/project.json` and no `.env`
-(`tests/dev-root.mjs`).
-
-### Roles
 | Role | Who | Does |
 |---|---|---|
-| **Owner** | The human (Cairo, Egypt, GMT+2; Windows, PowerShell) | Decides, tests on real phones, creates accounts and secrets, relays prompts and reports |
-| **Orchestrator** | You, the cloud assistant | Never touches the repo. Writes prompts for the local agent, reviews reports and code, answers questions, keeps the queue |
-| **Local agent** | AI agent on `C:\Users\11\projects\Roofing-2` | Reads/changes code, runs tests, commits, pushes branches, opens PRs, writes reports |
+| **Owner** | The human (Cairo, GMT+2; Windows) | Decides, tests on real phones, creates accounts and secrets, relays prompts and reports |
+| **Orchestrator** | A cloud assistant | Never touches the repo. Writes prompts, reviews reports and diffs, keeps the queue |
+| **Agent** | Local or cloud, works in the repo | Reads and changes code, runs tests, commits, pushes branches, opens PRs, writes reports |
 
-### The loop
-1. Owner describes a goal or problem. The orchestrator clarifies, thinks of edge cases itself, and writes one complete prompt for the local agent.
-2. Owner pastes the prompt. The agent works and returns a final report.
-3. Owner pastes the report back. The orchestrator reviews it critically (Section 2), answers the agent's questions, and writes the next prompt.
+The loop: the owner states a goal → the orchestrator writes **one** complete
+prompt → the agent works and reports → the owner pastes the report back → the
+orchestrator reviews and writes the next prompt.
 
-### Prompt-writing rules (every prompt must include)
-- **CONTEXT:** branch, "never push to main", no force, no tags, push dry-run first.
-- Standard rules: never print secret values or PII; every behaviour change gets a **test plus a mutation check** (break the code, show the test fails, revert); one commit per logical item with hashes; **schema changes are proposals only** (never apply a migration, never leave an unapplied one in `supabase/migrations/`); never weaken an assertion without recording its before/after meaning.
-- Test-database rule: every suite run uses `TEST_ENV=1` and `.env.test`; verify with `npm run test:env-check`. The runner refuses production before starting and checks its canary. Never back up, reset, or restore production test fixtures.
-- **EDGE-CASE RULE:** list the cases beyond the owner's list and report a table: case / current behaviour / decision (test ID, proposal, n/a).
-- **BUDGET RULE:** priority order; after each group, run the touched suites, push dry-run, add a handoff entry. If budget runs low, stop at a clean commit and list what is left.
-- **FINAL REPORT:** Critical/High at the top; one section per group with commit hashes, tests, mutation results, changed assertions, what was NOT verified; suites run and which database; per-suite times; `git status`; `git log --oneline -20`. Do not include secrets, identifiers, or lead data.
-- **HANDOFF UPDATE (mandatory):** update this file with what changed, new issues and open questions.
+Rules every prompt carries:
 
-### Pending-prompt tracking rule
-Assume a prompt has NOT been sent until the owner pastes a report for it. Keep the queue (Section 11) accurate.
+- Never push to `main`, never force, no tags. Push dry-run first.
+- One review artefact per task: `_debug/patches/<branch>-review.diff`
+  (`git diff origin/main...<branch>`), with its byte size, line count, an
+  apply-check against a fresh `origin/main` worktree, and a secret scan (counts
+  only). No `.patch`, no per-area splits.
+- Every behaviour change gets a test **and** a mutation check: break the code,
+  show the test fails, revert.
+- Never weaken an assertion without recording its before/after meaning.
+- Schema changes ship as a numbered migration file; the agent applies it to the
+  TEST project, the **owner** applies it to production.
+- Never print secret values, chat identifiers, bind codes, or lead data.
+- Final report: critical items first, commit hashes, tests run and which database,
+  what was **not** verified, `git status`.
 
----
+Review discipline: read the agent's report, then the diff line by line. Look for
+unhandled rejections, fail-open paths, module-level state across warm invocations,
+PII in logs or messages, cross-tenant leaks, idempotency-key collisions, tests
+that assert too little, dead code, stale comments.
 
-## 2. How the orchestrator reviews code
-
-1. **The agent's final report**: evidence, mutation results, honest disclosures, and whether any assertion changed.
-2. **Commit links** (`github.com/.../commit/<full sha>`): only full URLs present in the owner's message can be fetched; the page truncates after ~5 files.
-3. **The single `.diff`**: read it line by line. A branch with a merge commit cannot be replayed with `git am`; `git apply` of the diff works.
-
-Look for: unhandled rejections, fail-open paths, module-level state across warm invocations, PII in logs/messages, cross-tenant leaks, idempotency-key collisions, tests that assert too little, dead code, stale comments, loosened assertions, tests coupled to production data.
-
----
-
-## 3. Owner preferences and working style
-
-- Easiest possible client experience, fewer support tickets; owners should fix problems themselves.
-- Few options, not many. Presets (2-4) beat free-form settings.
-- Warn and push back when an idea is insecure or wrong; explain why and offer the alternative.
-- Edge cases identified proactively.
-- Visual quality of the hero video is non-negotiable; keep the existing look. The form's close button is 32 px on every screen with a 44 px press area (owner decision 2026-11-16; it was 40 px before).
-- Prompts complete, copy-paste ready, in one block, with the handoff instruction.
-- Wants to see changes visually (preview gallery, real Telegram/Gmail).
-- Open question: which country the first roofing clients are in. It decides digest hour, phone defaults and the WhatsApp cost question.
+**Vercel CLI rule.** Never run `vercel dev` or any Vercel CLI command from a
+directory with no `.vercel` link, and never create or link a project while
+probing. `vercel dev` in an unlinked directory creates a project on the account,
+and in a directory with `.env` it gives that file precedence. The test runner
+avoids both by starting from a dev root with a copied `.vercel/project.json` and
+no `.env` (`tests/dev-root.mjs`).
 
 ---
 
-## 4. The project
+## 2. Decisions already made — do not re-litigate
 
-**Alder**: a lead platform for roofing contractors. A homeowner fills a multi-step estimate form; the contractor is alerted on **Telegram** (with buttons) and by email; the system can auto-reply, request a Google review, and send operational summaries.
+**Architecture**
+
+- **A is the direction: one shared deployment, one Host-routed tenant.** B (a
+  separate project per client) stays possible as an escape hatch for a client
+  needing a custom UI or a separate SEO surface. Nothing may block either.
+- The tenant comes from the request `Host` only, resolved by `resolveTenant()` in
+  `lib/tenant.js` against `businesses.site_host`. Body `slug`, `business_id`,
+  query, cookies and `X-Forwarded-Host` are never tenant selectors.
+- Per-client settings are **data**, not code. No `if (client === ...)`.
+- One shared Telegram bot serves every client. One Telegram account belongs to one
+  business, always, through `business_chats.tg_chat_id` (unique).
+
+**Product**
+
+- Telegram is the channel; email is the universal fallback. WhatsApp is not built.
+- Owner = the oldest connected phone. Only it may invite or remove phones; staff
+  phones read leads and nothing else.
+- The operator is a separate private chat (`OPERATOR_CHAT_ID`), never a business
+  binding. Operator text never reaches an owner chat.
+- Alerts are best-effort. A guaranteed outbox is a future implementation, not a
+  current promise.
+- Review flow: everyone is sent to the Google review link, whatever the rating.
+
+**Lifecycle and money**
+
+- Every duration lives in `lib/lifecycle-config.js` and nowhere else: reminder at
+  D−3, grace 5 days, suspended 10 days, termination at D+15, one payment = 30
+  days, data kept 60 days. A test (Gate BL) fails if a duration is written
+  anywhere else.
+- `paid_until` NULL means **not billing-enforced**. Nothing is charged, warned or
+  suspended for that business.
+- Termination is the existing status `churned`, displayed as "Terminated". Nothing
+  is ever deleted by the code; Extend or Reactivate brings a business back.
+- A held lead keeps its date order in `/leads` after reactivation; it is marked
+  with a fourth `held` line, not split into a separate section. One page header
+  counts the held rows on that page and one detail fact names the state.
+- A suspended business's form **holds** leads: stored whole with `leads.held_at`,
+  owner told a count and no detail, visitor told to call. A terminated business's
+  form answers 410 and stores nothing.
+- Retention is 60 days after termination, kept **by hand**. There is no purge job.
+  To be reviewed by a lawyer; drafts in `docs/legal-drafts/`.
+
+**Landing page**
+
+- Hero video quality is non-negotiable. No re-encode, resize, replacement or
+  slider change without an explicit instruction. Measured cost accepted:
+  LCP ≈ 4.1 s on simulated mobile.
+- The estimate form's close button is 32 px with a 44 px press area (owner
+  decision 2026-11-16; it was 40 px). A click outside the form does not close it.
+- Copy is plain, human and specific. No staccato fragments ("No fluff. Just
+  results."), no comma-couplets used as a sentence, no colon-fragment openers.
+  Full sentences with a reason in them.
+
+---
+
+## 3. The project
+
+**Alder** is a lead platform for roofing contractors. A homeowner fills a
+multi-step estimate form; the contractor is alerted on **Telegram** (with buttons)
+and by **email**; the system auto-replies to the customer, can request a Google
+review, sends daily operational summaries, and enforces a monthly subscription.
 
 | Item | Value |
 |---|---|
 | Repo | `https://github.com/AbdallahIsDev/alder` |
 | Local path | `C:\Users\11\projects\Roofing-2` |
-| Live site | `https://alder-roofing.vercel.app` (deploys from **`main`**) |
-| Hosting | Vercel **Hobby** (each cron job runs at most daily; commercial use needs a paid plan) |
-| DB | Supabase Postgres, **us-east-1** (~192 ms median from Cairo) |
-| Function region | Not pinned: `vercel.json` has no `regions` key. `docs/OPERATIONS.md` records the owner-verified project setting as `iad1` (same area as the DB). Not re-verified from code; every `[tg-timing]` log line carries the live value in `region`. |
-| Telegram | Webhook `api/tg.js`; helper `lib/tg.js` |
-| Email | Resend (`lib/notify.js`, `lib/email-layout.js`, `lib/email-builders.js`) |
+| Live site | `https://alder-roofing.vercel.app` (deploys from `main`) |
+| Bot | `@getleadalerts_bot` |
+| Hosting | Vercel **Hobby** — each cron job runs at most daily, and commercial use needs a paid plan |
+| DB | Supabase Postgres, `us-east-1` (~192 ms median from Cairo) |
+| Email | Resend |
 | Local dev | `npx vercel@48.12.1 dev` on port 3000 (pinned) |
-| Tests | `tests/run.mjs`, suites `tests/*.test.mjs`, loopback Telegram/Resend fakes, JSDOM |
 
-### Key files
-`api/lead.js`, `api/tg.js`, `api/review.js`, `api/health.js`, `api/selfcheck.js`, `api/digest.js`, `lib/db.js`, `lib/digest-db.js`, `lib/lead-intake.js`, `lib/notify.js`, `lib/ops-delivery.js`, `lib/ops-copy.js`, `lib/operator.js`, `lib/bind-codes.js`, `lib/request.js`, `lib/timing.js`, `lib/content.js`, `lib/outbound.js`, `scripts/`, `supabase/migrations/0001..0004` + `seed.sql`, `index.html`, `build-static.js`, `docs/`, `HANDOFF_alder_session.md` (the agent's own repo handoff; different from this file).
+Commands: `npm run build` (bake a client config into `dist/`), `images`, `icons`,
+`og`, `db:apply`, `bind -- <slug>`, `tg:commands` / `tg:commands:info`,
+`purge:expired`, `delete:lead`, `offboard`, `test:env-check`, `test:port-guard`.
+Tests: `node tests/run.mjs [suites...]`.
 
-### Security/architecture facts (verified)
-- RLS on all tables, deny-all, no policies; the app uses the service role server-side only. `v_client_leads` is `security_invoker`. Roofer-facing code never SELECTs directly from `leads` (test C10; that is why `findRecentDuplicate` and `digestCounts` live in separate modules).
-- Telegram authorization: business derived only from `business_chats.tg_chat_id`; callbacks anchored-regex validated; lead lookups scoped by `id + business_id`; transitions are conditional UPDATEs.
+Key files: `api/{lead,tg,review,health,selfcheck,digest,billing}.js`;
+`lib/{db,tenant,lead-intake,notify,outbound,content,operator,billing,billing-ops,service-status,lifecycle-config,lifecycle-text,lifecycle-notify,held-leads,notice-audit}.js`;
+`supabase/migrations/0001..0007`; `index.html`; `build-static.js`; `clients/*.json`;
+`docs/`.
+
+Migrations, all additive and idempotent: `0001_init`, `0002_default_privileges`,
+`0003_service_role_grants`, `0004_lead_event_kinds`, `0005_business_site_host`,
+`0006_business_billing`, `0007_lifecycle`.
+
+**Environment (names only).** Required in Vercel: `SUPABASE_URL`,
+`SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `IP_HASH_SALT`,
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`,
+`SITE_URL`, `HEALTH_SECRET`, `CRON_SECRET`, `OPERATOR_CHAT_ID`, `OPERATOR_EMAIL`.
+Optional: `TELEGRAM_CHAT_ID`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX`,
+`AUTOREPLY_DAILY_CAP`, `DIGEST_ENABLED`, `DIGEST_UNTOUCHED_DAYS`,
+`RECIPIENTS_MAX`, `INVITES_MAX`, `TELEGRAM_BOT_USERNAME`, `DATABASE_URL`,
+`TENANT_HOST_MAP` (JSON host aliases; ignored in production). Test-only:
+`.env.test` plus `TEST_ENV=1`. One loader, `lib/env.js`: `process.env` >
+`.env.test` (only when `TEST_ENV=1`) > `.env.local` > `.env`.
+
+---
+
+## 4. Architecture and invariants
+
+**Data and access**
+
+- RLS is on everywhere with deny-all and no policies; the app uses the service
+  role server-side only. `v_client_leads` is `security_invoker`.
+- Roofer-facing code never `SELECT`s directly from `leads` (test C10). That is why
+  `findRecentDuplicate` and `digestCounts` live in their own modules.
+- `leads.business_id` has no `ON DELETE` action, so offboarding deletes leads
+  first. `lead_events`, `review_feedback` and `private.lead_financials` cascade.
 - Bind codes: single use, 24 h, one minting function (`lib/bind-codes.js`).
-- Secrets: `HEALTH_SECRET` and `CRON_SECRET` are different values, compared in constant time; rotated after an earlier exposure.
-- `OUTBOUND_TIMEOUT_MS` and `*_API_BASE` overrides only honoured in dev.
-- Telegram timing log (`lib/timing.js`, always on): `api/tg.js` prints ONE `console.log` line per update, `[tg-timing] {json}`. Keys: `v, handler, type, cold, region, total_ms, answer_ms, answer_done_ms, db_calls, tg_calls, db_sum_ms, tg_sum_ms, steps[{s, at, ms, err?}], steps_dropped?`. Only fixed names from the code (handler names such as `cb.lead_open`, step labels such as `db.lead_by_id`, `tg.edit_message_text`) and numbers; the wrapper never reads a call's arguments or result, and a name that is not a short lowercase identifier is printed as `invalid` (test LB19/LB23). Module-level state: one boolean (`coldStart`), nothing per tenant. Every `lib/db.js` / `lib/tg.js` function `api/tg.js` uses is imported through `timedAll(...)`; a new one must be added to that list with a label or the import fails at load.
-- Telegram tap rules (set 2026-11-14, pinned by LB20-LB22): the toast goes out together with the edit once its text is known (never ahead of a result it depends on); the lead and the business row are read side by side; a lead is read once per tap and re-read only after a refused write; the owner check always runs alone, before the read or write it guards; `i:c` keeps its sequential order. The chat binding is read on every update and is never cached.
-- `npm audit` checked 2026-11-12: one High advisory in devDependency `sharp@0.34.5`; fix is `0.35.5` and requires a package manifest range change, so no lockfile-only upgrade was applied. See `docs/proposals/sharp-upgrade.md`.
+
+**Telegram**
+
+- The business is derived from `business_chats.tg_chat_id` on every update; the
+  binding is never cached.
+- Every callback is anchored-regex validated before a query runs, and every lead
+  read, transition and delete is scoped by `id` **and** `business_id`.
+- Transitions are conditional UPDATEs, so a stale tap cannot overwrite a newer
+  state.
+- No `parse_mode` anywhere (test C40). Messages are plain text plus explicit
+  `entities`; links are `text_link` entities.
+- Button labels are plain text. `BUTTON_ICONS` is an empty frozen table and
+  `iconLabel()` returns the bare label — that is the seam for custom emoji later,
+  not a missing feature.
+- One `[tg-timing]` JSON log line per update (`lib/timing.js`): handler name,
+  cold-start flag, region, total ms, DB/Telegram step timings. Fixed names and
+  numbers only; it never reads call arguments or results.
+- Tap rules: the toast goes out together with the edit once its text is known; the
+  lead and business rows are read side by side; the owner check runs alone, before
+  the read or write it guards.
+
+**Email**
+
+- One shared layout (`lib/email-builders.js` registry, `shell()` with
+  `data-alder-layout="1"`). The logo is a referenced `cid:brand-logo`, never an
+  unreferenced attachment.
+- Emoji are stripped at the builder boundary. One lockup: platform brand for
+  owner/ops mail, company brand for customer mail.
+- `MAIL_REDIRECT_TO` redirects **every** recipient and prefixes the subject. It is
+  loud, not a hard failure, until the first real client.
+
+**Secrets and limits**
+
+- `HEALTH_SECRET` and `CRON_SECRET` are different values, compared in constant
+  time. `/api/selfcheck` and `/api/digest` return 503 when `HEALTH_SECRET` is
+  unset even if `CRON_SECRET` is set.
+- `OUTBOUND_TIMEOUT_MS` and `*_API_BASE` are honoured only when `VERCEL_ENV` is
+  exactly `development`. An unset value is not dev.
+- `BIZ_LIMIT` 200 leads/hour per business; `AUTOREPLY_DAILY_CAP` 40/day per
+  business; 5 phones per business; 3 live invites per business; 10 invites per
+  business per hour.
 
 ---
 
-## 5. Environment variables (names only)
+## 5. What exists today
 
-Required in Vercel: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `SITE_URL`, `HEALTH_SECRET`, `CRON_SECRET` (set both; selfcheck/digest return 503 if `HEALTH_SECRET` is unset even when `CRON_SECRET` is set).
+**Landing page** — one self-contained `index.html` (inline CSS/JS, serialized DOM
+with `data-page-node-id`). Client copy and values come from `clients/<slug>.json`
+and are baked by `build-static.js`, which also generates `robots.txt` and
+`sitemap.xml` from the client's domain. Sections: header, hero (video), stats,
+about, services, how we work, projects, reviews, FAQ, CTA, footer, estimate modal.
+The debug panel and the hero switches are still in every build but gated by a
+`DEV` flag: they run only on `localhost`/`file://`, or on any host with
+`?dev=1`, so the published site never renders them. Deleting them means deleting
+the gate script, the `.dbg` markup, the DEBUG CSS block and the panel script.
+Images go through `npm run images` only; a changed image needs a new `-v2`
+filename because crawlers cache by URL.
 
-Optional: `TELEGRAM_CHAT_ID`, `MAIL_REDIRECT_TO`, `MAIL_REDIRECT_PREFIX` (**remove before first real client**), `AUTOREPLY_DAILY_CAP` (40), `DIGEST_ENABLED` (unset = no-op), `DIGEST_UNTOUCHED_DAYS` (14), `RECIPIENTS_MAX` (5), `INVITES_MAX` (3), `TELEGRAM_BOT_USERNAME`, `DATABASE_URL` (migrations only), `VERCEL_ENV`, `TENANT_HOST_MAP` (JSON canonical-host aliases; TEST/development/preview only, always ignored in production).
+**Lead intake** — `POST /api/lead`: honeypot, timing check, per-IP and per-business
+rate limits, allow-lists, E.164 phone normalisation, idempotency key, duplicate
+advisory (30 days, never blocks), store first and notify second, replay
+re-announces a lead whose first attempt died before alerting. Unknown host fails
+closed with the same response as an unknown token.
 
-New in `ops-audience` (not deployed): `OPERATOR_CHAT_ID` (falls back to `TELEGRAM_CHAT_ID`), `OPERATOR_EMAIL`.
+**Telegram** — owner and operator flows. Owner: `/leads` (5 per page, one message
+edited in place, numbers 1..N, Newer/Older only where real; held rows carry a
+fourth `held` line and the page header counts them without changing the order),
+lead detail with status actions and Back to the same page, `/remove_lead`
+(owner only, confirm before delete, no held mark), `/invite`, `/recipients`,
+`/status`, `/help`. A persistent reply
+keyboard carries the role's two buttons (`Invite` `Leads` for the owner, `Leads`
+for staff, `Status` for a switched-off business). Operator: `/businesses` browser,
+business screen (status, phones, lead counts, billing line), Suspend / Reactivate
+/ Terminate / Extend 30 days, invite with Replace phone, read-only lead view.
 
-Test-only: `.env.test` (exists since 2026-11-09), `TEST_ENV=1`. `ALLOW_PROD_TESTS` is gone.
+**Email** — owner alert, customer auto-reply, review request, daily digest, daily
+alert check, and every lifecycle notice (reminder, overdue, final warning,
+suspension, termination warning, termination). Each lifecycle notice goes to
+Telegram and email with the same words.
+
+**Billing and lifecycle** — `paid_until` per business, pure rules in
+`lib/billing.js`, one daily job at the end of `/api/selfcheck` (also callable by
+hand at `GET /api/billing`), one notice per business per UTC day, a stage recorded
+only when somebody was reached, and `applyPayment()` in `lib/billing-ops.js` as the
+single seam a payment provider will call. The operator presses **Extend 30 days**
+and confirms an exact date; a double tap adds nothing. Every notice round is
+logged in `business_events`, and `lib/notice-audit.js` reports a round that never
+finished.
+
+**Ops** — `GET /api/health` (event counts, no PII, `x-health-secret`),
+`GET /api/selfcheck` (per-business, daily 09:00 UTC), `GET /api/digest` (daily
+13:00 UTC, off unless `DIGEST_ENABLED=1`).
+
+**Multi-client** — `businesses.site_host` + `resolveTenant`; `clients/<slug>.json`
+drives the build; one deployment serves every client.
 
 ---
 
-## 6. Timeline: what has been done
+## 6. Landing page design rules that still bind
 
-### Phase 1-3: test speed and hardening (branch `db-backend`, merged)
-Suites in-process; runner timing; dev-only timeout override (411 s → ~272-304 s; the 180 s target was not met — ~93 % is DB round trips). Security audit clean; fixed `0004` missing from `ALL_FILES`, inverted env precedence, shared `clientIp`, constant-time secret compare. Reliability: cross-channel fallback, `/api/health`, `/api/selfcheck`, daily cron, redirect warning, 40/day auto-reply cap, duplicate detection, retry mutex, deletion scripts, handleCallback dispatch table. Accessibility: live region, `aria-describedby`, 3:1 borders, OG image 501 → 204 KB. Digest and selfcheck crons (`0 13 * * *`, `0 9 * * *`). Multiple recipients (`/invite`, `/recipients`; 5 phones / 3 pending invites). Merged to `main`.
+- Light page with dark cinematic sections: dark masthead (nav + hero + stats), then
+  light sections. Page background white / warm off-white (`#F7F4EF` for cards);
+  charcoal `#1C1F24`; red-orange accent for arrows, badges, symbols.
+- Clean grotesque sans, tight tracking on headings. Small labels never below
+  13–14 px; contrast at least 4.5:1; borders `#9aa0a8`.
+- Spacing comes from the main container's `gap`, not per-section padding. The
+  masthead wraps hero and stats with `gap: 0` and one shared dark background.
+- Images: warm morning or daytime light, **never sunset**. Replace AI images with
+  real client photos before the client sees the page.
+- Motion: split-text only on titles and subtitles (plus the footer text). Flags,
+  buttons, cards, before/after and footer each have their own reveal (`data-rv`,
+  selected by `html[data-a-*]`). A flag animates as one component. Clip-path
+  reveals never combine with opacity or blur. Every `<img>` gets a clip-path wipe
+  automatically (`data-no-reveal` opts out; hero, header, menu, modal and
+  before/after are skipped).
+- Any scrollable overlay needs `data-lenis-prevent`, or `lenis.stop()` blocks wheel
+  and touch scrolling inside it.
+- Reduced motion and no-JS must show everything: full opacity, static image, real
+  text in the HTML.
 
-### Phase 4: diagnosis of "New" and "Not found" (read-only)
-No data lost. "New" rows were test debris sorting above the three real `done` leads. "Not found." came from tapping Mark contacted on an already-`done` lead.
-
-### Phase 5: branch `ops-audience` (PR #6, DRAFT)
-Per-business self-check counts, audience rule, shared branded email layout, plain-English copy, preview gallery, `docs/PROPOSALS.md` §5d. Commits `5cc59aa`, `81e2132`, `92eefa2`. Disclosed: an intermediate test set `VERCEL_ENV=production` and two sends reached the real APIs (rejected). Fixed by the network guard.
-
-### Phase 6: operator channel bundle
-- **`fix-invite-message` (PR #7, from main):** `/invite` had a literal `//n//n` and no tappable link. Now a real deep link, plain code, expiry. `tests/bot-text.test.mjs` guards every bot string. Commits `b5bb654`, `a2bbd67`. **GitHub reports PR #7 as MERGED** (observed 2026-11-07 22:10 UTC); the live bug is closed.
-- **Network guard:** `tests/env.mjs` throws on any non-loopback, non-Supabase host (N1-N5).
-- **Operator channel (`f404b4e`):** `lib/operator.js`; operator text only to the operator chat; per-business owner messages; one aggregated operator alarm (Telegram → email → `operator_alarm_undelivered`); no `TELEGRAM_CHAT_ID` button fallback.
-- **Commands and recovery (`0c9c07c`):** `/code`, `/phones`, `/businesses`, `/operator`, `/id` (since 2026-11-14 the operator chat has `/businesses`, `/invite`, `/help`, `/id` only; `/code` became the operator's `/invite [slug]`, `/phones` is retired, Terminate became Suspend / Reactivate, and the operator can Replace the phones of a connected business; see the change log); owner = oldest phone; paste-a-code onboarding; `/leads` with Open and Older; stale taps answer "Already updated."; blocked-bot notice. OP1-OP13.
-- **Tools:** `send-test-lead.mjs`, `preview-send.mjs`, `docs/MANUAL_TESTING.md`.
-
-### Phase 7: review fix, data hygiene, run trust
-- Stored `google_review_url` began `ttps://`; both gates rejected it. Repaired in code and data; `/api/health` reports `review_links_invalid`.
-- 21 leads from a killed webhook run deleted after classification; `alder-demo` back to 3 leads / 2 feedback.
-- Suites sweep their own test-shaped leftovers at start and in `finally`; runner guards chats and debris.
-- B14/B15 were **test bugs**, not duplicate-detection defects: B14 indexed the raw send list, B15 could match an older lead. Both fixed in tests only.
-- Three full runs green: 385.2 s, 384.4 s, 385.6 s reversed.
-
-### Phase 8: fixture safety and `/code` (this bundle)
-- Fixture chat ids moved to a reserved range (`5e15` base, below 2^53), unique per suite. The runner pre-cleans anything at or above the base before snapshotting.
-- The sweep needs two signals: suite key shape AND an `@fixture.invalid` address. Reads page past PostgREST's 1000-row cap and are scoped to this deployment's businesses.
-- `/code` sends exactly two messages: the operator line (slug, code, human expiry) and the client-forwardable text (no slug, no business name). The old "send me this code" now says "open the bot and send it this code". If the second send fails, the operator gets the code back.
-- The no-phone operator notice no longer carries the customer's name.
-- `/code` fixtures mint on a throwaway `zz-test-<run>` business; the runner fails if live unused codes for a real business grow.
+**Placeholders that must be replaced before a client sees the page:** phone
+number, stats, Google rating and review count, warranty term, founder name and
+photo, the About story, crew photos, the service list, the reply-time promise, and
+the modal's thank-you steps.
 
 ---
 
-## 7. Issues and state RIGHT NOW
+## 7. Known limitations
 
-### Resolved in this branch
-| Was | Now |
+1. **Hosting.** Vercel Hobby is non-commercial and allows one cron run per job per
+   day. A paying client needs Pro or another compliant host.
+2. **No hard tenant isolation.** Every project shares one service-role key, so a
+   bug in tenant scoping exposes everyone. RLS or per-tenant credentials would be
+   needed for real isolation.
+3. **Onboarding is manual** — about eight steps per client (domain attach,
+   business row, site_host, invite). It does not scale to many clients a week.
+4. **Retention has no code.** No purge job; deletion is manual SQL.
+5. **The digest's failure line is generic** — one total, not split by kind.
+6. **`lead_events` has no index on `(kind, created_at)`**, so health and selfcheck
+   counts are sequential scans. Fine at this size.
+7. **No alert when the check itself stops running.**
+8. **Supabase retires the legacy JWT keys in early 2027.** Nothing in the code
+   decodes a key, so this should be an env swap; `tests/db-wall.test.mjs` counts
+   any error as a pass and would stay green for the wrong reason.
+9. **`sharp@0.34.5` has one High advisory** in dev-only image tooling. Fix is
+   `0.35.5`, not lockfile-only. Plan in `docs/proposals/sharp-upgrade.md`.
+10. **Unverified on real devices:** Gmail/Outlook/Apple Mail rendering, the review
+    page handoff on a phone, Telegram button colours on clients older than
+    Feb 2026.
+11. **A terminated host still serves the full landing page.** Only the form
+    answers "not available". Three options with their real costs are written in
+    `docs/OPERATIONS.md`; only option 1 exists today.
+
+---
+
+## 8. Pre-launch checklist
+
+1. Remove `MAIL_REDIRECT_TO` from production, then confirm `/api/health` reports
+   `mail_redirect_active: false`.
+2. Verify the Resend sending domain and set `MAIL_FROM` to an address on it.
+3. Match the Resend plan to `AUTOREPLY_DAILY_CAP`.
+4. Move to a commercially permitted host before taking payment.
+5. Set real `owner_email` values; `example.com` placeholders are still in place.
+6. Lawyer review of the retention window, the deletion promise, and the
+   privacy/terms text in `docs/legal-drafts/`.
+7. Apply migration `0007` to production and re-run `npm run tg:commands` after
+   deploy (`/status` is new in the owner menu).
+8. One full rehearsal of the billing lifecycle on a real business, end to end.
+
+---
+
+## 9. Roadmap — not built
+
+| Item | State |
 |---|---|
-| `review` suite red (8 failures) | Green; caused by the `ttps://` stored URL |
-| `notify` B1/B2b order dependence | Green in a full run |
-| Stray chat `6852` | It is the owner's **second account, bound to `second-demo`** — not a stray. The earlier "two real phones on alder-demo" explanation was wrong: B14's extra send was the fixture chat bound to `alder-demo`, not a second owner phone |
-| `/code` one message, ambiguous "send me" | Two messages, bot-directed wording |
-| Fixture ids in the real Telegram id space | Reserved range + runner pre-clean + guard |
+| **Whop integration** | Reference written (`docs/WHOP.md`). Next: webhook → verify signature → re-read membership → `applyPayment()`. Needs an API key in Vercel env, a webhook secret, and a sandbox run first. |
+| **One deployment, many clients** | The routing seam is built (`site_host` + `resolveTenant`, tested). Missing: per-host HTML rendering, content in the database, assets out of the deployment, `new-client` / `publish-client`, per-site brand and `noindex`. Step-by-step status in `docs/MULTI_TENANT_DESIGN.md` §9. |
+| **Multi-client onboarding automation** | Domain attach via API + business row creation, so a client is minutes not an afternoon. |
+| **Notification outbox** | Guaranteed delivery, claim/drain design. `docs/proposals/notification-outbox.md`. |
+| **Uptime / outage alerting** | Proposal only. `docs/proposals/uptime-check.md`. |
+| **Per-client summary schedule** | Four presets, local hour, needs one column and an hourly cron (Pro). `docs/PROPOSALS.md` §5d. |
+| **Keyset paging for `/leads`** | Deferred. Offset paging with an `id` tie-breaker is enough at 5 rows a page. |
+| **Terminated-site presentation** | Three options documented in `docs/OPERATIONS.md` (serve today, per-host holding page, redirect to operator contact). Not built; owner decides later. |
+| **Telegram audit leftovers** | Named lead buttons (name/service/age instead of 1..5) and merging `/remove_lead` into the lead detail. Everything else in `docs/audits/telegram-bot-audit.md` is done or rejected on purpose. |
+| **Retention automation** | A purge job matching the 60-day rule. |
+| **Supabase key migration** | Swap env values before early 2027; tighten `db-wall` first. |
 
-### Open
-| Severity | Issue |
+---
+
+## 10. Change log (recent rounds only)
+
+| Date | What changed |
 |---|---|
-| **High (ops) — RESOLVED** | The owner deleted every unused code in production (217). `/invite` is unblocked. The owner minted one more invite through the live bot, so two live unused codes exist; neither is a suite's. The runner fails a run that grows that number. |
-| **RESOLVED** | Claim-then-bind now reads the binding back; on a mismatch or a throw it restores the claim and says so. Global bind ceiling raised to 600/hour with `bind_ceiling_hit`. |
-| **RESOLVED** | Ceiling 600/h, `bind_ceiling_hit` logged. |
-| Medium | `leads.business_id` has no `ON DELETE` action; offboarding must delete leads first. |
-| **RESOLVED** | `/invite` at the cap offers one button that expires the old invites and mints a fresh one (owner only, 60 s mutex, budget checked before expiring). `/recipients` states the pending count. |
-| Low | `/businesses` shows 0 phones for paused/churned clients (it re-fetches through `getBusinessActiveBySlug`). |
-| Low | `public.rls_auto_enable()` is SECURITY DEFINER with EXECUTE to `anon`/`authenticated` (event-trigger function, not directly callable). |
-| **High (dated, platform)** | Supabase retires the legacy JWT `anon`/`service_role` keys in early 2027 for `sb_publishable_` / `sb_secret_`. Nothing here decodes a key — every use is `createClient(url, key)`, no migration calls `auth.jwt()` or `auth.role()`, and the anon key never reaches the browser. The switch should be env values only; the gap is `tests/db-wall.test.mjs`, which counts any error as a pass. Detail and steps in §8 item 11. |
-| Resolved | `/invite` message bug: PR #7 is merged (GitHub state observed 2026-11-07). |
-
-### Production data (verified 2026-11-07)
-`alder-demo`: 3 leads (all `done`, review tokens), 2 `review_feedback` (5★), chat tail `6109`. `second-demo`: 0 leads, chat tail `6852`. Both `owner_email` domains are `example.com` placeholders. `MAIL_REDIRECT_TO` is active (intentional, demo).
-
-### Test counts
-Last full run before this bundle: 385.2 s / 384.4 s / 385.6 s, all green. This bundle adds `fixture-safety` (7 checks) and four OP tests; targeted runs are green (see Section 9).
+| 2026-11-14 | Operator rounds 5–6: `/businesses` browser, business screen, Suspend/Reactivate, invite with Replace phone, two-message invite, exact command menus. |
+| 2026-11-15 | Bot UI/UX: persistent role keyboard, 5-per-page lead browser edited in place, numbered buttons, no disabled buttons. |
+| 2026-11-16 | Billing stage 1: `paid_until`, grace, daily warnings, auto-suspension, Extend 30 days, `applyPayment()` seam. Migration `0006`. |
+| 2026-11-16 | Service lifecycle: one config file for every duration, reminder → grace → suspension → termination, held leads, `/status`, `business_events` notice log with a daily audit. Migration `0007`. |
+| 2026-11-16 | Docs: `docs/WHOP.md` (one payment reference), Telegram audit status review, Creem/Polar pages isolated and ignored. |
+| 2026-11-17 | Held leads marked in `/leads` and detail without reordering or paging changes; held notice gained "Renew to see them."; terminated-site options documented, no implementation. |
 
 ---
 
-## 8. Still missing / not done
+## 11. Unverified state — check before starting
 
-1. **Separate test Supabase project (Phase C), DONE 2026-11-09.** `.env.test` exists; all suites require it with `TEST_ENV=1`, and no production-test override exists. Fixtures use seeded businesses in the test project. No production backup/reset/restore is part of test runs.
-2. **Summary schedule** (proposal only, `docs/PROPOSALS.md` §5d): four presets, per-business timezone, one column, hourly cron on Pro.
-3. Self-check is operator-only and not owner-configurable (decision).
-4. Quiet hours / 15-minute reminders: parked; Hobby crons are daily.
-5. Pre-launch checklist: remove `MAIL_REDIRECT_TO`, verify Resend domain, real `owner_email`, `OPERATOR_CHAT_ID`, Vercel Pro, Resend plan, hard-fail redirect check, retention decision, real Gmail/Outlook rendering, review handoff on a phone.
-6. Prompt queue, unsent: README rewrite + CI without secrets + preview check + fresh-eyes review of `main` + test-quality audit.
-7. Telegram command menus: after merge, `npm run tg:commands`, then `tg-webhook set` and `info` (the `my_chat_member` handler only arrives if `allowed_updates` is re-registered).
-8. Known minor: sharp High advisory deferred under the conditions in `docs/proposals/sharp-upgrade.md`; 13 images without width/height (CLS 0); `--timing` flag.
-9. A5 is done (`scripts/purge-expired.mjs`, dry run default). A2 is done: every bind test runs on `zz-test-bind-<run>` and F8 bans a real-business mint. Keyset paging is report-only. Hostile review: 409 and bind read-error are fixed; `botUsername()` cache (Low) and the retry lock window edge (Low) remain. The retry lock should become a unique index in the next migration proposal — no migration file is added now.
-10. Proposals only, not implemented: one brand per deployment; `/clients` and `/stats <slug>` on `v_client_leads`; retention predicates; `npm run new-client`. `robots.txt` and `sitemap.xml` are generated from the selected client's `domain` by `build-static.js`.
-    CI proposal: run `npm run test:port-guard` **before** `tests/run.mjs`. It binds port 3000 and therefore cannot live in the suite list, so a CI job that only runs the suite would silently skip the guard.
-11. **Supabase key format (read-only review, 2026-11-09).** Legacy JWT keys retire in early 2027; the replacements are `sb_publishable_…` (public) and `sb_secret_…` (server), which are not JWTs. What the code assumes: nothing. There is no JWT decode, no `eyJ` check, no key-length check, no raw `fetch` to `/rest/v1` in app code — `lib/db.js`, `lib/digest-db.js`, `lib/lead-intake.js`, `lib/review-db.js` and `api/health.js` all call `createClient(url, key)` (supabase-js 2.118.0), which sends `apikey` and `Authorization: Bearer` and does not care what the string looks like. No migration calls `auth.jwt()` or `auth.role()`, so RLS does not depend on claims. The anon key is used only by `tests/db-wall.test.mjs`; it never reaches the browser (the page has no Supabase code). **What would break:** `db-wall` treats any error as a pass, so a rejected or retired key would leave it green for the wrong reason; `test:env-check` only checks that a name is present. **Smallest steps:** (1) create the new keys in the dashboard, (2) put them in `.env.test` and run `db-wall` alone, (3) tighten `db-wall` so a 401 "invalid API key" fails while an RLS denial passes, (4) swap the production env values and redeploy, (5) delete the legacy keys, (6) repeat step 2. Unverified: that this project's PostgREST accepts `sb_secret_` in the `Authorization: Bearer` header as well as in `apikey` — test it in step 2 before touching production.
+These were left open by the last live test and cannot be confirmed from the repo:
 
----
-
-## 9. Testing and verification status
-
-### Verified by automated tests (fakes + test database)
-Lead intake validation, rate limits, idempotency, honeypot; Telegram callbacks (C1-C36); fallbacks (B9-B15); health/selfcheck/digest (H, S, D); recipients (R1-R14); operator commands (OP1-OP16); bot text artifact guard (T1-T7); network guard; email layout; modal a11y; brand tests; fixture-safety F1-F7.
-
-### This bundle's runs (historical production DB; do not repeat)
-| Run | Result |
-|---|---|
-| `fixture-safety` | 7/7, 0.7 s; mutation: old id `880001` back → F7 fails |
-| `recipients` | 14/14, 0.2 s |
-| `lead-api` | 45/45, 95.4 s |
-| `notify` | 45/45, 59.7 s |
-| `webhook` | 62/62, 143.2 s; mutation: one `/code` message → OP2/OP14/OP16 fail |
-| `bot-text` | 7/7; mutation: "send me" → T6 fails |
-| Full run ×2 | 396.2 s default order, 394.9 s reversed (outbound last); all suites green; chats 6109/6852, 215 unused codes, 0 debris before and after |
-
-Each run ended with `business_chats unchanged (2: 6109,6852)`, `unused bind codes unchanged`, `test-shaped leads unchanged (0)`.
-
-### NOT verified
-- Real Gmail/Outlook/Apple Mail rendering; real Telegram rendering of the new `/code` pair.
-- Operator commands in real Telegram (branch only).
-- Whether Vercel fires both crons; `DIGEST_ENABLED` unset.
-- Real-device LCP; retry mutex across instances; `authenticated` with a real JWT; fresh-DB migrations; digest query plan at scale.
-- The owner's manual checklist: `/recipients` on A and B; a real lead reaches both phones; stale card on B; remove/re-invite; account C as owner of `second-demo`.
-
-### How to see changes visually
-```powershell
-git fetch origin
-git checkout ops-audience
-node scripts/preview.mjs
-start _debug\previews\index.html
-git checkout main
-```
-For real Telegram/Gmail: `scripts/preview-send.mjs --to <chat id> --yes [--email <addr>]` (refuses bound chats unless `--allow-bound`).
-
----
-
-## 10. Decisions already made (do not re-litigate)
-
-- **WhatsApp:** not building. Telegram is the channel; email is the universal fallback.
-- **Telegram-ID pre-authorization rejected:** codes/links are better.
-- **Operator vs owner separation:** dedicated operator chat; operator text never reaches owner chats; owner = oldest phone; staff phones cannot invite/remove.
-- **Every operator invite (was `/code`) is two messages**, whichever way it was asked for (a number in the `/invite` list, **Invite** on a business, `/invite <slug>`, Confirm replace). The client-forwardable one is **anonymous** (no business name, no slug) and is always a NEW message. The operator's own message names the slug; for a tap it is the browser message edited in place, with Back.
-- **The operator never adds a phone to a connected business.** A business with one or more phones gets "Already connected" and **Replace phone**, which removes ALL its phones and creates one invite, in that order: invite first, removal second. Adding a phone is the owner's own `/invite`. There is no "Invite another phone" button, on purpose.
-- **The forward text points at the bot**, never "send me".
-- **No customer name in operator no-phone notices.**
-- **Owner messages per business, never merged.** One branded email template. Emoji only next to words.
-- **`MAIL_REDIRECT_TO`:** loud, not a hard failure until the first real client.
-- **Retention:** explicit scripts, no cascade; window is a business/legal decision.
-- **Fixture ids:** reserved range `5e15`+; never a real-space id. The sweep needs key shape + `.invalid` marker.
-- `BIZ_LIMIT` 200; auto-reply 40/day; digest 13:00 UTC; selfcheck 09:00 UTC; `#9aa0a8` borders; hero video untouched; close button 32 px (was 40 px until 2026-11-16); sharp bump deferred; PR #6 stays draft.
-
----
-
-## 11. Queue (what to do next)
-
-| # | Item | State |
-|---|---|---|
-| 1 | ~~Merge PR #7~~ | **MERGED** (observed) |
-| 2 | Review `ops-audience` from the single `.diff` | Waiting for the artefact |
-| 3 | ~~A3 cancel pending invites~~ | **Done** (R15-R21, OP17-OP19) |
-| 4 | ~~A4/A5 purge~~ | **Done** (K1-K8) |
-| 5 | GROUP 3: ceiling 600, claim-then-bind, `/start@botname`, `tg-webhook` docs | **Done** (R22-R24, C37) |
-| 5b | Keyset paging for `/leads` Older | Report only: not small (cursor in callbacks, both directions, index check) |
-| 6 | GROUP 5: hostile-reviewer pass over the branch diff | Not started |
-| 7 | Owner runs the manual checks in Section 9 and reports | Owner |
-| 8 | Owner creates `.env.test` (Paris), then Phase C prompt | Blocked on owner |
-| 9 | README + CI + preview check + review of `main` + test-quality audit | Unsent |
-| 10 | Summary schedule implementation | Proposal only |
-| 11 | Country of first clients | Ask the owner |
-
----
-
-## Decisions (2026-11-12)
-
-- Leads belong to the client. The business owner is the data owner; the platform
-  operator provides the system.
-- Retention is one global rule, stored as a per-client config field with the same
-  default for everyone: keep leads while the client is active; delete on request
-  within 30 days; delete all client data 30 days after the client leaves. **To be
-  reviewed by a lawyer before any contract.**
-- Alerts are best-effort for now. The guaranteed notification outbox is **FUTURE
-  IMPLEMENTATION**, planned for when the hosting plan is upgraded; nothing is built
-  now.
-- Uptime and outage alerting is **ON HOLD** and remains a proposal only.
-- Country, phone format, timezone and legal text are configurable per client.
-  Language stays English.
-- Review flow decision for page work, not implemented here: everyone is sent to
-  the Google review link, whatever the rating.
-- One shared Telegram bot serves all clients; one Telegram account/chat belongs
-  to one business only. Vercel Hobby is non-commercial, so no paying client may
-  use it. Choose Vercel Pro or another commercially permitted host first.
-- Working method: the owner uses a local worker and an online worker; a separate
-  assistant reviews; every task ends with a diff file for review.
-
-## Decisions (2026-11-16, service lifecycle)
-
-- Every lifecycle duration is one constant in `lib/lifecycle-config.js`: reminder
-  3 days before `paid_until`, grace 5 days, suspended 10 days, termination at 15
-  days, data kept 60 days, one payment = 30 days. The support link is there too.
-- **Retention is 60 days after termination** and is kept BY HAND: no code deletes
-  anything and there is no purge job. This replaces "delete all client data 30
-  days after the client leaves" in the 2026-11-12 block above. Still to be
-  reviewed by a lawyer; drafts are in `docs/legal-drafts/`.
-- Termination is the existing status `churned`, shown as "Terminated". No new
-  enum value. Terminate never deletes; Extend or Reactivate puts a business back.
-- A suspended business's form HOLDS leads (stored whole, `leads.held_at`); the
-  owner is told a count and no detail; the visitor gets no auto-reply. A
-  terminated business's form answers 410 and stores nothing.
-- A recorded payment (Extend) always switches the service back on, even when a
-  notice cannot be delivered. Suspend / Terminate / Reactivate by hand change
-  nothing when the phone list cannot be read.
-- The form: its four service options are the services section's four services
-  (same client keys); the fourth stored value stays `unsure` and reads "Free roof
-  inspection" for the visitor, "Roof inspection" for the owner. A click outside
-  the form does not close it. The X is 32 px.
-- The "no unapplied migration" habit was not kept in this round: `0007` is
-  written and registered, and applied nowhere, because this environment has no
-  database. Apply it to the TEST project first.
-
-### Owner decisions pending
-
-- **Architecture — DECIDED:** A, one shared Host-routed deployment. B remains an
-  escape hatch for a client needing a separate custom project; do not fork code.
-- **Hosting:** Vercel Pro or a compliant alternative before accepting payment.
-  Default: Vercel Pro because the repo and TEST harness already target Vercel.
-- **Retention/legal:** lawyer review of the retention window, deletion promise,
-  privacy/terms URLs, and lead notice before a contract. Default: do not sign
-  until reviewed.
-
-## 12. Git state (as of this report)
-
-- `origin/main` = `1d2c748fd779f0b6a1c789dca969eb2698791d1a`; PR #25 was verified
-  merged into it on 2026-11-12 before starting this branch. Never push to `main`.
-- `ops-audience` (PR #6): merged to `main` on GitHub (`4348b24`); local `main` = `origin/main`.
-- `fix-code-copy`: merged to `main` as `1e3be74` (PR #8).
-- `operator-ux`: merged to `main` as `baf15d1` (PR #9).
-- `email-brand`: merged to `main` as `fb4680c` (PR #10).
-- `operator-roles`: merged to `main` as `a29f36d` (PR #11).
-- `operator-views`: merged to `main` as `6bd7bb4` (PR #12, menu only).
-- `operator-redirects` (PR #13): merged to `main` as `df3a4b8`. The local branch is deleted; its one post-merge commit lives on as `7110a8f`.
-- `operator-redirects-2` (PR #14): merged to `main` as `de2c8fe`; head was `7110a8f`.
-- `vercel-storage` (from `origin/main`): builds `main` only; `**` catches branch names with a slash; head `8366d37`. Draft PR #15.
-- `test-isolation` (from `origin/main`): dev root (hardened removal), production canary, shape checks, strict db-wall, absolute guard, disk preflight, build-output cleanup and startup sweep, port-guard test, canary rate-limit reset; head `5639d3c`. Draft PR #17.
-- `client-config` (from `origin/main` at `455245e`): `clients/<slug>.json` drives the build; head `af4cbc8`. Draft PR.
-- `client-identity` (from `origin/main` at `07caea0`): address, sender, unused-key check; head `3eae101`. Draft PR.
-- `owner-ux-fixes` (from `origin/main` at `8c2df50`): paging, row order, invite pair, one-sentence reply, modal buttons, three-account manual script; head `d2e5749`. Draft PR.
-- `visual-polish` (from `origin/main` at `fa6030d`): CSS file, modal button, email layout and logo, review card, list paging, removal line, absolute href, logo cache; head `8a6523d`. Draft PR.
-- `polish-followup` (from `origin/main` at `78f1827`, five commits cherry-picked): narrow modal widths, not-modified edit; head `835f3ee`. Draft PR.
-- `multi-tenant-design` (from `origin/main`, not from `vercel-storage`): design doc only; head `67b38f2`. Draft PR #16.
-- `lead-safety` (from `origin/main` at `aab66e4`, PR #23 verified merged before starting): stored-but-silent
-  leads are re-announced on an idempotent replay, one claim per lead, one bounded notification round with a
-  6 s deadline, parallel phone fan-out, a timeout treated as unknown, one idempotency key for the owner email,
-  a form that cannot hang, and a shared redirect predicate for health and the daily check; outbox and
-  uptime-check proposals only. Independent-review follow-up: lead `maxDuration` 30 with no tg override;
-  truthful Resend replay/409 handling; salted per-chat outcomes and targeted partial retries; honest
-  fixed-window claim docs; duplicate-panel recap hidden; built page `aa71755b` -> `80d6281c`, other output
-  hashes unchanged. Review branch `arena/9c9b4995-alder` is based on this branch; `origin/lead-safety`
-  is an ancestor. Local verification uses `.env.test`, never production. Draft PR #25 targeted `main`
-  and superseded #24; #24 remains untouched. PR #25 was later merged into `origin/main` at
-  `1d2c748fd779f0b6a1c789dca969eb2698791d1a`. Current verification and mutation results are in the
-  2026-11-12 change-log row below. Review artifacts are `_debug/patches/arena-fix-delta-2.diff` and
-  `_debug/patches/lead-safety-review.diff`.
-  No schema change. The review branch was pushed after a dry-run and merged by its owner.
-- `multi-client-prep` is based directly on the merged `origin/main` above. Commit `dd34ba9`
-  contains the architecture comparison, replay fix, and onboarding/handoff updates. It was
-  pushed after a successful dry-run; draft PR #26 targets `main`.
-- PR #27 (`arena/a12e637c-alder`) remains a draft against `main`; this branch now has
-  idempotent migration `0005` (`0d81188`), the tenant-host fixture fixes (`6b59157`), and
-  clearer B6g failure diagnostics (`af26707`). The final TEST run passed 525 assertions
-  across 36 suites with 0 failures and 0 skips in 317.5 s. No production database was queried.
-- **Host rollout gate:** docs identify `alder-roofing.vercel.app` as live. `clients/alder.json`
-  configures `www.alderroof.com`, while the README says to set the real canonical/OG domain
-  before launch; custom-domain attachment is unverified locally. Every Host that production
-  will serve needs a `businesses.site_host` value before merge. That column stores one host per
-  business, so serving both independently needs a redirect or an explicit alias design.
-- `arena/d1aa6e15-alder` (from `origin/main` at `e895a89`, the merge of PR #29): bot UI/UX round, code commit `f4df11d`
-  plus this handoff update. Not merged, no PR opened by the agent. DB-backed suites are unrun on this branch; the
-  owner runs the full suite once at the end of the UI work. Review artefact:
-  `_debug/patches/arena/d1aa6e15-alder-review.diff`.
-- `arena/d1aa6e15-alder` was merged to `main` as `f183ba5` (PR #30).
-- `arena/f38f9758-alder` (from `origin/main` at `f183ba5`): keyboard button order swap, code commit `9f04a9f`
-  plus this handoff update. Not merged, no PR opened by the agent. DB-backed suites are unrun on this branch.
-  Review artefact: `_debug/patches/arena/f38f9758-alder-review.diff`.
-- `arena/f38f9758-alder` was merged to `main` as `28f6da2` (PR #31).
-- `arena/83700235-alder` (from `origin/main` at `28f6da2`): Telegram tap latency, code commit `7d1df04`
-  plus this handoff update. Not merged, no PR opened by the agent. DB-backed suites are unrun on this branch;
-  no DB-backed test file was edited. Review artefact: `_debug/patches/arena/83700235-alder-review.diff`.
-- `arena/83700235-alder` was merged to `main` as `9650e48` (PR #32).
-- `arena/9a9da0fd-alder` (from `origin/main` at `9650e48`): operator `/businesses` browser with Terminate, code
-  commit `4f2e880` plus this handoff update. Not merged, no PR opened by the agent. `tests/webhook.test.mjs` (DB-backed) was
-  edited and is UNRUN on this branch. Review artefact: `_debug/patches/arena/9a9da0fd-alder-review.diff`.
-- `arena/9a9da0fd-alder` was merged to `main` as `25ef85a` (PR #34).
-- `arena/79c05a98-alder` (from `origin/main` at `25ef85a`): operator round 5, code commit `4b4e562` plus this handoff
-  update. Not merged, no PR opened by the agent. `tests/webhook.test.mjs` (DB-backed) was edited and is UNRUN on this
-  branch. After deploy run `npm run tg:commands` (operator menu changes). Review artefact:
-  `_debug/patches/arena/79c05a98-alder-review.diff`.
-- `arena/79c05a98-alder` was merged to `main` as `f2b634c` (PR #35).
-- `arena/f5a18f85-alder` (from `origin/main` at `f2b634c`): operator round 6 (Replace phone, two-message invite, exact
-  command menu), code commit `b190298` plus this handoff update. Not merged, no PR opened by the agent.
-  `tests/webhook.test.mjs` (DB-backed) was edited (OP24, OP43, new OP63) and is UNRUN on this branch. **After deploy run
-  `npm run tg:commands` with `OPERATOR_CHAT_ID` set where it runs**: the live operator menu still listed `/code` and
-  `/phones` because the chat-scoped menu was never re-set. Review artefact:
-  `_debug/patches/arena/f5a18f85-alder-review.diff`.
-- `arena/f5a18f85-alder` was merged to `main` as `47d8612` (PR #36).
-- `arena/e7a04353-alder` (from `origin/main` at `47d8612`): billing stage 1, code commit `b40bf4a` plus this handoff
-  update. Not merged, no PR opened by the agent. **Migration `0006_business_billing.sql` is NOT applied to any
-  database**; the code runs without it (business screen `Billing: unavailable`, Extend refused, daily job skips
-  itself). Apply it to the test project, then production (`npm run db:apply`). No new cron and no `vercel.json`
-  change: the job runs at the end of the daily `/api/selfcheck`; `/api/billing` runs it by hand. No business is
-  billed until the operator presses **Extend 30 days** for it (`paid_until` NULL = not billed).
-  `tests/webhook.test.mjs` (DB-backed) was edited (business-screen layout in OP24's block, `be` / `bE` added to the
-  forged-callback lists of OP24 and OP43) and is UNRUN on this branch, like the other 14 DB-backed suites. Review
-  artefact: `_debug/patches/arena/e7a04353-alder-review.diff`.
-- `arena/e7a04353-alder` (billing stage 1): merged to `main` as `ad502bd` (PR #37).
-- `arena/586ca282-alder` (service lifecycle, 2026-11-16): code commit `2da26d8` on top of `ad502bd`, plus this
-  handoff update. Pushed; no PR opened by the agent. **Migration `0007_lifecycle.sql` is NOT applied to any
-  database** (and check that `0006` is applied to production). Without 0007 the code still runs: a held lead is
-  stored without its mark, the held count reads 0, the notice log and its daily audit skip themselves. **After
-  deploy run `npm run tg:commands`** (`/status` is new in the owner menu). `OPERATOR_EMAIL` is now also the
-  Reply-To of every billing email. DB-free suites via the scratch runner: 26 suites, 305/305. The DB-backed
-  suites were not run here; `tests/webhook.test.mjs` (suspension texts, business-screen keyboard, help text) and
-  `tests/notify.test.mjs` (one service label) were edited BY READING and are UNRUN. Review artefact:
-  `_debug/patches/arena/586ca282-alder-review.diff`.
-- Owner state: **A (6109) operator only, unbound; B (6852) owner of alder-demo; second-demo 0 phones**.
-- `ops-audience` (PR #6): merged; `git merge-tree` against `main` is clean.
-- `fix-invite-message` (PR #7): head `a2bbd67`; GitHub reports **MERGED** (observed 2026-11-07).
-- Review artefact: `_debug/patches/ops-audience-review.diff` (gitignored), single file.
-- Remote: `origin https://github.com/AbdallahIsDev/alder.git`. Never push to `main`, never force, no tags.
-
-### How PRs work here (PR map)
-| Branch | PR | Role |
-|---|---|---|
-| `main` | — | deploys to production; never pushed by an agent |
-| `arena/9c9b4995-alder` | #25 | lead-safety corrections; merged to `main` at `1d2c748` |
-| `multi-client-prep` | #26 | multi-client comparison + replay guard; draft, base `main` |
-| `ops-audience` | #6 | the operator work and every fix that came out of reviewing it; one review `.diff` against `main` |
-| `fix-invite-message` | #7 | cut from `main`, merged into `ops-audience` as `58d2707`; GitHub reports it merged |
-
-One bundle = one branch off `main`, one review artefact, push dry-run first. A PR
-description may be edited; draft state and merges are the owner's decision.
-
----
-
-## 13. Change log (one row per bundle)
-
-| Date | Branch | Commits | What changed | State / issues |
-|---|---|---|---|---|
-| 2026-11-07 | `db-backend` | (merged) | Test speed, security audit, reliability, digest, recipients | Merged to `main` |
-| 2026-11-07 | `ops-audience` | `5cc59aa` `81e2132` `92eefa2` | Per-business selfcheck, audience rule, branded email, proposals | PR #6 draft |
-| 2026-11-07 | `fix-invite-message` | `b5bb654` `a2bbd67` | `/invite` newlines + deep link; bot-text guard; network guard | PR #7 draft; live bug until merged |
-| 2026-11-07 | `ops-audience` | `f404b4e` `0c9c07c` `963e340` `2d21cd5` `e56caee` | Operator channel, commands, recovery, tools | OP1-OP13 |
-| 2026-11-07 | `ops-audience` | `22cff44` `f36afbe` `33a7d27` `1f1910a` `0c1bb02` `6fc03c9` | B14/B15 test bugs, sweep safety, three green runs | Review suite green |
-| 2026-11-07 | `ops-audience` | `82a0abc` | Reserved fixture ids, pre-clean, two-signal sweep, paged reads | F1-F7 |
-| 2026-11-07 | `ops-audience` | `6198e67` | `/code` two messages, bot-directed wording, no customer name in ops notice | OP2/OP14/OP15/OP16, T6/T7 |
-| 2026-11-07 | `ops-audience` | `e11877b` | `/code` fixtures on `zz-test-<run>`; unused-code leak guard | Owner cap root cause |
-| 2026-11-07 | `ops-audience` | (docs) | This handoff rewritten as one coherent document; drifted §8/§9/§10 blocks folded in; corrected the "two real phones on alder-demo" claim | Docs only |
-| 2026-11-07 | `ops-audience` | `c8d45bf` | Bounded housekeeping in the daily selfcheck (codes 7 d, rate limits 2 d, 1000/run, used codes never) | K1-K7 |
-| 2026-11-07 | `ops-audience` | `b953c88` | `/invite` cancel button; bind read-back + claim restore; 600/h ceiling; health requires a review identifier | R4/R5, R15-R24, H1b |
-| 2026-11-08 | `ops-audience` | `45ef16e` | Bind tests on `zz-test-bind-<run>`; F8 bans real-business mints; OP17-OP20 real-DB cancel/restore | F8, OP17-OP20 |
-| 2026-11-08 | `ops-audience` | `829cc1e` | `/command@thisbot`; two-account MANUAL_TESTING; tg-webhook set/info docs | C37 |
-| 2026-11-08 | `ops-audience` | `0b55342` | `scripts/purge-expired.mjs` (dry run, two guards) | K8 |
-| 2026-11-08 | `ops-audience` | `45f32f7` | Retry lock keyed by failure generation; C33 loops 20x; OP21 pins unset OPERATOR_CHAT_ID | C33-C35, OP21 |
-| 2026-11-08 | `ops-audience` | `dbb7eec` | Resend idempotency 409 = duplicate; bind read error says "something went wrong" and restores the claim | C38/C39, R25 |
-| 2026-11-08 | `ops-audience` | `fafa5d8` | Client message is text + entities (no parse_mode, no visible URL, code once); link replies are role-aware, and an unbound operator cannot bind itself | T2/T3/T6/T7, OP2/OP16, W1-W5 |
-| 2026-11-08 | `fix-code-copy` | `f710cc7` | No `parse_mode` anywhere (C40); resend is text + entities; fallback drops the link sentence; operator link replies read the code state; preview renders entities | T3/T7/T8, OP14, W2 |
-| 2026-11-08 | `operator-ux` | `1c900e2` | Numeric /leads (5/page), phone list without self-remove, operator names + pickers, /id operator wording, /code cancels older codes, copy audit | OP7/11/12/22/23/24, R8/R10, T9 |
-| 2026-11-08 | `email-brand` | `e118554` | Emails strip emoji at the builder boundary; one lockup renders logo + name (platform for owner/ops, company for customers) | L5, L6 |
-| 2026-11-08 | `email-brand` | `7a96514` `057f783` `d435dcd` | Company header on every company email; digest targets carry the name; preview uses current builders; OP3 boundary retry | L6b/L7-L9, D-name, T8, OP3 |
-| 2026-11-08 | `operator-roles` | `d06d404` | `/remove_lead` (owner only, scoped, confirm + danger), operator welcome, never bound | OP25-OP28, T10 |
-| 2026-11-09 | `operator-redirects` | `b24aa76` `4da4a0b` `f7eeb60` | Operator answers for /invite /recipients /help /leads /remove_lead; /businesses counts paused phones; self-check email header on its own line (S4b); test-project schema/seed/docs/env-check | OP33/OP34, S4b, T1 |
-| 2026-11-09 | `operator-redirects-2` | `7110a8f` | Env check back to names-only readiness by default with the posture report behind `--db`; docs restored and merged with the SQL-editor route; one seed (`Alder Roofing`) with M5/M6 drift guards; `/businesses` says `?` when the count fails | PR #14 **merged** (`de2c8fe`); 382 assertions green |
-| 2026-11-09 | `vercel-storage` | `7a931f7` | `git.deploymentEnabled` builds `main` only; V1–V3 test; OPERATIONS §10 on deployment storage and retention | PR #15 draft |
-| 2026-11-09 | `multi-tenant-design` | `67b38f2` | One deployment for many clients: inventory, three-table proposal, content schema, rendering comparison and recommendation, assets, commands, migration plan | PR #16 draft, docs only |
-| 2026-11-09 | `vercel-storage` | `8366d37` | `**` catch-all so branch names with a slash are covered; V2b models Vercel's no-rule default; sourced Pro storage and domain facts; Phase C green on the test project; Supabase key-format review added as an open item | PR #15 draft; 391 assertions on the test project |
-| 2026-11-09 | `test-isolation` | `6789644` | `vercel dev` runs from a dev root with no .env; canary checks production and aborts; env shape validation (URL, DSN, key format, swap); db-wall passes only on a real denial; SKIP lines counted in the runner summary | Draft PR; suite counts in the PR |
-| 2026-11-09 | `test-isolation` | (this branch) | `ALLOW_PROD_TESTS` removed — a suite run needs `TEST_ENV=1` plus `.env.test`; `--seed-check` renamed to `--read-production-seed` with a deprecated alias; `build-static.js` copies assets with `dereference: true`, so the dev root links them | PR #17 draft |
-| 2026-11-09 | `test-isolation` | `8fe7200` | Disk preflight: the runner refuses to start under 2 GB free, `DISK_MIN_BYTES` can raise the floor but not lower it; `statfsSync` works on Windows, Linux and macOS | PR #17 draft |
-| 2026-11-09 | `test-isolation` | `c991e67` | The runner removes `_debug/build-test` on every exit, exact path only; the port-3000 refusal now applies only to runs that start a server, so a DB-only or nested run can share the machine | PR #17 draft |
-| 2026-11-09 | `test-isolation` | `8610a99` | Startup sweep for `_debug/build-test` (a killed run never reaches cleanup); the port-3000 guard is proven by a standalone test that binds the port; the suite list is deduped (two suites were registered twice) | PR #17 draft |
-| 2026-11-10 | `test-isolation` | `c87d1a0` | The runner clears the canary business's rate-limit rows after the canary proves the host (exact key, max 100, never on production or an unknown host); `tests/suite-list` fails on a duplicate registration; `npm run test:port-guard` is the required check when `tests/run.mjs` changes | PR #17 draft |
-| 2026-11-10 | `test-isolation` | `5639d3c` | `removeDevRoot` re-scans after unlinking and refuses the recursive delete if a link survived; one fixed WARN line for every canary-reset skip reason except none; CI proposal recorded | PR #17 draft |
-| 2026-11-10 | `client-config` | `af4cbc8` | Alder's page is built from `clients/alder.json`; `--client`/`CLIENT` selects one; the build refuses a missing, invalid, incomplete or unknown-key file with one line; a sample client builds clean; Alder's output is byte-identical | Draft PR |
-| 2026-11-10 | `client-copy` | `876ec81` | The rest of the page copy (66 blocks) moved into the client file; the template BIZ is now a key list with empty values; tag-bearing blocks split around the tag; slugs validated; `sync-brand` reads the client file | Draft PR |
-| 2026-11-10 | `client-identity` | `3eae101` | Unused copy keys fail the build; `robots.txt` and `sitemap.xml` generated from the client's `domain`; optional per-client `sender`; sample builds cannot overwrite the tracked brand file | Draft PR |
-| 2026-11-10 | `owner-ux-fixes` | `d2e5749` | Empty list pages answer the tap instead of replacing the message; /leads puts the age last; /invite sends the instruction then the forwardable message; a bound chat gets one sentence; owner commands re-proved per command and per forged callback; final modal Call/Close row | Draft PR; 462 assertions on the test project |
-| 2026-11-10 | `visual-polish` | `69bb14c` | CSS moved to `assets/css/styles.css` and linked; modal Call filled at 52px; owner email stacks its buttons on a phone, 124px labels, 16px around the divider; logo is two colours at 256px from the favicon; review page is a card from 640px | Draft PR; page hash 20948309 → 23af892b |
-| 2026-11-11 | `visual-polish` | `8a6523d` | A stale list page is rewritten after the toast (numbers now, Older only when real, empty text with no buttons); the removal line names the request and the job; the stylesheet href is root-absolute; both logo URLs carry the file hash | Draft PR; page hash 23af892b → be79571b |
-| 2026-11-11 | `polish-followup` | `835f3ee` | Modal buttons share one row down to 354px and stack below; the dialog no longer stretches past the screen on a long label; the fake can answer 400 not-modified and the bot treats it as success | Draft PR; CSS hash 4b24ccda → 7ecc159a |
-| 2026-11-11 | `lead-safety` | `c674d03` | A replay of an idempotent lead re-announces it when no channel delivered; per-lead claim in `rate_limits` (10 s bucket, released in a finally, fails open); the missing `created` event is written once | B1a-B1f, 51/51 |
-| 2026-11-11 | `lead-safety` | `9fd9919` | Telegram fan-out is `Promise.allSettled` over every bound phone, one 6000 ms round deadline shared with the fallback, abandoned phones recorded as `timeout` + `abandoned`; `maxDuration: 10` for `api/lead.js` and `api/tg.js` | B5p/B5d, notify 53/53, vercel-config 5/5 |
-| 2026-11-11 | `lead-safety` | `f771b5a` | A timeout is unknown, not failed: never retried; the fallback owner email reuses `<leadId>:owner`, so a lost answer cannot double-alert | B6a/B6b, notify 55/55 |
-| 2026-11-11 | `lead-safety` | `48e0c4a` | The form aborts each attempt at 12 s, retries once after 700 ms under the same key, posts nothing when offline and says so, and shows the already-received panel for an in-page duplicate (B19) | 12c-12e, B19, lead-api 49/49; page hash `be79571b` -> `aa71755b` |
-| 2026-11-11 | `lead-safety` | `c3529ce` | `mailRedirectConfigured()` / `mailRedirectInProduction()` in `lib/mail.js` are the one answer for `/api/health`'s flag, the production log line and the daily operator line | B12a/B12b, health 31/31 |
-| 2026-11-11 | `lead-safety` | `cf85761` | `docs/proposals/notification-outbox.md` (0005 SQL as text, claim/drain design, independent alarm channel) and `docs/proposals/uptime-check.md` | Docs only; `supabase/migrations/` untouched |
-| 2026-11-11 | `lead-safety` | (this commit) | `docs/OPERATIONS.md` §4c/§4d/§8: how one lead is announced, how to find a silent lead, the form's retry rules, the timeout and redirect semantics | Docs only |
-| 2026-11-11 | `lead-safety` review | (this wrap-up) | Lead `maxDuration` 30; truthful Resend replay/409 outcomes; partial Telegram retries by salted chat hash; claim/browser/recap honesty; stale docs and tests corrected | Draft PR #24; no schema. Static/mutations green; DB/full suite blocked by unset `SUPABASE_URL` |
-| 2026-11-12 | `arena/9c9b4995-alder` | `2173631` | Re-verified partial-chat retries and concurrent 409 handling; suppressed owner-email retries after uncertain Resend 5xx, corrected delayed-500 fake support, isolated digest fake idempotency state, and recorded decisions | B1a–B1f, B5p/B5d/B5r, B6a/B6b, C38/C39 passed; touched suites 245/0/0 in 254.6s; full 502/0/0 in 320.6s (baseline 496); mutations failed as intended; review diffs are gitignored at _debug/patches/lead-safety-review.diff and _debug/patches/arena-fix-delta.diff; no schema |
-| 2026-11-12 | `arena/9c9b4995-alder` | `e01b7e4` | Restored owner-email 5xx fallback and replay retries with one attempt per replay; replay now retries both missing paths after partial Telegram delivery; operator alarms claim each problem with fail-open behavior; documented digest claim outcomes; assessed sharp High and deferred non-lockfile upgrade; corrected stale test, cron, self-check, and build docs | D5 strict and B12 restored to baseline strength; interim D5/B12 suppression was weaker and is fixed. Touched 170/0/0 in 131.7s plus notify rerun 62/0/0 in 67.3s; full 506/0/0 in 313.2s (prior 502/0/0 in 320.6s); 5xx suppression mutation fails B6b/B12; disabled throttle mutation fails S12/S22, S23 proves fail-open; PR #25 draft, no schema |
-| 2026-11-12 | `telegram-audit` | (this commit) | Added `docs/audits/telegram-bot-audit.md` from local Telegram Bot API 10.4 snapshots; evaluated owner/operator commands, Rich Messages under no-`parse_mode`, lead-list state, Premium/paid APIs, and deferred item 5b. Task A: PR #27 TEST-only full run passed 525 assertions / 36 suites / 0 failures / 0 skips in 324.7 s; fixture-only fixes are on local branch `codex/pr27-host-fixture-fixes` (`eade8b4`). Migration 0005 is not idempotent (second apply reports existing `site_host`); production was not queried. Docs only confirm `alder-roofing.vercel.app` as live; custom domain attachment is unverified. Telegram snapshots remain gitignored under `_debug/telegram-docs/` |
-| 2026-11-12 | `multi-client-prep` | `dd34ba9` | Added A/B architecture decision memo, honest manual onboarding limits, owner decisions, and replay guard for recorded structural email failures | B8b added; no assertions weakened. Touched suites: lead-api 51/51 + notify 62/62, 136s. Full TEST project: 507/0/0 across 34 suites in 329.6s (+16.4s vs baseline 506/0/0 in 313.2s). B8b mutation: 50/51, failed as expected (ownerAttempts=1). No schema. Pushed after dry-run; draft PR #26 targets main. Review diff: 49,243 bytes / 572 lines, zero secret-pattern hits; apply-check passed on fresh `origin/main` worktree |
-| 2026-11-12 | `arena/a12e637c-alder` | `85f5486` | Chose Architecture A; later replay retries missing env/sender and all failures except `blocked_test_mode`; same-request suppression unchanged. Added real-path replay recovery/5xx tests. | Decision record 82 lines; replay policy 3/3 and old-guard mutation failed R1; DB integration unrun because `.env.test` is absent |
-| 2026-11-13 | `arena/a12e637c-alder` | `0d81188` `6b59157` `af26707` | Made migration `0005` idempotent; brought in the tenant-host fixture fixes; expanded B6g replay diagnostics without changing its assertion. | TEST: migration applied twice to the installed schema; fresh temporary table applied twice; duplicate host rejected (`23505`); old non-idempotent mutation failed with duplicate-column (`42701`) and scratch table was removed. Final full run: 525 assertions / 36 suites / 0 failures / 0 skips in 317.5 s. An earlier full run had one B6g failure; focused and ordered reruns passed, final full run passed, initial cause unconfirmed. No production database was queried. |
-| 2026-11-13 | `arena/abb82209-alder` | (this commit) | Fixed C31, OP56, OP57, OP60 and OP61 test assertions/fixtures only; no production code changed. | TEST full runs: 563/563, 37 suites, 0 failures / 0 skips in 351.0 s and 397.3 s. Five production-behavior mutations each failed the named test and were restored. OP56 compares owner rows with relative-age suffixes normalized. C35 had one transient live-bucket failure (`emails=1`), then passed three webhook reruns and both full runs; test-side timing edge, unchanged. PR #29 updated; no merge. |
-| 2026-11-14 | `arena/d1aa6e15-alder` | `f4df11d` | Bot UI/UX only (no business logic, tenant rule, schema or permission change; callback formats unchanged). Persistent keyboard: ONE row, at most two plain-text buttons: owner `Leads` `Invite`, staff `Leads`, operator `Businesses` `Code`, unbound `remove_keyboard`; the retired labels (`Recipients`, `Help`, `Phones`, `Operator`) still route for keyboards already on phones. Every free-text reply (`handlePlainText`, plus the two rate-limited bad-code replies) goes through `replyRole`, so it carries the chat's role keyboard. `/leads` and `/remove_lead`: one row of number buttons `1..N` (N <= 5, `L:`/`Q:` callbacks) and at most one navigation row with only the useful ends (first page `Older`; middle `Newer` `Older`; last `Newer`; single page none); no `disabled` button anywhere; `leadRowLabel` and `navButton` removed. Lead detail: status action row + `Back`; the copy-phone button is gone. `BUTTON_ICONS` is an empty frozen table, `buttonIcon()` is null, `iconLabel()` returns the label; the seam takes the table as a parameter. Older is not offered on page `LEADS_PAGE_MAX`. `docs/MANUAL_TESTING.md` row 5 updated. Telegram limits: a reply keyboard only travels as the `reply_markup` of a sent message and a message has one `reply_markup`, so messages with inline buttons cannot carry it, and a rate-limited hint (nothing sent) cannot either. | DB-free suites run with a scratch runner (no `.env.test` here): 21 suites, 175/175, incl. lead-browser 18/18 (was 15) and bot-text 19/19. Not runnable without the TEST database and NOT run: every DB-backed suite, and isolation, build-cleanup, startup-sweep, canary-limits, fixture-safety, runner-flags, disk-preflight (they fail the same way on untouched `main`). `tests/webhook.test.mjs` edited and UNRUN: OP12, OP27, OP36, OP37, OP46, OP47, OP48, OP49, OP50, OP53, OP56, OP57, OP58, OP59, OP60 changed, OP62 added. Assertion changes (before -> after), none weaker: LB1 six labeled rows + disabled Newer -> exact number row matching the text + exactly `Older l:1`; LB2 copy button -> exact `Mark contacted` + `Back l:1`, no `copy_text`; LB3/LB4 also require the Back row; LB5 forced disabled tap -> stale `l:0` no-op and out-of-range `l:7` toast; LB6-LB8 exact number rows and nav; LB11 exact one-row keyboards + a legacy label still routes; LB16-LB18 new (nav rule, free-text keyboards, no emoji). T9 row labels <= 40 -> every button <= 20 and list buttons one digit; T14 one button per row -> one row of <= 2 text-only buttons, exact layouts, label map = current + exactly four legacy; T15 `leadRowLabel` format -> number row matches the text, no lead detail on a button; T16 disabled ends -> only useful ends; T17 `copy_text` length -> no `copy_text`, all callbacks <= 64 B; T18 copy button on every kind -> exact keyboard per kind; T19 arrow/clipboard icons -> empty table, seam proved with an injected table, no emoji on any label. OP27/OP36/OP37/OP47/OP50 labeled rows or disabled ends -> exact number row + exact nav row; OP46 copy button required -> forbidden, exact detail keyboard; OP48 exact Back row; OP49/OP53 done detail exactly `Back`; OP56 age-normalized row labels -> whole-keyboard equality; OP57 disabled ends -> no nav row, stale `l:0` no-op, stale `l:1` toast with nothing changed; OP58 shortened row label -> button is `1`, the text keeps the truncated name; OP59 `> 10` callbacks -> exactly 8 with an anchored shape; OP60 label arrays -> exact one-row layouts. No mutation campaign. Review diff: `_debug/patches/arena/d1aa6e15-alder-review.diff` (gitignored). |
-| 2026-11-14 | `arena/f38f9758-alder` | `9f04a9f` | Order only: the two persistent-keyboard buttons are swapped. Owner is now `Invite` (left) `Leads` (right); operator is `Code` (left) `Businesses` (right); staff (`Leads`) and unbound chats (`remove_keyboard`) unchanged. This supersedes the order recorded in the row above. Only `OWNER_KEYBOARD_LABELS` and `OPERATOR_KEYBOARD_LABELS` in `lib/content.js` changed (array order = on-screen order, left to right); no routing, permission, tenant, callback or text change. | DB-free suites via the scratch runner (no `.env.test` here): 21 suites, 175/175, incl. bot-text 19/19, lead-browser 18/18, recipients 25/25. `tests/webhook.test.mjs` edited and UNRUN (DB-backed): OP60 and OP62, through the shared `OWNER_ROWS` / `OPERATOR_ROWS` literals. All other DB-backed suites unrun. Assertion changes (before -> after), same strictness, exact equality kept: T14 owner `[Leads, Invite]` -> `[Invite, Leads]`, operator `[Businesses, Code]` -> `[Code, Businesses]`, and the label-to-command list follows the same order (`/leads,/invite,/leads,/businesses,/code` -> `/invite,/leads,/leads,/code,/businesses`); LB11/LB17 `OWNER_KB` / `OPERATOR_KB` literals reordered the same way; OP60/OP62 `OWNER_ROWS` / `OPERATOR_ROWS` reordered the same way. No mutation campaign. Review diff: `_debug/patches/arena/f38f9758-alder-review.diff` (gitignored). |
-| 2026-11-14 | `arena/83700235-alder` | `7d1df04` | Telegram tap latency; no toast, permission, tenant rule, callback format or schema changed. **Measure:** new `lib/timing.js`; `api/tg.js` prints one `[tg-timing]` JSON line per update (handler name, cold-start flag, `VERCEL_REGION`, total ms, when the answer was sent, each DB/Telegram step with start offset and duration; fixed names and numbers only). **Cut:** the toast goes out together with the edit instead of before it; lead and business are read side by side; the card is drawn from the dispatcher's scoped read, so a status tap reads the lead once (re-read only after a refused write); `/recipients`, `v:` and `/invite` reuse the phone list the owner check read; picker taps (`pc:`, `pb:`) do not re-read the business by slug; the remove browser no longer probes a page and then reads it again; `/businesses` counts run 6 at a time; `business_id` is no longer a selected column in `listClientLeads` / `getClientLead` (still a filter on both). DB calls / Telegram calls per flow, measured with the DB-free fakes, before -> after: `l:` 2/2 -> 2/2, `L:` 3/2 -> 3/2, `C:`/`c:` 7/2 -> 6/2, `D:`/`N:` 4/2 -> 3/2, `Y:` 8/2 -> 7/2, `r:` 12/2 -> 11/2, `/recipients` 4/1 -> 3/1, `v:` 4/2 -> 3/2, `/invite` 6/2 -> 5/2, `pc:` 7/3 -> 6/3, `pb:` 5/2 -> 4/2, `E:` on an emptied page 7/2 -> 6/2; all others unchanged. Awaits in a row: `l:` 4 -> 3, `L:` 5 -> 3, `C:` 9 -> 4, `D:`/`N:` 6 -> 3. **Known difference (race only):** a lead removed between the tap's read and its redraw used to get a keyboard-only edit plus `tg_rerender_failed`; it now gets the card redrawn from the row the tap read. The write itself is still a conditional, scoped UPDATE. **Not changed:** `getBusinessById` columns (shared row passed into the email builders; saving is a few bytes), `postJson` (draining the body would change what counts as a timeout), `i:c`, the region, caching (report only: not recommended — the lead read already overlaps the business read, so a cache saves no wait, and it cannot be invalidated across instances). | DB-free suites via the scratch runner (no `.env.test` here): 22 suites, 189/189, incl. lead-browser 23/23 (was 18), recipients 25/25, bot-text 19/19. New checks, nothing existing changed or weakened: LB19 (one timing line per update; literal key, handler and step lists; no id, name, phone, email, callback data, token), LB20 (literal DB/Telegram budget for 17 flows, counted by the line and by the fakes; one scoped lead read per tap), LB21 (the edit starts while the answer is pending; fails on the old code for all 9 taps), LB22 (lead and business read together — fails on the old code; owner check alone; staff and foreign-business taps read and write nothing), LB23 (timing module). No DB-backed test edited; all DB-backed suites UNRUN, and 16 suites cannot run in this sandbox (same failures on untouched `main`). C10, C31 and C36 were replayed by hand against the new source (static shape only). No mutation campaign. Review diff: `_debug/patches/arena/83700235-alder-review.diff` (gitignored). |
-| 2026-11-14 | `arena/9a9da0fd-alder` | `4f2e880` | Operator chat UI/UX only; no schema, tenant rule, owner or staff flow changed. **Browser:** `/businesses` is ONE message edited in place: five businesses a page (`N. Name · Status · N phones`, sorted by name, every status; a duplicate name shows its slug), a number row, `Newer`/`Older` only where real. `/phones [anything]`, the operator's `/recipients` and the keyboard labels `Businesses`/`Phones` open the same list; the `/phones` picker and the operator's per-phone Remove are gone (single-phone removal is the owner's `/recipients`). **Business screen:** name, `Status · slug`, `Telegram: connected · N phones` + `Phone 1 · main phone`… or `Telegram: not connected`, `Requests: N`; buttons `Terminate` (danger, left) `Leads` (right), `Back` below. **Leads:** read-only list and card of that business through `v_client_leads`, scoped by business id, `Back` only; `/leads` in the operator chat now points here. This is the ONE place the operator reads request content (docs reworded). **Terminate:** confirm screen, then a plain notice + `remove_keyboard` to every phone FIRST, one `DELETE business_chats?business_id=eq.<id>`, live invites expired; business row, status and leads untouched; no grace period. Afterwards the chat is an ordinary unbound chat (`BOT_NOT_CONNECTED`, taps `Not found`, old invite `BOT_CODE_BAD`); `/code <slug>` reconnects. Lead intake was read, not changed: with 0 phones a `demo`/`active` business still stores requests and emails the owner, and the operator gets one no-phone notice per lead. **Callbacks (operator-only, checked on every tap before any read):** `bl:<page>`, `bd/bt/bT:<page>:<uuid>`, `bq:<leadPage>:<page>:<uuid>`, `bo:<leadPage>:<page>:<b22><l22>` (two UUIDs packed to 22 base64url chars each; longest 54 bytes). Old buttons: `pb:` opens that business; `p:`/`P:`/`q:` answer "That screen expired. Here is the current list." and show the list, removing nothing. **DB:** `lib/db.js` gained `listBusinessesPage`, `countChatsForBusinesses` (one `in.()` read per page, not one per business), `countClientLeads`, `removeAllBusinessChats`; lost `getChatById`, `removeChatById`, `countBusinessesByName`. New `[tg-timing]` names: `cmd.operator_businesses`, `cmd.operator_phones`, `cb.operator_business_page`, `cb.operator_business_open`, `cb.operator_leads_page`, `cb.operator_lead_open`, `cb.operator_terminate_ask`, `cb.operator_terminate`, `cb.operator_phone_legacy`; steps `db.business_page`, `db.chat_count_page`, `db.lead_count`, `db.chat_remove_all`, `db.invite_expire`. Menu text in `scripts/tg-commands.mjs` changed: run `npm run tg:commands` after deploy. | DB-free suites via the scratch runner (no `.env.test` here): 23 suites, 206/206 (new `tests/operator-browser.test.mjs` Gate OB 17/17, lead-browser 23/23, bot-text 19/19, recipients 25/25). Four mutations of `api/tg.js` each failed the named OB lines and were restored (operator check removed; unbind before notice; invites not expired; legacy `P:` without the expiry toast). Measured per action (DB / Telegram calls): `/businesses` 3/1, page 3/2, open 4/2, Leads 3/2, one request 3/2, Terminate ask 3/2, confirm with 2 phones 5/4. **NOT RUN:** `tests/webhook.test.mjs` (OP4, OP5, OP7, OP11, OP24, OP33, OP34, OP35, OP43, OP61 rewritten for the browser; `node --check` only) and every other DB-backed suite; no real-phone check. Not merged, no PR opened. |
-| 2026-11-14 | `arena/79c05a98-alder` | `4b4e562` | Operator chat round 5; no migration, no owner or staff flow changed. **Commands:** the operator chat has `/businesses`, `/invite [slug]`, `/help`, `/id` (`/operator` is an alias of `/help`); keyboard `Invite` `Businesses`. Typed `/code`, `/phones`, `/leads`, `/recipients`, `/remove_lead` get `OPERATOR_WELCOME` ("Send /help for the commands") and mint nothing; a `Code` / `Phones` press on an old keyboard still opens the invite list / the business list. `scripts/tg-commands.mjs` `OPERATOR_COMMANDS` = businesses, invite, help, id: **run `npm run tg:commands` after deploy**. **Invite:** `/invite` is one message edited in place: served businesses five a page (`N. Name · Status`), number buttons `bi:<page>:<id>`, nav `bn:<page>`; a number turns the message into name + single-use link + "Forward this link to the business owner." with Back. Same invite under **Invite** on a business (`bv:`). `/invite <slug>` keeps the two-message shortcut. A new invite expires the business's older unused ones; cap 10 per business per hour (`opcode:<slug>`); a suspended business gets none. **Business screen:** name, `Status · slug`, `Telegram: Connected` + phones or `Telegram: Not connected`, `Leads: N total · N in the last 30 days`, `Last lead: <age>`; "Requests: N" removed. Buttons: Suspend, Leads / Invite, Back; suspended: Reactivate, Leads / Back. **Operator Leads:** rows and cards show service, status, age only; the columns read from the database are derived from `OPERATOR_LEAD_FIELDS` (`lib/content.js`), so no name, phone, email, address or note reaches `api/tg.js` for the operator. **Suspend** (replaces Terminate): confirm, then one notice with `remove_keyboard` to every phone and one plain email to the owner address, then `businesses.status = 'paused'` in one update scoped by id and served status. Nothing deleted. Failed notices and a failed email are counted in the result line and never block; an unreadable phone list aborts with nothing sent. While suspended: lead intake and review links 404 (already true on `main` through `resolveTenant`), digest and self-check skip it (already true), bound chats get "This service is suspended. Contact support." for every command, press and tap (`getChatBinding` now returns `business_status` from one embedded read), free text capped by the hint limiter, no new phone binds (code handed back unused), operator invite refused. **Reactivate:** one tap, status `'active'` (a suspended demo comes back as active), every phone told with its role keyboard. `churned` is treated as suspended. **Retired buttons:** `bt`, `bT`, `pb`, `p`, `P`, `q` answer "That screen expired" and change nothing; `pc:` still invites. **db.js:** added `getBusinessBySlug`, `setBusinessStatus`, `listLeadsColumns`, `getLeadColumns`, `getLeadTotals`, `countClientLeadsSince`, `SUSPENDED_STATUSES`, `isSuspendedStatus`; removed `countClientLeads`, `listPickerBusinesses`, `removeAllBusinessChats`. **Known limits:** if PostgREST refuses the `businesses(status)` embed, `getChatBinding` logs `binding_status_embed_refused` and falls back to the plain read, which serves the chat as not suspended; a lead already past the tenant check when Suspend lands is still delivered; `npm run bind` refuses a suspended slug. **Not built (noted only):** a `paid_until` date with automatic suspension would need a new column (a migration) and a step in the daily self-check cron. **Tests:** `tests/operator-browser.test.mjs` rewritten (19 checks, in-file fake PostgREST, per-flow DB / Telegram call budgets in OB14); bot-text, lead-browser, email-layout updated. DB-free 23 suites 208/208 (206 on `main`). `tests/webhook.test.mjs` edited (OP4, OP15, OP24, OP33, OP34, OP43, OP61, OP62 and the `/invite <slug>` mints) and **UNRUN**; every DB-backed suite is unrun on this branch. Docs: `docs/OPERATIONS.md` §2–3, `docs/MANUAL_TESTING.md` (rows B, C; steps 2a–10, 26–27g), `docs/EMAIL_SYSTEM.md` (suspension email). |
-| 2026-11-14 | `arena/f5a18f85-alder` | `b190298` | Operator round 6; no migration, no owner or staff flow changed, business status never touched. **Menu:** `scripts/tg-commands.mjs` operator scope is exactly `/businesses`, `/invite`, `/help`, `/id` (default scope unchanged: `/leads`, `/invite`, `/recipients`, `/remove_lead`, `/help`); `/operator` is an unlisted alias of `/help`; typed `/phones`, `/code`, `/recipients` in the operator chat get `OPERATOR_WELCOME`. `set` now prints both menus, and prints `OPERATOR MENU NOT UPDATED: …` when `OPERATOR_CHAT_ID` is missing or not numeric (the operator chat then keeps its old menu: the cause of the stale live menu); `info` reads both scopes and says `operator menu is up to date` or `OPERATOR MENU IS OUT OF DATE`. **Invite rules** (one function, `operatorInviteStep`, for the list pick `bi:`, the business button `bv:`, the old picker `pc:` and typed `/invite <slug>`; the business and its phone count are read on every step): 0 phones → one invite; 1+ phones → nothing created, `<Name> · Already connected · N phone(s)` with **Replace phone** (danger) and Back; suspended → `<Name> is suspended. Reactivate it first.` and Back, as an edit (was a toast). **Replace phone:** ask `bp:` / `bw:`, confirm `bP:` / `bW:`, cancel `bc:` / `bu:` (list origin / business origin; all `<letters>:<page>:<uuid>`, anchored, 44 bytes at most). Confirm, in order: claim `opreplace:<business id>` on `rate_limits` (60 s, released in `finally`; a second confirm gets "Already replaced."); create the invite (`opcode:<slug>` cap 10/h, fail closed; on failure the screen ends "No phone was removed."); `expireOtherBindCodes` (every other unused live code of that business; if it fails the new code is taken back); `removeAllBusinessChats` (ONE delete scoped by `business_id`, returns the chats; if it fails the new code is taken back and nothing was removed); one `BOT_ACCESS_ENDED` notice with `remove_keyboard` per removed chat, failures counted, never blocking; the invite output. 0 phones at confirm → "Already replaced.", nothing touched. **Output:** the old `/code` pair, builders reused (`operatorCodeText`, `botForwardText`, `operatorCodeResendText`): the browser message is edited into `Code for <slug>: <CODE>` + `Expires in 24 hours.[ N phones removed (M notices not delivered).][ K older invites were cancelled.] The next message is for the client — forward it as it is.` with Back (to the list page, or to the business); then the client message as a NEW message (`text_link` on "connect your lead alerts", code entity, no slug, no button). If the edit fails the guidance is sent new; if the client message fails the guidance becomes the resend text. `operatorInviteResultText` and `operatorInviteCancelledToast` are deleted. New in `lib/db.js`: `expireOtherBindCodes`, `expireBindCode`, `removeAllBusinessChats`. | DB-free 23 suites 214/214 (`operator-browser` 25: OB13 rewritten, new OB18-OB23, OB11/OB12/OB14/OB15 extended; `bot-text` 19: T9, T10, T20). 8 spot mutations all caught (create when connected; unscoped expiry; no expiry; delete before create; notice without keyboard removal; suspended check only on open; operator text in the client message; menu order). `tests/webhook.test.mjs` adapted (OP24 invite tap, OP43 forged list, new OP63 Replace on real rows) and **UNRUN**: no test database here. Not proven on real Postgres: the `.neq('code', …)` expiry, the delete-returning statement, the `opreplace:` claim. |
-| 2026-11-14 | `arena/e7a04353-alder` | `b40bf4a` | Billing stage 1 (no payment provider). **Schema:** migration `0006_business_billing.sql`, additive and idempotent, NOT applied: `businesses.paid_until` (NULL = not billed; every existing row), `billing_warning_stage` (0/1/2), `suspended_for_billing`. **Rules** (`lib/billing.js`, pure): paid while now < `paid_until`; grace for 7 days after (`GRACE_DAYS`); expired from `paid_until` + 7 d; final warning when 25 h or less of grace is left; only `status = 'active'` with a `paid_until` is ever acted on. **Daily job** (`runBillingJob` in `lib/billing-ops.js`): runs at the end of the daily `/api/selfcheck` cron (skipped when scoped to one business; an error never fails the self-check; response unchanged, counts logged as `billing_job`), also by hand at `GET /api/billing` (same auth as the other daily jobs, not scheduled); overdue warning then final warning to every bound phone + owner email, stage advanced only when someone was reached, then suspension through `lib/service-status.js` (the ONE suspend / reactivate path, now also used by the operator's Suspend / Reactivate) with `suspended_for_billing = true`; at most one billing notice per business per UTC day (claim `billing:step:<id>`); one operator summary per UTC day via `lib/operator-alarm.js` (extracted from `api/selfcheck.js`). **Seam:** `applyPayment({ businessId, paidUntil, source, reactivate })`: idempotent, forward-only (`paid_until < target` or NULL in the WHERE), clears the stage, reactivates a billing-suspended business. **Operator:** billing line on the business screen; **Extend 30 days** (`be`) asks with the exact date, Confirm (`bE:<page>:<id>:<base-36 seconds>`) applies that date, so a double tap adds nothing; a suspended business is reactivated by it. Manual Reactivate never touches `paid_until`. Billing suspension email has its own idempotency key (`suspended:billing:<id>:<day>`). | DB-free: 25 suites, 241/241 (new `billing` 8/8, `billing-job` 13/13, `operator-browser` 30/30 with OB24-OB28, `migrations` 7/7). Mutations: 14 tried, 14 caught after one fix (a redundant pre-check in the Extend handler was removed). DB-backed suites UNRUN (no database in the sandbox); `tests/webhook.test.mjs` edited and unrun. Vercel Hobby cron limits were not checked against Vercel's docs: no cron was added. |
-| 2026-11-16 | `arena/586ca282-alder` | `2da26d8` | Service lifecycle (no payment provider). **Config:** `lib/lifecycle-config.js` holds every duration and the support link; Gate BL fails if one is written elsewhere. **Schema:** migration `0007_lifecycle.sql`, additive and idempotent, NOT applied: `leads.held_at`, `v_client_leads` with it, table `business_events` (notice type, channel, status, error class, provider id; no text, no address). **Rules** (`lib/billing.js`, pure): stages 0-6, one notice each: reminder D-3, overdue D, final D+4, suspension D+5, termination warning D+10, termination D+15 (`churned`, shown as Terminated). A warning may go out 1 h early; a suspension or termination never early. **Daily job** (`lib/billing-ops.js`): at most one notice per business per UTC day; a stage is recorded only when somebody was reached or there was nobody to tell; restores a business that paid; one operator summary (`Billing today`) only when something happened. Return shape changed: `terminated`, `restored`, `undelivered`, `held` are new, `final_warned` and `unwarned` are gone. **Notices** (`lib/lifecycle-text.js`, `lib/lifecycle-notify.js`): Telegram + owner email with the same words, `Contact support` as a `text_link` entity (never `parse_mode`), email Reply-To `OPERATOR_EMAIL`, idempotency key `<type>:<business>:<instance>` (milliseconds for transitions); every round is logged in `business_events`; a failed send alerts the operator; `lib/notice-audit.js` reports once a day a round that never finished. **Form** (`api/lead.js`): suspended = stored with `held_at`, `200 {ok,held}`, no alert, no auto-reply, a count-only notice (20 an hour by Telegram, one email a day); terminated = `410 {ok:false,unavailable}`, nothing stored; the page has a panel for each. **Bot:** a switched-off phone keeps `/status` and one `Status` button; `/status` is in the owner menu and the help text. **Operator:** Terminate (`bx` ask, `bX` confirm; the old `bt` / `bT` stay retired), Reactivate works for suspended and terminated, `Held leads: N`, Extend reactivates. **Frontend:** the form's four service options and the no-JS form print the services section's keys (4th: Free roof inspection, value `unsure` kept, new copy key `footer12`, owner label `Roof inspection`); a click outside the form does not close it; the X is 32 px with a 44 px press area. **Docs:** `docs/OPERATIONS.md` 3b rewritten, `docs/PRE_LAUNCH_CHECKLIST.md`, `docs/legal-drafts/` (drafts, not legal advice), email and manual-testing docs. | DB-free suites via the scratch runner: 26 suites, 305/305, incl. new Gate LC `lifecycle` 13/13 and Gate MD `modal` 7/7, `billing` 24, `billing-job` 45, `operator-browser` 31, `bot-text` 19; mutation checks run for the held-lead, 410, cap, audit, Terminate, `/status`, document-number and form rules (each broke the named check). `client-config` `BASELINE` moved to `27a08c72…` (page and `clients/alder.json` changed). DB-backed suites UNRUN; `webhook` and `notify` edited by reading. Migration 0007 NOT applied. Nothing verified in a real browser, in real Telegram or with real email. Not built: a purge job, an export, per-reason wording review by a lawyer. |
-
-### Edge cases — operator redirects (R1a) and T1
-| Case | Behaviour |
-|---|---|
-| Operator chat bound or not | the operator answers come from `OPERATOR_CHAT_ID`, never from a binding |
-| `/leads second-demo` from an owner | the slug is ignored; only that chat's business is listed |
-| Unbound non-operator chat | client text (`This chat isn't connected yet`) unchanged |
-| Paused/churned business in `/businesses` | real phone count by id, not 0 |
-| Many businesses | the picker refuses more than 8 with the usage text |
-| Test project missing `.env.test` | runner refuses the production host; `test:env-check` reports `is production host: true` |
-| Test project posture | RLS per table, anon grants and `rls_auto_enable` compared to production (7/7, none, present) |
+1. `alder-demo` was temporarily set to `status = 'active'` for a billing
+   simulation. Confirm it is back to `demo`, with `paid_until` NULL,
+   `billing_warning_stage` 0 and `suspended_for_billing` false.
+2. A test business `ZZ Billing Test` may still exist in production. Remove it and
+   its leads if it does.
+3. Migration `0007` application status on the TEST project and on production.
+4. `npm run tg:commands` after the lifecycle deploy — the live operator menu was
+   out of date once before.

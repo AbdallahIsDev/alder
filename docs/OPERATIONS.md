@@ -5,8 +5,8 @@ Every command and env name here was checked against the code in this repo.
 No secret values appear anywhere in this document — names only.
 
 Related: `docs/ONBOARDING.md` (the long version of step 1), `docs/TEST_PROJECT.md`
-(pointing the suite at a separate Supabase project), `HANDOFF_alder_session.md`
-(what changed and why).
+(pointing the suite at a separate Supabase project), `SESSION_HANDOFF.md`
+(state, decisions and why).
 
 ---
 
@@ -17,8 +17,6 @@ object with the same keys the page template defines, and an optional `copy` obje
 for the text blocks that were moved out of the page.
 
 1. Copy `clients/alder.json` to `clients/<slug>.json` and change the values. The
-   slug is a file name: lowercase letters, digits and hyphens, starting with a
-   letter or digit. Anything else is refused before the file is read. The
    slug is a file name: lowercase letters, digits and hyphens, starting with a
    letter or digit. Anything else is refused before the file is read.
 2. Build it: `npm run build -- --client <slug>` or `CLIENT=<slug> npm run build`.
@@ -40,12 +38,6 @@ Three more top-level keys:
 
 A `copy` key that no token uses is a build error naming the key, so a typo cannot
 sit in the file looking like it works.
-
-The `copy` object holds the visible text, keyed by section and number (`services1`,
-`faq3`, `reviews2`). Order follows the page. A block that contains a tag — the hero
-heading has a line break, the services heading has a highlighted span — is split
-into `…A`, `…B`, `…C` around the tag instead of being stored as HTML, because token
-values are HTML-escaped.
 
 The `copy` object holds the visible text, keyed by section and number (`services1`,
 `faq3`, `reviews2`). Order follows the page. A block that contains a tag — the hero
@@ -139,7 +131,7 @@ until it is set again, so run it after every deploy that changes either list:
 a deploy alone changes nothing on a phone. The script prints both lists:
 
 ```
-default menu (every private chat): /leads, /invite, /recipients, /remove_lead, /help
+default menu (every private chat): /leads, /invite, /recipients, /remove_lead, /status, /help
 operator menu (operator chat only): /businesses, /invite, /help, /id
 ```
 
@@ -427,6 +419,21 @@ alert that one notice could not be delivered.
 accepting requests through this form right now. Please call them directly."
 (HTTP 410) and stores nothing. Extend or Reactivate puts everything back.
 
+#### Options for the site itself
+
+Only option 1 exists today. The current code is form-only: a terminated host
+still serves the full landing page, and only the form answers "not available".
+The other two options are recorded here for a later decision, not implemented.
+
+1. **Keep serving the site (today).** No build work and no running cost, but
+   the site keeps advertising a business that is not accepting work.
+2. **A neutral holding page per terminated host.** Now that the API resolves
+   the tenant from `Host`, this needs a per-host branch in whatever renders
+   the page. The HTML render does not resolve a tenant yet, so that branch
+   does not exist.
+3. **Redirect the host to the operator's contact page.** One rule to add, but
+   the client's SEO is lost because the old pages stop answering.
+
 ### The daily job
 
 It runs once a day inside the daily self-check (the 09:00 UTC cron; no extra
@@ -564,6 +571,16 @@ and failure/skip counts; there is no `deduped` response field.
 `x-health-secret`; the other three also accept `Authorization: Bearer $CRON_SECRET`.
 The daily billing job (section 3b) runs at the end of `/api/selfcheck`; `/api/billing`
 runs the same job on its own and is not scheduled.
+
+## 4b. Rate limits are fixed windows
+
+`hit_rate_limit()` counts inside a fixed bucket (`floor(epoch / window)`), not a
+sliding window. A burst that straddles a boundary can therefore get up to twice
+the limit in that instant — 10 operator invites before the hour turns, 10 after.
+That is accepted for the operator-only `/invite` because the
+operator is trusted and the cap is there to stop a runaway loop, not an attacker.
+The bind and invite paths use the same primitive; there the cap is one of several
+guards, and the code itself is single-use.
 
 ## 4c. How one lead is announced
 
@@ -705,7 +722,7 @@ that calling is faster. A terminated business accepts nothing (HTTP 410 with
 `unavailable: true`): the visitor reads that the form is not available. Both
 panels keep the **Call** button and promise no reply (section 3b).
 
-## What the visitor sees
+### What the visitor sees
 
 | Failure | Visitor | Owner | Operator |
 |---|---|---|---|
@@ -722,16 +739,6 @@ under-2-second checks deliberately return `{ ok: true }` before insertion
 only after `insertLead` succeeds or finds the same stored idempotency key
 (`api/lead.js:264-282`, `api/lead.js:321`, `api/lead.js:349`). Notification failure
 never changes that stored-lead success into a failure.
-
-## 4b. Rate limits are fixed windows
-
-`hit_rate_limit()` counts inside a fixed bucket (`floor(epoch / window)`), not a
-sliding window. A burst that straddles a boundary can therefore get up to twice
-the limit in that instant — 10 operator invites before the hour turns, 10 after.
-That is accepted for the operator-only `/invite` because the
-operator is trusted and the cap is there to stop a runaway loop, not an attacker.
-The bind and invite paths use the same primitive; there the cap is one of several
-guards, and the code itself is single-use.
 
 ## 5. Incident playbooks
 
@@ -831,28 +838,29 @@ The full list for the first paying customer is `docs/PRE_LAUNCH_CHECKLIST.md`.
    `SUPABASE_URL` or `HEALTH_SECRET` fails exactly like production would.
 2. **Remove `MAIL_REDIRECT_TO`** from Production, then confirm
    `/api/health` → `mail_redirect_active: false`.
-3. **Run `npm run tg:commands`** after the first deploy that adds a command. The menu
-   is `/leads`, `/invite`, `/recipients`, `/remove_lead`, `/help`, and the operator chat's own menu
-   is `/businesses`, `/invite`, `/help`, `/id`; the script also sets the bot
+3. **Run `npm run tg:commands`** after the first deploy that adds a command. The owner
+   menu is `/leads`, `/invite`, `/recipients`, `/remove_lead`, `/status`, `/help`, and the
+   operator chat's own menu is `/businesses`, `/invite`, `/help`, `/id`; the script also sets the bot
    description and short description. Run it after any deploy that changes either menu (the
    operator menu lost `/code` and `/phones`), from a shell that has `OPERATOR_CHAT_ID`: without
    it the operator chat keeps its old menu and the script says `OPERATOR MENU NOT UPDATED`.
    `npm run tg:commands:info` prints both live menus and whether the operator one is up to date.
-3b. **Re-register the webhook** if this deploy adds an update type the bot has never
+4. **Re-register the webhook** if this deploy adds an update type the bot has never
    received: `node scripts/tg-webhook.mjs set https://<host>/api/tg`, then
    `node scripts/tg-webhook.mjs info`. The `set` call drops updates Telegram queued
    while the old registration was live, and `info` must show `my_chat_member` in
    `allowed_updates` or the blocked-bot notice is silently never sent.
-4. **Enable the digest** with `DIGEST_ENABLED=1` (it is off by default), redeploy, then
+5. **Enable the digest** with `DIGEST_ENABLED=1` (it is off by default), redeploy, then
    `curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/digest` → the body
    has `"enabled": true`. The first message goes out at the next 13:00 UTC run; until
    then the endpoint is the only way to see it. Leave it unset to keep the digest off.
-4b. **Apply migration `0006_business_billing.sql`** (`npm run db:apply`, or the SQL editor)
-   to the test project first, then to production. The code runs without it (the business
-   screen says `Billing: unavailable` and the daily billing job skips itself), so the order
-   of deploy and migration does not matter. Nothing is billed until you press **Extend 30
-   days** for a business.
-5. **Read `/api/health`** once after the deploy: `webhook_secret_set` and `salt_set`
+6. **Apply the migrations** (`npm run db:apply`, or the SQL editor) to the test
+   project first, then to production: `0006_business_billing.sql` and
+   `0007_lifecycle.sql`. The code runs without them (the business screen says
+   `Billing: unavailable`, the daily billing job skips itself, a held lead is stored
+   without its mark), so the order of deploy and migration does not matter. Nothing is
+   billed until you press **Extend 30 days** for a business.
+7. **Read `/api/health`** once after the deploy: `webhook_secret_set` and `salt_set`
    must both be `true`, and `last_hour.created` tells you whether leads are arriving.
 
 ## 8. Known limitations
