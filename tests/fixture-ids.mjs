@@ -47,6 +47,11 @@ export const FIXTURE_CHATS = Object.freeze({
   browserB: fixtureId(52),
   browserX: fixtureId(53),
   browserOperator: fixtureId(54),
+  billingOwner: fixtureId(60),     // billing-job: in-memory store only
+  billingStaff: fixtureId(61),
+  billingB: fixtureId(62),
+  billingOther: fixtureId(63),     // billing-job: phones of businesses the job must never touch
+  billingOperator: fixtureId(64),
 });
 
 export const ALL_FIXTURE_CHAT_IDS = Object.freeze(Object.values(FIXTURE_CHATS));

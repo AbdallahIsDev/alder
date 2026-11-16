@@ -33,16 +33,21 @@ import {
   operatorAlreadyConnectedText, operatorAlreadyConnectedKeyboard, operatorReplaceConfirmText, operatorReplaceConfirmKeyboard,
   operatorInviteFailedText, operatorReplaceFailedText, OPERATOR_ALREADY_REPLACED, OPERATOR_NO_PHONE_NOW, BOT_ACCESS_ENDED,
   operatorBackToBusinessKeyboard,
+  operatorExtendConfirmText, operatorExtendConfirmKeyboard, operatorExtendedText, operatorAlreadyExtendedText,
+  OPERATOR_EXTENDED, OPERATOR_ALREADY_EXTENDED, OPERATOR_BILLING_UNAVAILABLE,
   operatorLeadListText, operatorLeadCardText, operatorLeadColumns, operatorLeadListKeyboard, operatorLeadDetailKeyboard,
   unpackUuid,
   OPERATOR_BUSINESS_GONE, OPERATOR_SCREEN_EXPIRED, OPERATOR_PAGE_GONE,
   OPERATOR_SUSPENDED, OPERATOR_REACTIVATED, OPERATOR_ALREADY_SUSPENDED, OPERATOR_ALREADY_ACTIVE,
   OPERATOR_NO_LEADS, OPERATOR_NO_OLDER_LEADS, OPERATOR_LEAD_GONE, OPERATOR_RECENT_DAYS,
   OPERATOR_USAGE_INVITE, OPERATOR_UNKNOWN_SLUG, OPERATOR_CAPPED, operatorIdMessage, OPERATOR_HELP,
-  BOT_SUSPENDED, BOT_SUSPENDED_NOTICE, BOT_REACTIVATED,
+  BOT_SUSPENDED,
   leadDetailKeyboard, persistentKeyboard, KEYBOARD_LABELS, BOT_DISCONNECTED,
   OWNER_KEYBOARD_LABELS, STAFF_KEYBOARD_LABELS, OPERATOR_KEYBOARD_LABELS,
 } from '../lib/content.js';
+import { suspendBusiness, reactivateStatus, reactivationNotices, sendFailed } from '../lib/service-status.js';
+import { nextPaidUntil, decodePaidUntil, extendTargetAllowed } from '../lib/billing.js';
+import { applyPayment } from '../lib/billing-ops.js';
 
 /* ---------- timing ----------
    Every database and Telegram call this file makes goes through a wrapper that
@@ -57,7 +62,7 @@ const {
   countBusinessChats, countLiveBindCodes, listLiveBindCodes, expireLiveBindCodes, clearStaleRetryLock,
   listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
   expireOtherBindCodes, expireBindCode, removeAllBusinessChats,
-  getBusinessBySlug, setBusinessStatus,
+  getBusinessBySlug, setBusinessStatus, extendPaidUntil,
   listBusinessesPage, countChatsForBusinesses, getLeadTotals, countClientLeadsSince,
   listLeadsColumns, getLeadColumns,
 } = timedAll(dbApi, {
@@ -69,6 +74,7 @@ const {
   getBusinessById: 'db.business_by_id',
   getBusinessBySlug: 'db.business_by_slug',
   setBusinessStatus: 'db.business_status_update',
+  extendPaidUntil: 'db.business_paid_until_update',
   listBusinessesPage: 'db.business_page',
   listClientLeads: 'db.lead_page',
   getClientLead: 'db.lead_by_id',
@@ -116,7 +122,18 @@ const { sendReviewRequest, notifyOperatorUnreachable, sendSuspensionEmail } = ti
   sendSuspensionEmail: 'mail.suspension_notice',
 });
 // Pure checks and lists, not database calls: nothing to time.
-const { isSuspendedStatus, ACTIVE_STATUSES, SUSPENDED_STATUSES } = dbApi;
+const { isSuspendedStatus } = dbApi;
+/** The calls lib/service-status.js and applyPayment() make, as this file's
+ *  timed wrappers: a suspension, a reactivation and a recorded payment show
+ *  up in the timing line whoever started them. */
+const SERVICE_IO = {
+  sendMessage: (...a) => sendMessage(...a),
+  sendSuspensionEmail: (...a) => sendSuspensionEmail(...a),
+  setBusinessStatus: (...a) => setBusinessStatus(...a),
+  getBusinessById: (...a) => getBusinessById(...a),
+  listBusinessChatsDetailed: (...a) => listBusinessChatsDetailed(...a),
+  extendPaidUntil: (...a) => extendPaidUntil(...a),
+};
 
 const GENERIC_NOT_FOUND = TOAST_NOT_FOUND;
 
@@ -1072,22 +1089,21 @@ async function handleOperatorLeadOpen({ chatId, messageId, businessId, leadId, l
   ]);
 }
 
-/** Whether a send reached Telegram and was accepted. */
-const sendFailed = (r) => !!(r.error || !(r.value && r.value.ok));
-
 /**
  * Suspend: stop the whole service for one business. `confirmed` false asks,
  * true does it. The only thing written is businesses.status ('paused');
  * bindings, invites and leads are untouched, so Reactivate restores
  * everything without re-onboarding.
  *
- * On confirm, in this order: (a) one plain notice to every bound phone, with
- * ReplyKeyboardRemove on the same message, and one plain email to the owner
- * address, BEFORE the status changes — a notice or an email that fails is
- * counted and blocks nothing; (b) the status, in one UPDATE scoped by the id AND the
- * served statuses, so a second tap or a race changes nothing; (c) the
- * operator's message becomes the result. A business that is already suspended
- * gets no notice and no write, so a second tap is harmless.
+ * On confirm: suspendBusiness() (lib/service-status.js, the ONE suspension
+ * path, shared with the daily billing job) sends one plain notice to every
+ * bound phone with ReplyKeyboardRemove and one plain email to the owner
+ * address BEFORE the status changes (a notice that fails is counted and
+ * blocks nothing), then writes the status in one UPDATE scoped by the id AND
+ * the served statuses, so a second tap or a race changes nothing. The
+ * operator's message then becomes the result. A business that is already
+ * suspended gets no notice and no write, so a second tap is harmless. A
+ * suspension made here is never marked "for non-payment".
  */
 async function handleOperatorSuspend({ chatId, messageId, businessId, page, answer, confirmed }) {
   const [biz, chats] = await together([
@@ -1120,20 +1136,10 @@ async function handleOperatorSuspend({ chatId, messageId, businessId, page, answ
   // The phones could not be read: nothing is sent and nothing is changed. The
   // dispatcher answers with the generic error and the question stays on screen.
   if (chats.error) throw chats.error;
-  const rows = chats.value;
-  const [sent, mail] = await together([
-    together(rows.map((r) => settle(
-      sendMessage(r.tg_chat_id, BOT_SUSPENDED_NOTICE, { reply_markup: { remove_keyboard: true } })))),
-    settle(sendSuspensionEmail({ business })),
-  ]);
   // The owner email is a notice too: one that could not be sent is counted,
-  // so the operator knows to tell the owner another way. A business with no
-  // owner address has no email to fail.
-  const noAddress = !!(mail.value && mail.value.status === 'no_owner_email');
-  const failed = sent.filter(sendFailed).length + (!noAddress && sendFailed(mail) ? 1 : 0);
-
-  // The status could not be written: nothing is reported as done.
-  const changed = await setBusinessStatus(business.id, 'paused', ACTIVE_STATUSES);
+  // so the operator knows to tell the owner another way. A status that could
+  // not be written throws, and nothing is reported as done.
+  const { changed, failed } = await suspendBusiness({ business, rows: chats.value }, SERVICE_IO);
   if (!changed) { await already(); return; }
   await together([
     answer(OPERATOR_SUSPENDED),
@@ -1147,7 +1153,9 @@ async function handleOperatorSuspend({ chatId, messageId, businessId, page, answ
  * statuses, so a business that was demo before it was suspended comes back as
  * active, and a second tap changes nothing. Then every bound phone is told,
  * with its own role keyboard on the same message (the main phone is the
- * oldest binding); a notice that fails blocks nothing.
+ * oldest binding); a notice that fails blocks nothing. Both steps are
+ * lib/service-status.js, shared with a recorded payment. paid_until is not
+ * touched: reactivating is not paying.
  */
 async function handleOperatorReactivate({ chatId, messageId, businessId, page, answer }) {
   const [biz, chats] = await together([
@@ -1166,14 +1174,81 @@ async function handleOperatorReactivate({ chatId, messageId, businessId, page, a
   if (chats.error) throw chats.error;
   const rows = chats.value;
 
-  const changed = await setBusinessStatus(business.id, 'active', SUSPENDED_STATUSES);
+  const changed = await reactivateStatus(business, SERVICE_IO);
   if (!changed) { await already(); return; }
   await together([
     answer(OPERATOR_REACTIVATED),
     editList(chatId, messageId, operatorReactivatedText(business), back),
-    ...rows.map((r, i) => settle(sendMessage(r.tg_chat_id, BOT_REACTIVATED, {
-      reply_markup: persistentKeyboard(i === 0 ? OWNER_KEYBOARD_LABELS : STAFF_KEYBOARD_LABELS),
-    }))),
+    ...reactivationNotices(rows, SERVICE_IO),
+  ]);
+}
+
+/**
+ * Extend 30 days: the operator records one payment. `token` null asks; a
+ * token is the Confirm button, and carries the exact paid-until moment the
+ * question showed.
+ *
+ * Ask: the date is nextPaidUntil(paid_until, now): max(paid_until, now) + 30
+ * days. Nothing is written.
+ *
+ * Confirm: applyPayment() with the date FROM THE BUTTON. That is what makes a
+ * double tap harmless: the second tap asks for the same date, the business is
+ * already paid that far, and nothing is written, sent or reactivated. Before
+ * it is applied the date is checked against the business as it is now: it
+ * must lie in the future and be no later than one press could reach, so no
+ * button, however old, can add more than one period. A date that fails that
+ * check is a screen that expired: the business is shown as it is.
+ *
+ * A suspended business is reactivated through the Reactivate path (notices
+ * and keyboards included), and the question says so before the tap.
+ */
+async function handleOperatorExtend({ chatId, messageId, businessId, page, answer, token = null }) {
+  const business = await operatorBusinessOrList({ chatId, messageId, businessId, page, answer });
+  if (!business) return;
+  const back = operatorBackToBusinessKeyboard(business.id, page);
+  if (business.billing_unavailable) {
+    await together([answer(''), editList(chatId, messageId, OPERATOR_BILLING_UNAVAILABLE, back)]);
+    return;
+  }
+  const now = Date.now();
+  const suspended = isSuspendedStatus(business.status);
+
+  if (token === null) {
+    const target = nextPaidUntil(business.paid_until, now);
+    await together([
+      answer(''),
+      editList(chatId, messageId, operatorExtendConfirmText({ business, target, suspended }),
+        operatorExtendConfirmKeyboard(business.id, page, target)),
+    ]);
+    return;
+  }
+
+  const target = decodePaidUntil(token);
+  if (!extendTargetAllowed(target, business.paid_until, now)) {
+    await sendBusinessDetail({ chatId, messageId, businessId: business.id, page, answer, toast: OPERATOR_SCREEN_EXPIRED });
+    return;
+  }
+
+  const r = await applyPayment({ businessId: business.id, paidUntil: target, source: 'operator', reactivate: 'any', business }, SERVICE_IO);
+  if (!r.ok) {
+    if (r.reason === 'unavailable') { await together([answer(''), editList(chatId, messageId, OPERATOR_BILLING_UNAVAILABLE, back)]); return; }
+    await sendBusinessPage(chatId, page, messageId, answer, OPERATOR_BUSINESS_GONE);
+    return;
+  }
+  if (!r.changed) {
+    // Already paid that far (the second tap of a double tap): nothing was
+    // written, nobody was told.
+    await together([
+      answer(OPERATOR_ALREADY_EXTENDED),
+      editList(chatId, messageId, operatorAlreadyExtendedText({ business, paidUntil: r.paidUntil }), back),
+    ]);
+    return;
+  }
+  await together([
+    answer(OPERATOR_EXTENDED),
+    editList(chatId, messageId, operatorExtendedText({
+      business, paidUntil: r.paidUntil, wasSuspended: r.wasSuspended, reactivated: r.reactivated, failed: r.noticesFailed,
+    }), back),
   ]);
 }
 
@@ -1484,11 +1559,13 @@ const CB_OPERATOR_PICK = /^(pb|pc):([0-9a-f-]{36})$/;
 // bounded digits and every id is a uuid, as text or as 22 packed characters.
 // bl = the business list, bn = the /invite list.
 const CB_OP_LIST = /^(bl|bn):(\d{1,3})$/;
-// bd open, bs ask to suspend, bS suspend, br reactivate; bt and bT were
-// Terminate. The invite flow, once per origin (see OP_INVITE_STEPS): from the
+// bd open, bs ask to suspend, bS suspend, br reactivate, be ask to extend
+// the paid period; bt and bT were Terminate. The invite flow, once per origin (see OP_INVITE_STEPS): from the
 // /invite list bi open, bp ask to replace, bP replace, bc cancel; from the
 // business bv, bw, bW, bu.
-const CB_OP_BUSINESS = /^(bd|bs|bS|br|bi|bp|bP|bc|bv|bw|bW|bu|bt|bT):(\d{1,3}):([0-9a-f-]{36})$/;
+const CB_OP_BUSINESS = /^(bd|bs|bS|br|be|bi|bp|bP|bc|bv|bw|bW|bu|bt|bT):(\d{1,3}):([0-9a-f-]{36})$/;
+// bE: extend to exactly <until> (whole seconds, base 36; lib/billing.js).
+const CB_OP_EXTEND = /^bE:(\d{1,3}):([0-9a-f-]{36}):([0-9a-z]{1,8})$/;
 const CB_OP_LEADS = /^bq:(\d{1,2}):(\d{1,3}):([0-9a-f-]{36})$/;
 const CB_OP_LEAD = /^bo:(\d{1,2}):(\d{1,3}):([A-Za-z0-9_-]{22})([A-Za-z0-9_-]{22})$/;
 /** The invite flow's callbacks: which step, and where Back leads. */
@@ -1500,7 +1577,7 @@ const OP_INVITE_STEPS = {
 };
 const OP_BUSINESS_HANDLER_NAMES = {
   bd: 'cb.operator_business_open', bs: 'cb.operator_suspend_ask', bS: 'cb.operator_suspend',
-  br: 'cb.operator_reactivate', bv: 'cb.operator_invite_business', bi: 'cb.operator_invite_open',
+  br: 'cb.operator_reactivate', be: 'cb.operator_extend_ask', bv: 'cb.operator_invite_business', bi: 'cb.operator_invite_open',
   bp: 'cb.operator_replace_ask', bw: 'cb.operator_replace_ask',
   bP: 'cb.operator_replace', bW: 'cb.operator_replace',
   bc: 'cb.operator_replace_cancel', bu: 'cb.operator_replace_cancel',
@@ -1598,16 +1675,24 @@ async function handleCallback(cb, binding) {
     const opBusiness = CB_OP_BUSINESS.exec(data);
     const opLeads = CB_OP_LEADS.exec(data);
     const opLead = CB_OP_LEAD.exec(data);
-    if (opList || opBusiness || opLeads || opLead) {
+    const opExtend = CB_OP_EXTEND.exec(data);
+    if (opList || opBusiness || opLeads || opLead || opExtend) {
       setHandler(opList ? (opList[1] === 'bn' ? 'cb.operator_invite_page' : 'cb.operator_business_page')
         : opLeads ? 'cb.operator_leads_page'
           : opLead ? 'cb.operator_lead_open'
-            : OP_BUSINESS_HANDLER_NAMES[opBusiness[1]]);
+            : opExtend ? 'cb.operator_extend'
+              : OP_BUSINESS_HANDLER_NAMES[opBusiness[1]]);
       // Operator-only BEFORE any data read, on every tap; a non-operator gets
       // the same answer as any unknown callback and nothing is read or written.
       if (!isOperatorChat(chatId, chatType)) { await answer(GENERIC_NOT_FOUND); return; }
       if (opList) {
         await sendOperatorList({ kind: opList[1] === 'bn' ? 'invite' : 'businesses', chatId, page: Number(opList[2]), messageId, answer });
+        return;
+      }
+      if (opExtend) {
+        await handleOperatorExtend({
+          chatId, messageId, businessId: opExtend[2], page: clampBusinessPage(opExtend[1]), answer, token: opExtend[3],
+        });
         return;
       }
       if (opBusiness) {
@@ -1616,6 +1701,7 @@ async function handleCallback(cb, binding) {
         if (kind === 'bd') await sendBusinessDetail(at);
         else if (kind === 'bs' || kind === 'bS') await handleOperatorSuspend({ ...at, confirmed: kind === 'bS' });
         else if (kind === 'br') await handleOperatorReactivate(at);
+        else if (kind === 'be') await handleOperatorExtend(at);
         else if (OP_INVITE_STEPS[kind]) {
           await operatorInviteStep({ ...at, from: OP_INVITE_STEPS[kind].from }, { step: OP_INVITE_STEPS[kind].step, businessId: at.businessId });
         }

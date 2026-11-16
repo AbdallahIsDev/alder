@@ -126,6 +126,29 @@ key is `suspended:<business id>:<UTC day>`, so suspending the same business
 twice in one day sends one email. A failed send is counted in the operator's
 result line and never blocks the suspension. Reactivation sends no email.
 
+When the daily billing job suspends a business (docs/OPERATIONS.md, 3b) the
+same builder and sender are used with the billing sentence, "Your service has
+been suspended because payment was not received. Contact support.", and the
+key `suspended:billing:<business id>:<UTC day>`.
+
+## Billing warnings
+
+`billingNoticeEmail(business, { subject, text })` in `lib/email-builders.js`,
+sent by `sendBillingEmail` in `lib/notify.js` from the daily billing job. It
+goes to the business's owner email address, from "Lead Alerts", in the same
+shell, with one sentence, the same one the business's phones get in Telegram:
+
+- subject "Payment overdue": "Payment for \<Name\> is overdue. Your service
+  will be suspended on \<date\> unless payment is received. Contact support."
+- subject "Final notice: payment overdue": the same sentence, starting "Final
+  notice: payment for \<Name\> is overdue."
+
+The idempotency key is `billing:<overdue|final>:<business id>:<UTC day>`. The
+email counts as a delivered notice: a warning is recorded as sent when at
+least one phone or this email accepted it. The operator's billing summary uses
+`operatorAlarmEmail` when Telegram refuses it, with the key
+`billing:operator:<UTC day>`.
+
 ## Customer emails
 
 Both customer mails share the owner email's dark band but logo-only (no

@@ -1499,13 +1499,17 @@ try {
         // The business screen against the real view: the Telegram line says
         // Connected and nothing else, the lead numbers are one line (two
         // aggregates) plus the age of the newest, and "Requests" is gone.
+        // The last line is billing: the demo business is not billed ("not
+        // tracked"), or the test database has no billing columns yet
+        // (migration 0006 not applied: "unavailable"). Either is correct here.
         const detailOk = phSends === 0 && pbToast.includes(C2.OPERATOR_SCREEN_EXPIRED) && phonesTitle.split('\n')[0] === 'Alder Roofing'
           && phonesTitle.split('\n')[1] === 'Demo · alder-demo' && /\n\nTelegram: Connected\nPhone 1 · main phone/.test(phonesTitle)
-          && /\n\nLeads: \d+ total · \d+ in the last 30 days(\nLast lead: [^\n]+)?$/.test(phonesTitle)
+          && /\n\nLeads: \d+ total · \d+ in the last 30 days(\nLast lead: [^\n]+)?\nBilling: (not tracked|unavailable)$/.test(phonesTitle)
           && !/Requests|\d phones?/.test(phonesTitle)
           && JSON.stringify(detailKb) === JSON.stringify([
             [{ text: 'Suspend', callback_data: 'bs:0:' + bizA.id, style: 'danger' }, { text: 'Leads', callback_data: 'bq:0:0:' + bizA.id }],
-            [{ text: 'Invite', callback_data: 'bv:0:' + bizA.id, style: 'primary' }, { text: 'Back', callback_data: 'bl:0' }],
+            [{ text: 'Extend 30 days', callback_data: 'be:0:' + bizA.id }, { text: 'Invite', callback_data: 'bv:0:' + bizA.id, style: 'primary' }],
+            [{ text: 'Back', callback_data: 'bl:0' }],
           ])
           && !!bdEdit && bdEdit.body.text === phonesTitle;
 
@@ -1573,6 +1577,8 @@ try {
         let foreignRefused = true;
         for (const data of ['pb:' + bizA.id, 'bl:0', 'bn:0', 'bd:0:' + bizA.id, 'bt:0:' + bizA.id, 'bT:0:' + bizA.id, 'bs:0:' + bizA.id, 'bS:0:' + bizA.id,
           'br:0:' + bizA.id, 'bv:0:' + bizA.id, 'bi:0:' + bizA.id, 'bq:0:0:' + bizA.id,
+          // Extend: the question, and a confirm carrying a date 30 days ahead.
+          'be:0:' + bizA.id, 'bE:0:' + bizA.id + ':' + Math.floor((Date.now() + 30 * 86400000) / 1000).toString(36),
           'bp:0:' + bizA.id, 'bP:0:' + bizA.id, 'bc:0:' + bizA.id, 'bw:0:' + bizA.id, 'bW:0:' + bizA.id, 'bu:0:' + bizA.id]) {
           await reset();
           await good(cb(chatA, data));
@@ -2468,6 +2474,8 @@ try {
           'i:c', 'pc:' + bizA.id, 'pb:' + bizA.id,
           'bl:0', 'bn:0', 'bd:0:' + invBiz.id, 'bt:0:' + invBiz.id, 'bT:0:' + invBiz.id, 'bs:0:' + invBiz.id, 'bS:0:' + invBiz.id,
           'br:0:' + invBiz.id, 'bv:0:' + invBiz.id, 'bi:0:' + invBiz.id, 'bq:0:0:' + invBiz.id,
+          // Extend: the question, and a confirm carrying a date 30 days ahead.
+          'be:0:' + invBiz.id, 'bE:0:' + invBiz.id + ':' + Math.floor((Date.now() + 30 * 86400000) / 1000).toString(36),
           'bp:0:' + invBiz.id, 'bP:0:' + invBiz.id, 'bc:0:' + invBiz.id, 'bw:0:' + invBiz.id, 'bW:0:' + invBiz.id, 'bu:0:' + invBiz.id]) {
           await reset();
           await good(cb(invStaff, data));
@@ -2482,7 +2490,7 @@ try {
         // The operator's lists and its business browser, Suspend, Reactivate
         // and Invite included and aimed at this phone's OWN business: not
         // found, like any unknown tap.
-        const pickerRefused = ['pc', 'pb', 'bl', 'bn', 'bd', 'bt', 'bT', 'bs', 'bS', 'br', 'bv', 'bi', 'bq', 'bp', 'bP', 'bc', 'bw', 'bW', 'bu']
+        const pickerRefused = ['pc', 'pb', 'bl', 'bn', 'bd', 'bt', 'bT', 'bs', 'bS', 'br', 'be', 'bE', 'bv', 'bi', 'bq', 'bp', 'bP', 'bc', 'bw', 'bW', 'bu']
           .every((k) => (answers[k] || []).length === 1 && answers[k][0] === C2.TOAST_NOT_FOUND);
         line(refused && inviteRefused && pickerRefused && rowsKept === rowsAtStart && leadKept === 1 && liveAfter === liveBefore,
           'OP43', 'staff forged callbacks: refused, owner row, lead and codes intact',

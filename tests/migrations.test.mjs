@@ -10,6 +10,9 @@
 //   M3  The order is sane: 0001, then seed, then the later migrations.
 //   M4  scripts/apply-migrations.mjs reads the list from lib/migrations.js and does
 //       not re-inline its own array (which would let the two drift apart again).
+//   M7  0006 (billing) is three guarded ADD COLUMNs on businesses and nothing
+//       else, so it is safe on a database that already has it, and paid_until
+//       stays nullable with no default (NULL = not billed).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -47,11 +50,35 @@ const line = (ok, id, what, d) => {
   const i2 = idx('0002_default');
   const i3 = idx('0003_service_role');
   const i4 = idx('0004_lead_event');
+  const i5 = idx('0005_business_site_host');
+  const i6 = idx('0006_business_billing');
   const numeric = APPLY_ORDER.map((f) => /(\d{4})_/.exec(path.basename(f))).filter(Boolean).map((m) => Number(m[1]));
   const ascending = numeric.every((n, i) => i === 0 || n > numeric[i - 1]);
-  const ok = i1 === 0 && iseed === 1 && i2 > iseed && i3 > i2 && i4 > i3 && ascending;
-  line(ok, 'M3', 'apply order: 0001, seed, 0002, 0003, 0004, 0005',
-    `i=${i1}/${iseed}/${i2}/${i3}/${i4} ascending=${ascending}`);
+  const ok = i1 === 0 && iseed === 1 && i2 > iseed && i3 > i2 && i4 > i3 && i5 > i4 && i6 > i5
+    && i6 === APPLY_ORDER.length - 1 && ascending;
+  line(ok, 'M3', 'apply order: 0001, seed, 0002, 0003, 0004, 0005, 0006',
+    `i=${i1}/${iseed}/${i2}/${i3}/${i4}/${i5}/${i6} ascending=${ascending}`);
+}
+
+/* M7: 0006 (billing) is additive and safe to run twice: one ALTER TABLE on
+   businesses, three ADD COLUMN IF NOT EXISTS, and nothing else: no drop, no
+   update, no backfill, no NOT NULL without a default. paid_until must stay
+   nullable with no default, because NULL is what "not billed" means and what
+   every existing row must start as. */
+{
+  const sql = fs.readFileSync(path.join(ROOT, 'supabase', 'migrations', '0006_business_billing.sql'), 'utf8')
+    .split(/\r?\n/).filter((l) => !/^\s*--/.test(l)).join('\n').replace(/\s+/g, ' ').trim().toLowerCase();
+  const statements = sql.split(';').map((x) => x.trim()).filter(Boolean);
+  const want = 'alter table public.businesses'
+    + ' add column if not exists paid_until timestamptz,'
+    + ' add column if not exists billing_warning_stage smallint not null default 0,'
+    + ' add column if not exists suspended_for_billing boolean not null default false';
+  const adds = (sql.match(/add column/g) || []).length;
+  const guarded = (sql.match(/add column if not exists/g) || []).length;
+  const ok = statements.length === 1 && statements[0] === want && adds === 3 && guarded === 3
+    && !/\b(drop|delete|update|truncate|insert|rename|create|grant|revoke)\b/.test(sql);
+  line(ok, 'M7', '0006 billing: three guarded columns on businesses, nothing else',
+    `statements=${statements.length} adds=${adds} guarded=${guarded}`);
 }
 
 /* M4: the script consumes the shared list instead of keeping its own copy. */

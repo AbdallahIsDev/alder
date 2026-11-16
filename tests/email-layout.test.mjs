@@ -52,6 +52,7 @@ const FIXTURES = {
   digestEmail: [digestDay, '2026-11-07', business],
   operatorAlarmEmail: ['⚠️ Needs attention\nalder-demo: 1 alert could not be delivered', '2026-11-07'],
   suspendedEmail: [business],
+  billingNoticeEmail: [business, { subject: 'Payment overdue', text: 'Payment for Alder Roofing is overdue. Your service will be suspended on Dec 21 unless payment is received. Contact support.' }],
 };
 
 /* L1: every registered builder, and only registered ones, produces shell HTML. */
