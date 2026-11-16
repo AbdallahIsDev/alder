@@ -451,7 +451,13 @@ async function sendLeadsPage(chatId, businessId, page, messageId, answer = null)
   const hasOlder = leads.length > LEADS_PAGE && safePage < LEADS_PAGE_MAX;
   const shown = leads.slice(0, LEADS_PAGE);
   const empty = !shown.length;
-  const text = empty ? 'No requests yet.' : renderLeadList(shown);
+  // One count line, only for this page. The list itself keeps its order and
+  // five rows; no second list, numbering or callback is added for held leads.
+  const heldCount = shown.reduce((n, l) => n + (l.held_at ? 1 : 0), 0);
+  const listText = renderLeadList(shown);
+  const text = empty ? 'No requests yet.'
+    : heldCount ? listText.replace('Recent requests\n', `Recent requests\nReceived while suspended: ${heldCount}\n`)
+      : listText;
   const markup = empty ? { reply_markup: { inline_keyboard: [] } } : leadListKeyboard(shown, safePage, hasOlder);
   if (messageId) {
     const [, edited] = await together([

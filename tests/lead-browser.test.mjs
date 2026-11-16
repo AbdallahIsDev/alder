@@ -1199,6 +1199,99 @@ try {
       'LB23', 'timing module: cold flag, fixed names only, bounded, survives a throw',
       `lines=${printed.length} cold=${printed.map((x) => x.cold).join(',')} steps=${printed.map((x) => x.steps.length).join(',')} dropped=${second && second.steps_dropped}`);
   }
+
+  /* LB24: held leads are marked in place. The page header counts only this
+     page, the fourth "held" line sits inside the existing block, the detail
+     gets one fact line, and /remove_lead carries none of it. */
+  store = freshStore();
+  {
+    const heldAt = '2026-11-14T12:00:00Z';
+    const h1 = seedLead(BIZ_A, { name: 'Held First', created_at: '2026-11-15T12:00:00Z' });
+    const h2 = seedLead(BIZ_A, { name: 'Held Second', created_at: '2026-11-14T13:00:00Z' });
+    for (const id of [h1, h2]) store.leads.find((l) => l.id === id).held_at = heldAt;
+    const normal = [];
+    for (let i = 0; i < 5; i++) {
+      normal.push(seedLead(BIZ_A, { name: `Normal ${i}`, created_at: `2026-11-${String(13 - i).padStart(2, '0')}T12:00:00Z` }));
+    }
+    const order0 = [h1, h2, ...normal.slice(0, 3)];
+
+    await tgReset();
+    await call(msg(OWNER, '/leads'));
+    const first = (await sends()).pop();
+    const firstText = String(first.body.text);
+    const firstKb = kbOf(first);
+    const firstBlocks = firstText.split('\n\n').slice(1);
+    const heldRows = firstBlocks.filter((b) => b.split('\n').includes('held'));
+    const header = 'Received while suspended: 2';
+    const firstOk = firstText.startsWith(`Recent requests\n${header}\n\n`)
+      && firstBlocks.length === 5 && heldRows.length === 2
+      && heldRows.every((b) => /^([12])\. Held (First|Second)$/.test(b.split('\n')[0]))
+      && numbersOk(firstKb[0], 5)
+      && order0.every((id, i) => firstKb[0][i].callback_data === `L:0:${id}`)
+      && firstText.split('\n').every((l) => l.length <= 34);
+
+    await tgReset();
+    await call(cb(OWNER, 'l:1'));
+    const page1 = String((await edits())[0].body.text);
+    const page1Blocks = page1.split('\n\n').slice(1);
+    const page1Ok = page1.startsWith('Recent requests\n\n') && page1Blocks.length === 2
+      && !page1.includes('Received while suspended') && !page1.split('\n').includes('held')
+      && page1.split('\n').every((l) => l.length <= 34);
+
+    await tgReset();
+    await call(cb(OWNER, `L:0:${h1}`));
+    const heldDetail = String((await edits())[0].body.text);
+    await tgReset();
+    await call(cb(OWNER, `L:0:${normal[0]}`));
+    const normalDetail = String((await edits())[0].body.text);
+    const detailOk = heldDetail.split('\n').filter((l) => l === 'Received while suspended').length === 1
+      && !normalDetail.includes('Received while suspended')
+      && heldDetail.split('\n').every((l) => l.length <= 34);
+
+    await tgReset();
+    await call(msg(OWNER, '/remove_lead'));
+    const removeText = String((await sends()).pop().body.text);
+    const removeOk = removeText.startsWith(C.REMOVE_LEAD_TITLE)
+      && !removeText.split('\n').includes('held') && !removeText.includes('Received while suspended');
+
+    line(firstOk && page1Ok && detailOk && removeOk,
+      'LB24', 'held rows marked in place; page count, detail, removal clean',
+      `header=${firstText.split('\n')[1]} heldRows=${heldRows.length} detail=${detailOk} remove=${removeOk}`);
+  }
+
+  /* LB25: migration 0007 may be absent. A detail read that fails on held_at
+     retries without it and still opens the lead, with no held fact. */
+  store = freshStore();
+  {
+    const id = seedLead(BIZ_A, { name: 'No Column Lead' });
+    store.leads.find((l) => l.id === id).held_at = '2026-11-14T12:00:00Z';
+    let forced = false;
+    sbHook = async ({ table, params }) => {
+      if (table !== 'v_client_leads' || !params.some(([k]) => k === 'id')) return null;
+      const asked = (params.find(([k]) => k === 'select') || [])[1] || '';
+      if (String(asked).includes('held_at')) {
+        forced = true;
+        return new Response(JSON.stringify({ message: 'column does not exist', code: '42703', details: '', hint: '' }),
+          { status: 400, headers: { 'content-type': 'application/json' } });
+      }
+      // A database without the column cannot return it on the retry either.
+      const wanted = (params.find(([k]) => k === 'id') || [])[1];
+      const { held_at: _dropped, ...row } = store.leads.find((l) => l.id === String(wanted).slice(3)) || {};
+      return new Response(JSON.stringify(row.id ? [row] : []), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    sbRequests = [];
+    await tgReset();
+    await call(cb(OWNER, `L:0:${id}`));
+    const detailEdits = await edits();
+    sbHook = null;
+    const retried = sbRequests.some((r) => r.table === 'v_client_leads'
+      && r.params.some(([k, v]) => k === 'select' && !String(v).includes('held_at')));
+    const text = String((detailEdits[0] || {}).body && (detailEdits[0] || {}).body.text);
+    line(forced && retried && detailEdits.length === 1 && text.includes('No Column Lead')
+      && !text.includes('Received while suspended'),
+    'LB25', 'detail survives a database without leads.held_at',
+    `forced=${forced} retried=${retried} edits=${detailEdits.length}`);
+  }
 } catch (e) {
   line(false, 'LB0', 'lead-browser suite threw', e.message);
 } finally {
