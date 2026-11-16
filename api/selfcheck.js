@@ -35,6 +35,8 @@ import { operatorReachable } from '../lib/operator.js';
 import { runBillingJob } from '../lib/billing-ops.js';
 // Telegram, then email, then a loud log line; shared with the billing job.
 import { deliverOperatorAlarm } from '../lib/operator-alarm.js';
+// Owner notices that were started and never finished (business_events).
+import { auditOwnerNotices } from '../lib/notice-audit.js';
 
 const HEADER = 'x-health-secret';
 const KINDS = [
@@ -258,8 +260,19 @@ export default async function handler(req, res) {
     if (!requestedBusiness) {
       try {
         const b = await runBillingJob();
-        console.error('billing_job', b.skipped || [b.checked, b.reset, b.warned, b.final_warned, b.suspended, b.unwarned, b.failed, b.operator].join(' '));
+        console.error('billing_job', b.skipped || [b.checked, b.reset, b.warned, b.suspended, b.terminated, b.restored, b.undelivered, b.failed, b.operator].join(' '));
       } catch (e) { console.error('billing_job_failed', (e && e.code) || 'no_code'); }
+    }
+
+    // After the job, so today's notices are part of it: a notice round that
+    // began and left no outcome (a killed invocation, a failed log write) is
+    // reported to the operator once a day. Counts only in the log; it cannot
+    // fail the run.
+    if (!requestedBusiness) {
+      try {
+        const a = await auditOwnerNotices();
+        console.error('notice_audit', a.skipped || [a.rounds, a.missing, a.operator].join(' '));
+      } catch (e) { console.error('notice_audit_failed', (e && e.code) || 'no_code'); }
     }
 
     return res.status(200).json({

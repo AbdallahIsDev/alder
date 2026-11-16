@@ -35,8 +35,15 @@ const OUT = path.join(ROOT, '_debug', 'client-build');
    -> 80d6281c5d4a333db88b411d749b2acc42801b49ddb7c849f2731fa4c9cddbef
    (index.html only): the timeout rationale now matches maxDuration 30, and an
    in-page duplicate hides unsent edited recap values. The other three output
-   hashes below are unchanged and prove no other client-data output changed. */
-const BASELINE = '80d6281c5d4a333db88b411d749b2acc42801b49ddb7c849f2731fa4c9cddbef';
+   hashes below are unchanged and prove no other client-data output changed.
+
+   The lifecycle round moves it 80d6281c… -> 27a08c72… (index.html and
+   clients/alder.json): the form has a panel for a held request and for an
+   unavailable business; its four service options and the no-JS form print
+   the services section's own keys (the 4th is "Free roof inspection", with
+   the new copy key footer12); the dimmed area no longer closes the form.
+   The manifest, robots and sitemap hashes are unchanged. */
+const BASELINE = '27a08c720057c1caa1d6078e48c32755ba2a9f01ccbe98ebb20c60e062ff9172';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = 'dcd93cf0545e1bad61f0218310823424565419e811ba50b74a2e7f7642ce7053';
 const BASELINE_SITEMAP = 'f90e45bdfa569c01cc2c7fe584831cd9e03b212fbac43254454968bcc16c27e8';

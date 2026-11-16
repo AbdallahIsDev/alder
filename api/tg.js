@@ -28,6 +28,8 @@ import {
   operatorCodeText, operatorCodeResendText,
   operatorBusinessListText, operatorBusinessListKeyboard, operatorBusinessDetailText, operatorBusinessDetailKeyboard,
   operatorSuspendConfirmText, operatorSuspendConfirmKeyboard, operatorSuspendedText, operatorReactivatedText,
+  operatorTerminateConfirmText, operatorTerminateConfirmKeyboard, operatorTerminatedText, operatorAlreadyTerminatedText,
+  OPERATOR_TERMINATED, OPERATOR_ALREADY_TERMINATED,
   operatorAlreadySuspendedText, operatorAlreadyActiveText, operatorInviteSuspendedText,
   operatorInviteListText, operatorInviteListKeyboard, operatorInviteBackKeyboard,
   operatorAlreadyConnectedText, operatorAlreadyConnectedKeyboard, operatorReplaceConfirmText, operatorReplaceConfirmKeyboard,
@@ -41,11 +43,11 @@ import {
   OPERATOR_SUSPENDED, OPERATOR_REACTIVATED, OPERATOR_ALREADY_SUSPENDED, OPERATOR_ALREADY_ACTIVE,
   OPERATOR_NO_LEADS, OPERATOR_NO_OLDER_LEADS, OPERATOR_LEAD_GONE, OPERATOR_RECENT_DAYS,
   OPERATOR_USAGE_INVITE, OPERATOR_UNKNOWN_SLUG, OPERATOR_CAPPED, operatorIdMessage, OPERATOR_HELP,
-  BOT_SUSPENDED,
   leadDetailKeyboard, persistentKeyboard, KEYBOARD_LABELS, BOT_DISCONNECTED,
   OWNER_KEYBOARD_LABELS, STAFF_KEYBOARD_LABELS, OPERATOR_KEYBOARD_LABELS,
 } from '../lib/content.js';
-import { suspendBusiness, reactivateStatus, reactivationNotices, sendFailed } from '../lib/service-status.js';
+import { suspendBusiness, terminateBusiness, reactivateBusiness, heldLeadCount, suspendedKeyboard, sendFailed } from '../lib/service-status.js';
+import { suspendedReply, suspendedToast, connectRefused, statusText } from '../lib/lifecycle-text.js';
 import { nextPaidUntil, decodePaidUntil, extendTargetAllowed } from '../lib/billing.js';
 import { applyPayment } from '../lib/billing-ops.js';
 
@@ -63,6 +65,7 @@ const {
   listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
   expireOtherBindCodes, expireBindCode, removeAllBusinessChats,
   getBusinessBySlug, setBusinessStatus, extendPaidUntil,
+  countHeldLeads, lastBusinessEventAt, addBusinessEvent,
   listBusinessesPage, countChatsForBusinesses, getLeadTotals, countClientLeadsSince,
   listLeadsColumns, getLeadColumns,
 } = timedAll(dbApi, {
@@ -102,6 +105,9 @@ const {
   expireOtherBindCodes: 'db.invite_expire_others',
   expireBindCode: 'db.invite_take_back',
   removeAllBusinessChats: 'db.chat_remove_all',
+  countHeldLeads: 'db.held_lead_count',
+  lastBusinessEventAt: 'db.business_event_last',
+  addBusinessEvent: 'db.business_event_insert',
 });
 const { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarkup, botUsername } = timedAll(tgApi, {
   sendMessage: 'tg.send_message',
@@ -116,23 +122,29 @@ const { sendMessage, answerCallbackQuery, editMessageText, editMessageReplyMarku
 const { mintBindCode } = timedAll(bindCodesApi, { mintBindCode: 'db.invite_mint' });
 const { BIND_CODE_HOURS } = bindCodesApi;
 // The review email is the Resend call plus the event row that records it.
-const { sendReviewRequest, notifyOperatorUnreachable, sendSuspensionEmail } = timedAll(notifyApi, {
+const { sendReviewRequest, notifyOperatorUnreachable, sendLifecycleEmail } = timedAll(notifyApi, {
   sendReviewRequest: 'mail.review_request',
   notifyOperatorUnreachable: 'tg.operator_notice',
-  sendSuspensionEmail: 'mail.suspension_notice',
+  sendLifecycleEmail: 'mail.lifecycle_notice',
 });
 // Pure checks and lists, not database calls: nothing to time.
 const { isSuspendedStatus } = dbApi;
-/** The calls lib/service-status.js and applyPayment() make, as this file's
- *  timed wrappers: a suspension, a reactivation and a recorded payment show
- *  up in the timing line whoever started them. */
+/** The calls lib/service-status.js, lib/lifecycle-notify.js and applyPayment()
+ *  make, as this file's timed wrappers: a suspension, a termination, a
+ *  reactivation and a recorded payment show up in the timing line whoever
+ *  started them. */
 const SERVICE_IO = {
   sendMessage: (...a) => sendMessage(...a),
-  sendSuspensionEmail: (...a) => sendSuspensionEmail(...a),
+  sendLifecycleEmail: (...a) => sendLifecycleEmail(...a),
   setBusinessStatus: (...a) => setBusinessStatus(...a),
   getBusinessById: (...a) => getBusinessById(...a),
   listBusinessChatsDetailed: (...a) => listBusinessChatsDetailed(...a),
   extendPaidUntil: (...a) => extendPaidUntil(...a),
+  countHeldLeads: (...a) => countHeldLeads(...a),
+  lastBusinessEventAt: (...a) => lastBusinessEventAt(...a),
+  addBusinessEvent: (...a) => addBusinessEvent(...a),
+  hitRateLimit: (...a) => hitRateLimit(...a),
+  clearRateLimit: (...a) => clearRateLimit(...a),
 };
 
 const GENERIC_NOT_FOUND = TOAST_NOT_FOUND;
@@ -192,6 +204,8 @@ async function roleKeyboardMarkup(chatId, binding) {
   // keyboard, whatever OPERATOR_CHAT_ID says (bindChat already refuses to bind
   // the operator chat; this ordering is the belt to those braces).
   if (binding) {
+    // Suspended or terminated: the one Status button, whatever the role.
+    if (bindingSuspended(binding)) return suspendedKeyboard();
     const owner = await isOwnerChat(binding.business_id, chatId).catch(() => false);
     return persistentKeyboard(owner ? OWNER_KEYBOARD_LABELS : STAFF_KEYBOARD_LABELS);
   }
@@ -214,20 +228,55 @@ function sendKeyboardRemoved(chatId) {
   return sendMessage(chatId, BOT_DISCONNECTED, { reply_markup: { remove_keyboard: true } }).catch(() => {});
 }
 
-/* ---------- suspended business ----------
-   The operator's Suspend sets businesses.status to 'paused'. Nothing is
-   deleted: the phones stay bound, the invites and the leads stay where they
-   are, and Reactivate puts the status back. While it lasts, a phone of that
-   business gets ONE neutral line for every command, keyboard press and button
-   tap, and no data. The status arrives with the binding (one query, see
-   lib/db.js getChatBinding), so this costs no extra round trip. */
+/* ---------- suspended or terminated business ----------
+   Suspend sets businesses.status to 'paused', Terminate to 'churned' (shown
+   as "Terminated"). Nothing is deleted either way: the phones stay bound, the
+   invites and the leads stay where they are, and Reactivate or a recorded
+   payment puts the status back. While it lasts, a phone of that business has
+   ONE working command, /status (also the one button of its keyboard). Every
+   other command, keyboard press and free text gets a short answer that says
+   the service is off, why, and until when, with the support link; a button
+   tap gets the same as a toast. No lead data is shown, and nothing is
+   changed. The status arrives with the binding (one query, lib/db.js
+   getChatBinding); the reason and the dates need the business row, which is
+   read only when an answer is actually sent. */
 
-const bindingSuspended = (binding) => !!binding && isSuspendedStatus(binding.business_status);
+function bindingSuspended(binding) { return !!binding && isSuspendedStatus(binding.business_status); }
 
-/** The one line, with the keyboard removed on the same message: a phone that
- *  missed the suspension notice still loses its stale keyboard here. */
-function replySuspended(chatId) {
-  return sendMessage(chatId, BOT_SUSPENDED, { reply_markup: { remove_keyboard: true } });
+/** The business behind a binding, or a minimal stand-in built from the
+ *  binding when the row cannot be read: the answer then names the state and
+ *  no date, and is still sent. */
+async function boundBusiness(binding) {
+  const row = await getBusinessById(binding.business_id).catch(() => null);
+  return row || { id: binding.business_id, status: binding.business_status };
+}
+
+/** The answer to anything but /status, with the one-button keyboard on the
+ *  same message: a phone that missed the notice still loses its stale role
+ *  keyboard here. */
+async function replySuspended(chatId, binding) {
+  const m = suspendedReply({ business: await boundBusiness(binding) });
+  return sendMessage(chatId, m.text, { entities: m.entities, reply_markup: suspendedKeyboard() });
+}
+
+/**
+ * /status, for every bound phone: the state of the service in a few lines.
+ * In service: "Active" and the paid-until date (and, once payment is
+ * overdue, when the service will be suspended). Suspended: the reason, the
+ * termination date with the days left, and HOW MANY leads are waiting, as a
+ * number and nothing else. Terminated: that, and that no data was deleted.
+ * It reads the business row and, when suspended, one count; it writes
+ * nothing. A chat with no binding gets the usual "not connected" line.
+ */
+async function handleStatus(chatId, binding) {
+  if (!binding) return replyRole(chatId, BOT_NOT_CONNECTED, null);
+  const business = await boundBusiness(binding);
+  const off = isSuspendedStatus(business.status);
+  const held = business.status === 'paused' ? await heldLeadCount(business, SERVICE_IO) : null;
+  const m = statusText({ business, held });
+  let markup = null;
+  try { markup = off ? suspendedKeyboard() : await roleKeyboardMarkup(chatId, binding); } catch { markup = null; }
+  return sendMessage(chatId, m.text, { entities: m.entities, ...(markup ? { reply_markup: markup } : {}) });
 }
 
 /* ---------- binding by pasted code ----------
@@ -261,11 +310,13 @@ async function finishBind(chatId, code, badText = BOT_CODE_BAD) {
     await restoreBindCode(code, businessId).catch(() => {});
     return replyRole(chatId, isOperatorChat(chatId) ? OPERATOR_WELCOME : badText, null);
   }
-  // A suspended business connects no new phone. The code is handed back
-  // unused, so the same invite works again once the business is reactivated.
+  // A suspended or terminated business connects no new phone. The code is
+  // handed back unused, so the same invite works again once the business is
+  // back in service. The chat is not bound, so it gets no keyboard.
   if (isSuspendedStatus(business.status)) {
     await restoreBindCode(code, businessId).catch(() => {});
-    return replySuspended(chatId);
+    const m = connectRefused(business.status);
+    return sendMessage(chatId, m.text, { entities: m.entities, reply_markup: { remove_keyboard: true } });
   }
 
   try {
@@ -1030,6 +1081,8 @@ async function sendBusinessDetail({ chatId, messageId, businessId, page, answer,
   if (biz.error) throw biz.error;
   const business = biz.value;
   if (!business) return sendBusinessPage(chatId, page, messageId, answer, OPERATOR_BUSINESS_GONE);
+  // A count of the leads being held, only while the business is suspended.
+  const held = business.status === 'paused' ? await heldLeadCount(business, SERVICE_IO) : null;
   const text = operatorBusinessDetailText({
     business,
     rows: chats.error ? null : chats.value,
@@ -1037,9 +1090,12 @@ async function sendBusinessDetail({ chatId, messageId, businessId, page, answer,
       total: totals.error ? null : totals.value.total,
       lastAt: totals.error ? null : totals.value.lastAt,
       recent: recent.error ? null : recent.value,
+      held,
     },
   });
-  const markup = operatorBusinessDetailKeyboard(business.id, page, { suspended: isSuspendedStatus(business.status) });
+  const markup = operatorBusinessDetailKeyboard(business.id, page, {
+    suspended: isSuspendedStatus(business.status), terminated: business.status === 'churned',
+  });
   await together([answer(toast), editList(chatId, messageId, text, markup)]);
 }
 
@@ -1096,14 +1152,14 @@ async function handleOperatorLeadOpen({ chatId, messageId, businessId, leadId, l
  * everything without re-onboarding.
  *
  * On confirm: suspendBusiness() (lib/service-status.js, the ONE suspension
- * path, shared with the daily billing job) sends one plain notice to every
- * bound phone with ReplyKeyboardRemove and one plain email to the owner
- * address BEFORE the status changes (a notice that fails is counted and
- * blocks nothing), then writes the status in one UPDATE scoped by the id AND
- * the served statuses, so a second tap or a race changes nothing. The
- * operator's message then becomes the result. A business that is already
- * suspended gets no notice and no write, so a second tap is harmless. A
- * suspension made here is never marked "for non-payment".
+ * path, shared with the daily billing job) writes the status in one UPDATE
+ * scoped by the id AND the served statuses, so a second tap or a race changes
+ * nothing, and then sends the suspension notice to every bound phone (with
+ * the one-button Status keyboard) and to the owner address. A notice that
+ * fails is logged, alerts this chat and blocks nothing. The operator's
+ * message then becomes the result. A business that is already suspended or
+ * terminated gets no notice and no write. A suspension made here is never
+ * marked "for non-payment", so the daily job leaves it alone.
  */
 async function handleOperatorSuspend({ chatId, messageId, businessId, page, answer, confirmed }) {
   const [biz, chats] = await together([
@@ -1115,14 +1171,18 @@ async function handleOperatorSuspend({ chatId, messageId, businessId, page, answ
   const business = biz.value;
   if (!business) { await sendBusinessPage(chatId, page, messageId, answer, OPERATOR_BUSINESS_GONE); return; }
   const back = operatorBackToBusinessKeyboard(business.id, page);
+  const terminated = business.status === 'churned';
   const already = () => together([
-    answer(OPERATOR_ALREADY_SUSPENDED),
-    editList(chatId, messageId, operatorAlreadySuspendedText(business), back),
+    answer(terminated ? OPERATOR_ALREADY_TERMINATED : OPERATOR_ALREADY_SUSPENDED),
+    editList(chatId, messageId, terminated ? operatorAlreadyTerminatedText(business) : operatorAlreadySuspendedText(business), back),
   ]);
 
   if (isSuspendedStatus(business.status)) {
     if (confirmed) { await already(); return; }
-    await sendBusinessDetail({ chatId, messageId, businessId: business.id, page, answer, toast: OPERATOR_ALREADY_SUSPENDED });
+    await sendBusinessDetail({
+      chatId, messageId, businessId: business.id, page, answer,
+      toast: terminated ? OPERATOR_ALREADY_TERMINATED : OPERATOR_ALREADY_SUSPENDED,
+    });
     return;
   }
   if (!confirmed) {
@@ -1133,29 +1193,79 @@ async function handleOperatorSuspend({ chatId, messageId, businessId, page, answ
     return;
   }
 
-  // The phones could not be read: nothing is sent and nothing is changed. The
-  // dispatcher answers with the generic error and the question stays on screen.
+  // The phones could not be read: nothing is changed and nobody is told. The
+  // dispatcher answers with the generic error and the question stays on
+  // screen. A status that could not be written throws too, and nothing is
+  // reported as done.
   if (chats.error) throw chats.error;
-  // The owner email is a notice too: one that could not be sent is counted,
-  // so the operator knows to tell the owner another way. A status that could
-  // not be written throws, and nothing is reported as done.
-  const { changed, failed } = await suspendBusiness({ business, rows: chats.value }, SERVICE_IO);
+  const { changed, notice } = await suspendBusiness({ business, rows: chats.value }, SERVICE_IO);
   if (!changed) { await already(); return; }
   await together([
     answer(OPERATOR_SUSPENDED),
-    editList(chatId, messageId, operatorSuspendedText({ business, failed }), back),
+    editList(chatId, messageId, operatorSuspendedText({ business, notice }), back),
   ]);
 }
 
 /**
- * Reactivate: one tap, no question (it only switches a service back on). The
- * status goes to 'active' in one UPDATE scoped by the id AND the suspended
- * statuses, so a business that was demo before it was suspended comes back as
- * active, and a second tap changes nothing. Then every bound phone is told,
- * with its own role keyboard on the same message (the main phone is the
- * oldest binding); a notice that fails blocks nothing. Both steps are
- * lib/service-status.js, shared with a recorded payment. paid_until is not
- * touched: reactivating is not paying.
+ * Terminate: the operator ends a service by hand, from an active or a
+ * suspended business. `confirmed` false asks, true does it. It is
+ * terminateBusiness() in lib/service-status.js, the SAME function the daily
+ * job calls at the end of the suspended period: status 'churned' in one
+ * scoped UPDATE, then the termination notice to every phone and the owner
+ * address. Nothing is deleted, so Extend or Reactivate puts the business
+ * back. A termination made here is never marked "for non-payment".
+ *
+ * The buttons are bx (ask) and bX (confirm). bt / bT, the letters of the
+ * Terminate that used to delete a business, stay retired.
+ */
+async function handleOperatorTerminate({ chatId, messageId, businessId, page, answer, confirmed }) {
+  const [biz, chats] = await together([
+    settle(getBusinessById(businessId)),
+    confirmed ? settle(listBusinessChatsDetailed(businessId)) : null,
+  ]);
+  if (biz.error) throw biz.error;
+  const business = biz.value;
+  if (!business) { await sendBusinessPage(chatId, page, messageId, answer, OPERATOR_BUSINESS_GONE); return; }
+  const back = operatorBackToBusinessKeyboard(business.id, page);
+  const already = () => together([
+    answer(OPERATOR_ALREADY_TERMINATED),
+    editList(chatId, messageId, operatorAlreadyTerminatedText(business), back),
+  ]);
+
+  if (business.status === 'churned') {
+    if (confirmed) { await already(); return; }
+    await sendBusinessDetail({ chatId, messageId, businessId: business.id, page, answer, toast: OPERATOR_ALREADY_TERMINATED });
+    return;
+  }
+  if (!confirmed) {
+    await together([
+      answer(''),
+      editList(chatId, messageId, operatorTerminateConfirmText(business), operatorTerminateConfirmKeyboard(business.id, page)),
+    ]);
+    return;
+  }
+
+  if (chats.error) throw chats.error;
+  const { changed, notice } = await terminateBusiness({ business, rows: chats.value }, SERVICE_IO);
+  if (!changed) { await already(); return; }
+  await together([
+    answer(OPERATOR_TERMINATED),
+    editList(chatId, messageId, operatorTerminatedText({ business, notice }), back),
+  ]);
+}
+
+/**
+ * Reactivate: one tap, no question (it only switches a service back on), for
+ * a suspended and for a terminated business. reactivateBusiness()
+ * (lib/service-status.js, shared with a recorded payment): the status goes to
+ * 'active' in one UPDATE scoped by the id AND the suspended statuses, so a
+ * business that was demo before comes back as active and a second tap
+ * changes nothing. Then every bound phone is told, with its own role
+ * keyboard on the same message (the main phone is the oldest binding), and
+ * the owner address by email; the notice says how many leads were held. A
+ * notice that fails blocks nothing. paid_until is not touched: reactivating
+ * is not paying, so a business whose payment is still overdue is suspended
+ * again by the next daily run.
  */
 async function handleOperatorReactivate({ chatId, messageId, businessId, page, answer }) {
   const [biz, chats] = await together([
@@ -1172,14 +1282,12 @@ async function handleOperatorReactivate({ chatId, messageId, businessId, page, a
   ]);
   if (!isSuspendedStatus(business.status)) { await already(); return; }
   if (chats.error) throw chats.error;
-  const rows = chats.value;
 
-  const changed = await reactivateStatus(business, SERVICE_IO);
+  const { changed, notice, held } = await reactivateBusiness({ business, rows: chats.value, reason: 'manual' }, SERVICE_IO);
   if (!changed) { await already(); return; }
   await together([
     answer(OPERATOR_REACTIVATED),
-    editList(chatId, messageId, operatorReactivatedText(business), back),
-    ...reactivationNotices(rows, SERVICE_IO),
+    editList(chatId, messageId, operatorReactivatedText(business, { held, notice }), back),
   ]);
 }
 
@@ -1199,8 +1307,9 @@ async function handleOperatorReactivate({ chatId, messageId, businessId, page, a
  * button, however old, can add more than one period. A date that fails that
  * check is a screen that expired: the business is shown as it is.
  *
- * A suspended business is reactivated through the Reactivate path (notices
- * and keyboards included), and the question says so before the tap.
+ * A suspended or terminated business is reactivated through the Reactivate
+ * path (notices and keyboards included), and the question says so before the
+ * tap.
  */
 async function handleOperatorExtend({ chatId, messageId, businessId, page, answer, token = null }) {
   const business = await operatorBusinessOrList({ chatId, messageId, businessId, page, answer });
@@ -1247,7 +1356,8 @@ async function handleOperatorExtend({ chatId, messageId, businessId, page, answe
   await together([
     answer(OPERATOR_EXTENDED),
     editList(chatId, messageId, operatorExtendedText({
-      business, paidUntil: r.paidUntil, wasSuspended: r.wasSuspended, reactivated: r.reactivated, failed: r.noticesFailed,
+      business, paidUntil: r.paidUntil, wasSuspended: r.wasSuspended, reactivated: r.reactivated,
+      failed: r.notice && Array.isArray(r.notice.failures) ? r.notice.failures.length : 0,
     }), back),
   ]);
 }
@@ -1560,10 +1670,11 @@ const CB_OPERATOR_PICK = /^(pb|pc):([0-9a-f-]{36})$/;
 // bl = the business list, bn = the /invite list.
 const CB_OP_LIST = /^(bl|bn):(\d{1,3})$/;
 // bd open, bs ask to suspend, bS suspend, br reactivate, be ask to extend
-// the paid period; bt and bT were Terminate. The invite flow, once per origin (see OP_INVITE_STEPS): from the
+// the paid period, bx ask to terminate, bX terminate; bt and bT were the
+// retired Terminate (it deleted data) and only ever answer "expired". The invite flow, once per origin (see OP_INVITE_STEPS): from the
 // /invite list bi open, bp ask to replace, bP replace, bc cancel; from the
 // business bv, bw, bW, bu.
-const CB_OP_BUSINESS = /^(bd|bs|bS|br|be|bi|bp|bP|bc|bv|bw|bW|bu|bt|bT):(\d{1,3}):([0-9a-f-]{36})$/;
+const CB_OP_BUSINESS = /^(bd|bs|bS|br|be|bi|bp|bP|bc|bv|bw|bW|bu|bt|bT|bx|bX):(\d{1,3}):([0-9a-f-]{36})$/;
 // bE: extend to exactly <until> (whole seconds, base 36; lib/billing.js).
 const CB_OP_EXTEND = /^bE:(\d{1,3}):([0-9a-f-]{36}):([0-9a-z]{1,8})$/;
 const CB_OP_LEADS = /^bq:(\d{1,2}):(\d{1,3}):([0-9a-f-]{36})$/;
@@ -1582,6 +1693,7 @@ const OP_BUSINESS_HANDLER_NAMES = {
   bP: 'cb.operator_replace', bW: 'cb.operator_replace',
   bc: 'cb.operator_replace_cancel', bu: 'cb.operator_replace_cancel',
   bt: 'cb.operator_expired', bT: 'cb.operator_expired',
+  bx: 'cb.operator_terminate_ask', bX: 'cb.operator_terminate',
 };
 
 /** Open one lead as a NEW message with its current card. */
@@ -1700,14 +1812,15 @@ async function handleCallback(cb, binding) {
         const at = { chatId, messageId, businessId: opBusiness[3], page: clampBusinessPage(opBusiness[2]), answer };
         if (kind === 'bd') await sendBusinessDetail(at);
         else if (kind === 'bs' || kind === 'bS') await handleOperatorSuspend({ ...at, confirmed: kind === 'bS' });
+        else if (kind === 'bx' || kind === 'bX') await handleOperatorTerminate({ ...at, confirmed: kind === 'bX' });
         else if (kind === 'br') await handleOperatorReactivate(at);
         else if (kind === 'be') await handleOperatorExtend(at);
         else if (OP_INVITE_STEPS[kind]) {
           await operatorInviteStep({ ...at, from: OP_INVITE_STEPS[kind].from }, { step: OP_INVITE_STEPS[kind].step, businessId: at.businessId });
         }
-        // bt / bT: the Terminate buttons of a message sent before Suspend
-        // existed. Nothing is ended: the tap says the screen expired and the
-        // message becomes that business as it is now.
+        // bt / bT: the buttons of the retired Terminate, which deleted a
+        // business. Nothing is ended: the tap says the screen expired and
+        // the message becomes that business as it is now.
         else await sendBusinessDetail({ ...at, toast: OPERATOR_SCREEN_EXPIRED });
         return;
       }
@@ -1756,11 +1869,11 @@ async function handleCallback(cb, binding) {
 
     if (!binding) { await answer(GENERIC_NOT_FOUND); return; }
 
-    // A phone of a suspended business: one neutral line for every button, and
-    // nothing is read, shown or changed.
+    // A phone of a suspended or terminated business: one short toast for
+    // every button, and nothing is read, shown or changed.
     if (bindingSuspended(binding)) {
       setHandler('cb.suspended');
-      await answer(BOT_SUSPENDED);
+      await answer(suspendedToast(binding.business_status));
       return;
     }
 
@@ -1926,7 +2039,7 @@ async function handleChatMember(m) {
  *  is logged as 'text.plain', so the log can only ever hold these strings. */
 const COMMAND_HANDLER_NAMES = {
   '/start': 'cmd.start', '/leads': 'cmd.leads', '/invite': 'cmd.invite', '/recipients': 'cmd.recipients',
-  '/remove_lead': 'cmd.remove_lead', '/help': 'cmd.help', '/id': 'cmd.id',
+  '/remove_lead': 'cmd.remove_lead', '/help': 'cmd.help', '/id': 'cmd.id', '/status': 'cmd.status',
 };
 /**
  * The operator chat's own commands, and nothing else: /businesses, /invite,
@@ -2009,18 +2122,23 @@ async function handleUpdate(u, chat) {
       // the command menu. It shows the chat's own id and nothing else, so a
       // suspended business's phone still gets it.
       await replyMessage(chatId, operatorIdMessage(chatId, { operator: false }));
+    } else if (first === '/status') {
+      // Every bound phone, in service or not: the one command a suspended or
+      // terminated business keeps.
+      await handleStatus(chatId, binding);
     } else if (bindingSuspended(binding)) {
-      // A phone of a suspended business: the same neutral line for every
-      // command and every keyboard press, and no data. Free text gets it under
-      // the plain-text hint's limit (3 an hour, silent when the counter is
-      // unreachable), so the bot cannot be made to answer without end.
+      // A phone of a suspended or terminated business: the same short answer
+      // (state, reason, date, support link) for every other command and every
+      // keyboard press, and no data. Free text gets it under the plain-text
+      // hint's limit (3 an hour, silent when the counter is unreachable), so
+      // the bot cannot be made to answer without end.
       const command = !!pressed || !!COMMAND_HANDLER_NAMES[first];
       setHandler(command ? 'cmd.suspended' : 'text.suspended');
       let within = command;
       if (!command) {
         try { within = await hitRateLimit('tghint:' + chatId, 3600, 3); } catch { within = false; }
       }
-      if (within) await replySuspended(chatId);
+      if (within) await replySuspended(chatId, binding);
     } else if (first === '/start') {
       await handleStart(chatId, arg);
     } else if (first === '/leads') {

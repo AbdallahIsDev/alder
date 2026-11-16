@@ -72,9 +72,10 @@ The full walkthrough is `docs/ONBOARDING.md`. The short version:
 6. **Commands**: after the first deploy that adds or renames a command, run
    `npm run tg:commands` once (see §7).
 
-A business with `status` `paused` or `churned` is never messaged: the digest and the
-self-check only target `demo` and `active` rows, and `getActiveBusinessBySlug` refuses
-to serve its page.
+A business with `status` `paused` (shown as Suspended) or `churned` (shown as
+Terminated) gets no lead alert, no digest and no self-check message: those only
+target `demo` and `active` rows, and `getActiveBusinessBySlug` refuses to serve
+its page. The only messages it gets are the lifecycle notices of section 3b.
 
 ## 2. Offboard a business, or delete one lead
 
@@ -242,15 +243,18 @@ Last lead: 2d ago
 Billing: not tracked
 ```
 
-The status is Demo, Active or Suspended (`paused` in the database; `churned`
-shows as Churned and is treated as suspended). `Telegram: Not connected` has
+The status is Demo, Active, Suspended (`paused` in the database) or Terminated
+(`churned` in the database). `Telegram: Not connected` has
 no phone lines under it. The lead numbers come from two queries (a count
 with the newest `created_at`, and a count since 30 days ago): the only lead
 column read for this screen is that one timestamp, and `Last lead` is left
 out when there are none. The last line is the billing line (see **3b.
-Billing**). Under it: **Suspend** and **Leads**, then **Extend 30 days** and
-**Invite**, then **Back**. For a suspended business: **Reactivate** and
-**Leads**, then **Extend 30 days**, then **Back**.
+Billing and the service lifecycle**). Under it: **Suspend** and **Leads**,
+then **Extend 30 days** and **Invite**, then **Terminate**, then **Back**. For
+a suspended business: **Reactivate** and **Leads**, then **Extend 30 days**
+and **Terminate**, then **Back**, and a `Held leads: N` line when leads came
+in meanwhile. For a terminated business: **Reactivate** and **Leads**, then
+**Extend 30 days**, then **Back**.
 
 **What the operator can see of a lead.** **Leads** is read-only and minimal:
 every row and every card shows only the service, the status and the age of the
@@ -259,23 +263,24 @@ free text are never shown in the operator chat and are not read from the
 database for it. The allowed fields are one constant, `OPERATOR_LEAD_FIELDS`
 in `lib/content.js`; showing the name later is one word added there.
 
-**Suspend (operator).** Stops the whole service for one business, after one
-confirmation. It replaces Terminate. In this order: every connected phone gets
-one plain notice ("Your service has been suspended. Contact support if this is
-a mistake.") with its keyboard removed, and the owner email address gets one
-plain email with the same sentence; then the business's status is set to
-`paused` in one statement. A notice or an email that fails is counted
-("N notices failed") and never blocks the suspension. Nothing is deleted:
-bindings, invites, leads and events stay as they are. While a business is
-suspended:
+**Suspend (operator).** Switches one business off, after one confirmation.
+The status is set to `paused` in one statement; then every connected phone
+gets the suspension notice ("Your service has been suspended by support", the
+`/status` hint and the **Contact support** link) with its keyboard reduced to
+one button, **Status**, and the owner email address gets the same words.
+A notice or an email that fails is counted ("1 notice failed"), alerts this
+chat, and never undoes the suspension. Nothing is deleted: phones, invites,
+leads and events stay as they are. While a business is suspended:
 
-- the website form's request is refused with the same plain 404 an unknown
-  site gets, before anything is stored; the visitor sees the form's generic
-  failure panel (the one a server error shows) and the page does not retry;
-- so there is no Telegram alert, no owner email and no auto-reply;
-- every command, keyboard press and button in its bound chats answers "This
-  service is suspended. Contact support." and shows no data (`/id` still
-  answers); free text gets that line at most three times an hour;
+- the website form keeps accepting requests and **holds** them: each one is
+  stored complete with `held_at` set, the visitor is told the request was
+  saved and to call, and gets no auto-reply;
+- the owner gets one short notice per held lead with no detail of it (at most
+  20 an hour) and one count-only email a day; no lead alert, no lead email;
+- every phone keeps `/status` and the **Status** button; every other command,
+  keyboard press and button answers with the reason and the support link and
+  shows no data (`/id` still answers); free text gets that answer at most
+  three times an hour;
 - no new phone can connect: the invite is handed back unused and works again
   after reactivation;
 - review links of that site answer 404; the daily digest and the daily
@@ -284,97 +289,198 @@ suspended:
 A second tap on Suspend changes nothing and tells nobody. A request that was
 already past the tenant check when the status changed is still delivered.
 
-**Reactivate (operator).** One tap on a suspended business sets the status to
-`active` — a business that was `demo` before it was suspended comes back as
-`active`, not `demo` — and tells every connected phone "Your service is active
-again." with its own keyboard. Everything works as before without
-re-onboarding. Reactivating is not paying: it does not change `paid_until`, so
-a business whose paid period is over is warned and suspended again by the next
-daily runs. Use **Extend 30 days** when the customer has paid.
+**Terminate (operator).** One confirmation, from an active or a suspended
+business. The status is set to `churned`; the owner is told; the website form
+answers "not available" (HTTP 410) and stores nothing; the phones keep
+`/status` only. **Nothing is deleted**: Extend or Reactivate puts the business
+back exactly as it was. Deleting a business is the offboard script (section
+2), never a button.
 
-Buttons of messages sent before Suspend existed (Terminate, Confirm terminate,
-the old `/phones` and Remove Phone screens) answer "That screen expired. Here
+**Reactivate (operator).** One tap on a suspended or terminated business sets
+the status to `active` (a business that was `demo` before comes back as
+`active`, not `demo`) and tells every connected phone "Your service is active
+again." with its own keyboard and the number of leads that were held. Those
+leads are ordinary leads from that moment: `/leads` shows them. Reactivating
+is not paying: it does not change `paid_until`, so a business whose paid
+period is over is suspended again by the next daily runs. Use **Extend 30
+days** when the customer has paid.
+
+If the phone list cannot be read when you press Suspend, Terminate or
+Reactivate, nothing changes and a toast says so. Press it again.
+
+Buttons of messages sent before Suspend existed (the old Terminate and Confirm
+terminate, which deleted data; the old `/phones` and Remove Phone screens) answer "That screen expired. Here
 is the current screen." and change nothing. A button of the old `/code` picker
 follows the invite rules above, as a pick from the first page of the list.
 
-## 3b. Billing
+## 3b. Billing and the service lifecycle
 
 Billing is a date, not a payment system. Money arrives outside this system
 (bank transfer, cash, a link you sent); you record it with one button. There
 is no payment-provider code yet.
 
-**How it works.** Every business has `paid_until` (UTC). While it is in the
-future the business is paid. For **7 days** after it (the grace period, one
-constant: `GRACE_DAYS` in `lib/billing.js`) the service keeps running and the
-business is warned. At the end of the grace period it is suspended
-automatically. `paid_until` empty (NULL) means the business is **not billed**:
-nothing below ever touches it. That is the state of every business until you
-press Extend for it, so applying the migration changes nothing by itself.
+Every duration below is one constant in `lib/lifecycle-config.js`. Change it
+there and the rules, the screens, the notices and the emails follow.
 
-**The billing line** on the business screen says which state it is in:
+### The timeline
+
+`D` is the business's `paid_until` (UTC). `paid_until` empty (NULL) means the
+business is **not billed**: nothing in this section ever touches it. A `demo`
+business is never enforced either.
+
+| When | State | What works | Notice sent (once) |
+|---|---|---|---|
+| before D - 3 days | paid | everything | none |
+| D - 3 days | due soon | everything | renewal reminder |
+| D | grace (5 days) | everything | overdue notice |
+| D + 4 days | grace, last day | everything | final warning |
+| D + 5 days | **suspended** (10 days) | `/status` only; the form holds new leads | suspension notice |
+| D + 10 days | suspended | the same | termination warning |
+| D + 15 days | **terminated** | `/status` only; the form says "not available" | termination notice |
+| D + 15 days, for 60 days | terminated, data kept | nothing | none |
+
+Every notice goes to every connected phone and to the owner email. Each one
+ends with a **Contact support** link in Telegram (the address is
+`SUPPORT_TELEGRAM_URL`) and with "Reply to this email and we will help." in
+email (Reply-To is `OPERATOR_EMAIL`).
+
+**Nothing is deleted, ever, by this code.** "Terminated" is the status
+`churned` and a flag; the business, its phones and its leads stay in the
+database. The 60 days (`RETENTION_DAYS`) are a promise to the customer, kept
+by hand: to delete a terminated business after that time, use the offboard
+script in section 2. There is no purge job.
+
+### The billing line
+
+The business screen in `/businesses` says which state it is in:
 
 ```
-Billing: not tracked                                not billed
-Paid until: Dec 14                                  paid
-Paid until: Dec 14 (overdue, suspends Dec 21)       in the grace period
-Paid until: Dec 14 (overdue, suspends at the next daily check)
-Suspended for non-payment · paid until Dec 14       suspended by the daily job
-Paid until: Dec 14 (ended)                          suspended by you, period over
-Paid until: Dec 14 (demo: not enforced)             a demo business
-Billing: unavailable                                migration 0006 not applied
+Billing: not tracked                                  not billed
+Paid until: Dec 14                                    paid
+Paid until: Dec 14 · due in 3 days                    due soon
+Overdue since Dec 14 · suspends Dec 19                grace
+Overdue since Dec 14 · suspends today                 grace, last day
+Suspended since Dec 19 · terminates Dec 29            suspended
+Terminated Dec 29                                     terminated
+Paid until: Dec 14 · not enforced                     a demo business
+Billing: unavailable                                  migration 0006 not applied
 ```
 
-**Start billing a new customer.** Make sure its status is `active` (a `demo`
-business is never enforced), open it in `/businesses` and press **Extend 30
-days**, then **Confirm**. It is now paid for 30 days from that moment.
+A suspended or terminated business also shows `Held leads: N` when leads
+arrived while it was off.
 
-**Record a payment.** The same button. The question shows the exact date
-(`Extend <Name> to Dec 14?`): 30 days are added to `paid_until` when the
-business is still paid, and counted from now when it is overdue or was never
-billed, so a late payment is not eaten by the days already missed. Confirm
-sets the date, clears the warnings, and reactivates a suspended business the
-way **Reactivate** does (every phone is told, keyboards come back); the
-question says so first. The result line says what changed, for example
-`Alder Roofing paid until Dec 14 · reactivated`. The date travels inside the
-Confirm button, so a double tap asks for the same date twice and the second
-one answers `Already extended.` and changes nothing. To add 60 days, press
-Extend 30 days a second time.
+### Record a payment (Extend 30 days)
 
-**What the daily job does.** It runs once a day inside the daily self-check
-(the 09:00 UTC cron; no extra cron job), and only looks at businesses that are
-`active` AND have a `paid_until`. Demo, suspended and unbilled businesses are
-never read.
+Make sure the status is `active` (a `demo` business is never enforced), open
+the business in `/businesses`, press **Extend 30 days**, then **Confirm**.
+The question shows the exact date (`Extend <Name> to Dec 14?`). 30 days are
+added to `paid_until` when the business is still paid, and counted from now
+when it is overdue or was never billed, so a late payment is not eaten by the
+days already missed.
 
-| The business is | Already told | The job |
+Confirm sets the date and clears the warning stage. If the business was
+suspended or terminated, for non-payment or by hand, the button also switches
+it back on: every phone is told, keyboards come back, and the leads held
+meanwhile become visible (`Alder Roofing paid until Dec 14 · reactivated`).
+The question says so before you confirm. To record a payment and keep a
+business off, press Suspend again afterwards.
+
+The date travels inside the Confirm button, so a double tap answers `Already
+extended.` and changes nothing. To add 60 days, press Extend twice.
+
+### Suspend, Terminate, Reactivate by hand
+
+| Button | From | What it does |
 |---|---|---|
-| paid | nothing | nothing |
-| paid | a warning (it paid since) | clears the warning stage |
-| overdue, more than a day of grace left | nothing | overdue warning to every connected phone and the owner email |
-| overdue, more than a day left | the overdue warning | nothing |
-| overdue, a day or less left | not the final warning | final warning, the same way |
-| overdue, a day or less left | the final warning | nothing |
-| past the grace period | anything | suspends it, exactly like **Suspend**, and marks it "for non-payment" |
+| **Suspend** (asks first) | active | status `paused`; the owner is told "suspended by support" |
+| **Terminate** (asks first) | active or suspended | status `churned`; the owner is told; nothing is deleted |
+| **Reactivate** (one tap) | suspended or terminated | status `active`; the owner is told, with the count of held leads; `paid_until` is not changed |
 
-The warning reads `Payment for <Name> is overdue. Your service will be
-suspended on <date> unless payment is received. Contact support.` Each warning
-is sent once. If a warning reaches nobody (every phone refused it and the
-email failed) it is not counted as sent and the next day's run tries again; a
-warning that failed never delays the suspension. Running the job twice on one
-day sends and changes nothing the second time, and a business is sent at most
-one billing notice per UTC day. "A day or less" is 25 hours,
-because a daily cron may fire anywhere inside its hour. The suspension happens
-at the first daily run at or after the date in the warning, so on that day or
-the next morning, never earlier.
+A manual suspension has no countdown: it stays until you press Reactivate.
+If you reactivate a business whose `paid_until` is more than 5 days in the
+past, the next daily run suspends it again; press Extend instead.
 
-When something happened you get **one** Telegram message a day in the operator
-chat (email when Telegram refuses it): who was suspended, who was warned, who
-could not be warned, who is overdue, and who is due within 3 days. Business
-names only.
+If the phone list cannot be read at that moment, Suspend, Terminate and
+Reactivate change nothing and say so: try again. Extend is different on
+purpose. A recorded payment always switches the service back on; you get an
+alert that one notice could not be delivered.
+
+### What a suspended business sees
+
+- **The bot.** Every phone keeps one command, `/status`, and one button,
+  **Status**. Anything else is answered with the reason, the termination date
+  and the support link. No lead data is shown.
+- **The website form.** It still accepts requests. Each one is stored
+  complete and marked held (`leads.held_at`). The visitor reads "Your request
+  was saved, but this business can't respond through this form right now. For
+  the fastest help, please call them directly." The visitor gets no
+  auto-reply.
+- **The owner.** One short Telegram notice per held lead, with no detail of
+  the lead (at most 20 an hour per business), and one email per day with the
+  count only.
+- **After reactivation.** The held leads are ordinary leads: `/leads` shows
+  them, the reactivation notice says how many there are.
+
+### What a terminated business sees
+
+`/status` only, as above. The website form answers "This business isn't
+accepting requests through this form right now. Please call them directly."
+(HTTP 410) and stores nothing. Extend or Reactivate puts everything back.
+
+### The daily job
+
+It runs once a day inside the daily self-check (the 09:00 UTC cron; no extra
+cron job) and reads only businesses that have a `paid_until` and whose status
+is active, suspended or terminated. Demo and unbilled businesses are never
+read. A business you suspended or terminated by hand is read but never
+switched on by the job.
+
+- A warning may go out up to one hour early (a daily cron fires anywhere
+  inside its hour). A suspension or a termination never happens early: it
+  happens at the first daily run at or after the exact moment.
+- A business gets at most one billing notice per UTC day. Running the job
+  twice on one day sends and changes nothing the second time.
+- A notice is recorded as sent only when it reached somebody, or when there
+  was nobody to tell (no phone and no owner email). A notice that reached
+  nobody is tried again the next day and you are alerted. A failed notice
+  never delays a suspension or a termination.
+- A business that paid while it was suspended for non-payment, but was not
+  switched on (for example the date was set by SQL), is restored by the job.
+
+When the run did something you get **one** Telegram message in the operator
+chat (email when Telegram refuses it): who was suspended, terminated,
+restored, warned, who could not be told, who is overdue and who is due soon.
+Business names only.
 
 To run it by hand: `curl -H "x-health-secret: $HEALTH_SECRET"
 https://<host>/api/billing` (the answer is counts only).
 
-**Turn billing off for one business.** In the Supabase SQL editor:
+### The notice log
+
+Every owner notice is recorded in `public.business_events` (migration 0007):
+one `expected` row before anything is sent, then one row per phone and per
+email with `sent`, `failed` or `skipped`. The table holds fixed words only:
+the notice type, the channel, an error class, the mail provider's message id.
+No text, no address, no chat id.
+
+- A send that fails alerts the operator chat at once: business name, notice
+  type, channel, error class.
+- Once a day, after the billing job, the self-check looks for a notice that
+  was started and never finished (an `expected` row with nothing after it:
+  the function was stopped half way, or the log could not be written). You
+  get one message, `Owner notices with no recorded outcome`, with the business
+  names and notice types. Open each business and check that the owner knows.
+
+To read the log for one business:
+
+```sql
+select created_at, type, channel, status, error_class
+from public.business_events
+where business_id = (select id from public.businesses where slug = '<slug>')
+order by created_at desc limit 50;
+```
+
+### Turn billing off for one business
 
 ```sql
 update public.businesses
@@ -382,21 +488,29 @@ set paid_until = null, billing_warning_stage = 0, suspended_for_billing = false
 where slug = '<slug>';
 ```
 
-If the job had already suspended it, press **Reactivate** afterwards.
+If the job had already suspended or terminated it, press **Reactivate**
+afterwards.
 
-**What stays manual until the payment-provider stage.** Receiving the money;
-pressing Extend 30 days for each payment; choosing any period other than 30
-days (set `paid_until` by SQL); refunds and prices (the system stores no
-amount). The seam for that stage exists: `applyPayment()` in
+### What stays manual until the payment-provider stage
+
+Receiving the money; pressing Extend 30 days for each payment; choosing any
+period other than 30 days (set `paid_until` by SQL); refunds and prices (the
+system stores no amount); deleting a terminated business after the retention
+period. The seam for a payment provider exists: `applyPayment()` in
 `lib/billing-ops.js` is what the button calls and what a payment webhook will
 call. Its contract is in the code: idempotent, never shortens a paid period,
-clears the grace period and the warning stage.
+clears the warning stage, restores a business that was off for non-payment.
 
-**Before any of this works** migration `0006_business_billing.sql` must be
-applied (`npm run db:apply`, or paste the file in the SQL editor). Until then
-the business screen says `Billing: unavailable`, Extend answers that billing
-is not available, the daily job skips itself, and everything else works as
-before.
+### Migrations this needs
+
+- `0006_business_billing.sql`: the billing columns. Without it the business
+  screen says `Billing: unavailable`, Extend answers that billing is not
+  available and the daily job skips itself.
+- `0007_lifecycle.sql`: `leads.held_at` and `public.business_events`. Without
+  it everything above still works, with two losses: a held lead is stored
+  without its mark (so the held count reads 0), and the notice log and its
+  daily audit are skipped. Apply both with `npm run db:apply`, or paste the
+  files in the SQL editor in order.
 
 **Remove.** `/recipients` lists every phone as "Recipient 1, 2, …" (or the stored
 `business_chats.label` when set) with one **Remove** button each. Removing asks once;
@@ -571,12 +685,34 @@ than a failure, because the server dropped the duplicate on purpose. If the
 visitor edited fields before that second press, those new values were **not**
 sent, so the recap is hidden in this state instead of displaying them as received.
 
+**Closing the form.** Three things close it: the **X** (32 px, with a 44 px
+press area), **Escape**, and the **Close** button of the last panel. A click
+or a tap on the dimmed area around the form does nothing, so nobody loses a
+half-filled form by touching beside it. Closing with the X keeps the answers
+until the page is left.
+
+**The four service options** are the four services of the services section:
+the form (and the no-JavaScript form) print the same client keys (`services3`,
+`services5`, `services7`, `services9` in `clients/<slug>.json`), so the two
+can never say different things. The short line under each option is
+`footer9` to `footer12`. The stored values did not change (`replacement`,
+`storm`, `repair`, `unsure`); the fourth is now shown to the visitor as "Free
+roof inspection" and to the owner as "Roof inspection".
+
+Two answers are neither "sent" nor "failed". A suspended business holds the
+request (HTTP 200 with `held: true`): the visitor reads that it was saved and
+that calling is faster. A terminated business accepts nothing (HTTP 410 with
+`unavailable: true`): the visitor reads that the form is not available. Both
+panels keep the **Call** button and promise no reply (section 3b).
+
 ## What the visitor sees
 
 | Failure | Visitor | Owner | Operator |
 |---|---|---|---|
 | Save fails | HTTP 500 generic failure panel; no success recap | Nothing new | `lead_insert_failed`; no local buffer exists |
 | Save succeeds, both owner alerts fail | HTTP 200 success panel: the request was stored | No alert unless a later same-key replay succeeds | Failure events and `owner_alert_fallback` when eligible; replay can repair missing delivery |
+| Business is suspended | "Your request was saved." and the Call button; no recap, no auto-reply | A short notice with no details; a count by email once a day; the lead after reactivation | `Held leads: N` on the business screen |
+| Business is terminated | "This form is not available." and the Call button; nothing stored | Nothing | Nothing |
 | Browser is offline | Immediate "You're offline"; no POST | Nothing new from that attempt | No server event because no request reached it |
 | Attempt times out, then visitor retries | One automatic retry after 700 ms with the same key; success or generic failure according to that answer | At most one stored lead; missing alerts may be re-driven | First attempt may still finish server-side; events reveal actual outcomes |
 
@@ -686,6 +822,8 @@ set, so it cannot be pointed at a fake by accident.
 - `review_links_invalid` in `/api/health` is `0` (every demo/active business has
   an `https://` Google review link on an allowed host).
 
+The full list for the first paying customer is `docs/PRE_LAUNCH_CHECKLIST.md`.
+
 ## 7. Post-merge checklist
 
 1. **Set every variable in both scopes.** Vercel → Project → Settings → Environment
@@ -757,6 +895,19 @@ set, so it cannot be pointed at a fake by accident.
 - **A shared inbox gets one message per business.** Two businesses with the same
   `owner_email` each get their own counts; neither is de-duplicated or merged, because
   suppressing one would hide that business's only warning.
+- **Nothing deletes a terminated business.** The 60-day retention period
+  (`RETENTION_DAYS`) is a number in the documents and in the customer's terms.
+  No job counts it and no job deletes: after the period, run the offboard
+  script by hand (section 2). Until then a terminated business can be put back
+  with one button.
+- **Lifecycle notices follow the daily cron.** A suspension or a termination
+  happens at the first daily run at or after its exact moment, so up to a day
+  late and never early. A notice that reached nobody is tried again a day
+  later, not sooner.
+- **A held-lead notice is capped, a held lead is not.** Above 20 held leads an
+  hour for one business the phones get no further notice in that hour; every
+  lead is still stored, and the count in `/status` and on the operator screen
+  is exact.
 - **The self-check is per business but its window is global.** Each message counts the
   last 24 h for that business only, so two messages can cover slightly different
   windows if the run takes long enough to cross a second boundary. At this size it does

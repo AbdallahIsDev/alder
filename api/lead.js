@@ -13,8 +13,15 @@ import { insertLead, addEvent, hitRateLimit, getLeadForReplay, getLeadDeliverySt
 import { findRecentDuplicate } from '../lib/lead-intake.js';
 import { isOwnerEmailReplayRetryable, notifyAllAfterLead } from '../lib/notify.js';
 import { resolveTenant } from '../lib/tenant.js';
+import { announceHeldLead } from '../lib/held-leads.js';
 
 const SERVICES = ['replacement', 'storm', 'repair', 'unsure'];
+
+/* What the visitor is told when the business is suspended (the lead is HELD)
+   or terminated (nothing is stored). Neither promises a reply. The page's own
+   modal carries the same two sentences next to a Call button (index.html). */
+export const HELD_MESSAGE = 'Your request was saved, but this business can\u2019t respond through this form right now. For the fastest help, please call them directly.';
+export const UNAVAILABLE_MESSAGE = 'This business isn\u2019t accepting requests through this form right now. Please call them directly.';
 const HOMES = ['house', 'multi', 'commercial', 'other'];
 const TIMINGS = ['asap', 'month', 'quarter', 'planning'];
 const AGES = ['Under 10 years', '10 to 20 years', 'Over 20 years', 'Not sure'];
@@ -184,9 +191,27 @@ export default async function handler(req, res) {
   const idem = str(b.idempotencyKey);
   if (!/^[A-Za-z0-9-]{8,64}$/.test(idem)) return isForm ? badForm(null) : res.status(400).json({ ok: false });
 
-  const tenant = await resolveTenant(req);
-  if (!tenant) return tenantNotFound(); // unknown/malformed host, inactive business, or lookup failure
+  // The tenant comes from Host and from nothing else. Unlike every other
+  // public endpoint, this one also resolves a suspended and a terminated
+  // business, because each has its own answer:
+  //   demo / active   the lead is stored and announced (unchanged)
+  //   paused          HOLD: stored with held_at, announced to nobody
+  //   churned         UNAVAILABLE: nothing is stored, nothing is sent
+  const tenant = await resolveTenant(req, { anyStatus: true });
+  if (!tenant) return tenantNotFound(); // unknown/malformed host, or lookup failure
   const { business } = tenant;
+  const held = business.status === 'paused';
+  if (business.status === 'churned') {
+    // Its own result: not ok, not a 404, and never the generic 5xx panel.
+    return isForm
+      ? htmlReply(410, 'Not available', UNAVAILABLE_MESSAGE, business.name)
+      : res.status(410).json({ ok: false, unavailable: true });
+  }
+  if (!held && business.status !== 'demo' && business.status !== 'active') return tenantNotFound();
+  const okReply = () => {
+    if (held) return isForm ? htmlReply(200, 'Request saved', HELD_MESSAGE, business.name) : res.status(200).json({ ok: true, held: true });
+    return isForm ? htmlReply(200, 'Request received', 'We received your request.', business.name) : res.status(200).json({ ok: true });
+  };
 
   // Phone: validated and normalised to E.164 (region is always 'US'; see above).
   // Anything that does not parse as a valid number is a 400; stored value
@@ -268,6 +293,8 @@ export default async function handler(req, res) {
       name, phone: phoneE164, email: email || null, zip, service, home, timing,
       roof_age: age, insurance_claim: b.claim === true,
       notes: notes || null, source: isForm ? 'form-nojs' : 'form', idempotency_key: idem,
+      // Hold mode: the mark that keeps this lead out of every alert.
+      ...(held ? { held_at: new Date().toISOString() } : {}),
     });
   } catch (e) {
     console.error('lead_insert_failed', (e && e.code) || 'no_code');
@@ -282,6 +309,9 @@ export default async function handler(req, res) {
   // chats and an already-delivered owner email are not repeated. A failed read is
   // not a reason to guess: log a code and leave the lead for the next attempt.
   if (leadId === null) {
+    // A retry while the business is suspended announces nothing: the lead is
+    // held, and its one notice belongs to the request that stored it.
+    if (held) return okReply();
     try {
       const stored = await getLeadForReplay(business.id, idem);
       if (stored) {
@@ -321,7 +351,7 @@ export default async function handler(req, res) {
     } catch (e) {
       console.error('lead_replay_failed', (e && e.code) || 'no_code');
     }
-    return isForm ? htmlReply(200, 'Request received', 'We received your request.', business.name) : res.status(200).json({ ok: true });
+    return okReply();
   }
 
   // Advisory: is this the same phone or email as a recent request for this
@@ -337,9 +367,20 @@ export default async function handler(req, res) {
       source: isForm ? 'form-nojs' : 'form',
       slug: business.slug,
       ...(duplicateOf ? { duplicate_of: duplicateOf } : {}),
+      ...(held ? { held: true } : {}),
     });
   } catch (e) {
     console.error('lead_event_created_failed', (e && e.code) || 'no_code');
+  }
+
+  // HOLD MODE. The lead is stored and nothing about it leaves the system: no
+  // owner email with its details, no Telegram alert with its details, no
+  // customer auto-reply. The business's phones get one short notice with no
+  // personal data, and the owner address at most one count a day
+  // (lib/held-leads.js). Nothing below can change the response.
+  if (held) {
+    try { await announceHeldLead({ business }); } catch (e) { console.error('held_notice_failed', (e && e.code) || 'no_code'); }
+    return okReply();
   }
 
   // Save first, notify second. Nothing below can change the response. The
@@ -349,5 +390,5 @@ export default async function handler(req, res) {
     lead: { name, phone: phoneE164, email, zip, service, home, timing, roof_age: age, insurance_claim: b.claim === true, notes },
   }, false);
 
-  return isForm ? htmlReply(200, 'Request received', 'We received your request.', business.name) : res.status(200).json({ ok: true });
+  return okReply();
 }

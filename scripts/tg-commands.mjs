@@ -41,6 +41,7 @@ export const COMMANDS = [
   { command: 'invite', description: 'Connect another phone' },
   { command: 'recipients', description: 'Who receives alerts' },
   { command: 'remove_lead', description: 'Remove a request' },
+  { command: 'status', description: 'Your service status' },
   { command: 'help', description: 'How this works' },
 ];
 

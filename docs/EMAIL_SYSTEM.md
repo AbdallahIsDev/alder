@@ -114,38 +114,46 @@ lines after the Job section.
 digits starting with 1 to `+`, a leading `+` stays, anything else is the bare
 digits. Display text is never altered.
 
-## Suspension email
+## Billing and lifecycle emails
 
-`suspendedEmail(business)` in `lib/email-builders.js`, sent by
-`sendSuspensionEmail` in `lib/notify.js` when the operator suspends a
-business. It goes to the business's owner email address, from "Lead Alerts",
-with the subject "Your service has been suspended" and one sentence: "Your
-service has been suspended. Contact support if this is a mistake." It uses the
-same shell as the other operational emails and names no lead. The idempotency
-key is `suspended:<business id>:<UTC day>`, so suspending the same business
-twice in one day sends one email. A failed send is counted in the operator's
-result line and never blocks the suspension. Reactivation sends no email.
+One builder, `lifecycleEmail(business, { subject, text })` in
+`lib/email-builders.js`, and one sender, `sendLifecycleEmail` in
+`lib/notify.js`. Every email below goes to the business's owner email address,
+from "Lead Alerts", in the same shell as the other operational emails. The
+words come from `ownerNotice(type, …)` in `lib/lifecycle-text.js`, the same
+function that writes the Telegram notice, so the two channels always say the
+same thing.
 
-When the daily billing job suspends a business (docs/OPERATIONS.md, 3b) the
-same builder and sender are used with the billing sentence, "Your service has
-been suspended because payment was not received. Contact support.", and the
-key `suspended:billing:<business id>:<UTC day>`.
+| Notice (`type`) | Subject | Sent when |
+|---|---|---|
+| `renewal_reminder` | Your payment is due soon | 3 days before `paid_until` |
+| `overdue` | Payment overdue | at `paid_until` |
+| `final_warning` | Final notice: payment overdue | 1 day before the suspension |
+| `suspension` | Your service has been suspended | at the suspension (daily job or operator) |
+| `termination_warning` | Your service will be terminated | 5 days before the termination |
+| `termination` | Your service has been terminated | at the termination (daily job or operator) |
+| `reactivation` | Your service is active again | at a reactivation or a recorded payment that switches the service on |
+| `held_summary` | New requests are waiting | once per UTC day while suspended, on the first held lead: the count only |
 
-## Billing warnings
+Rules that hold for all of them:
 
-`billingNoticeEmail(business, { subject, text })` in `lib/email-builders.js`,
-sent by `sendBillingEmail` in `lib/notify.js` from the daily billing job. It
-goes to the business's owner email address, from "Lead Alerts", in the same
-shell, with one sentence, the same one the business's phones get in Telegram:
+- **No button and no link.** The text ends with "Reply to this email and we
+  will help." and the `Reply-To` header is `OPERATOR_EMAIL` (when it is set).
+- **No lead data.** A held-leads email carries a number, never a name, a phone
+  or a note. The visitor of a held lead gets no email at all.
+- **The idempotency key is `<type>:<business id>:<instance>`.** The instance is
+  the moment of the transition in milliseconds for a suspension, a termination
+  and a reactivation, `<paid_until in seconds>:<UTC day>` for the daily
+  warnings, and the UTC day for the held-leads email. A retry of the same
+  event sends once; a second, different event on the same day is a different
+  key and is sent. (A day-only key made the mail service refuse the second
+  email of a day as a mismatch.)
+- **The email counts as a delivered notice.** A billing stage is recorded as
+  sent when at least one phone or this email accepted it. A failed email is
+  recorded in `business_events` and alerts the operator; it never blocks a
+  suspension, a termination or a reactivation.
 
-- subject "Payment overdue": "Payment for \<Name\> is overdue. Your service
-  will be suspended on \<date\> unless payment is received. Contact support."
-- subject "Final notice: payment overdue": the same sentence, starting "Final
-  notice: payment for \<Name\> is overdue."
-
-The idempotency key is `billing:<overdue|final>:<business id>:<UTC day>`. The
-email counts as a delivered notice: a warning is recorded as sent when at
-least one phone or this email accepted it. The operator's billing summary uses
+The operator's billing summary uses
 `operatorAlarmEmail` when Telegram refuses it, with the key
 `billing:operator:<UTC day>`.
 
