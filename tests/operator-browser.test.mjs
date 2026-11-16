@@ -30,24 +30,33 @@
 //        allowed fields are one constant; scoped, ordered, read-only
 //   OB5  Suspend asks first (exact text, Confirm suspend danger left, Cancel
 //        right); Cancel returns to the business; nothing sent or changed
-//   OB6  Confirm: every bound phone gets ONE notice with ReplyKeyboardRemove
-//        and the owner address ONE email, all BEFORE the status is written;
-//        the write is one UPDATE scoped by the id and the served statuses;
-//        bindings, invites, leads and every other business are untouched
+//   OB6  Confirm: ONE UPDATE scoped by the id and the served statuses, THEN
+//        every bound phone gets one notice (support link as an entity, the
+//        one-button Status keyboard) and the owner address one email; every
+//        attempt is a business_events row with fixed words only; bindings,
+//        invites, leads and every other business are untouched
 //   OB7  a second tap is harmless: "already suspended", nothing sent or written
-//   OB8  a notice that fails is counted and blocks nothing; a phone list that
+//   OB8  a notice that fails is counted, logged with its error class, and
+//        alerts the operator chat once; it blocks nothing; a phone list that
 //        cannot be read sends and changes nothing; a status that cannot be
 //        written is not reported as done
-//   OB9  a suspended business: every command and keyboard press of its phones
-//        answers the one neutral line with no data and nothing read beyond
-//        the binding; every button answers the same line as a toast; free
-//        text is rate limited; /id still answers; a new phone cannot connect
-//        and its invite stays unused; the website form's request is refused
-//        with a plain 404 before anything is stored or sent; another business
-//        is unaffected
+//   OB9  a suspended business: /status (typed or pressed) answers the state,
+//        the reason and the NUMBER of leads waiting, from one count; every
+//        other command and keyboard press gets one short answer with the
+//        support link and no data; every button a toast; free text is rate
+//        limited; /id still answers; a new phone cannot connect and its
+//        invite stays unused; the website form's request passes the tenant
+//        check (it is held: tests/lifecycle.test.mjs); a terminated
+//        business's form answers 410 "unavailable" before anything is stored
+//        or sent; an unknown host is still 404; another business is unaffected
 //   OB10 Reactivate: one scoped UPDATE to active (a demo business comes back
-//        as active); every bound phone is told, with its own role keyboard;
-//        a second tap is harmless; the phones work again
+//        as active); every bound phone is told, with its own role keyboard,
+//        and the owner address by email; a second tap is harmless; the
+//        phones work again
+//   OB29 Terminate by hand (bx asks, bX does it): one scoped UPDATE to
+//        'churned', never marked for non-payment; phones and owner told;
+//        nothing deleted; the bot is /status only; from a suspended business
+//        too; Reactivate or Extend restores; bt / bT stay retired
 //   OB11 an unknown business in any callback answers and shows the current
 //        list; a malformed callback is not a callback at all; the retired
 //        Terminate (bt/bT), picker (pb) and Remove Phone (p/P/q) buttons say
@@ -207,6 +216,8 @@ const freshStore = () => ({
   codes: [],
   leads: [],
   events: [],
+  // business_events: the owner-notice log (migration 0007).
+  notices: [],
   claims: new Map(),
   seq: 100,
 });
@@ -372,6 +383,10 @@ const install = () => {
       const total = rows.length;
       return json(paged(rows).map((r) => ({ ...r })), countRequested(init) ? { 'content-range': `0-0/${total}` } : {});
     }
+    if (table === 'business_events') {
+      if (method === 'POST') { store.notices.push(...(Array.isArray(sent) ? sent : [sent])); return new Response(null, { status: 201 }); }
+      return json(store.notices.filter((r) => match(r, params)));
+    }
     if (table === 'lead_events') {
       if (method === 'POST') { store.events.push(JSON.parse(init.body || '{}')); return json([]); }
       return json(store.events.filter((r) => match(r, params)));
@@ -400,7 +415,9 @@ const param = (r, key) => (r.params.find(([k]) => k === key) || [])[1];
 const numbersOk = (row, n) => Array.isArray(row) && row.length === n
   && row.every((b, i) => b.text === String(i + 1) && same(Object.keys(b).sort(), ['callback_data', 'text']));
 const snapshot = () => JSON.stringify({ b: store.businesses, c: store.chats, k: store.codes, l: store.leads, e: store.events });
-const writes = (reqs) => reqs.filter((q) => !['GET', 'HEAD'].includes(q.method) && q.table !== 'rpc/hit_rate_limit');
+// The notice log (business_events) is bookkeeping about a send, not a change
+// to a business: it is checked on its own (store.notices).
+const writes = (reqs) => reqs.filter((q) => !['GET', 'HEAD'].includes(q.method) && q.table !== 'rpc/hit_rate_limit' && q.table !== 'business_events');
 
 /** One update: what Telegram received, what the database was asked, and the
  *  timing lines it printed. */
@@ -476,9 +493,16 @@ const DETAIL_P = 'Zz Paused\nSuspended · zz-paused\n\nTelegram: Connected\nPhon
 const detailKb = (id, page) => [
   [{ text: 'Suspend', callback_data: `bs:${page}:${id}`, style: 'danger' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
   [{ text: 'Extend 30 days', callback_data: `be:${page}:${id}` }, { text: 'Invite', callback_data: `bv:${page}:${id}`, style: 'primary' }],
+  [{ text: 'Terminate', callback_data: `bx:${page}:${id}`, style: 'danger' }],
   [{ text: 'Back', callback_data: `bl:${page}` }],
 ];
 const suspendedKb = (id, page) => [
+  [{ text: 'Reactivate', callback_data: `br:${page}:${id}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
+  [{ text: 'Extend 30 days', callback_data: `be:${page}:${id}` }, { text: 'Terminate', callback_data: `bx:${page}:${id}`, style: 'danger' }],
+  [{ text: 'Back', callback_data: `bl:${page}` }],
+];
+/** Terminated: Reactivate, Leads, Extend, Back. No Terminate, Suspend or Invite. */
+const terminatedKb = (id, page) => [
   [{ text: 'Reactivate', callback_data: `br:${page}:${id}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
   [{ text: 'Extend 30 days', callback_data: `be:${page}:${id}` }],
   [{ text: 'Back', callback_data: `bl:${page}` }],
@@ -498,9 +522,29 @@ const STAFF_KB = { keyboard: [[{ text: 'Leads' }]], is_persistent: true, resize_
 const REMOVED_KB = { remove_keyboard: true };
 const fail500 = () => new Response('{"message":"fake failure"}', { status: 500, headers: { 'content-type': 'application/json' } });
 const textOf = (req) => String((req && req.body && req.body.text) || '');
-const SUSPEND_ASK = 'Suspend Alder Roofing? Telegram alerts, emails and the website form stop for this business. Data is kept and you can reactivate at any time.';
-const NOTICE = 'Your service has been suspended. Contact support if this is a mistake.';
-const SUSPENDED_LINE = 'This service is suspended. Contact support.';
+const SUSPEND_ASK = 'Suspend Alder Roofing? Lead alerts and emails stop. The website form keeps saving new requests; they stay hidden until you reactivate. Nothing is deleted.';
+const NOTICE = 'Your service has been suspended\nby support.\n\nYour website still saves new\nrequests. You will see them\nwhen the service is active\nagain.\n\nSend /status at any time to see\nthe current state.\n\nContact support';
+const NOTICE_EMAIL = 'Your service has been suspended by support.\n\nYour website still saves new requests. You will see them when the service is active again.\n\nSend /status at any time to see the current state.\n\nReply to this email and we will help.';
+// What a phone of a business suspended by hand is told (lib/lifecycle-text.js),
+// written out here and not taken from the code under test.
+const SUPPORT = 'Contact support';
+const SUSPENDED_LINE = 'This service has been suspended\nby support.\n\nSend /status to see the current\nstate.\n\n' + SUPPORT;
+const SUSPENDED_TOAST = 'This service is suspended. Send /status.';
+const TERMINATED_TOAST = 'This service was terminated. Send /status.';
+const REFUSED_LINE = 'This service is suspended.\nA new phone cannot be connected\nright now.\n\n' + SUPPORT;
+const STATUS_SUSPENDED = 'Status: Suspended\n\nReason: suspended by support.\n\n' + SUPPORT;
+const STATUS_TERMINATED = 'Status: Terminated\n\nTerminated by support.\n\nYour website form no longer\naccepts requests. Your data has\nnot been deleted.\n\n' + SUPPORT;
+const TERMINATED_NOTICE = 'Your service has been\nterminated by support.\n\nYour website form no longer\naccepts requests. Your data has\nnot been deleted.\n\nSend /status at any time to see\nthe current state.\n\n' + SUPPORT;
+const REACTIVATED_NOTICE = 'Your service is active again.\nSupport has reactivated it.\n\nSend /status at any time to see\nthe current state.\n\n' + SUPPORT;
+/** The one keyboard of a suspended or terminated business's phone. */
+const STATUS_KB = { keyboard: [[{ text: 'Status' }]], is_persistent: true, resize_keyboard: true };
+/** The support link is an entity over the last words; there is no parse_mode. */
+const supportLinked = (m) => {
+  const e = m && m.body && m.body.entities;
+  const t = textOf(m);
+  return Array.isArray(e) && e.length === 1 && e[0].type === 'text_link' && e[0].url === 'https://t.me/AbdallahIsDev'
+    && t.slice(e[0].offset, e[0].offset + e[0].length) === SUPPORT && t.endsWith(SUPPORT) && !('parse_mode' in m.body);
+};
 const EXPIRED = 'That screen expired. Here is the current screen.';
 /** Every text the operator chat was shown, across the suite (for OB4). */
 const operatorTexts = [];
@@ -602,7 +646,7 @@ try {
     const lastKb = kbOf(last.edits[0]);
     // The suspended business is on the last page and shows its real phone.
     const lastOk = last.sends.length === 0 && last.edits.length === 1
-      && last.edits[0].body.text === listText(['Juniper Roofing · Churned · 0 phones', 'Zz Paused · Suspended · 1 phone'])
+      && last.edits[0].body.text === listText(['Juniper Roofing · Terminated · 0 phones', 'Zz Paused · Suspended · 1 phone'])
       && lastKb.length === 2 && numbersOk(lastKb[0], 2)
       && same(lastKb[1], [{ text: 'Newer', callback_data: 'bl:1' }]);
     const first = await run(cb(OP, 'bl:0'));
@@ -775,27 +819,31 @@ try {
       `ask=${askOk} cancel=${cancelOk} unchanged=${snapshot() === before}`);
   }
 
-  /* OB6: Confirm. Notices and the email first, then one scoped UPDATE. */
+  /* OB6: Confirm. One scoped UPDATE first, then the notices and the email. */
   {
     const others = () => JSON.stringify({
       b: store.businesses.filter((b) => b.id !== BIZ_A), c: store.chats, k: store.codes, l: store.leads, e: store.events,
     });
     const before = others();
+    store.notices = [];
     const r = seen(await run(cb(OP, `bS:0:${BIZ_A}`)));
     const notices = r.sends.filter((m) => m.body.text === NOTICE);
+    // Every bound phone: the notice, the support link as an entity, and the
+    // one-button Status keyboard in place of its role keyboard.
     const noticeOk = r.sends.length === 2 && notices.length === 2
       && same(notices.map((m) => String(m.body.chat_id)).sort(), [String(OWNER), String(STAFF)].sort())
-      && notices.every((m) => same(m.body.reply_markup, REMOVED_KB) && !('parse_mode' in m.body));
-    // One plain email to the owner address, with the same sentence.
+      && notices.every((m) => same(m.body.reply_markup, STATUS_KB) && supportLinked(m));
+    // One plain email to the owner address, with the same words, Reply-To
+    // support, and no button or link.
     const mail = r.mail[0] && r.mail[0].body;
     const mailOk = r.mail.length === 1 && same([].concat(mail.to), ['alder-demo@fixture.invalid'])
-      && mail.subject === 'Your service has been suspended' && String(mail.text).includes(NOTICE)
-      && !/alder-demo|Suspend Alder/.test(String(mail.text));
-    // Order: every notice and the email were answered before the status write began.
+      && mail.subject === 'Your service has been suspended' && String(mail.text).includes(NOTICE_EMAIL)
+      && !/alder-demo|Suspend Alder|t\.me\//.test(String(mail.text));
+    // Order: the status write began before any notice was sent, so a second
+    // tap or a race finds the business already suspended and tells nobody.
     const patchAt = r.trace.findIndex((t) => t.kind === 'sb' && t.table === 'businesses' && t.method === 'PATCH');
-    const lastNotice = r.trace.map((t, i) => (((t.kind === 'tg' && t.method === 'sendMessage') || t.kind === 'mail') && t.phase === 'end' ? i : -1))
-      .reduce((a, b) => Math.max(a, b), -1);
-    const orderOk = patchAt > 0 && lastNotice >= 0 && lastNotice < patchAt;
+    const firstNotice = r.trace.findIndex((t) => ((t.kind === 'tg' && t.method === 'sendMessage') || t.kind === 'mail') && t.phase !== 'end');
+    const orderOk = patchAt > 0 && firstNotice > patchAt;
     // The write: one statement, by the id and the served statuses.
     const w = writes(r.sb);
     const status = String(param(w[0] || { params: [] }, 'status') || '');
@@ -803,15 +851,21 @@ try {
       && param(w[0], 'id') === `eq.${BIZ_A}` && /^in\.\("?demo"?,"?active"?\)$/.test(status)
       && same(w[0].body, { status: 'paused' })
       && store.businesses.find((b) => b.id === BIZ_A).status === 'paused';
+    // The notice log: expected, one row per phone, one for the email; fixed
+    // words only (no text, no address, no chat id).
+    const log = store.notices;
+    const logOk = same(log.map((n) => `${n.type}/${n.channel}/${n.status}`), ['suspension/none/expected', 'suspension/telegram/sent', 'suspension/telegram/sent', 'suspension/email/sent'])
+      && log.every((n) => n.business_id === BIZ_A && same(Object.keys(n).sort(), ['business_id', 'channel', 'error_class', 'provider_id', 'status', 'type']))
+      && !JSON.stringify(log).includes('fixture.invalid') && !JSON.stringify(log).includes(String(OWNER));
     // Bindings, invites, leads, every other business: as they were.
     const untouched = others() === before && store.chats.filter((c) => c.business_id === BIZ_A).length === 2
       && liveCodes(BIZ_A).length === 1 && store.leads.filter((l) => l.business_id === BIZ_A).length === 7;
     const resultOk = r.edits.length === 1 && r.edits[0].body.message_id === 9
-      && r.edits[0].body.text === 'Alder Roofing suspended · 0 notices failed'
+      && r.edits[0].body.text === 'Alder Roofing suspended'
       && same(kbOf(r.edits[0]), backKb(BIZ_A, 0)) && same(r.answers, ['Suspended.']);
-    line(noticeOk && mailOk && orderOk && writeOk && untouched && resultOk,
-      'OB6', 'suspend: notices and email first, one scoped update',
-      `notice=${noticeOk} mail=${mailOk} order=${orderOk} write=${writeOk} untouched=${untouched} result=${resultOk}`);
+    line(noticeOk && mailOk && orderOk && writeOk && logOk && untouched && resultOk,
+      'OB6', 'suspend: one scoped update, then notices, email and log',
+      `notice=${noticeOk} mail=${mailOk} order=${orderOk} write=${writeOk} log=${logOk} untouched=${untouched} result=${resultOk}`);
   }
 
   /* OB7: a second tap changes nothing and tells nobody. */
@@ -826,11 +880,12 @@ try {
     const askOk = ask.sends.length === 0 && ask.mail.length === 0 && writes(ask.sb).length === 0 && ask.edits.length === 1
       && textOf(ask.edits[0]).startsWith('Alder Roofing\nSuspended · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n')
       && same(kbOf(ask.edits[0]), suspendedKb(BIZ_A, 0)) && same(ask.answers, ['Already suspended.']);
-    // A business that was suspended by hand, and one that has churned.
+    // A business that was suspended by hand, and one that was terminated.
     const paused = await run(cb(OP, `bS:2:${BIZ_P}`));
     const churned = await run(cb(OP, `bS:2:${BIZ_C}`));
-    const neverOk = [paused, churned].every((x) => x.sends.length === 0 && x.mail.length === 0 && writes(x.sb).length === 0
-      && same(x.answers, ['Already suspended.']));
+    const neverOk = [paused, churned].every((x) => x.sends.length === 0 && x.mail.length === 0 && writes(x.sb).length === 0)
+      && same(paused.answers, ['Already suspended.']) && same(churned.answers, ['Already terminated.'])
+      && textOf(churned.edits[0]) === 'Juniper Roofing is already terminated.';
     line(againOk && askOk && neverOk && snapshot() === before, 'OB7', 'second tap: already suspended, nothing sent or written',
       `again=${againOk} ask=${askOk} others=${neverOk} unchanged=${snapshot() === before}`);
   }
@@ -841,31 +896,54 @@ try {
     const lead = leadIds[0];
     const row = uuid(2);
     const onlyBinding = (x, chat) => x.sb.length === 1 && x.sb[0].table === 'business_chats' && param(x.sb[0], 'tg_chat_id') === `eq.${chat}`;
-    // Every command and every keyboard press: the one line, the keyboard
-    // removed, and nothing read beyond the chat's own binding.
+    // The binding, then the business row for the reason and the dates.
+    const bindingAndBusiness = (x, chat) => x.sb.length === 2 && x.sb[0].table === 'business_chats' && param(x.sb[0], 'tg_chat_id') === `eq.${chat}`
+      && x.sb[1].table === 'businesses' && x.sb[1].method === 'GET' && param(x.sb[1], 'id') === `eq.${BIZ_A}`;
+    // Every command and every keyboard press but /status: the one short
+    // answer (state, reason, support link), the Status keyboard, no data,
+    // and nothing read beyond the binding and the business row.
     const bad = [];
     for (const chat of [OWNER, STAFF]) {
       for (const text of ['/leads', '/invite', '/recipients', '/remove_lead', '/help', '/start', '/start KEEPKEEPKEEP', 'Leads', 'Invite', 'Recipients', 'Help']) {
         const x = await run(msg(chat, text));
-        if (x.tg.length !== 1 || x.sends.length !== 1 || textOf(x.sends[0]) !== SUSPENDED_LINE
-          || !same(x.sends[0].body.reply_markup, REMOVED_KB) || !onlyBinding(x, chat)) bad.push(`${chat === OWNER ? 'owner' : 'staff'}:${text}`);
+        if (x.tg.length !== 1 || x.sends.length !== 1 || textOf(x.sends[0]) !== SUSPENDED_LINE || !supportLinked(x.sends[0])
+          || !same(x.sends[0].body.reply_markup, STATUS_KB) || !bindingAndBusiness(x, chat) || x.mail.length) bad.push(`${chat === OWNER ? 'owner' : 'staff'}:${text}`);
+      }
+      // /status, typed or pressed: the state, the reason and how many leads
+      // are waiting, as a number. No lead row is read: one count.
+      for (const text of ['/status', 'Status']) {
+        const x = await run(msg(chat, text));
+        const leadReads = x.sb.filter((q) => q.table === 'v_client_leads');
+        if (x.sends.length !== 1 || textOf(x.sends[0]) !== STATUS_SUSPENDED || !supportLinked(x.sends[0]) || !same(x.sends[0].body.reply_markup, STATUS_KB)
+          || writes(x.sb).length || leadReads.length !== 1 || leadReads[0].method !== 'HEAD' || param(leadReads[0], 'held_at') !== 'not.is.null') bad.push(`status:${text}`);
       }
     }
-    // Every button of a message sent before the suspension: the same line as
-    // a toast; nothing drawn, nothing read, nothing changed.
+    // Two leads held for the business: /status says "2" and shows nothing of them.
+    store.leads.push({ id: uuid(901), business_id: BIZ_A, name: 'Held One', phone: '+15155550991', service: 'repair', status: 'open', held_at: new Date().toISOString(), created_at: new Date().toISOString() },
+      { id: uuid(902), business_id: BIZ_A, name: 'Held Two', phone: '+15155550992', service: 'storm', status: 'open', held_at: new Date().toISOString(), created_at: new Date().toISOString() });
+    const waiting = await run(msg(OWNER, '/status'));
+    const waitingText = textOf(waiting.sends[0]);
+    if (waitingText !== 'Status: Suspended\n\nReason: suspended by support.\n\nLeads waiting: 2\nTheir details are hidden until\nthe service is active again.\n\n' + SUPPORT
+      || /Held One|Held Two|5155550/.test(waitingText)) bad.push('status:held');
+    // /leads still shows nothing while suspended, held leads included.
+    const hidden = await run(msg(OWNER, '/leads'));
+    if (textOf(hidden.sends[0]) !== SUSPENDED_LINE || hidden.sb.some((q) => q.table === 'v_client_leads')) bad.push('leads:held');
+    store.leads = store.leads.filter((l) => !l.held_at);
+    // Every button of a message sent before the suspension: one short toast;
+    // nothing drawn, nothing read beyond the binding, nothing changed.
     const taps = [];
     for (const chat of [OWNER, STAFF]) {
       for (const data of ['l:0', `L:0:${lead}`, `c:${lead}`, `d:${lead}`, `C:0:${lead}`, `D:0:${lead}`, `Y:0:${lead}`, `o:${lead}`,
         'rm:0', `Q:0:${lead}`, `E:0:${lead}`, `rl:${lead}`, `RL:${lead}`, 'i:c', `x:${row}`, `X:${row}`, `v:${row}`, 'nonsense']) {
         const x = await run(cb(chat, data));
-        if (!same(x.answers, [SUSPENDED_LINE]) || x.sends.length || x.edits.length || x.mail.length || !onlyBinding(x, chat)) taps.push(data.slice(0, 2));
+        if (!same(x.answers, [SUSPENDED_TOAST]) || x.sends.length || x.edits.length || x.mail.length || !onlyBinding(x, chat)) taps.push(data.slice(0, 2));
       }
     }
-    // Free text: the same line, at most three times an hour.
+    // Free text: the same answer, at most three times an hour.
     let replies = 0;
     for (let i = 0; i < 5; i++) {
       const x = await run(msg(STAFF, 'is anyone there'));
-      replies += x.sends.filter((m) => textOf(m) === SUSPENDED_LINE && same(m.body.reply_markup, REMOVED_KB)).length;
+      replies += x.sends.filter((m) => textOf(m) === SUSPENDED_LINE && same(m.body.reply_markup, STATUS_KB)).length;
       if (x.sends.some((m) => textOf(m) !== SUSPENDED_LINE)) replies = -99;
     }
     // /id is the chat's own id and nothing else: still answered.
@@ -875,11 +953,15 @@ try {
     // and the invite is still unused for the day the business is reactivated.
     const link = await run(msg(CHAT_X, '/start KEEPKEEPKEEP'));
     const pasted = await run(msg(CHAT_X, 'KEEPKEEPKEEP'));
-    const bindOk = [link, pasted].every((x) => x.sends.length === 1 && textOf(x.sends[0]) === SUSPENDED_LINE)
+    const bindOk = [link, pasted].every((x) => x.sends.length === 1 && textOf(x.sends[0]) === REFUSED_LINE && supportLinked(x.sends[0])
+      && same(x.sends[0].body.reply_markup, REMOVED_KB))
       && !store.chats.some((c) => String(c.tg_chat_id) === String(CHAT_X))
       && liveCodes(BIZ_A).length === 1 && liveCodes(BIZ_A)[0].code === 'KEEPKEEPKEEP';
-    // The website form. Host picks the tenant, and only a served one: the
-    // request is refused before anything is stored, alerted or mailed.
+    // The website form. Host picks the tenant, whatever its status (the
+    // lookup carries no status filter). A SUSPENDED business's request gets
+    // past the tenant check: it is held, not refused (tests/lifecycle.test.mjs
+    // proves what is stored and what is sent). A TERMINATED business answers
+    // "unavailable" (410, its own body) before anything is stored or sent.
     const { default: leadHandler } = await import('../api/lead.js');
     const post = async (host, type = 'application/json') => {
       await tgReset(); await mailReset(); sbRequests = [];
@@ -891,27 +973,33 @@ try {
       await leadHandler({ method: 'POST', headers: { 'content-type': type, 'x-real-ip': '203.0.113.9', host }, body, socket: {} }, res);
       return { res, sb: sbRequests.slice(), tg: await tgReqs(), mail: await mailReqs() };
     };
-    const refused = await post('alder-demo.test');
-    const lookup = refused.sb.find((q) => q.table === 'businesses');
-    const refusedOk = refused.res.code === 404 && same(refused.res.body, { ok: false })
-      && !!lookup && param(lookup, 'site_host') === 'eq.alder-demo.test' && /^in\.\("?demo"?,"?active"?\)$/.test(String(param(lookup, 'status')))
-      && refused.sb.every((q) => q.table === 'businesses' || q.table === 'rpc/hit_rate_limit')
-      && refused.tg.length === 0 && refused.mail.length === 0;
-    const form = await post('alder-demo.test', 'application/x-www-form-urlencoded');
-    const formOk = form.res.code === 404 && /Not found/.test(String(form.res.body)) && !/suspend|Alder/i.test(String(form.res.body))
-      && form.tg.length === 0 && form.mail.length === 0;
+    const heldPost = await post('alder-demo.test');
+    const lookup = heldPost.sb.find((q) => q.table === 'businesses');
+    const refusedOk = heldPost.res.code !== 404 && heldPost.res.code !== 410
+      && !!lookup && param(lookup, 'site_host') === 'eq.alder-demo.test' && param(lookup, 'status') === undefined
+      && heldPost.sb.some((q) => q.table !== 'businesses' && q.table !== 'rpc/hit_rate_limit');
+    const gone = await post('juniper.test');
+    const goneForm = await post('juniper.test', 'application/x-www-form-urlencoded');
+    const formOk = gone.res.code === 410 && same(gone.res.body, { ok: false, unavailable: true })
+      && gone.sb.every((q) => q.table === 'businesses' || q.table === 'rpc/hit_rate_limit') && gone.tg.length === 0 && gone.mail.length === 0
+      && goneForm.res.code === 410 && String(goneForm.res.body).includes('accepting requests through this form right now')
+      && !/terminat|suspend|Juniper Roofing is/i.test(String(goneForm.res.body)) && goneForm.tg.length === 0 && goneForm.mail.length === 0;
+    // An unknown host is still a plain 404.
+    const nobody = await post('nobody.test');
     // The same request for a served business gets past that check.
     const served = await post('beta.test');
-    const servedOk = served.res.code !== 404 && served.sb.some((q) => q.table !== 'businesses' && q.table !== 'rpc/hit_rate_limit');
+    const servedOk = nobody.res.code === 404 && same(nobody.res.body, { ok: false })
+      && served.res.code !== 404 && served.sb.some((q) => q.table !== 'businesses' && q.table !== 'rpc/hit_rate_limit');
     // Another business never notices.
     const other = await run(msg(CHAT_B, '/leads'));
     const otherOk = other.sends.length === 1 && textOf(other.sends[0]) !== SUSPENDED_LINE && textOf(other.sends[0]).includes('Beta Only')
       && other.sb.some((q) => q.table === 'v_client_leads');
     store.leads = store.leads.filter((l) => l.name !== 'Form Visitor');
     store.events = [];
+    store.notices = [];
     const unchanged = JSON.stringify({ b: store.businesses, c: store.chats, k: store.codes, l: store.leads }) === JSON.stringify((({ b, c, k, l }) => ({ b, c, k, l }))(JSON.parse(before)));
     line(bad.length === 0 && taps.length === 0 && replies === 3 && idOk && bindOk && refusedOk && formOk && servedOk && otherOk && unchanged,
-      'OB9', 'suspended: one neutral line, no data, form refused',
+      'OB9', 'suspended: /status only, no data; form held / unavailable',
       `commands=${bad.slice(0, 3).join(',') || 'ok'} taps=${taps.join(',') || 'ok'} free=${replies} id=${idOk} bind=${bindOk} intake=${refusedOk}/${formOk}/${servedOk} other=${otherOk} unchanged=${unchanged}`);
   }
 
@@ -929,9 +1017,12 @@ try {
       && param(w[0], 'id') === `eq.${BIZ_A}` && /^in\.\("?paused"?,"?churned"?\)$/.test(status)
       && same(w[0].body, { status: 'active' }) && store.businesses.find((b) => b.id === BIZ_A).status === 'active';
     const told = (chat) => r.sends.filter((m) => String(m.body.chat_id) === String(chat));
-    const noticeOk = r.sends.length === 2 && r.mail.length === 0
-      && told(OWNER).length === 1 && textOf(told(OWNER)[0]) === 'Your service is active again.' && same(told(OWNER)[0].body.reply_markup, OWNER_KB)
-      && told(STAFF).length === 1 && textOf(told(STAFF)[0]) === 'Your service is active again.' && same(told(STAFF)[0].body.reply_markup, STAFF_KB);
+    // Every phone is told with its own role keyboard back, and the owner
+    // address by email.
+    const noticeOk = r.sends.length === 2 && r.mail.length === 1 && r.mail[0].body.subject === 'Your service is active again'
+      && same([].concat(r.mail[0].body.to), ['alder-demo@fixture.invalid'])
+      && told(OWNER).length === 1 && textOf(told(OWNER)[0]) === REACTIVATED_NOTICE && same(told(OWNER)[0].body.reply_markup, OWNER_KB) && supportLinked(told(OWNER)[0])
+      && told(STAFF).length === 1 && textOf(told(STAFF)[0]) === REACTIVATED_NOTICE && same(told(STAFF)[0].body.reply_markup, STAFF_KB);
     const resultOk = r.edits.length === 1 && r.edits[0].body.text === 'Alder Roofing reactivated'
       && same(kbOf(r.edits[0]), backKb(BIZ_A, 0)) && same(r.answers, ['Reactivated.']) && others() === before;
     // Twice, and for a business that was never suspended: nothing.
@@ -946,10 +1037,10 @@ try {
     const leads = await run(msg(OWNER, '/leads'));
     const backOk = textOf(detail.edits[0]).startsWith('Alder Roofing\nActive · alder-demo\n') && same(kbOf(detail.edits[0]), detailKb(BIZ_A, 0))
       && leads.sends.length === 1 && textOf(leads.sends[0]) !== SUSPENDED_LINE && leads.sb.some((q) => q.table === 'v_client_leads');
-    // A churned business is reactivated the same way.
+    // A terminated business is reactivated the same way (no phone: the email only).
     const churned = await run(cb(OP, `br:2:${BIZ_C}`));
     const churnedOk = churned.edits.length === 1 && churned.edits[0].body.text === 'Juniper Roofing reactivated'
-      && store.businesses.find((b) => b.id === BIZ_C).status === 'active' && churned.sends.length === 0;
+      && store.businesses.find((b) => b.id === BIZ_C).status === 'active' && churned.sends.length === 0 && churned.mail.length === 1;
     line(writeOk && noticeOk && resultOk && againOk && backOk && churnedOk, 'OB10', 'reactivate: one scoped update, phones told with their keyboards',
       `write=${writeOk} notice=${noticeOk} result=${resultOk} again=${againOk} back=${backOk} churned=${churnedOk}`);
   }
@@ -962,7 +1053,13 @@ try {
     await tgCtl({ mode: 'ok', failChat: String(STAFF) });
     const one = await run(cb(OP, `bS:0:${BIZ_A}`));
     await tgCtl({ mode: 'ok', failChat: null });
-    const oneOk = one.sends.length === 2 && one.edits.length === 1 && one.edits[0].body.text === 'Alder Roofing suspended · 1 notice failed'
+    // The operator is alerted in this chat: the business, the notice, the
+    // channel and a fixed error word; no personal data.
+    const alertOf = (x) => x.sends.filter((m) => String(m.body.chat_id) === String(OP));
+    const alertText = textOf(alertOf(one)[0]);
+    const oneOk = one.sends.length === 3 && alertOf(one).length === 1 && one.edits.length === 1 && one.edits[0].body.text === 'Alder Roofing suspended · 1 notice failed'
+      && /Alder Roofing/.test(alertText) && /Telegram/i.test(alertText) && !alertText.includes(String(STAFF)) && !alertText.includes('fixture.invalid')
+      && store.notices.some((n) => n.type === 'suspension' && n.channel === 'telegram' && n.status === 'failed' && /^http_\d+$/.test(n.error_class || ''))
       && store.businesses.find((b) => b.id === BIZ_A).status === 'paused';
     // The email cannot be sent: counted like a phone, and the suspension goes
     // through. No owner address: there is no email to fail, so nothing is counted.
@@ -975,9 +1072,9 @@ try {
     store.businesses.find((b) => b.id === BIZ_B).owner_email = null;
     const noAddress = await run(cb(OP, `bS:0:${BIZ_B}`));
     const mailOk = noMail.edits.length === 1 && noMail.edits[0].body.text === 'Alder Roofing suspended · 1 notice failed'
-      && noMail.mail.length === 1 && noMail.sends.length === 2
+      && noMail.mail.length === 1 && noMail.sends.length === 3 && alertOf(noMail).length === 1 && /email/i.test(textOf(alertOf(noMail)[0]))
       && store.businesses.find((b) => b.id === BIZ_A).status === 'paused'
-      && noAddress.mail.length === 0 && noAddress.sends.length === 1 && noAddress.edits[0].body.text === 'Beta Roofing suspended · 0 notices failed'
+      && noAddress.mail.length === 0 && noAddress.sends.length === 1 && noAddress.edits[0].body.text === 'Beta Roofing suspended'
       && store.businesses.find((b) => b.id === BIZ_B).status === 'paused';
     // The phone list cannot be read: nobody is told and nothing is changed.
     store = freshStore();
@@ -1006,7 +1103,7 @@ try {
     const bad = [];
     for (const data of [`bd:0:${BIZ_GONE}`, `bs:0:${BIZ_GONE}`, `bS:0:${BIZ_GONE}`, `br:0:${BIZ_GONE}`, `bv:0:${BIZ_GONE}`,
       `bq:0:0:${BIZ_GONE}`, `bo:0:0:${packed(BIZ_GONE, leadIds[0])}`, `bt:0:${BIZ_GONE}`, `pb:${BIZ_GONE}`,
-      `bw:0:${BIZ_GONE}`, `bW:0:${BIZ_GONE}`, `bu:0:${BIZ_GONE}`, `be:0:${BIZ_GONE}`, `bE:0:${BIZ_GONE}:${untilToken(Date.now() + 30 * DAY)}`]) {
+      `bw:0:${BIZ_GONE}`, `bW:0:${BIZ_GONE}`, `bu:0:${BIZ_GONE}`, `bx:0:${BIZ_GONE}`, `bX:0:${BIZ_GONE}`, `be:0:${BIZ_GONE}`, `bE:0:${BIZ_GONE}:${untilToken(Date.now() + 30 * DAY)}`]) {
       const x = await run(cb(OP, data));
       if (!same(x.answers, [C.OPERATOR_BUSINESS_GONE]) || x.sends.length || x.mail.length || x.edits.length !== 1
         || x.edits[0].body.text !== listText(PAGE0) || writes(x.sb).length) bad.push(data.slice(0, 2));
@@ -1024,7 +1121,7 @@ try {
     // Not one of the anchored patterns: not a callback of this bot at all.
     const malformed = [];
     for (const data of ['bd:0:not-a-uuid', `bS:0:${BIZ_A}x`, `bS:${BIZ_A}`, 'bl:1000', 'bl:-1', 'bn:1000', 'bn:', `bq:100:0:${BIZ_A}`, 'bo:0:0:short',
-      `bo:0:0:${packed(BIZ_A, leadIds[0])}=`, `bS:0:${BIZ_A}\n`, `bX:0:${BIZ_A}`, `BS:0:${BIZ_A}`, `br:0:${BIZ_A} `, `bi:${BIZ_A}`, `bv:0:0:${BIZ_A}`, `bs:0:${BIZ_A.toUpperCase()}`,
+      `bo:0:0:${packed(BIZ_A, leadIds[0])}=`, `bS:0:${BIZ_A}\n`, `bX:${BIZ_A}`, `bx:0:${BIZ_A}x`, `BX:0:${BIZ_A}`, `bX:0:0:${BIZ_A}`, `bx:0:${BIZ_A.toUpperCase()}`, `BS:0:${BIZ_A}`, `br:0:${BIZ_A} `, `bi:${BIZ_A}`, `bv:0:0:${BIZ_A}`, `bs:0:${BIZ_A.toUpperCase()}`,
       `bP:${BIZ_A}`, `bP:0:${BIZ_A}x`, `bW:0:${BIZ_A}\n`, `bp:1000:${BIZ_A}`, `Bp:0:${BIZ_A}`, `bP:0:0:${BIZ_A}`, `bW:0:${BIZ_A.toUpperCase()}`,
       // Extend: the confirm needs its date, the question takes none.
       `bE:0:${BIZ_A}`, `bE:0:${BIZ_A}:`, `bE:0:${BIZ_A}:ABC123`, `bE:0:${BIZ_A}:123456789`, `bE:0:${BIZ_A}:t0a1b2\n`, `bE:0:${BIZ_A}:-1`,
@@ -1061,6 +1158,8 @@ try {
     const taps = ['bl:0', 'bn:0', `bd:0:${BIZ_A}`, `bs:0:${BIZ_A}`, `bS:0:${BIZ_A}`, `br:0:${BIZ_P}`, `bv:0:${BIZ_A}`, `bi:0:${BIZ_A}`,
       `bq:0:0:${BIZ_A}`, `bo:0:0:${packed(BIZ_A, leadIds[0])}`, `bS:0:${BIZ_B}`, `bi:0:${BIZ_B}`, `bo:0:0:${packed(BIZ_B, leadIds[0])}`,
       `bt:0:${BIZ_A}`, `bT:0:${BIZ_A}`, `pb:${BIZ_A}`, `pc:${BIZ_A}`, `pc:${BIZ_B}`, `p:${row}`, `P:${row}`, `q:${row}`,
+      // Terminate: the question and the confirm, own business and another.
+      `bx:0:${BIZ_A}`, `bX:0:${BIZ_A}`, `bx:0:${BIZ_B}`, `bX:0:${BIZ_B}`,
       // Extend: the question and the confirm, for the chat's own business and another.
       `be:0:${BIZ_A}`, `bE:0:${BIZ_A}:${untilToken(Date.now() + 30 * DAY)}`, `be:0:${BIZ_B}`, `bE:0:${BIZ_B}:${untilToken(Date.now() + 30 * DAY)}`,
       // Replace phone: the question, the confirm and Cancel, from both origins,
@@ -1558,7 +1657,7 @@ try {
       [`bP:0:${BIZ_C}`, listBack(0)],
     ]) {
       const x = seen(await run(cb(OP, data)));
-      const want = data.endsWith(BIZ_C) ? 'Juniper Roofing is suspended. Reactivate it first.' : LINE;
+      const want = data.endsWith(BIZ_C) ? 'Juniper Roofing is terminated. Reactivate it first.' : LINE;
       if (!same(x.answers, ['']) || x.sends.length || x.edits.length !== 1 || textOf(x.edits[0]) !== want || !same(kbOf(x.edits[0]), back) || !noWrite(x)) bad.push(data.slice(0, 2));
     }
     const typed = seen(await run(msg(OP, '/invite zz-paused')));
@@ -1582,7 +1681,9 @@ try {
       'db.lead_totals', 'db.lead_count_recent', 'db.operator_lead_page', 'db.operator_lead_by_id', 'db.business_status_update', 'db.business_paid_until_update',
       'db.rate_limit', 'db.rate_limit_clear', 'db.chat_count', 'db.chat_remove_all', 'db.invite_mint', 'db.invite_expire_others',
       'db.invite_take_back', 'lookup.bot_username',
-      'mail.suspension_notice', 'tg.send_message', 'tg.answer_callback', 'tg.edit_message_text'];
+      // The lifecycle notices: the log, the held-lead count, the one email.
+      'db.business_event_insert', 'db.business_event_last', 'db.held_lead_count',
+      'mail.lifecycle_notice', 'tg.send_message', 'tg.answer_callback', 'tg.edit_message_text'];
     const row = uuid(2);
     // [update, handler name, type, database calls, Telegram calls]
     const flows = [
@@ -1622,15 +1723,21 @@ try {
       [cb(OP, `pb:${BIZ_A}`), 'cb.operator_expired', 'callback', 5, 2],
       [cb(OP, `P:${row}`), 'cb.operator_expired', 'callback', 3, 2],
       [cb(OP, `bs:0:${BIZ_A}`), 'cb.operator_suspend_ask', 'callback', 2, 2],
-      // Binding, business, phones, one update; two notices, the toast, the edit.
-      [cb(OP, `bS:0:${BIZ_A}`), 'cb.operator_suspend', 'callback', 4, 4],
+      // Binding, business, phones, one update, two log inserts ("expected",
+      // then every outcome in one); two notices, the toast, the edit.
+      [cb(OP, `bS:0:${BIZ_A}`), 'cb.operator_suspend', 'callback', 6, 4],
       [cb(OP, `bS:0:${BIZ_A}`), 'cb.operator_suspend', 'callback', 3, 2],
-      [msg(OWNER, '/leads'), 'cmd.suspended', 'message', 1, 1],
-      [msg(OWNER, 'Invite'), 'cmd.suspended', 'message', 1, 1],
-      [msg(OWNER, 'good morning'), 'text.suspended', 'message', 2, 1],
+      // A suspended phone: the binding and the business row (reason, dates).
+      [msg(OWNER, '/leads'), 'cmd.suspended', 'message', 2, 1],
+      [msg(OWNER, 'Invite'), 'cmd.suspended', 'message', 2, 1],
+      [msg(OWNER, 'good morning'), 'text.suspended', 'message', 3, 1],
       [cb(OWNER, `L:0:${leadIds[0]}`), 'cb.suspended', 'callback', 1, 1],
-      // Binding, business, phones, one update; two notices, the toast, the edit.
-      [cb(OP, `br:0:${BIZ_A}`), 'cb.operator_reactivate', 'callback', 4, 4],
+      // /status: those two, when the suspension began, and one count.
+      [msg(OWNER, '/status'), 'cmd.status', 'message', 4, 1],
+      [msg(OWNER, 'Status'), 'cmd.status', 'message', 4, 1],
+      // Binding, business, phones, when it was suspended, the held count, one
+      // update, two log inserts; two notices, the toast, the edit.
+      [cb(OP, `br:0:${BIZ_A}`), 'cb.operator_reactivate', 'callback', 8, 4],
       [cb(OP, `br:0:${BIZ_A}`), 'cb.operator_reactivate', 'callback', 3, 2],
       [cb(OWNER, `bS:0:${BIZ_B}`), 'cb.operator_suspend', 'callback', 1, 1],
       // Replace, from the business screen: two phones, so two notices.
@@ -1641,6 +1748,12 @@ try {
       [cb(OP, `bE:0:${BIZ_B}:${untilToken(Date.now() + 30 * DAY)}`), 'cb.operator_extend', 'callback', 3, 2],
       [cb(OP, `bE:0:${BIZ_B}:${untilToken(Date.now() + 30 * DAY - 5000)}`), 'cb.operator_extend', 'callback', 2, 2],
       [cb(OWNER, `bE:0:${BIZ_A}:${untilToken(Date.now() + 30 * DAY)}`), 'cb.operator_extend', 'callback', 1, 1],
+      // Terminate: the question is one read. The confirm (a business with no
+      // phone): binding, business, phones, one update, two log inserts.
+      [cb(OP, `bx:0:${biz(6)}`), 'cb.operator_terminate_ask', 'callback', 2, 2],
+      [cb(OP, `bX:0:${biz(6)}`), 'cb.operator_terminate', 'callback', 6, 2],
+      [cb(OP, `bX:0:${biz(6)}`), 'cb.operator_terminate', 'callback', 3, 2],
+      [cb(OWNER, `bX:0:${BIZ_B}`), 'cb.operator_terminate', 'callback', 1, 1],
     ];
     const problems = [];
     for (const [update, handlerName, type, db, tg] of flows) {
@@ -1756,32 +1869,40 @@ try {
       && textOf(paid.edits[0]) === `Beta Roofing\nActive · beta\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total · 0 in the last 30 days\nPaid until: ${shortDate(paidAt)}`
       && same(kbOf(paid.edits[0]), detailKb(BIZ_B, 0)) && writes(paid.sb).length === 0;
     // Overdue, not connected (Fir & Sons has no phone): the suspension date
-    // is paid_until + 7 days.
+    // is paid_until + 5 days (GRACE_DAYS).
     const overdueAt = now - 2 * DAY;
     set(biz(9), { paid_until: new Date(overdueAt).toISOString(), billing_warning_stage: 1 });
     const overdue = await open(biz(9), 1);
-    const overdueOk = textOf(overdue.edits[0]) === `Fir & Sons\nActive · fir\n\nTelegram: Not connected\n\nLeads: 0 total · 0 in the last 30 days\nPaid until: ${shortDate(overdueAt)} (overdue, suspends ${shortDate(overdueAt + 7 * DAY)})`
+    const overdueOk = textOf(overdue.edits[0]) === `Fir & Sons\nActive · fir\n\nTelegram: Not connected\n\nLeads: 0 total · 0 in the last 30 days\nOverdue since ${shortDate(overdueAt)} · suspends ${shortDate(overdueAt + 5 * DAY)}`
       && same(kbOf(overdue.edits[0]), detailKb(biz(9), 1));
     // Past the grace period and not suspended yet (the job runs once a day).
     set(biz(4), { paid_until: new Date(now - 8 * DAY).toISOString(), billing_warning_stage: 2 });
     const expired = await open(biz(4));
-    const expiredOk = lastLine(expired) === `Paid until: ${shortDate(now - 8 * DAY)} (overdue, suspends at the next daily check)`;
-    // Suspended by the job: said in so many words, with the Reactivate layout.
-    set(BIZ_P, { paid_until: new Date(now - 9 * DAY).toISOString(), billing_warning_stage: 2, suspended_for_billing: true });
+    const expiredOk = lastLine(expired) === `Overdue since ${shortDate(now - 8 * DAY)} · suspends today`;
+    // Suspended by the job: since when (paid_until + 5 days) and when it
+    // terminates (paid_until + 15 days), with the Reactivate layout.
+    set(BIZ_P, { paid_until: new Date(now - 9 * DAY).toISOString(), billing_warning_stage: 4, suspended_for_billing: true });
     const unpaid = await open(BIZ_P, 2);
-    const unpaidOk = textOf(unpaid.edits[0]) === `Zz Paused\nSuspended · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total · 0 in the last 30 days\nSuspended for non-payment · paid until ${shortDate(now - 9 * DAY)}`
+    const unpaidOk = textOf(unpaid.edits[0]) === `Zz Paused\nSuspended · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total · 0 in the last 30 days\nSuspended since ${shortDate(now - 4 * DAY)} · terminates ${shortDate(now + 6 * DAY)}`
       && same(kbOf(unpaid.edits[0]), suspendedKb(BIZ_P, 2));
-    // Suspended by hand: never "for non-payment", whatever the dates say.
+    // Suspended by hand: never the billing suspension line, whatever the dates say.
     set(BIZ_P, { suspended_for_billing: false });
     const byHand = await open(BIZ_P, 2);
     set(BIZ_P, { paid_until: new Date(now + 3 * DAY).toISOString() });
     const byHandPaid = await open(BIZ_P, 2);
-    const byHandOk = lastLine(byHand) === `Paid until: ${shortDate(now - 9 * DAY)} (ended)` && !textOf(byHand.edits[0]).includes('non-payment')
-      && lastLine(byHandPaid) === `Paid until: ${shortDate(now + 3 * DAY)}`;
+    const byHandOk = lastLine(byHand) === `Overdue since ${shortDate(now - 9 * DAY)}` && !/Suspended since|terminates/.test(textOf(byHand.edits[0]))
+      && lastLine(byHandPaid) === `Paid until: ${shortDate(now + 3 * DAY)} · due in 3 days`;
+    // Terminated by the job: the day it happened (paid_until + 15 days), and
+    // the word shown is "Terminated", never "Churned".
+    set(BIZ_C, { paid_until: new Date(now - 20 * DAY).toISOString(), billing_warning_stage: 6, suspended_for_billing: true });
+    const ended = await open(BIZ_C, 2);
+    const endedOk = textOf(ended.edits[0]) === `Juniper Roofing\nTerminated · juniper\n\nTelegram: Not connected\n\nLeads: 0 total · 0 in the last 30 days\nTerminated ${shortDate(now - 5 * DAY)}`
+      && same(kbOf(ended.edits[0]), terminatedKb(BIZ_C, 2));
+    set(BIZ_C, { paid_until: null, billing_warning_stage: 0, suspended_for_billing: false });
     // A demo business is never enforced, and the line says so.
     set(BIZ_A, { paid_until: new Date(now - 20 * DAY).toISOString() });
     const demo = await open(BIZ_A);
-    const demoOk = lastLine(demo) === `Paid until: ${shortDate(now - 20 * DAY)} (demo: not enforced)`;
+    const demoOk = lastLine(demo) === `Overdue since ${shortDate(now - 20 * DAY)} · not enforced`;
     // Not billed.
     const none = await open(biz(5));
     const noneOk = lastLine(none) === 'Billing: not tracked' && same(kbOf(none.edits[0]), detailKb(biz(5), 0));
@@ -1802,11 +1923,11 @@ try {
         && same(kbOf(x.edits[0]), backKb(BIZ_B, 0)) && writes(x.sb).length === 0 && x.sends.length === 0)
       && bareSuspend.edits.length === 1 && textOf(bareSuspend.edits[0]).startsWith('Suspend Beta Roofing?');
     // One billing line per screen, always the last.
-    const all = [paid, overdue, expired, unpaid, byHand, demo, none, bare];
-    const once = all.every((x) => textOf(x.edits[0]).split('\n').filter((l) => /^(Paid until|Billing|Suspended for non-payment)/.test(l)).length === 1);
-    line(paidOk && overdueOk && expiredOk && unpaidOk && byHandOk && demoOk && noneOk && bareOk && once,
+    const all = [paid, overdue, expired, unpaid, byHand, ended, demo, none, bare];
+    const once = all.every((x) => textOf(x.edits[0]).split('\n').filter((l) => /^(Paid until|Billing|Overdue since|Suspended since|Terminated [A-Z][a-z]{2} \d)/.test(l)).length === 1);
+    line(paidOk && overdueOk && expiredOk && unpaidOk && byHandOk && endedOk && demoOk && noneOk && bareOk && once,
       'OB24', 'billing line: every state, exact; no columns -> unavailable',
-      `paid=${paidOk} overdue=${overdueOk} expired=${expiredOk} unpaid=${unpaidOk} byHand=${byHandOk} demo=${demoOk} none=${noneOk} bare=${bareOk} once=${once}`);
+      `paid=${paidOk} overdue=${overdueOk} expired=${expiredOk} unpaid=${unpaidOk} byHand=${byHandOk} ended=${endedOk} demo=${demoOk} none=${noneOk} bare=${bareOk} once=${once}`);
   }
 
   /* OB25: Extend 30 days asks first, with the computed date. */
@@ -1946,9 +2067,13 @@ try {
       && /^in\.\("?paused"?,"?churned"?\)$/.test(status) && same(w[1].body, { status: 'active', suspended_for_billing: false })
       && bizRow(BIZ_P).status === 'active' && bizRow(BIZ_P).suspended_for_billing === false
       && bizRow(BIZ_P).billing_warning_stage === 0 && Date.parse(bizRow(BIZ_P).paid_until) === a.target;
-    // The phone is told exactly what Reactivate tells it, keyboard included.
+    // The phone is told through the Reactivate path, keyboard included, and
+    // the notice thanks for the payment and gives the new date; the owner
+    // address gets the same by email.
     const noticeOk = r.sends.length === 1 && String(r.sends[0].body.chat_id) === String(PHONE_P)
-      && textOf(r.sends[0]) === 'Your service is active again.' && same(r.sends[0].body.reply_markup, OWNER_KB) && r.mail.length === 0;
+      && textOf(r.sends[0]) === `Your service is active again.\nThank you for your payment.\n\nPaid until: ${shortDate(a.target)}.\n\nSend /status at any time to see\nthe current state.\n\n${SUPPORT}`
+      && supportLinked(r.sends[0]) && same(r.sends[0].body.reply_markup, OWNER_KB)
+      && r.mail.length === 1 && r.mail[0].body.subject === 'Your service is active again' && same([].concat(r.mail[0].body.to), ['zz-paused@fixture.invalid']);
     const resultOk = r.edits.length === 1 && textOf(r.edits[0]) === `Zz Paused paid until ${shortDate(a.target)} · reactivated`
       && same(kbOf(r.edits[0]), backKb(BIZ_P, 2)) && same(r.answers, ['Extended.']);
     // Again: no second notice, no write.
@@ -1969,17 +2094,23 @@ try {
     const hw = writes(hand.sb);
     const handOk = hw.length === 2 && same(hw[1].body, { status: 'active' }) && bizRow(BIZ_A).status === 'active'
       && textOf(hand.edits[0]) === `Alder Roofing paid until ${shortDate(b.target)} · reactivated · 1 notice failed`
-      && hand.sends.length === 1 && String(hand.sends[0].body.chat_id) === String(OWNER) && same(hand.sends[0].body.reply_markup, OWNER_KB);
+      // The main phone's notice, and the operator's alert about the other one.
+      && hand.sends.length === 2 && hand.sends.filter((m) => String(m.body.chat_id) === String(OWNER) && same(m.body.reply_markup, OWNER_KB)).length === 1
+      && hand.sends.filter((m) => String(m.body.chat_id) === String(OP) && /Alder Roofing/.test(textOf(m))).length === 1;
 
-    // The phones cannot be read: the date is stored, the status is left for
-    // the Reactivate button, and the result says so.
+    // The phones cannot be read: a paid business is never left switched off.
+    // The date is stored, the service is back, the owner address is mailed,
+    // and the unread phone list counts as one failed notice (the operator is
+    // alerted).
     set(BIZ_C, { status: 'paused' });
     const c = await confirmFor(BIZ_C, 2);
     sbHook = ({ table, params }) => (table === 'business_chats' && param({ params }, 'business_id') === `eq.${BIZ_C}` ? fail500() : null);
     const blind = await run(cb(OP, c.data));
     sbHook = null;
-    const blindOk = Date.parse(bizRow(BIZ_C).paid_until) === c.target && bizRow(BIZ_C).status === 'paused'
-      && textOf(blind.edits[0]) === `Juniper Roofing paid until ${shortDate(c.target)} · still suspended, press Reactivate`;
+    const blindOk = Date.parse(bizRow(BIZ_C).paid_until) === c.target && bizRow(BIZ_C).status === 'active'
+      && textOf(blind.edits[0]) === `Juniper Roofing paid until ${shortDate(c.target)} · reactivated · 1 notice failed`
+      && blind.mail.length === 1 && blind.sends.filter((m) => String(m.body.chat_id) === String(OP)).length === 1
+      && store.notices.some((n) => n.business_id === BIZ_C && n.status === 'failed' && n.error_class === 'phones_unreadable');
 
     // Reactivate alone is not a payment: paid_until and the stage stay.
     const stale = new Date(Date.now() - 30 * DAY).toISOString();
@@ -2032,6 +2163,94 @@ try {
       `refused=${expired.join(',') || 'all'} exact=${exactOk} unchanged=${snapshot() === before}`);
   }
 
+  /* OB29: Terminate by hand. Asks first; one scoped update; the phones and
+     the owner address are told; nothing is deleted; the bot is /status only;
+     Extend or Reactivate puts the business back. */
+  store = freshStore();
+  leadIds = seedSeven();
+  seedCode(BIZ_A, 'KEEPKEEPKEEP');
+  {
+    const TERMINATE_ASK = 'Terminate Alder Roofing? The bot answers only /status and the website form shows "not available". Nothing is deleted: Extend or Reactivate puts it back.';
+    const before = snapshot();
+    const ask = seen(await run(cb(OP, `bx:0:${BIZ_A}`)));
+    const askKb = kbOf(ask.edits[0]);
+    const askOk = ask.sends.length === 0 && ask.edits.length === 1 && textOf(ask.edits[0]) === TERMINATE_ASK && same(ask.answers, [''])
+      && same(askKb, [[
+        { text: 'Confirm terminate', callback_data: `bX:0:${BIZ_A}`, style: 'danger' },
+        { text: 'Cancel', callback_data: `bd:0:${BIZ_A}` },
+      ]]) && writes(ask.sb).length === 0 && ask.mail.length === 0 && ask.sb.length === 2;
+    const cancel = await run(cb(OP, askKb[0][1].callback_data));
+    const cancelOk = cancel.edits.length === 1 && textOf(cancel.edits[0]) === DETAIL_A && same(kbOf(cancel.edits[0]), detailKb(BIZ_A, 0))
+      && writes(cancel.sb).length === 0 && snapshot() === before;
+    // The retired Terminate buttons (bt / bT deleted a business) end nothing.
+    const old = [await run(cb(OP, `bt:0:${BIZ_A}`)), await run(cb(OP, `bT:0:${BIZ_A}`))];
+    const oldOk = old.every((x) => same(x.answers, [EXPIRED]) && writes(x.sb).length === 0 && x.sends.length === 0) && snapshot() === before;
+
+    // Confirm.
+    const others = () => JSON.stringify({ b: store.businesses.filter((b) => b.id !== BIZ_A), c: store.chats, k: store.codes, l: store.leads, e: store.events });
+    const untouchedBefore = others();
+    store.notices = [];
+    const r = seen(await run(cb(OP, `bX:0:${BIZ_A}`)));
+    const w = writes(r.sb);
+    const writeOk = w.length === 1 && w[0].table === 'businesses' && w[0].method === 'PATCH' && param(w[0], 'id') === `eq.${BIZ_A}`
+      && /^in\.\("?demo"?,"?active"?,"?paused"?\)$/.test(String(param(w[0], 'status')))
+      // By hand: never marked "for non-payment".
+      && same(w[0].body, { status: 'churned' }) && bizRow(BIZ_A).status === 'churned' && bizRow(BIZ_A).suspended_for_billing === false
+      && !r.sb.some((q) => q.method === 'DELETE');
+    const told = r.sends.filter((m) => textOf(m) === TERMINATED_NOTICE);
+    const noticeOk = r.sends.length === 2 && told.length === 2
+      && same(told.map((m) => String(m.body.chat_id)).sort(), [String(OWNER), String(STAFF)].sort())
+      && told.every((m) => same(m.body.reply_markup, STATUS_KB) && supportLinked(m))
+      && r.mail.length === 1 && r.mail[0].body.subject === 'Your service has been terminated'
+      && same([].concat(r.mail[0].body.to), ['alder-demo@fixture.invalid']) && !/t\.me\//.test(String(r.mail[0].body.text))
+      && same(store.notices.map((n) => `${n.type}/${n.channel}/${n.status}`), ['termination/none/expected', 'termination/telegram/sent', 'termination/telegram/sent', 'termination/email/sent']);
+    // Nothing deleted: phones, invite, leads, every other business.
+    const keptOk = others() === untouchedBefore && store.chats.filter((c) => c.business_id === BIZ_A).length === 2
+      && liveCodes(BIZ_A).length === 1 && store.leads.filter((l) => l.business_id === BIZ_A).length === 7;
+    const resultOk = r.edits.length === 1 && textOf(r.edits[0]) === 'Alder Roofing terminated' && same(kbOf(r.edits[0]), backKb(BIZ_A, 0))
+      && same(r.answers, ['Terminated.']);
+    // A second tap, and the question again: nothing sent or written.
+    const again = await run(cb(OP, `bX:0:${BIZ_A}`));
+    const askAgain = await run(cb(OP, `bx:0:${BIZ_A}`));
+    const againOk = again.sends.length === 0 && again.mail.length === 0 && writes(again.sb).length === 0
+      && textOf(again.edits[0]) === 'Alder Roofing is already terminated.' && same(again.answers, ['Already terminated.'])
+      && same(askAgain.answers, ['Already terminated.']) && writes(askAgain.sb).length === 0
+      && textOf(askAgain.edits[0]).startsWith('Alder Roofing\nTerminated · alder-demo\n') && same(kbOf(askAgain.edits[0]), terminatedKb(BIZ_A, 0));
+
+    // Its phones: /status works, everything else gets the short answer or a
+    // toast, no data; no new phone connects and the invite stays unused.
+    const status = await run(msg(OWNER, '/status'));
+    const leads = await run(msg(OWNER, '/leads'));
+    const tap = await run(cb(STAFF, `L:0:${leadIds[0]}`));
+    const join = await run(msg(CHAT_X, 'KEEPKEEPKEEP'));
+    const phoneOk = status.sends.length === 1 && textOf(status.sends[0]) === STATUS_TERMINATED && same(status.sends[0].body.reply_markup, STATUS_KB)
+      && !status.sb.some((q) => q.table === 'v_client_leads')
+      && leads.sends.length === 1 && textOf(leads.sends[0]) === 'This service was terminated\nby support.\n\nSend /status to see the current\nstate.\n\n' + SUPPORT
+      && !leads.sb.some((q) => q.table === 'v_client_leads')
+      && same(tap.answers, [TERMINATED_TOAST]) && tap.sends.length === 0
+      && join.sends.length === 1 && textOf(join.sends[0]) === 'This service was terminated.\nA new phone cannot be connected\nright now.\n\n' + SUPPORT
+      && !store.chats.some((c) => String(c.tg_chat_id) === String(CHAT_X)) && liveCodes(BIZ_A).length === 1;
+
+    // From a SUSPENDED business too (the statement allows 'paused').
+    const fromPaused = await run(cb(OP, `bX:2:${BIZ_P}`));
+    const pausedOk = bizRow(BIZ_P).status === 'churned' && textOf(fromPaused.edits[0]) === 'Zz Paused terminated'
+      && fromPaused.sends.length === 1 && textOf(fromPaused.sends[0]) === TERMINATED_NOTICE;
+
+    // Back in service: Reactivate (one tap), or Extend (a recorded payment).
+    const react = await run(cb(OP, `br:0:${BIZ_A}`));
+    const reactOk = bizRow(BIZ_A).status === 'active' && textOf(react.edits[0]) === 'Alder Roofing reactivated'
+      && react.sends.length === 2 && react.sends.every((m) => textOf(m) === REACTIVATED_NOTICE)
+      && store.chats.filter((c) => c.business_id === BIZ_A).length === 2 && store.leads.filter((l) => l.business_id === BIZ_A).length === 7;
+    const extendAsk = await run(cb(OP, `be:2:${BIZ_P}`));
+    const extendData = String(kbOf(extendAsk.edits[0])[0][0].callback_data);
+    const extended = await run(cb(OP, extendData));
+    const extendOk = textOf(extendAsk.edits[0]).endsWith('\n\nIt is terminated. Confirm also reactivates it.')
+      && bizRow(BIZ_P).status === 'active' && / · reactivated$/.test(textOf(extended.edits[0]));
+    line(askOk && cancelOk && oldOk && writeOk && noticeOk && keptOk && resultOk && againOk && phoneOk && pausedOk && reactOk && extendOk,
+      'OB29', 'Terminate: asks, one scoped update, told, nothing deleted, restorable',
+      `ask=${askOk} cancel=${cancelOk} old=${oldOk} write=${writeOk} notice=${noticeOk} kept=${keptOk} result=${resultOk} again=${againOk} phone=${phoneOk} paused=${pausedOk} react=${reactOk} extend=${extendOk}`);
+  }
+
   /* OB15: over the whole suite, every message the operator chat was sent. */
   {
     await tgReset();
@@ -2040,17 +2259,17 @@ try {
     const inline = toOperator.flatMap((x) => kbOf(x).flat());
     const EMOJI = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{FE0F}\u{200D}\u{2190}-\u{21FF}]/u;
     const withEmoji = allTg.flatMap((x) => kbOf(x).flat()).filter((b) => EMOJI.test(String(b.text)));
-    const PATTERNS = [/^(bl|bn):\d{1,3}$/, /^(bd|bs|bS|br|be|bv|bi|bp|bP|bc|bw|bW|bu):\d{1,3}:[0-9a-f-]{36}$/, /^bE:\d{1,3}:[0-9a-f-]{36}:[0-9a-z]{1,8}$/, /^bq:\d{1,2}:\d{1,3}:[0-9a-f-]{36}$/,
+    const PATTERNS = [/^(bl|bn):\d{1,3}$/, /^(bd|bs|bS|br|be|bv|bi|bp|bP|bc|bw|bW|bu|bx|bX):\d{1,3}:[0-9a-f-]{36}$/, /^bE:\d{1,3}:[0-9a-f-]{36}:[0-9a-z]{1,8}$/, /^bq:\d{1,2}:\d{1,3}:[0-9a-f-]{36}$/,
       /^bo:\d{1,2}:\d{1,3}:[A-Za-z0-9_-]{44}$/];
     const data = inline.map((b) => String(b.callback_data));
     const unshaped = data.filter((d) => Buffer.byteLength(d, 'utf8') > 64 || !PATTERNS.some((p) => p.test(d)));
-    const STYLES = { Suspend: 'danger', 'Confirm suspend': 'danger', 'Replace phone': 'danger', 'Confirm replace': 'danger', Invite: 'primary', Reactivate: 'primary' };
+    const STYLES = { Suspend: 'danger', 'Confirm suspend': 'danger', Terminate: 'danger', 'Confirm terminate': 'danger', 'Replace phone': 'danger', 'Confirm replace': 'danger', Invite: 'primary', Reactivate: 'primary' };
     const styled = inline.filter((b) => (b.style || null) !== (STYLES[b.text] || null));
     const labels = [...new Set(inline.map((b) => b.text))].filter((t) => !/^\d$/.test(t)).sort();
-    const labelsOk = same(labels, ['Back', 'Cancel', 'Confirm', 'Confirm replace', 'Confirm suspend', 'Extend 30 days', 'Invite', 'Leads', 'Newer', 'Older', 'Reactivate', 'Replace phone', 'Suspend']);
+    const labelsOk = same(labels, ['Back', 'Cancel', 'Confirm', 'Confirm replace', 'Confirm suspend', 'Confirm terminate', 'Extend 30 days', 'Invite', 'Leads', 'Newer', 'Older', 'Reactivate', 'Replace phone', 'Suspend', 'Terminate']);
     // Nothing a customer typed, and no retired word, in anything the operator
     // chat was shown by the flows above.
-    const words = operatorTexts.filter((t) => /Requests?\b|Terminate|\/phones|\/code\b/.test(t)
+    const words = operatorTexts.filter((t) => /Requests?\b|Churned|churned|\/phones|\/code\b/.test(t)
       || [PII.name, PII.phone, PII.email, PII.notes, PII.address].some((x) => t.includes(x)));
     line(allTg.length > 400 && withParse.length === 0 && inline.length > 150 && withEmoji.length === 0
       && unshaped.length === 0 && styled.length === 0 && labelsOk && operatorTexts.length > 30 && words.length === 0,

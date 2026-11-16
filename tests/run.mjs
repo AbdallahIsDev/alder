@@ -62,6 +62,8 @@ const DEFAULT_SUITES = [
   { file: 'tests/operator-browser.test.mjs', needsHttp: false },
   { file: 'tests/billing.test.mjs', needsHttp: false },
   { file: 'tests/billing-job.test.mjs', needsHttp: false },
+  { file: 'tests/lifecycle.test.mjs', needsHttp: false },
+  { file: 'tests/modal.test.mjs', needsHttp: false },
   { file: 'tests/runner-flags.test.mjs', needsHttp: false },
   { file: 'tests/disk-preflight.test.mjs', needsHttp: false },
   { file: 'tests/skip-summary.test.mjs', needsHttp: false },

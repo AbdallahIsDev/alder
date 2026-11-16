@@ -194,15 +194,16 @@ const samples = sampleTelegramTexts();
   const longActions = navAndActions.filter((t) => t.length > 20);
   const badNumbers = numbers.filter((b) => !/^[1-5]$/.test(b.text));
   // The operator copy offers no retired command (/phones, /code, the owner's
-  // /recipients and /leads), no per-phone Remove, no Terminate, and never the
-  // word "Requests" for a count of leads.
+  // /recipients and /leads), no per-phone Remove, and never the word
+  // "Requests" for a count of leads. Terminate is back (lifecycle round): it
+  // deletes nothing, and its texts are pinned in T10.
   const opBiz = { id: bizId, name: 'A', slug: 'a', status: 'demo' };
   const operatorCopy = [C.OPERATOR_WELCOME, C.OPERATOR_HELP, C.OPERATOR_USAGE_INVITE, C.OPERATOR_UNKNOWN_SLUG, C.OPERATOR_CAPPED,
     C.OPERATOR_NO_BUSINESSES, C.OPERATOR_NO_INVITABLE, C.OPERATOR_BUSINESS_GONE, C.OPERATOR_SCREEN_EXPIRED, C.OPERATOR_PAGE_GONE,
     C.OPERATOR_NO_LEADS, C.OPERATOR_NO_OLDER_LEADS, C.OPERATOR_LEAD_GONE,
     C.operatorBusinessListText(fiveBiz), C.operatorInviteListText(fiveBiz), C.operatorNoPhoneText({ business: { name: 'A', slug: 'a' } }),
     C.operatorBusinessDetailText({ business: opBiz, rows: [{ label: null }], stats: { total: 1, recent: 1, lastAt: new Date().toISOString() } }),
-    C.operatorSuspendConfirmText(opBiz), C.operatorSuspendedText({ business: opBiz, failed: 1 }), C.operatorReactivatedText(opBiz),
+    C.operatorSuspendConfirmText(opBiz), C.operatorSuspendedText({ business: opBiz, notice: { failures: [{}] } }), C.operatorReactivatedText(opBiz, { held: 2 }),
     C.operatorAlreadySuspendedText(opBiz), C.operatorAlreadyActiveText(opBiz), C.operatorInviteSuspendedText(opBiz),
     C.operatorAlreadyConnectedText({ business: opBiz, phones: 2 }), C.operatorReplaceConfirmText({ business: opBiz, phones: 2 }),
     C.operatorInviteFailedText({ business: opBiz }), C.operatorInviteFailedText({ business: opBiz, capped: true, replace: true }),
@@ -215,12 +216,13 @@ const samples = sampleTelegramTexts();
   const copy = [operatorCopy, C.BOT_INVITE_CANCEL_BUTTON, C.operatorUnreachableText({ business: { name: 'A', slug: 'a' }, chatId: 1234 }),
     C.botRecipientsText([{ id: 'a', label: null }]), C.botInvitePendingText({ hours: [5] })].join('\n');
   const banned = /with a Remove button each|Tap Remove to disconnect|The main phone is the one connected first|Cancel them to make a new one|\/phones|Remove Phone|Pick a business with/i;
-  const bannedOperator = /\/code\b|\/recipients|\/leads|\/remove_lead|Terminate|terminated|Requests?\b/;
+  const bannedOperator = /\/code\b|\/recipients|\/leads|\/remove_lead|Churned|churned|Requests?\b/;
   const goneExports = ['OPERATOR_USAGE_PHONES', 'OPERATOR_NO_PHONES', 'OPERATOR_PHONE_REMOVED', 'OPERATOR_PHONE_GONE',
     'operatorPhonesText', 'operatorPhonesKeyboard', 'operatorConfirmRemoveText', 'operatorConfirmRemoveKeyboard', 'operatorBusinessesText',
     'OPERATOR_LEADS_HINT', 'OPERATOR_USAGE_CODE', 'OPERATOR_PICK_TEXT', 'operatorPickerKeyboard', 'OPERATOR_REMOVE_LEAD',
-    'OPERATOR_TERMINATE_STILL', 'OPERATOR_TERMINATED', 'OPERATOR_NOT_CONNECTED', 'operatorTerminateConfirmText',
-    'operatorTerminateConfirmKeyboard', 'operatorTerminatedText', 'botAccessEndedText',
+    'OPERATOR_TERMINATE_STILL', 'OPERATOR_NOT_CONNECTED', 'botAccessEndedText',
+    // Everything a business is told about suspension lives in lib/lifecycle-text.js now.
+    'BOT_SUSPENDED_NOTICE', 'BOT_SUSPENDED', 'BOT_REACTIVATED', 'SUSPENDED_EMAIL_SUBJECT',
     // The in-place "Invite link · works once" output and its toast.
     'operatorInviteResultText', 'operatorInviteCancelledToast']
     .filter((k) => k in C);
@@ -248,8 +250,10 @@ const samples = sampleTelegramTexts();
   const connectedBiz = kbRows(C.operatorAlreadyConnectedKeyboard(bizId, 3, 'business'));
   const replaceList = kbRows(C.operatorReplaceConfirmKeyboard(bizId, 3, 'list'));
   const replaceBiz = kbRows(C.operatorReplaceConfirmKeyboard(bizId, 3, 'business'));
-  const danger = [kb[0], opKb[0], opDetail[0][0], connectedList[0][0], connectedBiz[0][0], replaceList[0][0], replaceBiz[0][0]];
-  const cancel = [kb[1], opKb[1], opDetail[0][1], opDetail[1][0], opDetail[2][0], opSuspended[0][1], opSuspended[1][0], opSuspended[2][0],
+  const danger = [kb[0], opKb[0], opDetail[0][0], opDetail[2][0], opSuspended[1][1], C.operatorTerminateConfirmKeyboard(bizId, 3).reply_markup.inline_keyboard[0][0],
+    connectedList[0][0], connectedBiz[0][0], replaceList[0][0], replaceBiz[0][0]];
+  const cancel = [kb[1], opKb[1], opDetail[0][1], opDetail[1][0], opDetail[3][0], opSuspended[0][1], opSuspended[1][0], opSuspended[2][0],
+    C.operatorTerminateConfirmKeyboard(bizId, 3).reply_markup.inline_keyboard[0][1],
     connectedList[0][1], connectedBiz[0][1], replaceList[0][1], replaceBiz[0][1]];
   const JSONsame = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   // The exact layouts. Served: Suspend (danger) left and Leads right, then
@@ -263,12 +267,22 @@ const samples = sampleTelegramTexts();
   const opOk = JSONsame(opDetail, [
     [{ text: 'Suspend', callback_data: `bs:3:${bizId}`, style: 'danger' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
     [{ text: 'Extend 30 days', callback_data: `be:3:${bizId}` }, { text: 'Invite', callback_data: `bv:3:${bizId}`, style: 'primary' }],
+    [{ text: 'Terminate', callback_data: `bx:3:${bizId}`, style: 'danger' }],
     [{ text: 'Back', callback_data: 'bl:3' }],
   ]) && JSONsame(opSuspended, [
     [{ text: 'Reactivate', callback_data: `br:3:${bizId}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
+    [{ text: 'Extend 30 days', callback_data: `be:3:${bizId}` }, { text: 'Terminate', callback_data: `bx:3:${bizId}`, style: 'danger' }],
+    [{ text: 'Back', callback_data: 'bl:3' }],
+  ]) && JSONsame(kbRows(C.operatorBusinessDetailKeyboard(bizId, 3, { suspended: true, terminated: true })), [
+    // Terminated: Reactivate and Leads, Extend alone, Back. No Terminate, no Suspend, no Invite.
+    [{ text: 'Reactivate', callback_data: `br:3:${bizId}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
     [{ text: 'Extend 30 days', callback_data: `be:3:${bizId}` }],
     [{ text: 'Back', callback_data: 'bl:3' }],
-  ]) && JSONsame(opKb, [
+  ]) && JSONsame(kbRows(C.operatorTerminateConfirmKeyboard(bizId, 3)), [[
+    // bx / bX: never the retired bt / bT.
+    { text: 'Confirm terminate', callback_data: `bX:3:${bizId}`, style: 'danger' },
+    { text: 'Cancel', callback_data: `bd:3:${bizId}` },
+  ]]) && JSONsame(opKb, [
     { text: 'Confirm suspend', callback_data: `bS:3:${bizId}`, style: 'danger' },
     { text: 'Cancel', callback_data: `bd:3:${bizId}` },
   ])
@@ -291,14 +305,23 @@ const samples = sampleTelegramTexts();
     && C.operatorInviteFailedText({ business: biz, replace: true }) === 'Could not create an invite for Alder Roofing. Try again. No phone was removed.'
     && C.operatorCodeText({ slug: 'alder-demo', code: 'K7M2QPX9RT4W', removed: 2, failed: 1, cancelled: 2 }).text
       === 'Code for alder-demo: K7M2QPX9RT4W\n\nExpires in 24 hours. 2 phones removed (1 notice not delivered). 2 older invites were cancelled. The next message is for the client — forward it as it is.'
-    && C.operatorSuspendConfirmText(biz) === 'Suspend Alder Roofing? Telegram alerts, emails and the website form stop for this business. Data is kept and you can reactivate at any time.'
-    && C.BOT_SUSPENDED_NOTICE === 'Your service has been suspended. Contact support if this is a mistake.'
-    && C.BOT_SUSPENDED === 'This service is suspended. Contact support.'
-    && C.BOT_REACTIVATED === 'Your service is active again.'
+    && C.operatorSuspendConfirmText(biz) === 'Suspend Alder Roofing? Lead alerts and emails stop. The website form keeps saving new requests; they stay hidden until you reactivate. Nothing is deleted.'
+    && C.operatorTerminateConfirmText(biz) === 'Terminate Alder Roofing? The bot answers only /status and the website form shows "not available". Nothing is deleted: Extend or Reactivate puts it back.'
+    && C.operatorTerminatedText({ business: biz }) === 'Alder Roofing terminated'
+    && C.operatorTerminatedText({ business: biz, notice: { failures: [{}, {}] } }) === 'Alder Roofing terminated · 2 notices failed'
+    && C.operatorAlreadyTerminatedText(biz) === 'Alder Roofing is already terminated.'
+    && C.operatorInviteSuspendedText({ ...biz, status: 'churned' }) === 'Alder Roofing is terminated. Reactivate it first.'
+    && C.OPERATOR_TERMINATED === 'Terminated.' && C.OPERATOR_ALREADY_TERMINATED === 'Already terminated.'
+    // "churned" is the stored value; the word shown is "Terminated".
+    && C.businessStatusWord('churned') === 'Terminated' && C.businessStatusWord('paused') === 'Suspended'
     && C.OPERATOR_SCREEN_EXPIRED === 'That screen expired. Here is the current screen.'
-    && C.operatorSuspendedText({ business: biz, failed: 0 }) === 'Alder Roofing suspended · 0 notices failed'
-    && C.operatorSuspendedText({ business: biz, failed: 1 }) === 'Alder Roofing suspended · 1 notice failed'
+    && C.operatorSuspendedText({ business: biz, notice: { failures: [] } }) === 'Alder Roofing suspended'
+    && C.operatorSuspendedText({ business: biz, notice: { failures: [{}] } }) === 'Alder Roofing suspended · 1 notice failed'
     && C.operatorReactivatedText(biz) === 'Alder Roofing reactivated'
+    && C.operatorReactivatedText(biz, { held: 1 }) === 'Alder Roofing reactivated · 1 held lead released'
+    && C.operatorReactivatedText(biz, { held: 3, notice: { failures: [{}] } }) === 'Alder Roofing reactivated · 3 held leads released · 1 notice failed'
+    && C.operatorBusinessDetailText({ business: { ...biz, status: 'churned' }, rows: [], stats: { total: 0, recent: 0, lastAt: null }, nowMs: now }).split('\n')[1] === 'Terminated · alder-demo'
+    && C.operatorBusinessDetailText({ business: { ...biz, status: 'paused' }, rows: [], stats: { total: 4, recent: 4, lastAt: null, held: 2 }, nowMs: now }).includes('\nHeld leads: 2\n')
     // The business screen, to the character, in its three states.
     && C.operatorBusinessDetailText({ business: biz, rows: phones, stats, nowMs: now })
       === 'Alder Roofing\nDemo · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total · 3 in the last 30 days\nLast lead: 2d ago\nBilling: not tracked'
@@ -401,7 +424,9 @@ const samples = sampleTelegramTexts();
   // operator chat turns a PRESS on them into /invite and /businesses
   // (tests/operator-browser OB1a, OB13), while the typed commands are gone.
   const legacy = Object.keys(C.LEGACY_KEYBOARD_LABELS);
-  const mapOk = same(Object.keys(C.KEYBOARD_LABELS).sort(), [...new Set([...labels, ...legacy])].sort())
+  // "Status" is the one button of a suspended or terminated business's phone.
+  const mapOk = same(Object.keys(C.KEYBOARD_LABELS).sort(), [...new Set([...labels, ...legacy, 'Status'])].sort())
+    && C.KEYBOARD_LABELS.Status === '/status'
     && same(legacy.sort(), ['Code', 'Help', 'Operator', 'Phones', 'Recipients'])
     && same(mapped, ['/invite', '/leads', '/leads', '/invite', '/businesses'])
     && C.KEYBOARD_LABELS.Code === '/code'
@@ -699,6 +724,7 @@ const samples = sampleTelegramTexts();
     { command: 'invite', description: 'Connect another phone' },
     { command: 'recipients', description: 'Who receives alerts' },
     { command: 'remove_lead', description: 'Remove a request' },
+    { command: 'status', description: 'Your service status' },
     { command: 'help', description: 'How this works' },
   ];
   const WANT_OPERATOR = [
@@ -707,7 +733,7 @@ const samples = sampleTelegramTexts();
     { command: 'help', description: 'Operator commands' },
     { command: 'id', description: "This chat's ID" },
   ];
-  const DEFAULT_LINE = '/leads, /invite, /recipients, /remove_lead, /help';
+  const DEFAULT_LINE = '/leads, /invite, /recipients, /remove_lead, /status, /help';
   const OPERATOR_LINE = '/businesses, /invite, /help, /id';
   const listsOk = same(COMMANDS, WANT_DEFAULT) && same(OPERATOR_COMMANDS, WANT_OPERATOR)
     && new Set(OPERATOR_COMMANDS.map((c) => c.command)).size === 4

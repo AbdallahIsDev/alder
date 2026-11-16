@@ -1,34 +1,39 @@
 #!/usr/bin/env node
-// tests/billing.test.mjs — Gate BL (the billing rules).
+// tests/billing.test.mjs — Gate BL (the lifecycle rules).
 // HARNESS: in-process, pure functions only. No network, no database, no clock:
 // every case passes its own `now`.
 //
-// What it proves (lib/billing.js):
-//   BL1  billingState: null / missing / unparseable paid_until is "not
-//        enforced"; paid strictly before paid_until; grace from paid_until
-//        itself up to (not including) paid_until + 7 days; expired from that
-//        exact moment on; graceEnd is paid_until + 7 days; the status of the
-//        business plays no part; every input type of a date is accepted
-//   BL2  nextPaidUntil = max(current, now) + days: a paid business keeps its
+// What it proves (lib/billing.js + lib/lifecycle-config.js):
+//   BL1  the constants: 3 / 5 / 10 / 60 / 30 days, one support address, and
+//        that no other source file states the address as a literal
+//   BL2  billingState: null / missing / unparseable paid_until is "not
+//        enforced"; every boundary (D-3d, D, D+5d, D+15d) is inclusive on the
+//        left and exclusive on the right; the end date and the days left of
+//        each state; the status plays no part; every date input type
+//   BL3  nextPaidUntil = max(current, now) + days: a paid business keeps its
 //        days, an overdue or unbilled one starts from now; whole seconds;
 //        month ends, a leap day and a year end land on the right date
-//   BL3  billingDate: "Dec 14" in UTC whatever the local zone; no padding
-//   BL4  the notice texts, to the character
-//   BL5  billingDecision: the whole decision table, including every boundary
-//        of the final-warning window, and that only status 'active' is ever
-//        acted on (demo, paused, churned, unknown: none)
-//   BL6  billingLine: every line the operator can see
-//   BL7  billingSummaryText: null when nothing happened; names only; the
-//        order and wording of each part; dueSoon's three-day window
-//   BL8  the Extend button's date: encode/decode round trip, what decode
-//        refuses, and extendTargetAllowed (future only, never more than one
-//        period from max(current, now))
+//   BL4  billingDate: "Dec 14" in UTC whatever the local zone; daysText
+//   BL5  billingDecision: the whole table, every warning window boundary
+//        (with the one-hour cron allowance), who is enforced (never a demo,
+//        never a business suspended or terminated by hand)
+//   BL6  missed days: only the current state's notice, and a transition never
+//        waits for a notice; a full walk through a period sends each of the
+//        six notices exactly once
+//   BL7  billingLine: every line the operator can see
+//   BL8  billingSummaryText: null when the run did nothing; names only
+//   BL9  the Extend button's date: encode/decode and extendTargetAllowed
 //
-// Mutation: change GRACE_DAYS, or `<` to `<=` in billingState, and BL1 fails;
-// drop the Math.max in nextPaidUntil and BL2 fails.
+// Mutation: change GRACE_DAYS, or `<` to `<=` in billingState, and BL2 fails;
+// drop the Math.max in nextPaidUntil and BL3 fails.
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as B from '../lib/billing.js';
+import * as CFG from '../lib/lifecycle-config.js';
 
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let failed = 0, total = 0;
 const line = (ok, id, what, d) => {
   total++; if (!ok) failed++;
@@ -38,235 +43,224 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const DAY = 86400000;
 const HOUR = 3600000;
 const T = (iso) => Date.parse(iso);
-const biz = (patch = {}) => ({ id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'active', paid_until: null, billing_warning_stage: 0, suspended_for_billing: false, ...patch });
+const PAID = '2026-12-14T09:00:00Z';
+const P = T(PAID);
+const biz = (patch = {}) => ({ id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'active', paid_until: PAID, billing_warning_stage: 0, suspended_for_billing: false, ...patch });
 
 /* BL1 */
 {
-  const paid = '2026-12-14T09:00:00Z';
-  const P = T(paid);
-  const st = (now, p = paid) => B.billingState(biz({ paid_until: p }), now).state;
-  const notEnforced = [null, undefined, '', 'not a date', NaN].every((v) => same(B.billingState(biz({ paid_until: v }), P), { state: 'not_enforced' }))
-    && same(B.billingState(null, P), { state: 'not_enforced' }) && same(B.billingState({}, P), { state: 'not_enforced' });
-  const paidOk = st(P - 1) === 'paid' && st(P - 30 * DAY) === 'paid' && st(0) === 'paid';
-  // The boundary: AT paid_until the period is over.
-  const graceOk = st(P) === 'grace' && st(P + 1) === 'grace' && st(P + 3 * DAY) === 'grace' && st(P + 7 * DAY - 1) === 'grace';
-  const expiredOk = st(P + 7 * DAY) === 'expired' && st(P + 7 * DAY + 1) === 'expired' && st(P + 400 * DAY) === 'expired';
-  const g = B.billingState(biz({ paid_until: paid }), P + DAY);
-  const shapeOk = same(g, { state: 'grace', paidUntil: P, graceEnd: P + 7 * DAY })
-    && same(B.billingState(biz({ paid_until: paid }), P - 1), { state: 'paid', paidUntil: P, graceEnd: P + 7 * DAY })
-    && same(B.billingState(biz({ paid_until: paid }), P + 8 * DAY), { state: 'expired', paidUntil: P, graceEnd: P + 7 * DAY })
-    && B.GRACE_DAYS === 7 && B.EXTEND_DAYS === 30 && B.DUE_SOON_DAYS === 3;
-  // The status is not part of the answer: the dates are.
-  const statusFree = ['demo', 'active', 'paused', 'churned', undefined].every((s) => B.billingState(biz({ status: s, paid_until: paid }), P + DAY).state === 'grace');
-  // A date may arrive as a Postgres string, a Date or a number; `now` too.
-  const typesOk = [paid, '2026-12-14T09:00:00+00:00', '2026-12-14 09:00:00+00', new Date(P), P].every((v) => B.billingState(biz({ paid_until: v }), P).paidUntil === P)
-    && B.billingState(biz({ paid_until: paid }), new Date(P + DAY)).state === 'grace'
-    && B.billingState(biz({ paid_until: paid }), '2026-12-22T09:00:00Z').state === 'expired'
-    && B.toMs('2026-12-14T11:00:00+02:00') === P;
-  // A date long past: expired, not an error.
-  const pastOk = st(T('2026-11-14T00:00:00Z'), '2020-01-01T00:00:00Z') === 'expired';
-  line(notEnforced && paidOk && graceOk && expiredOk && shapeOk && statusFree && typesOk && pastOk,
-    'BL1', 'billingState: null, paid, grace, expired, exact boundaries',
-    `null=${notEnforced} paid=${paidOk} grace=${graceOk} expired=${expiredOk} shape=${shapeOk} status=${statusFree} types=${typesOk} past=${pastOk}`);
+  const constants = CFG.RENEWAL_REMINDER_DAYS === 3 && CFG.GRACE_DAYS === 5 && CFG.SUSPENDED_DAYS === 10
+    && CFG.TERMINATE_AFTER_DAYS === 15 && CFG.RETENTION_DAYS === 60 && CFG.EXTEND_DAYS === 30
+    && B.GRACE_DAYS === 5 && B.EXTEND_DAYS === 30 && B.DUE_SOON_DAYS === 3;
+  line(constants, 'BL1', 'durations: 3 / 5 / 10 (15) / 60 / 30 days');
+  line(CFG.SUPPORT_TELEGRAM_URL === 'https://t.me/AbdallahIsDev' && CFG.SUPPORT_LINK_LABEL === 'Contact support',
+    'BL1b', 'one support address and one link label');
+  line(CFG.supportEmail({ OPERATOR_EMAIL: ' ops@example.test ' }) === 'ops@example.test' && CFG.supportEmail({}) === null,
+    'BL1c', 'support email = the configured operator address, or null');
+  // The address is written in the config module and nowhere else in the code.
+  const hits = [];
+  const walk = (dir) => {
+    for (const f of fs.readdirSync(path.join(ROOT, dir))) {
+      const rel = `${dir}/${f}`;
+      if (fs.statSync(path.join(ROOT, rel)).isDirectory()) { walk(rel); continue; }
+      if (!/\.(js|mjs|html)$/.test(f) || rel === 'lib/lifecycle-config.js') continue;
+      if (fs.readFileSync(path.join(ROOT, rel), 'utf8').includes('t.me/AbdallahIsDev')) hits.push(rel);
+    }
+  };
+  ['lib', 'api', 'scripts'].forEach(walk);
+  line(hits.length === 0, 'BL1d', 'support address is not hardcoded outside the config', hits.join(','));
 }
 
 /* BL2 */
 {
-  const now = T('2026-11-14T10:20:30Z');
-  const iso = (ms) => new Date(ms).toISOString();
-  // Still paid: 30 days are added to what it has.
-  const keepOk = B.nextPaidUntil('2026-11-24T10:00:00Z', now, 30) === T('2026-12-24T10:00:00Z');
-  // Overdue or long past: the period starts now; the missed days are not charged.
-  const lateOk = B.nextPaidUntil('2026-11-10T00:00:00Z', now, 30) === now + 30 * DAY
-    && B.nextPaidUntil('2019-01-01T00:00:00Z', now, 30) === now + 30 * DAY;
-  // Never billed.
-  const nullOk = [null, undefined, '', 'nope'].every((v) => B.nextPaidUntil(v, now, 30) === now + 30 * DAY);
-  // Equal to now: either side of the max gives the same answer.
-  const equalOk = B.nextPaidUntil(iso(now), now, 30) === now + 30 * DAY;
-  // Defaults: 30 days.
-  const defaultOk = B.nextPaidUntil(null, now) === now + 30 * DAY && B.nextPaidUntil('2026-11-24T10:00:00Z', now) === T('2026-12-24T10:00:00Z');
-  // Other lengths, and whole seconds whatever the milliseconds were.
-  const daysOk = B.nextPaidUntil(null, now, 1) === now + DAY && B.nextPaidUntil(null, now, 365) === now + 365 * DAY
-    && B.nextPaidUntil(null, now + 789, 30) === now + 30 * DAY && B.nextPaidUntil(iso(now + 5 * DAY + 999), now, 30) === now + 35 * DAY;
-  // Calendar edges, by the date they land on (30 days is 30 days, not "a month").
-  const lands = (from, want) => B.billingDate(B.nextPaidUntil(from, T('2020-01-01T00:00:00Z'), 30)) === want;
-  const edgesOk = lands('2027-01-31T12:00:00Z', 'Mar 2')      // over a 28-day February
-    && lands('2028-01-31T12:00:00Z', 'Mar 1')                  // over a leap February
-    && lands('2028-01-30T12:00:00Z', 'Feb 29')                 // onto the leap day
-    && lands('2026-12-14T12:00:00Z', 'Jan 13')                 // over the year end
-    && lands('2026-12-02T12:00:00Z', 'Jan 1')
-    && lands('2026-11-30T23:59:59Z', 'Dec 30')
-    && lands('2026-03-01T00:00:00Z', 'Mar 31');
-  // Pressing twice in a row, each from what the first stored: 60 days, by
-  // intent. (One press pressed twice is what the button's date prevents.)
-  const first = B.nextPaidUntil(null, now, 30);
-  const twiceOk = B.nextPaidUntil(first, now + 1000, 30) === now + 60 * DAY;
-  line(keepOk && lateOk && nullOk && equalOk && defaultOk && daysOk && edgesOk && twiceOk,
-    'BL2', 'nextPaidUntil = max(current, now) + days; calendar edges',
-    `keep=${keepOk} late=${lateOk} null=${nullOk} equal=${equalOk} default=${defaultOk} days=${daysOk} edges=${edgesOk} twice=${twiceOk}`);
+  const st = (now, p = PAID) => B.billingState(biz({ paid_until: p }), now).state;
+  const notEnforced = [null, undefined, '', 'not a date', NaN].every((v) => same(B.billingState(biz({ paid_until: v }), P), { state: 'not_enforced' }))
+    && same(B.billingState(null, P), { state: 'not_enforced' }) && same(B.billingState({}, P), { state: 'not_enforced' });
+  line(notEnforced, 'BL2', 'no paid_until (any form): not enforced');
+  const edges = [
+    [P - 30 * DAY, 'paid'], [P - 3 * DAY - 1, 'paid'],
+    [P - 3 * DAY, 'due_soon'], [P - 1, 'due_soon'],
+    [P, 'grace'], [P + 5 * DAY - 1, 'grace'],
+    [P + 5 * DAY, 'suspended'], [P + 15 * DAY - 1, 'suspended'],
+    [P + 15 * DAY, 'terminated'], [P + 400 * DAY, 'terminated'],
+  ];
+  const wrong = edges.filter(([now, want]) => st(now) !== want).map(([now, want]) => `${(now - P) / DAY}d!=${want}`);
+  line(wrong.length === 0, 'BL2b', 'every boundary: inclusive left, exclusive right', wrong.join(' '));
+  const at = (now) => B.billingState(biz(), now);
+  const base = { paidUntil: P, suspendAt: P + 5 * DAY, terminateAt: P + 15 * DAY };
+  const shapes = same(at(P - 10 * DAY), { state: 'paid', ...base, endsAt: P, daysLeft: 10 })
+    && same(at(P - 2 * DAY - 1), { state: 'due_soon', ...base, endsAt: P, daysLeft: 3 })
+    && same(at(P - 2 * DAY), { state: 'due_soon', ...base, endsAt: P, daysLeft: 2 })
+    && same(at(P + DAY), { state: 'grace', ...base, endsAt: P + 5 * DAY, daysLeft: 4 })
+    && same(at(P + 5 * DAY), { state: 'suspended', ...base, endsAt: P + 15 * DAY, daysLeft: 10 })
+    && same(at(P + 14 * DAY + 1), { state: 'suspended', ...base, endsAt: P + 15 * DAY, daysLeft: 1 })
+    && same(at(P + 20 * DAY), { state: 'terminated', ...base, endsAt: P + 15 * DAY, daysLeft: 0 });
+  line(shapes, 'BL2c', 'end date and days left of each state');
+  const statusFree = ['demo', 'active', 'paused', 'churned', undefined].every((s) => B.billingState(biz({ status: s }), P + DAY).state === 'grace');
+  const inputs = [PAID, new Date(P), P].every((v) => B.billingState(biz({ paid_until: v }), new Date(P + DAY)).state === 'grace');
+  line(statusFree && inputs, 'BL2d', 'status plays no part; string, Date and number accepted');
 }
 
 /* BL3 */
 {
-  const savedTz = process.env.TZ;
-  const cases = [
-    ['2026-12-14T09:00:00Z', 'Dec 14'], ['2026-12-21T00:00:00Z', 'Dec 21'], ['2026-01-01T00:00:00Z', 'Jan 1'],
-    ['2026-12-31T23:59:59Z', 'Dec 31'], ['2028-02-29T12:00:00Z', 'Feb 29'], ['2026-05-05T05:05:05Z', 'May 5'],
-    // UTC decides the day: 23:30 in New York on the 13th is already the 14th.
-    ['2026-12-13T23:30:00-05:00', 'Dec 14'], ['2026-12-14T01:00:00+03:00', 'Dec 13'],
-  ];
-  const bad = [];
-  for (const tz of ['UTC', 'America/Chicago', 'Asia/Tokyo', 'Africa/Cairo']) {
-    process.env.TZ = tz;
-    for (const [iso, want] of cases) if (B.billingDate(iso) !== want) bad.push(`${tz}:${iso}`);
-  }
-  if (savedTz === undefined) delete process.env.TZ; else process.env.TZ = savedTz;
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    .every((m, i) => B.billingDate(Date.UTC(2026, i, 9, 12)) === `${m} 9`);
-  const noDate = B.billingDate(null) === '?' && B.billingDate('x') === '?';
-  line(bad.length === 0 && months && noDate, 'BL3', 'billingDate: "Dec 14", UTC in every zone',
-    `bad=${bad.slice(0, 3).join(',') || 'none'} months=${months} none=${noDate}`);
+  const now = T('2026-11-16T12:00:00.750Z');
+  const whole = Math.floor(now / 1000) * 1000;
+  const keeps = B.nextPaidUntil('2026-12-01T00:00:00Z', now) === T('2026-12-31T00:00:00Z');
+  const late = B.nextPaidUntil('2026-11-01T00:00:00Z', now) === whole + 30 * DAY;
+  const never = B.nextPaidUntil(null, now) === whole + 30 * DAY && B.nextPaidUntil('', now) === whole + 30 * DAY;
+  line(keeps && late && never, 'BL3', 'max(paid_until, now) + 30 days, whole seconds');
+  const d = (cur, n) => B.billingDate(B.nextPaidUntil(cur, T(n)));
+  const months = d('2026-01-31T00:00:00Z', '2026-01-01T00:00:00Z') === 'Mar 2'
+    && d('2028-01-30T00:00:00Z', '2028-01-01T00:00:00Z') === 'Feb 29'       // leap year
+    && d('2027-01-30T00:00:00Z', '2027-01-01T00:00:00Z') === 'Mar 1'        // not a leap year
+    && d('2026-12-15T00:00:00Z', '2026-12-01T00:00:00Z') === 'Jan 14'       // year end
+    && d(null, '2028-02-29T10:00:00Z') === 'Mar 30';
+  line(months, 'BL3b', 'month ends, a leap day and a year end');
+  line(B.nextPaidUntil('2026-12-01T00:00:00Z', now, 7) === T('2026-12-08T00:00:00Z'), 'BL3c', 'days is a parameter');
 }
 
 /* BL4 */
 {
-  const end = T('2026-12-21T09:00:00Z');
-  const ok = B.overdueWarningText(biz(), end) === 'Payment for Alder Roofing is overdue. Your service will be suspended on Dec 21 unless payment is received. Contact support.'
-    && B.finalWarningText(biz(), end) === 'Final notice: payment for Alder Roofing is overdue. Your service will be suspended on Dec 21 unless payment is received. Contact support.'
-    && B.BILLING_SUSPENDED_NOTICE === 'Your service has been suspended because payment was not received. Contact support.'
-    && B.BILLING_OVERDUE_SUBJECT === 'Payment overdue' && B.BILLING_FINAL_SUBJECT === 'Final notice: payment overdue'
-    // A name is one line, and a business without one still gets a sentence.
-    && B.overdueWarningText({ name: ' Fir \n & Sons ' }, end).startsWith('Payment for Fir & Sons is overdue.')
-    && B.overdueWarningText({ slug: 'fir' }, end).startsWith('Payment for fir is overdue.')
-    && B.overdueWarningText({}, end).startsWith('Payment for your business is overdue.');
-  const all = [B.overdueWarningText(biz(), end), B.finalWarningText(biz(), end), B.BILLING_SUSPENDED_NOTICE];
-  const plain = all.every((t) => !/[<>*_`\[\]]/.test(t) && !/\p{Extended_Pictographic}/u.test(t) && !t.includes('\n'));
-  line(ok && plain, 'BL4', 'notice texts, exact; plain text, one line', `texts=${ok} plain=${plain}`);
+  const ok = B.billingDate('2026-12-14T23:59:59Z') === 'Dec 14' && B.billingDate('2026-12-15T00:00:00Z') === 'Dec 15'
+    && B.billingDate('2026-01-05T00:00:00Z') === 'Jan 5' && B.billingDate(null) === '?' && B.billingDate('x') === '?'
+    && B.daysText(1) === '1 day' && B.daysText(0) === '0 days' && B.daysText(9) === '9 days';
+  line(ok, 'BL4', 'billingDate in UTC, no padding; daysText');
 }
 
 /* BL5 */
 {
-  const paid = '2026-12-14T09:00:00Z';
-  const P = T(paid);
-  const END = P + 7 * DAY;
-  const act = (now, stage, status = 'active', p = paid) => B.billingDecision(biz({ paid_until: p, billing_warning_stage: stage, status }), now).action;
+  const dec = (patch, now) => { const r = B.billingDecision(biz(patch), now); return `${r.action}:${r.notice || '-'}:${r.stage === null ? '-' : r.stage}`; };
   const rows = [
-    // [when, stage, expected]
-    [P - DAY, 0, 'none'], [P - DAY, 1, 'reset'], [P - DAY, 2, 'reset'], [P - 1, 2, 'reset'],
-    [P, 0, 'warn'], [P + DAY, 0, 'warn'], [P + DAY, 1, 'none'], [P + DAY, 2, 'none'], [P + 5 * DAY, 1, 'none'],
-    // The final-warning window: a day (plus the hour a daily cron may drift) or less.
-    [END - B.FINAL_WARNING_MS - 1, 0, 'warn'], [END - B.FINAL_WARNING_MS - 1, 1, 'none'],
-    [END - B.FINAL_WARNING_MS, 0, 'final'], [END - B.FINAL_WARNING_MS, 1, 'final'], [END - B.FINAL_WARNING_MS, 2, 'none'],
-    [END - DAY, 1, 'final'], [END - HOUR, 1, 'final'], [END - 1, 0, 'final'], [END - 1, 1, 'final'], [END - 1, 2, 'none'],
-    [END, 0, 'suspend'], [END, 1, 'suspend'], [END, 2, 'suspend'], [END + 30 * DAY, 2, 'suspend'],
+    // status active
+    [{}, P - 10 * DAY, 'none:-:-'],
+    [{ billing_warning_stage: 3 }, P - 10 * DAY, 'reset:-:-'],
+    [{}, P - 3 * DAY, 'notice:renewal_reminder:1'],
+    [{ billing_warning_stage: 1 }, P - DAY, 'none:-:-'],
+    [{ billing_warning_stage: 4 }, P - DAY, 'reset:-:-'],
+    [{}, P, 'notice:overdue:2'],
+    [{ billing_warning_stage: 1 }, P + DAY, 'notice:overdue:2'],
+    [{ billing_warning_stage: 2 }, P + DAY, 'none:-:-'],
+    [{ billing_warning_stage: 2 }, P + 4 * DAY - HOUR - 1, 'none:-:-'],
+    [{ billing_warning_stage: 2 }, P + 4 * DAY - HOUR, 'notice:final_warning:3'],   // the cron allowance
+    [{ billing_warning_stage: 2 }, P + 4 * DAY, 'notice:final_warning:3'],
+    [{ billing_warning_stage: 3 }, P + 5 * DAY - 1, 'none:-:-'],
+    [{ billing_warning_stage: 3 }, P + 5 * DAY, 'suspend:suspension:4'],
+    [{ billing_warning_stage: 0 }, P + 5 * DAY - 1, 'notice:final_warning:3'],       // never early
+    [{}, P + 15 * DAY, 'terminate:termination:6'],
+    // suspended for billing
+    [{ status: 'paused', suspended_for_billing: true, billing_warning_stage: 4 }, P + 6 * DAY, 'none:-:-'],
+    [{ status: 'paused', suspended_for_billing: true, billing_warning_stage: 3 }, P + 6 * DAY, 'notice:suspension:4'],
+    [{ status: 'paused', suspended_for_billing: true, billing_warning_stage: 4 }, P + 10 * DAY - HOUR - 1, 'none:-:-'],
+    [{ status: 'paused', suspended_for_billing: true, billing_warning_stage: 4 }, P + 10 * DAY - HOUR, 'notice:termination_warning:5'],
+    [{ status: 'paused', suspended_for_billing: true, billing_warning_stage: 5 }, P + 12 * DAY, 'none:-:-'],
+    [{ status: 'paused', suspended_for_billing: true, billing_warning_stage: 5 }, P + 15 * DAY - 1, 'none:-:-'],
+    [{ status: 'paused', suspended_for_billing: true, billing_warning_stage: 5 }, P + 15 * DAY, 'terminate:termination:6'],
+    [{ status: 'paused', suspended_for_billing: true, billing_warning_stage: 0 }, P + DAY, 'restore:-:-'],
+    // terminated for billing
+    [{ status: 'churned', suspended_for_billing: true, billing_warning_stage: 6 }, P + 30 * DAY, 'none:-:-'],
+    [{ status: 'churned', suspended_for_billing: true, billing_warning_stage: 5 }, P + 30 * DAY, 'notice:termination:6'],
+    [{ status: 'churned', suspended_for_billing: true }, P - DAY, 'restore:-:-'],
   ];
-  const wrong = rows.filter(([now, stage, want]) => act(now, stage) !== want).map(([now, stage, want]) => `${(now - P) / HOUR}h/s${stage}!=${want}`);
-  const windowOk = B.FINAL_WARNING_MS === DAY + HOUR;
-  // Never anything but 'active': not demo, not suspended, not unknown.
-  const others = [];
-  for (const status of ['demo', 'paused', 'churned', 'weird', '', null]) {
-    for (const now of [P - DAY, P + DAY, END - 1, END + DAY]) {
-      for (const stage of [0, 1, 2]) if (act(now, stage, status) !== 'none') others.push(`${status}@${(now - P) / DAY}`);
-    }
-  }
-  // Not billed: nothing, whatever the stage says.
-  const nullOk = [0, 1, 2].every((s) => act(P, s, 'active', null) === 'none')
-    && B.billingDecision(null, P).action === 'none';
-  // The decision carries the dates the caller needs for the notice.
-  const d = B.billingDecision(biz({ paid_until: paid }), P + DAY);
-  const shapeOk = same(d, { action: 'warn', state: 'grace', paidUntil: P, graceEnd: END });
-  // A stage that is not 0, 1 or 2 is read as 0, never as "already warned".
-  const junkOk = act(P + DAY, 7) === 'warn' && act(P + DAY, null) === 'warn' && act(P + DAY, '1') === 'none';
-  line(wrong.length === 0 && windowOk && others.length === 0 && nullOk && shapeOk && junkOk,
-    'BL5', 'billingDecision: the whole table; only active is acted on',
-    `wrong=${wrong.slice(0, 3).join(',') || 'none'} window=${windowOk} others=${others.slice(0, 2).join(',') || 'none'} null=${nullOk} shape=${shapeOk} junk=${junkOk}`);
+  const wrong = rows.map(([patch, now, want], i) => (dec(patch, now) === want ? null : `#${i} ${dec(patch, now)}!=${want}`)).filter(Boolean);
+  line(wrong.length === 0, 'BL5', `the decision table (${rows.length} rows)`, wrong.join(' | '));
+  // Never enforced: no date, a demo, suspended or terminated by hand, unknown status.
+  const moments = [P - 10 * DAY, P - DAY, P + DAY, P + 6 * DAY, P + 30 * DAY];
+  const never = [
+    { paid_until: null }, { status: 'demo' }, { status: 'paused' }, { status: 'churned' }, { status: 'weird' }, { status: undefined },
+    { status: 'paused', suspended_for_billing: null }, { status: 'demo', suspended_for_billing: true },
+  ].every((patch) => moments.every((now) => B.billingDecision(biz(patch), now).action === 'none'));
+  line(never && B.billingDecision(null, P).action === 'none', 'BL5b', 'no date, demo, manual pause or termination: never acted on');
+  line(B.billingEnforced(biz()) && !B.billingEnforced(biz({ status: 'paused' })) && B.billingEnforced(biz({ status: 'paused', suspended_for_billing: true }))
+    && !B.billingEnforced(biz({ status: 'demo' })) && !B.billingEnforced(biz({ paid_until: null })), 'BL5c', 'billingEnforced');
 }
 
 /* BL6 */
 {
-  const now = T('2026-12-16T12:00:00Z');
-  const l = (patch, at = now) => B.billingLine(biz(patch), at);
-  const ok = l({}) === 'Billing: not tracked'
-    && l({ paid_until: '2027-01-13T09:00:00Z' }) === 'Paid until: Jan 13'
-    && l({ paid_until: '2026-12-14T09:00:00Z' }) === 'Paid until: Dec 14 (overdue, suspends Dec 21)'
-    && l({ paid_until: '2026-12-14T09:00:00Z', billing_warning_stage: 2 }) === 'Paid until: Dec 14 (overdue, suspends Dec 21)'
-    && l({ paid_until: '2026-12-01T09:00:00Z' }) === 'Paid until: Dec 1 (overdue, suspends at the next daily check)'
-    && l({ paid_until: '2026-12-01T09:00:00Z', status: 'paused', suspended_for_billing: true }) === 'Suspended for non-payment · paid until Dec 1'
-    && l({ paid_until: '2026-12-01T09:00:00Z', status: 'churned', suspended_for_billing: true }) === 'Suspended for non-payment · paid until Dec 1'
-    // Suspended by hand: the dates, and never "for non-payment".
-    && l({ paid_until: '2026-12-01T09:00:00Z', status: 'paused' }) === 'Paid until: Dec 1 (ended)'
-    && l({ paid_until: '2027-01-13T09:00:00Z', status: 'paused' }) === 'Paid until: Jan 13'
-    // The flag on a business that is not suspended means nothing.
-    && l({ paid_until: '2027-01-13T09:00:00Z', suspended_for_billing: true }) === 'Paid until: Jan 13'
-    && l({ paid_until: '2026-12-01T09:00:00Z', status: 'demo' }) === 'Paid until: Dec 1 (demo: not enforced)'
-    && l({ paid_until: '2027-01-13T09:00:00Z', status: 'demo' }) === 'Paid until: Jan 13 (demo: not enforced)'
-    && l({ status: 'paused', suspended_for_billing: true }) === 'Billing: not tracked'
-    && l({ billing_unavailable: true, paid_until: '2027-01-13T09:00:00Z' }) === 'Billing: unavailable'
-    && B.billingLine(null, now) === 'Billing: unavailable';
-  line(ok, 'BL6', 'billingLine: every line the operator can see', `ok=${ok}`);
+  // A daily walk through one period: apply each decision the way the job does.
+  const walk = (startOffsetDays, stepDays, untilDays) => {
+    const b = biz();
+    const sent = [];
+    for (let d = startOffsetDays; d <= untilDays; d += stepDays) {
+      const r = B.billingDecision(b, P + d * DAY + 5 * 60000);
+      if (r.action === 'reset') b.billing_warning_stage = 0;
+      if (r.notice) { sent.push(r.notice); b.billing_warning_stage = r.stage; }
+      if (r.action === 'suspend') { b.status = 'paused'; b.suspended_for_billing = true; }
+      if (r.action === 'terminate') { b.status = 'churned'; b.suspended_for_billing = true; }
+    }
+    return { sent, status: b.status };
+  };
+  const daily = walk(-5, 1, 20);
+  line(same(daily.sent, ['renewal_reminder', 'overdue', 'final_warning', 'suspension', 'termination_warning', 'termination']) && daily.status === 'churned',
+    'BL6', 'a daily walk sends each of the six notices exactly once', daily.sent.join(','));
+  // The job did not run for days: only the notice of the state it finds.
+  const first = (patch, d) => { const r = B.billingDecision(biz(patch), P + d * DAY); return `${r.action}:${r.notice}`; };
+  const missed = first({}, 2) === 'notice:overdue' && first({}, 4.5) === 'notice:final_warning'
+    && first({}, 7) === 'suspend:suspension' && first({}, 40) === 'terminate:termination'
+    && first({ status: 'paused', suspended_for_billing: true, billing_warning_stage: 0 }, 12) === 'notice:termination_warning'
+    && first({ status: 'paused', suspended_for_billing: true, billing_warning_stage: 0 }, 16) === 'terminate:termination';
+  line(missed, 'BL6b', 'missed days: only the current state\'s notice');
+  const weekly = walk(-5, 7, 23);
+  line(weekly.status === 'churned' && !weekly.sent.includes('final_warning') && weekly.sent[weekly.sent.length - 1] === 'termination',
+    'BL6c', 'a transition never waits for a notice', weekly.sent.join(','));
 }
 
 /* BL7 */
 {
-  const a = biz({ name: 'Alder Roofing' });
-  const b = biz({ name: 'Beta Roofing' });
-  const c = biz({ name: 'Cedar Co' });
-  const nothing = B.billingSummaryText() === null && B.billingSummaryText({}) === null
-    && B.billingSummaryText({ suspended: [], warned: [], finalWarned: [], unwarned: [], failed: [], grace: [], due: [] }) === null;
-  const full = B.billingSummaryText({
-    suspended: [a], finalWarned: [b], warned: [c, a], unwarned: [b], failed: [c],
-    grace: [{ business: b, graceEnd: T('2026-12-21T09:00:00Z') }, { business: c, graceEnd: T('2026-12-23T09:00:00Z') }],
-    due: [{ business: a, paidUntil: T('2026-12-18T09:00:00Z') }],
-  });
-  const fullOk = full === ['Billing', '',
-    'Suspended for non-payment: Alder Roofing',
-    'Final warning sent: Beta Roofing',
-    'Overdue warning sent: Cedar Co, Alder Roofing',
-    'Could not be warned (no notice delivered): Beta Roofing',
-    'Not completed, tried again tomorrow: Cedar Co',
-    'Overdue: Beta Roofing (suspends Dec 21), Cedar Co (suspends Dec 23)',
-    'Due within 3 days: Alder Roofing (Dec 18)'].join('\n');
-  const one = B.billingSummaryText({ due: [{ business: a, paidUntil: T('2026-12-18T09:00:00Z') }] }) === 'Billing\n\nDue within 3 days: Alder Roofing (Dec 18)';
-  // Names only: an address, a chat id or an id on the row never appears.
-  const rich = { id: 'b0000001-0000-4000-8000-000000000001', name: 'Alder Roofing', slug: 'alder', owner_email: 'owner@fixture.invalid', tg_chat_id: 987654321 };
-  const lean = B.billingSummaryText({ suspended: [rich], grace: [{ business: rich, graceEnd: 0 }] });
-  const leanOk = !/fixture\.invalid|987654321|b0000001|@/.test(lean);
-  // dueSoon: paid, and three days or less to go.
-  const P = T('2026-12-14T09:00:00Z');
-  const due = (now, patch = {}) => B.dueSoon(biz({ paid_until: '2026-12-14T09:00:00Z', ...patch }), now);
-  const dueOk = due(P - 3 * DAY) === true && due(P - 3 * DAY - 1) === false && due(P - 1) === true && due(P) === false
-    && due(P + DAY) === false && B.dueSoon(biz(), P) === false;
-  line(nothing && fullOk && one && leanOk && dueOk, 'BL7', 'summary: null when quiet, names only, exact; dueSoon',
-    `quiet=${nothing} full=${fullOk} one=${one} lean=${leanOk} due=${dueOk}`);
+  const L = (patch, d) => B.billingLine(biz(patch), P + d * DAY);
+  const rows = [
+    [{ paid_until: null }, 0, 'Billing: not tracked'],
+    [{ billing_unavailable: true }, 0, 'Billing: unavailable'],
+    [{}, -10, 'Paid until: Dec 14'],
+    [{}, -1.5, 'Paid until: Dec 14 · due in 2 days'],
+    [{}, -0.5, 'Paid until: Dec 14 · due in 1 day'],
+    [{}, 1, 'Overdue since Dec 14 · suspends Dec 19'],
+    [{}, 6, 'Overdue since Dec 14 · suspends today'],
+    [{}, 16, 'Overdue since Dec 14 · terminates today'],
+    [{ status: 'paused', suspended_for_billing: true }, 6, 'Suspended since Dec 19 · terminates Dec 29'],
+    [{ status: 'churned', suspended_for_billing: true }, 20, 'Terminated Dec 29'],
+    [{ status: 'paused' }, -10, 'Paid until: Dec 14'],
+    [{ status: 'paused' }, 6, 'Overdue since Dec 14'],
+    [{ status: 'churned' }, 6, 'Overdue since Dec 14'],
+    [{ status: 'demo' }, -10, 'Paid until: Dec 14 · not enforced'],
+  ];
+  const wrong = rows.map(([patch, d, want]) => (L(patch, d) === want ? null : `${L(patch, d)} != ${want}`)).filter(Boolean);
+  line(wrong.length === 0 && B.billingLine(null, P) === 'Billing: unavailable', 'BL7', `billingLine: ${rows.length} lines`, wrong.join(' | '));
 }
 
 /* BL8 */
 {
-  const now = T('2026-11-14T10:20:30Z');
-  const target = B.nextPaidUntil(null, now, 30);
-  const token = B.encodePaidUntil(target);
-  const roundOk = B.decodePaidUntil(token) === target && /^[0-9a-z]{6,7}$/.test(token)
-    && B.decodePaidUntil(B.encodePaidUntil(target + 999)) === target   // whole seconds
-    && B.encodePaidUntil(T('2099-12-31T23:59:59Z')).length <= 7;
-  const refused = ['', null, undefined, 'ABC', 'a-b', 'a.b', ' 1', '1 ', '123456789', '-1', 'é', '1\n'].every((v) => B.decodePaidUntil(v) === null);
-  const ok = (t, current, at = now) => B.extendTargetAllowed(t, current, at);
-  // Not billed: anything up to now + 30 days, and only the future.
-  const nullOk = ok(target, null) && ok(now + 1000, null) && !ok(now, null) && !ok(now - 1000, null)
-    && !ok(target + 1000, null) && !ok(now + 60 * DAY, null) && !ok(null, null) && !ok('x', null);
-  // Paid until P: up to P + 30 days; one second more is refused.
-  const P = now + 10 * DAY;
-  const paidOk = ok(P + 30 * DAY, new Date(P).toISOString()) && !ok(P + 30 * DAY + 1000, new Date(P).toISOString())
-    && !ok(P + 60 * DAY, new Date(P).toISOString());
-  // Overdue: counted from now, so the old button of a later moment is refused
-  // only when it reaches further than now + 30 days.
-  const late = new Date(now - 5 * DAY).toISOString();
-  const lateOk = ok(now + 30 * DAY, late) && !ok(now + 30 * DAY + 1000, late);
-  // A button kept for a day still works (its date is nearer than one period).
-  const keptOk = ok(target, null, now + DAY) && !ok(target, null, target);
-  line(roundOk && refused && nullOk && paidOk && lateOk && keptOk, 'BL8', 'Extend date: round trip; never more than one period',
-    `round=${roundOk} refused=${refused} null=${nullOk} paid=${paidOk} late=${lateOk} kept=${keptOk}`);
+  const a = biz({ name: 'Alder  Roofing' });
+  const z = biz({ name: '', slug: 'zed-roof' });
+  const none = B.billingSummaryText({}) === null && B.billingSummaryText() === null
+    && B.billingSummaryText({ grace: [a], due: [z], held: [{ business: a, count: 2 }] }) === null;
+  line(none, 'BL8', 'summary: null when the run did nothing new');
+  const text = B.billingSummaryText({
+    terminated: [a], suspended: [z], restored: [a], warned: [{ business: z, notice: 'overdue' }], undelivered: [a], failed: [z],
+    grace: [a], due: [z], held: [{ business: a, count: 2 }],
+  });
+  const want = ['Billing today', '', 'Newly terminated:', 'Alder Roofing', '', 'Newly suspended:', 'zed-roof', '', 'Back in service:', 'Alder Roofing',
+    '', 'Newly warned:', 'zed-roof', '', 'Notice not delivered:', 'Alder Roofing', '', 'Not completed, retried tomorrow:', 'zed-roof',
+    '', 'In grace:', 'Alder Roofing', '', 'Due within 3 days:', 'zed-roof', '', 'Suspended, held leads:', 'Alder Roofing: 2'].join('\n');
+  line(text === want, 'BL8b', 'summary: every block, names only, one per line', text === want ? '' : text);
+  line(B.dueSoon(biz(), P - DAY) && B.dueSoon(biz(), P - 3 * DAY) && !B.dueSoon(biz(), P - 3 * DAY - 1) && !B.dueSoon(biz(), P), 'BL8c', 'dueSoon: the reminder window');
 }
 
-console.log('');
-console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
+/* BL9 */
+{
+  const ms = T('2026-12-31T00:00:00Z');
+  const tok = B.encodePaidUntil(ms + 999);
+  const round = B.decodePaidUntil(tok) === ms && /^[0-9a-z]{1,8}$/.test(tok);
+  const refuses = ['', null, undefined, 'ABC', '12-3', 'zzzzzzzzz', ' 1'].every((v) => B.decodePaidUntil(v) === null);
+  line(round && refuses, 'BL9', 'Extend token: round trip, refuses anything else');
+  const now = T('2026-11-16T12:00:00Z');
+  const cur = '2026-12-01T00:00:00Z';
+  const max = B.nextPaidUntil(cur, now);
+  const ok = B.extendTargetAllowed(max, cur, now) && !B.extendTargetAllowed(max + 1000, cur, now)
+    && !B.extendTargetAllowed(now, cur, now) && !B.extendTargetAllowed(now - 1, null, now)
+    && B.extendTargetAllowed(now + 30 * DAY, null, now) && !B.extendTargetAllowed(null, cur, now)
+    && !B.extendTargetAllowed(max, cur, max + 1);            // an old button: its date is in the past
+  line(ok, 'BL9b', 'extendTargetAllowed: future only, at most one period');
+}
+
+console.log(`\nGate BL (billing rules): ${total - failed}/${total} PASS`);
 process.exit(failed ? 1 : 0);

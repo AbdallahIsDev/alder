@@ -2514,9 +2514,13 @@
       }
     }
 
+    /* 32px on every screen. The part you can press is larger than the part
+       you can see: ::after adds 6px on each side (44px), so the smaller
+       button is no harder to hit with a thumb. */
     .est-x {
-      width: 40px;
-      height: 40px;
+      position: relative;
+      width: 32px;
+      height: 32px;
       display: grid;
       place-items: center;
       background: none;
@@ -2525,6 +2529,12 @@
       cursor: pointer;
       flex: none;
       transition: background .2s, transform .15s
+    }
+
+    .est-x::after {
+      content: "";
+      position: absolute;
+      inset: -6px
     }
 
     .est-x:hover {
@@ -2536,8 +2546,8 @@
     }
 
     .est-x svg {
-      width: 18px;
-      height: 18px
+      width: 16px;
+      height: 16px
     }
 
     /* body: scrolls on its own when a step is tall */
@@ -3122,6 +3132,11 @@
     .est-ok svg {
       width: 26px;
       height: 26px
+    }
+
+    /* held / unavailable: the request was not "sent", so no success mark */
+    .est-done.est-plain .est-ok {
+      display: none
     }
 
     .est-done:not([hidden]) .est-ok {

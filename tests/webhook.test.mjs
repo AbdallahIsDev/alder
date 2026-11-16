@@ -869,7 +869,7 @@ try {
     ];
     const banned = /another|other (roofer|business|compan)|roofers|administrator|provider|move it|shared|multiple/i;
     const exactOk = C.botLinkedText('Alder Roofing (demo)') === `You're connected to Alder Roofing (demo). ✅\n\nNew estimate requests from your website will appear here the moment they come in.\n\nFor each request:\n• Tap Mark contacted after you call the customer.\n• Tap Job completed when the work is done. You can then send the customer a review request.\n\nSend /leads to see your latest requests, or /help any time.`
-      && C.BOT_HELP === `How this works\n\nNew estimate requests from your website appear here as soon as they come in.\n\nFor each request:\n• Mark contacted after you call the customer.\n• Job completed when the work is done, to send a review request.\n\nCommands:\n/leads · your latest requests\n/invite · connect a second phone\n/recipients · who receives alerts\n/help · this message`
+      && C.BOT_HELP === `How this works\n\nNew estimate requests from your website appear here as soon as they come in.\n\nFor each request:\n• Mark contacted after you call the customer.\n• Job completed when the work is done, to send a review request.\n\nCommands:\n/leads · your latest requests\n/invite · connect a second phone\n/recipients · who receives alerts\n/status · your service and billing\n/help · this message`
       && C.BOT_ALREADY_CONNECTED === `You're all set. New requests will appear here.\n\nSend /help to see what I can do.`
       && C.BOT_NOT_CONNECTED === `This chat isn't connected yet.\n\nIf you were sent a setup link, tap it and press Start. If you have a setup code, send it to me here.\n\nNo link or code? Ask the person who set up your lead alerts for a new one.`
       && C.BOT_BAD_CODE === `That setup link isn't valid or has expired.\n\nAsk for a new one.`
@@ -1509,6 +1509,7 @@ try {
           && JSON.stringify(detailKb) === JSON.stringify([
             [{ text: 'Suspend', callback_data: 'bs:0:' + bizA.id, style: 'danger' }, { text: 'Leads', callback_data: 'bq:0:0:' + bizA.id }],
             [{ text: 'Extend 30 days', callback_data: 'be:0:' + bizA.id }, { text: 'Invite', callback_data: 'bv:0:' + bizA.id, style: 'primary' }],
+            [{ text: 'Terminate', callback_data: 'bx:0:' + bizA.id, style: 'danger' }],
             [{ text: 'Back', callback_data: 'bl:0' }],
           ])
           && !!bdEdit && bdEdit.body.text === phonesTitle;
@@ -2564,9 +2565,16 @@ try {
         const termEdit = (await edits()).pop() || { body: {} };
         const termToast = await answersNow();
         const leadsAfter = (await svc.from('leads').select('id').eq('business_id', invBiz.id)).data.length;
-        const noticeSent = (req) => !!req && req.body.text === C2.BOT_SUSPENDED_NOTICE
-          && req.body.reply_markup && req.body.reply_markup.remove_keyboard === true && !('parse_mode' in req.body);
-        const termOk = askEdit.body.text === 'Suspend ZZ Invite Fixture? Telegram alerts, emails and the website form stop for this business. Data is kept and you can reactivate at any time.'
+        // A suspension made by hand (this fixture is not billed): the notice
+        // says "by support", carries the support link as an entity and leaves
+        // the phone one button, Status.
+        const SUSPENDED_BY_HAND = 'Your service has been suspended\nby support.\n\nYour website still saves new\nrequests. You will see them\nwhen the service is active\nagain.\n\nSend /status at any time to see\nthe current state.\n\nContact support';
+        const STATUS_ONLY = JSON.stringify({ keyboard: [[{ text: 'Status' }]], is_persistent: true, resize_keyboard: true });
+        const supportLink = (req) => Array.isArray(req.body.entities) && req.body.entities.length === 1 && req.body.entities[0].type === 'text_link'
+          && req.body.text.slice(req.body.entities[0].offset, req.body.entities[0].offset + req.body.entities[0].length) === 'Contact support';
+        const noticeSent = (req) => !!req && req.body.text === SUSPENDED_BY_HAND && supportLink(req)
+          && JSON.stringify(req.body.reply_markup) === STATUS_ONLY && !('parse_mode' in req.body);
+        const termOk = askEdit.body.text === 'Suspend ZZ Invite Fixture? Lead alerts and emails stop. The website form keeps saving new requests; they stay hidden until you reactivate. Nothing is deleted.'
           && JSON.stringify(askEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[
             { text: 'Confirm suspend', callback_data: 'bS:0:' + invBiz.id, style: 'danger' },
             { text: 'Cancel', callback_data: 'bd:0:' + invBiz.id },
@@ -2575,13 +2583,16 @@ try {
           && (await statusNow()) === 'paused' && termSends.length === 2
           && [invOwner, invStaff].every((chat) => termSends.filter((x) => String(x.body.chat_id) === String(chat)).length === 1)
           && termSends.every(noticeSent)
-          && termEdit.body.text === 'ZZ Invite Fixture suspended · 0 notices failed'
-          && suspensionMails.length === 1 && suspensionMails[0].body.text === C2.BOT_SUSPENDED_NOTICE
+          && termEdit.body.text === 'ZZ Invite Fixture suspended'
+          && suspensionMails.length === 1 && suspensionMails[0].body.subject === 'Your service has been suspended'
+          && String(suspensionMails[0].body.text).includes('Your service has been suspended by support.')
+          && String(suspensionMails[0].body.text).includes('Reply to this email and we will help.')
           && JSON.stringify(termEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[{ text: 'Back', callback_data: 'bd:0:' + invBiz.id }]])
           && termToast === C2.OPERATOR_SUSPENDED
           && (await bindingsNow()) === 2 && (await liveNow()) === liveBefore && leadsAfter === leadsBefore;
-        // A phone of the suspended business: one neutral line for a command
-        // and for a button, and no data. (The binding lookup reads the status
+        // A phone of the suspended business: the reason and the /status hint
+        // for a command, a toast for a button, and no data. A new phone is
+        // refused and its code handed back. (The binding lookup reads the status
         // through the real foreign key here; the fake cannot prove that.)
         await reset();
         await good(msg(invOwner, '/leads'));
@@ -2602,9 +2613,10 @@ try {
         await good(cb(OP, 'bS:0:' + invBiz.id));
         const againSends = (await sends()).length;
         const againToast = await answersNow();
-        const afterOk = exOwnerReq.body.text === C2.BOT_SUSPENDED && exOwnerReq.body.reply_markup && exOwnerReq.body.reply_markup.remove_keyboard === true
-          && exStaffToast === C2.BOT_SUSPENDED && exStaffDrawn === 0
-          && newPhone === C2.BOT_SUSPENDED && newPhoneBound === 0 && !!pendingRow && pendingRow.used_at === null
+        const afterOk = exOwnerReq.body.text === 'This service has been suspended\nby support.\n\nSend /status to see the current\nstate.\n\nContact support'
+          && supportLink(exOwnerReq) && JSON.stringify(exOwnerReq.body.reply_markup) === STATUS_ONLY
+          && exStaffToast === 'This service is suspended. Send /status.' && exStaffDrawn === 0
+          && newPhone === 'This service is suspended.\nA new phone cannot be connected\nright now.\n\nContact support' && newPhoneBound === 0 && !!pendingRow && pendingRow.used_at === null
           && againSends === 0 && againToast === C2.OPERATOR_ALREADY_SUSPENDED && (await statusNow()) === 'paused';
         // Reactivate: active again, each phone told with its own keyboard.
         await reset();
@@ -2617,9 +2629,10 @@ try {
         await reset();
         await good(msg(invOwner, '/help'));
         const servedAgain = await allText();
+        const REACTIVATED_BY_HAND = 'Your service is active again.\nSupport has reactivated it.\n\nSend /status at any time to see\nthe current state.\n\nContact support';
         const reactivateOk = (await statusNow()) === 'active' && backSends.length === 2
-          && toOwner.length === 1 && toOwner[0].body.text === C2.BOT_REACTIVATED && JSON.stringify(rowsOf(toOwner[0])) === JSON.stringify([['Invite', 'Leads']])
-          && toStaff.length === 1 && toStaff[0].body.text === C2.BOT_REACTIVATED && JSON.stringify(rowsOf(toStaff[0])) === JSON.stringify([['Leads']])
+          && toOwner.length === 1 && toOwner[0].body.text === REACTIVATED_BY_HAND && JSON.stringify(rowsOf(toOwner[0])) === JSON.stringify([['Invite', 'Leads']])
+          && toStaff.length === 1 && toStaff[0].body.text === REACTIVATED_BY_HAND && JSON.stringify(rowsOf(toStaff[0])) === JSON.stringify([['Leads']])
           && backEdit.body.text === 'ZZ Invite Fixture reactivated' && servedAgain === C2.BOT_HELP;
         // Put the fixture back as it was.
         await svc.from('businesses').update({ status: statusAtStart }).eq('id', invBiz.id);
@@ -2693,7 +2706,7 @@ try {
       // OP7: /businesses lists both slugs with a phone count.
       const { rows: bizRows, first: bizFirst } = await opBusinessLines();
       const bizKb = (bizFirst && bizFirst.body.reply_markup && bizFirst.body.reply_markup.inline_keyboard) || [];
-      const rowShape = /^.+ · (Demo|Active|Paused|Churned) · (\d+ phones?|\?)$/;
+      const rowShape = /^.+ · (Demo|Active|Suspended|Terminated) · (\d+ phones?|\?)$/;
       line(bizRows.some((l) => /^Alder Roofing · Demo · \d+ phones?$/.test(l))
         && bizRows.some((l) => /^Second Demo Roofing · Demo · \d+ phones?$/.test(l))
         && bizRows.every((l) => rowShape.test(l))

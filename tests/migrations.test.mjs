@@ -10,6 +10,9 @@
 //   M3  The order is sane: 0001, then seed, then the later migrations.
 //   M4  scripts/apply-migrations.mjs reads the list from lib/migrations.js and does
 //       not re-inline its own array (which would let the two drift apart again).
+//   M8  0007 (lifecycle) is additive and guarded: leads.held_at, the
+//       business_events table, the client view with held_at appended, RLS
+//       and service_role-only grants
 //   M7  0006 (billing) is three guarded ADD COLUMNs on businesses and nothing
 //       else, so it is safe on a database that already has it, and paid_until
 //       stays nullable with no default (NULL = not billed).
@@ -52,12 +55,13 @@ const line = (ok, id, what, d) => {
   const i4 = idx('0004_lead_event');
   const i5 = idx('0005_business_site_host');
   const i6 = idx('0006_business_billing');
+  const i7 = idx('0007_lifecycle');
   const numeric = APPLY_ORDER.map((f) => /(\d{4})_/.exec(path.basename(f))).filter(Boolean).map((m) => Number(m[1]));
   const ascending = numeric.every((n, i) => i === 0 || n > numeric[i - 1]);
-  const ok = i1 === 0 && iseed === 1 && i2 > iseed && i3 > i2 && i4 > i3 && i5 > i4 && i6 > i5
-    && i6 === APPLY_ORDER.length - 1 && ascending;
-  line(ok, 'M3', 'apply order: 0001, seed, 0002, 0003, 0004, 0005, 0006',
-    `i=${i1}/${iseed}/${i2}/${i3}/${i4}/${i5}/${i6} ascending=${ascending}`);
+  const ok = i1 === 0 && iseed === 1 && i2 > iseed && i3 > i2 && i4 > i3 && i5 > i4 && i6 > i5 && i7 > i6
+    && i7 === APPLY_ORDER.length - 1 && ascending;
+  line(ok, 'M3', 'apply order: 0001, seed, 0002 ... 0006, 0007',
+    `i=${i1}/${iseed}/${i2}/${i3}/${i4}/${i5}/${i6}/${i7} ascending=${ascending}`);
 }
 
 /* M7: 0006 (billing) is additive and safe to run twice: one ALTER TABLE on
@@ -79,6 +83,38 @@ const line = (ok, id, what, d) => {
     && !/\b(drop|delete|update|truncate|insert|rename|create|grant|revoke)\b/.test(sql);
   line(ok, 'M7', '0006 billing: three guarded columns on businesses, nothing else',
     `statements=${statements.length} adds=${adds} guarded=${guarded}`);
+}
+
+/* M8: 0007 (lifecycle) is additive and safe to run twice: one guarded column
+   on leads, one new table, guarded indexes, the client view re-created with
+   the new column APPENDED (the existing columns in their order), row level
+   security on the new table and grants for service_role only. Nothing is
+   dropped, updated, deleted or renamed. */
+{
+  const sql = fs.readFileSync(path.join(ROOT, 'supabase', 'migrations', '0007_lifecycle.sql'), 'utf8')
+    .split(/\r?\n/).filter((l) => !/^\s*--/.test(l)).join('\n').replace(/\s+/g, ' ').trim().toLowerCase();
+  const statements = sql.split(';').map((x) => x.trim()).filter(Boolean);
+  const kinds = statements.map((x) => (/^(alter table \S+ (add column if not exists|enable row level security)|create (table|index) if not exists|create or replace view|revoke all on|grant )/.exec(x) || [''])[0]);
+  const allGuarded = kinds.every(Boolean);
+  const held = statements[0] === 'alter table public.leads add column if not exists held_at timestamptz';
+  const init = fs.readFileSync(path.join(ROOT, 'supabase', 'migrations', '0001_init.sql'), 'utf8').replace(/\s+/g, ' ').toLowerCase();
+  const oldCols = /create view public\.v_client_leads with \(security_invoker = on\) as select (.*?) from public\.leads/.exec(init)[1];
+  const view = statements.find((x) => x.startsWith('create or replace view public.v_client_leads')) || '';
+  const viewOk = view === `create or replace view public.v_client_leads with (security_invoker = on) as select ${oldCols}, held_at from public.leads`;
+  const table = statements.find((x) => x.startsWith('create table if not exists public.business_events')) || '';
+  const columns = ['id uuid primary key', 'business_id uuid not null references public.businesses(id) on delete cascade', 'type text not null',
+    'channel text not null', 'status text not null', 'error_class text', 'provider_id text', 'created_at timestamptz not null default now()']
+    .every((c) => table.includes(c));
+  // No column that could hold personal data or a secret.
+  const noPii = !/\b(name|phone|email|chat|text|body|notes|token|meta|payload)\b [a-z]/.test(table.replace(/\b(type|error_class|provider_id|channel|status) text/g, ''));
+  const locked = statements.includes('alter table public.business_events enable row level security')
+    && statements.includes('revoke all on public.business_events from anon, authenticated')
+    && statements.includes('grant select, insert, update, delete on public.business_events to service_role')
+    && !/grant [^;]* to (anon|authenticated|public)\b/.test(sql);
+  const ok = allGuarded && held && viewOk && columns && noPii && locked
+    && !/\b(drop|delete from|update public|truncate|insert into|rename)\b/.test(sql);
+  line(ok, 'M8', '0007 lifecycle: held_at, business_events, view, RLS, grants',
+    `guarded=${allGuarded} held=${held} view=${viewOk} columns=${columns} noPii=${noPii} locked=${locked}`);
 }
 
 /* M4: the script consumes the shared list instead of keeping its own copy. */

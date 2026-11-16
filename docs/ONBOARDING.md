@@ -37,8 +37,10 @@ setup tasks, not a safe self-service flow:
 8. Submit a test lead and verify owner email, Telegram alert, customer auto-
    reply, and review email/link. Do not use a real customer's data for a test.
 9. Before signing, settle the host plan and ask a lawyer to approve legal text
-   and retention. The current offboard script deletes immediately; it does not
-   provide a 30-day grace period.
+   and retention (drafts: `docs/legal-drafts/`; checklist:
+   `docs/PRE_LAUNCH_CHECKLIST.md`). A terminated business keeps its data; the
+   60-day retention period is kept by hand, and the offboard script deletes
+   immediately when you run it.
 
 The architecture decision and second-client gates are in
 [`docs/proposals/multi-client-architecture.md`](proposals/multi-client-architecture.md).
