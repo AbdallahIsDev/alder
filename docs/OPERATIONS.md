@@ -239,6 +239,7 @@ Phone 2 (Van)
 
 Leads: 7 total · 3 in the last 30 days
 Last lead: 2d ago
+Billing: not tracked
 ```
 
 The status is Demo, Active or Suspended (`paused` in the database; `churned`
@@ -246,9 +247,10 @@ shows as Churned and is treated as suspended). `Telegram: Not connected` has
 no phone lines under it. The lead numbers come from two queries (a count
 with the newest `created_at`, and a count since 30 days ago): the only lead
 column read for this screen is that one timestamp, and `Last lead` is left
-out when there are none. Under
-it: **Suspend** and **Leads**, then **Invite** and **Back**. For a suspended
-business: **Reactivate** and **Leads**, then **Back**.
+out when there are none. The last line is the billing line (see **3b.
+Billing**). Under it: **Suspend** and **Leads**, then **Extend 30 days** and
+**Invite**, then **Back**. For a suspended business: **Reactivate** and
+**Leads**, then **Extend 30 days**, then **Back**.
 
 **What the operator can see of a lead.** **Leads** is read-only and minimal:
 every row and every card shows only the service, the status and the age of the
@@ -286,12 +288,115 @@ already past the tenant check when the status changed is still delivered.
 `active` — a business that was `demo` before it was suspended comes back as
 `active`, not `demo` — and tells every connected phone "Your service is active
 again." with its own keyboard. Everything works as before without
-re-onboarding.
+re-onboarding. Reactivating is not paying: it does not change `paid_until`, so
+a business whose paid period is over is warned and suspended again by the next
+daily runs. Use **Extend 30 days** when the customer has paid.
 
 Buttons of messages sent before Suspend existed (Terminate, Confirm terminate,
 the old `/phones` and Remove Phone screens) answer "That screen expired. Here
 is the current screen." and change nothing. A button of the old `/code` picker
 follows the invite rules above, as a pick from the first page of the list.
+
+## 3b. Billing
+
+Billing is a date, not a payment system. Money arrives outside this system
+(bank transfer, cash, a link you sent); you record it with one button. There
+is no payment-provider code yet.
+
+**How it works.** Every business has `paid_until` (UTC). While it is in the
+future the business is paid. For **7 days** after it (the grace period, one
+constant: `GRACE_DAYS` in `lib/billing.js`) the service keeps running and the
+business is warned. At the end of the grace period it is suspended
+automatically. `paid_until` empty (NULL) means the business is **not billed**:
+nothing below ever touches it. That is the state of every business until you
+press Extend for it, so applying the migration changes nothing by itself.
+
+**The billing line** on the business screen says which state it is in:
+
+```
+Billing: not tracked                                not billed
+Paid until: Dec 14                                  paid
+Paid until: Dec 14 (overdue, suspends Dec 21)       in the grace period
+Paid until: Dec 14 (overdue, suspends at the next daily check)
+Suspended for non-payment · paid until Dec 14       suspended by the daily job
+Paid until: Dec 14 (ended)                          suspended by you, period over
+Paid until: Dec 14 (demo: not enforced)             a demo business
+Billing: unavailable                                migration 0006 not applied
+```
+
+**Start billing a new customer.** Make sure its status is `active` (a `demo`
+business is never enforced), open it in `/businesses` and press **Extend 30
+days**, then **Confirm**. It is now paid for 30 days from that moment.
+
+**Record a payment.** The same button. The question shows the exact date
+(`Extend <Name> to Dec 14?`): 30 days are added to `paid_until` when the
+business is still paid, and counted from now when it is overdue or was never
+billed, so a late payment is not eaten by the days already missed. Confirm
+sets the date, clears the warnings, and reactivates a suspended business the
+way **Reactivate** does (every phone is told, keyboards come back); the
+question says so first. The result line says what changed, for example
+`Alder Roofing paid until Dec 14 · reactivated`. The date travels inside the
+Confirm button, so a double tap asks for the same date twice and the second
+one answers `Already extended.` and changes nothing. To add 60 days, press
+Extend 30 days a second time.
+
+**What the daily job does.** It runs once a day inside the daily self-check
+(the 09:00 UTC cron; no extra cron job), and only looks at businesses that are
+`active` AND have a `paid_until`. Demo, suspended and unbilled businesses are
+never read.
+
+| The business is | Already told | The job |
+|---|---|---|
+| paid | nothing | nothing |
+| paid | a warning (it paid since) | clears the warning stage |
+| overdue, more than a day of grace left | nothing | overdue warning to every connected phone and the owner email |
+| overdue, more than a day left | the overdue warning | nothing |
+| overdue, a day or less left | not the final warning | final warning, the same way |
+| overdue, a day or less left | the final warning | nothing |
+| past the grace period | anything | suspends it, exactly like **Suspend**, and marks it "for non-payment" |
+
+The warning reads `Payment for <Name> is overdue. Your service will be
+suspended on <date> unless payment is received. Contact support.` Each warning
+is sent once. If a warning reaches nobody (every phone refused it and the
+email failed) it is not counted as sent and the next day's run tries again; a
+warning that failed never delays the suspension. Running the job twice on one
+day sends and changes nothing the second time, and a business is sent at most
+one billing notice per UTC day. "A day or less" is 25 hours,
+because a daily cron may fire anywhere inside its hour. The suspension happens
+at the first daily run at or after the date in the warning, so on that day or
+the next morning, never earlier.
+
+When something happened you get **one** Telegram message a day in the operator
+chat (email when Telegram refuses it): who was suspended, who was warned, who
+could not be warned, who is overdue, and who is due within 3 days. Business
+names only.
+
+To run it by hand: `curl -H "x-health-secret: $HEALTH_SECRET"
+https://<host>/api/billing` (the answer is counts only).
+
+**Turn billing off for one business.** In the Supabase SQL editor:
+
+```sql
+update public.businesses
+set paid_until = null, billing_warning_stage = 0, suspended_for_billing = false
+where slug = '<slug>';
+```
+
+If the job had already suspended it, press **Reactivate** afterwards.
+
+**What stays manual until the payment-provider stage.** Receiving the money;
+pressing Extend 30 days for each payment; choosing any period other than 30
+days (set `paid_until` by SQL); refunds and prices (the system stores no
+amount). The seam for that stage exists: `applyPayment()` in
+`lib/billing-ops.js` is what the button calls and what a payment webhook will
+call. Its contract is in the code: idempotent, never shortens a paid period,
+clears the grace period and the warning stage.
+
+**Before any of this works** migration `0006_business_billing.sql` must be
+applied (`npm run db:apply`, or paste the file in the SQL editor). Until then
+the business screen says `Billing: unavailable`, Extend answers that billing
+is not available, the daily job skips itself, and everything else works as
+before.
 
 **Remove.** `/recipients` lists every phone as "Recipient 1, 2, …" (or the stored
 `business_chats.label` when set) with one **Remove** button each. Removing asks once;
@@ -340,9 +445,11 @@ one message per business, even when two businesses share an inbox; suppressing t
 second would hide that business's own counts. The responses report `sent`, `emailed`,
 and failure/skip counts; there is no `deduped` response field.
 
-`/api/health` and `/api/selfcheck` and `/api/digest` all answer **503 when
+`/api/health` and `/api/selfcheck` and `/api/digest` and `/api/billing` all answer **503 when
 `HEALTH_SECRET` is unset**, even if `CRON_SECRET` is set. `/api/health` takes
-`x-health-secret`; the other two also accept `Authorization: Bearer $CRON_SECRET`.
+`x-health-secret`; the other three also accept `Authorization: Bearer $CRON_SECRET`.
+The daily billing job (section 3b) runs at the end of `/api/selfcheck`; `/api/billing`
+runs the same job on its own and is not scheduled.
 
 ## 4c. How one lead is announced
 
@@ -602,6 +709,11 @@ set, so it cannot be pointed at a fake by accident.
    `curl -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/digest` → the body
    has `"enabled": true`. The first message goes out at the next 13:00 UTC run; until
    then the endpoint is the only way to see it. Leave it unset to keep the digest off.
+4b. **Apply migration `0006_business_billing.sql`** (`npm run db:apply`, or the SQL editor)
+   to the test project first, then to production. The code runs without it (the business
+   screen says `Billing: unavailable` and the daily billing job skips itself), so the order
+   of deploy and migration does not matter. Nothing is billed until you press **Extend 30
+   days** for a business.
 5. **Read `/api/health`** once after the deploy: `webhook_secret_set` and `salt_set`
    must both be `true`, and `last_hour.created` tells you whether leads are arriving.
 

@@ -12,6 +12,10 @@
 //      fallback. If neither is configured the alarm is undeliverable and that is
 //      a logged event plus an /api/health flag, not silence.
 //
+// The daily BILLING job runs at the end of this run (lib/billing-ops.js): it
+// shares this cron instead of adding one. It can never fail the self-check,
+// and it is skipped when the call is scoped to one business.
+//
 // Counts only in owner messages: no names, no addresses, no lead data, no env
 // values. The operator message may name a business by slug, and nothing else.
 //
@@ -24,10 +28,13 @@ import { listBusinessChats, listActiveBusinesses, sweepExpired, hitRateLimit, cl
 import { sendMessage } from '../lib/tg.js';
 import { sendMail, mailRedirectInProduction } from '../lib/mail.js';
 import { deliverToBusinesses } from '../lib/ops-delivery.js';
-import { selfCheckEmail, operatorAlarmEmail } from '../lib/email-builders.js';
+import { selfCheckEmail } from '../lib/email-builders.js';
 import { eventCountsByBusiness } from '../lib/digest-db.js';
 import { FAILED_KINDS, selfCheckText, operatorAlarmBody, operatorAlarmText, shouldAlertBusiness, failedTotal } from '../lib/ops-copy.js';
-import { operatorChatId, operatorEmail, operatorReachable } from '../lib/operator.js';
+import { operatorReachable } from '../lib/operator.js';
+import { runBillingJob } from '../lib/billing-ops.js';
+// Telegram, then email, then a loud log line; shared with the billing job.
+import { deliverOperatorAlarm } from '../lib/operator-alarm.js';
 
 const HEADER = 'x-health-secret';
 const KINDS = [
@@ -148,25 +155,6 @@ function authorised(req, healthSecret, cronSecret) {
   return false;
 }
 
-/** Telegram, then email, then a loud log line. Never throws. */
-async function deliverOperatorAlarm({ body, text, dateKey }) {
-  const chat = operatorChatId();
-  if (chat) {
-    const r = await sendMessage(chat, text).catch(() => ({ ok: false }));
-    if (r && r.ok) return 'telegram';
-  }
-  const to = operatorEmail();
-  if (to) {
-    const r = await sendMail({
-      to, fromName: 'Lead Alerts', ...operatorAlarmEmail(body, dateKey),
-      idempotencyKey: `selfcheck:operator:${dateKey}`,
-    }).catch(() => ({ ok: false }));
-    if (r && r.ok) return 'email';
-  }
-  console.error('operator_alarm_undelivered');
-  return 'undelivered';
-}
-
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
@@ -261,6 +249,18 @@ export default async function handler(req, res) {
     let swept = { codes: 0, limits: 0, failed: 0 };
     try { swept = await sweepExpired(); } catch { swept.failed++; }
     console.error('housekeeping_swept', swept.codes, swept.limits, swept.failed);
+
+    // Billing: warnings, the final warning, automatic suspension. Its own
+    // rules and its own operator summary; here it only shares the daily cron.
+    // An error is a log line and a flag, never a 500 on the daily check.
+    // Its result is counts only, and goes to the log: this endpoint's
+    // response keeps its shape.
+    if (!requestedBusiness) {
+      try {
+        const b = await runBillingJob();
+        console.error('billing_job', b.skipped || [b.checked, b.reset, b.warned, b.final_warned, b.suspended, b.unwarned, b.failed, b.operator].join(' '));
+      } catch (e) { console.error('billing_job_failed', (e && e.code) || 'no_code'); }
+    }
 
     return res.status(200).json({
       ok: true, sent, emailed, failed, redirect_active: redirectActive,

@@ -249,21 +249,24 @@ const samples = sampleTelegramTexts();
   const replaceList = kbRows(C.operatorReplaceConfirmKeyboard(bizId, 3, 'list'));
   const replaceBiz = kbRows(C.operatorReplaceConfirmKeyboard(bizId, 3, 'business'));
   const danger = [kb[0], opKb[0], opDetail[0][0], connectedList[0][0], connectedBiz[0][0], replaceList[0][0], replaceBiz[0][0]];
-  const cancel = [kb[1], opKb[1], opDetail[0][1], opDetail[1][1], opSuspended[0][1], opSuspended[1][0],
+  const cancel = [kb[1], opKb[1], opDetail[0][1], opDetail[1][0], opDetail[2][0], opSuspended[0][1], opSuspended[1][0], opSuspended[2][0],
     connectedList[0][1], connectedBiz[0][1], replaceList[0][1], replaceBiz[0][1]];
   const JSONsame = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   // The exact layouts. Served: Suspend (danger) left and Leads right, then
-  // Invite (primary) left and Back right. Suspended: Reactivate (primary) and
-  // Leads, then Back alone; no Invite and no Suspend. The question: Confirm
-  // suspend (danger) left, Cancel right, back to the business.
+  // Extend 30 days left and Invite (primary) right, then Back alone.
+  // Suspended: Reactivate (primary) and Leads, then Extend 30 days alone,
+  // then Back alone; no Invite and no Suspend. The question: Confirm suspend
+  // (danger) left, Cancel right, back to the business.
   const now = Date.parse('2026-11-14T12:00:00Z');
   const stats = { total: 7, recent: 3, lastAt: '2026-11-12T10:00:00Z' };
   const phones = [{ label: null }, { label: 'Van' }];
   const opOk = JSONsame(opDetail, [
     [{ text: 'Suspend', callback_data: `bs:3:${bizId}`, style: 'danger' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
-    [{ text: 'Invite', callback_data: `bv:3:${bizId}`, style: 'primary' }, { text: 'Back', callback_data: 'bl:3' }],
+    [{ text: 'Extend 30 days', callback_data: `be:3:${bizId}` }, { text: 'Invite', callback_data: `bv:3:${bizId}`, style: 'primary' }],
+    [{ text: 'Back', callback_data: 'bl:3' }],
   ]) && JSONsame(opSuspended, [
     [{ text: 'Reactivate', callback_data: `br:3:${bizId}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
+    [{ text: 'Extend 30 days', callback_data: `be:3:${bizId}` }],
     [{ text: 'Back', callback_data: 'bl:3' }],
   ]) && JSONsame(opKb, [
     { text: 'Confirm suspend', callback_data: `bS:3:${bizId}`, style: 'danger' },
@@ -298,11 +301,11 @@ const samples = sampleTelegramTexts();
     && C.operatorReactivatedText(biz) === 'Alder Roofing reactivated'
     // The business screen, to the character, in its three states.
     && C.operatorBusinessDetailText({ business: biz, rows: phones, stats, nowMs: now })
-      === 'Alder Roofing\nDemo · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total · 3 in the last 30 days\nLast lead: 2d ago'
+      === 'Alder Roofing\nDemo · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total · 3 in the last 30 days\nLast lead: 2d ago\nBilling: not tracked'
     && C.operatorBusinessDetailText({ business: { ...biz, status: 'active' }, rows: [], stats: { total: 0, recent: 0, lastAt: null }, nowMs: now })
-      === 'Alder Roofing\nActive · alder-demo\n\nTelegram: Not connected\n\nLeads: 0 total · 0 in the last 30 days'
+      === 'Alder Roofing\nActive · alder-demo\n\nTelegram: Not connected\n\nLeads: 0 total · 0 in the last 30 days\nBilling: not tracked'
     && C.operatorBusinessDetailText({ business: { ...biz, status: 'paused' }, rows: [{ label: null }], stats, nowMs: now })
-      === 'Alder Roofing\nSuspended · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 7 total · 3 in the last 30 days\nLast lead: 2d ago'
+      === 'Alder Roofing\nSuspended · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 7 total · 3 in the last 30 days\nLast lead: 2d ago\nBilling: not tracked'
     // The operator's view of a lead: these fields and no other.
     && JSONsame([...C.OPERATOR_LEAD_FIELDS], ['service', 'status', 'age'])
     && C.operatorLeadCardText(biz, { service: 'repair', status: 'open', created_at: '2026-11-12T10:00:00Z', name: 'Dana Whitfield', phone: '+15155550142', email: 'dana@example.com', notes: 'side gate' }, now)
@@ -312,7 +315,7 @@ const samples = sampleTelegramTexts();
     && last.includes('This is the last phone.')
     && danger.every((b) => b.style === 'danger')
     && cancel.every((b) => b.style === undefined)
-    && opDetail[1][0].style === 'primary' && opSuspended[0][0].style === 'primary'
+    && opDetail[1][1].style === 'primary' && opSuspended[0][0].style === 'primary'
     && C.BOT_RECIPIENT_REMOVED === 'Removed.';
   line(ok, 'T10', 'destructive confirm: says what happens, danger only on the action',
     `one=${one.split('\n').pop()} danger=${danger.map((b) => b.style).join(',')}`);

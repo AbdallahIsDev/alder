@@ -74,6 +74,27 @@
 //        and cannot remove a phone
 //   OB17 a new lead's alert goes to EVERY bound phone of its business, once
 //        each, and to nobody else; a retry targets only the phone that failed
+//   OB24 the billing line of the business screen, exact, in every state: not
+//        tracked, paid, overdue (with the suspension date), overdue past the
+//        grace period, suspended for non-payment, suspended by hand, demo;
+//        connected and not connected; and "unavailable" when the database has
+//        no billing columns (migration 0006 not applied), where every other
+//        part of the screen still works
+//   OB25 Extend 30 days asks first: "Extend <Name> to <date>?" with the date
+//        max(paid_until, now) + 30 days, [Confirm] carrying that exact date
+//        and [Cancel] back to the business; nothing sent, nothing written
+//   OB26 Confirm: ONE update, paid_until forward to the date in the button
+//        and the warning stage to 0, scoped so it can never shorten a period;
+//        the result says what changed; a second tap (and two taps at once)
+//        changes nothing and adds no second period
+//   OB27 Confirm on a suspended business also reactivates it through the
+//        Reactivate path (status update, notice with the role keyboard) and
+//        says so; Reactivate alone never touches paid_until; a manual Suspend
+//        never sets suspended_for_billing
+//   OB28 a Confirm whose date is in the past or further than one period away
+//        is an expired screen and writes nothing; an unknown business shows
+//        the list; a malformed Extend callback is not a callback; no
+//        non-operator chat reaches Extend (OB12)
 
 import { loadEnv } from './env.mjs';
 import { fakeRes } from './helpers.mjs';
@@ -153,6 +174,8 @@ const tgRefuse = () => new Response(JSON.stringify({ ok: false, error_code: 400,
 const business = (id, slug, name, status) => ({
   id, slug, name, status, timezone: 'America/Chicago', owner_email: `${slug}@fixture.invalid`, google_review_url: 'https://g.page/r/x',
   site_host: `${slug}.test`,
+  // Migration 0006, with its defaults: not billed.
+  paid_until: null, billing_warning_stage: 0, suspended_for_billing: false,
 });
 
 /** Twelve businesses, so the list has three pages (5, 5, 2). Two share a name:
@@ -202,6 +225,8 @@ const match = (row, params) => {
     if (raw.startsWith('neq.')) { if (String(v) === raw.slice(4)) return false; continue; }
     if (raw === 'is.null') { if (v !== null && v !== undefined) return false; continue; }
     if (raw === 'not.is.null') { if (v === null || v === undefined) return false; continue; }
+    // As in SQL, NULL is neither before nor after anything.
+    if (/^(gt|gte|lt)\./.test(raw) && (v === null || v === undefined)) return false;
     if (raw.startsWith('gt.')) { if (!(new Date(v) > new Date(raw.slice(3)))) return false; continue; }
     if (raw.startsWith('gte.')) { if (!(new Date(v) >= new Date(raw.slice(4)))) return false; continue; }
     if (raw.startsWith('lt.')) { if (!(new Date(v) < new Date(raw.slice(3)))) return false; continue; }
@@ -445,18 +470,27 @@ const PAGE0 = ['Alder Roofing · Demo · 2 phones', 'Beta Roofing · Active · 1
 const PAGE0_IDS = [BIZ_A, BIZ_B, biz(4), biz(5), biz(6)];
 const PAGE1_IDS = [biz(9), biz(7), biz(8), biz(11), biz(12)];
 const listText = (rows) => 'Businesses\n\n' + rows.map((r, i) => `${i + 1}. ${r}`).join('\n');
-const DETAIL_A = 'Alder Roofing\nDemo · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total · 3 in the last 30 days\nLast lead: 2d ago';
-const DETAIL_FIR = 'Fir & Sons\nActive · fir\n\nTelegram: Not connected\n\nLeads: 0 total · 0 in the last 30 days';
-const DETAIL_P = 'Zz Paused\nSuspended · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total · 0 in the last 30 days';
+const DETAIL_A = 'Alder Roofing\nDemo · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total · 3 in the last 30 days\nLast lead: 2d ago\nBilling: not tracked';
+const DETAIL_FIR = 'Fir & Sons\nActive · fir\n\nTelegram: Not connected\n\nLeads: 0 total · 0 in the last 30 days\nBilling: not tracked';
+const DETAIL_P = 'Zz Paused\nSuspended · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total · 0 in the last 30 days\nBilling: not tracked';
 const detailKb = (id, page) => [
   [{ text: 'Suspend', callback_data: `bs:${page}:${id}`, style: 'danger' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
-  [{ text: 'Invite', callback_data: `bv:${page}:${id}`, style: 'primary' }, { text: 'Back', callback_data: `bl:${page}` }],
+  [{ text: 'Extend 30 days', callback_data: `be:${page}:${id}` }, { text: 'Invite', callback_data: `bv:${page}:${id}`, style: 'primary' }],
+  [{ text: 'Back', callback_data: `bl:${page}` }],
 ];
 const suspendedKb = (id, page) => [
   [{ text: 'Reactivate', callback_data: `br:${page}:${id}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
+  [{ text: 'Extend 30 days', callback_data: `be:${page}:${id}` }],
   [{ text: 'Back', callback_data: `bl:${page}` }],
 ];
 const backKb = (id, page) => [[{ text: 'Back', callback_data: `bd:${page}:${id}` }]];
+/** "Dec 14" in UTC, computed here and not by the code under test. */
+const shortDate = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+/** The date a Confirm button carries: whole seconds, base 36. */
+const untilToken = (ms) => Math.floor(ms / 1000).toString(36);
+const tokenMs = (token) => parseInt(token, 36) * 1000;
+const extendKb = (id, page, token) => [[{ text: 'Confirm', callback_data: `bE:${page}:${id}:${token}` }, { text: 'Cancel', callback_data: `bd:${page}:${id}` }]];
+const bizRow = (id) => store.businesses.find((b) => b.id === id);
 const packed = (businessId, leadId) => C.packUuid(businessId) + C.packUuid(leadId);
 const OPERATOR_KB = { keyboard: [[{ text: 'Invite' }, { text: 'Businesses' }]], is_persistent: true, resize_keyboard: true };
 const OWNER_KB = { keyboard: [[{ text: 'Invite' }, { text: 'Leads' }]], is_persistent: true, resize_keyboard: true };
@@ -641,7 +675,7 @@ try {
     sbHook = ({ table }) => (table === 'v_client_leads' ? fail500() : null);
     const blind = await run(cb(OP, `bd:0:${BIZ_A}`));
     sbHook = null;
-    const blindOk = blind.edits.length === 1 && textOf(blind.edits[0]).endsWith('Leads: ? total · ? in the last 30 days');
+    const blindOk = blind.edits.length === 1 && textOf(blind.edits[0]).endsWith('Leads: ? total · ? in the last 30 days\nBilling: not tracked');
     line(openOk && aggregates && otherOk && backOk && pausedOk && clean && blindOk,
       'OB3', 'business screen: three states, exact text, rows and styles',
       `open=${openOk} aggregates=${aggregates} notConnected=${otherOk} back=${backOk} suspended=${pausedOk} clean=${clean} unknown=${blindOk}`);
@@ -972,7 +1006,7 @@ try {
     const bad = [];
     for (const data of [`bd:0:${BIZ_GONE}`, `bs:0:${BIZ_GONE}`, `bS:0:${BIZ_GONE}`, `br:0:${BIZ_GONE}`, `bv:0:${BIZ_GONE}`,
       `bq:0:0:${BIZ_GONE}`, `bo:0:0:${packed(BIZ_GONE, leadIds[0])}`, `bt:0:${BIZ_GONE}`, `pb:${BIZ_GONE}`,
-      `bw:0:${BIZ_GONE}`, `bW:0:${BIZ_GONE}`, `bu:0:${BIZ_GONE}`]) {
+      `bw:0:${BIZ_GONE}`, `bW:0:${BIZ_GONE}`, `bu:0:${BIZ_GONE}`, `be:0:${BIZ_GONE}`, `bE:0:${BIZ_GONE}:${untilToken(Date.now() + 30 * DAY)}`]) {
       const x = await run(cb(OP, data));
       if (!same(x.answers, [C.OPERATOR_BUSINESS_GONE]) || x.sends.length || x.mail.length || x.edits.length !== 1
         || x.edits[0].body.text !== listText(PAGE0) || writes(x.sb).length) bad.push(data.slice(0, 2));
@@ -991,7 +1025,10 @@ try {
     const malformed = [];
     for (const data of ['bd:0:not-a-uuid', `bS:0:${BIZ_A}x`, `bS:${BIZ_A}`, 'bl:1000', 'bl:-1', 'bn:1000', 'bn:', `bq:100:0:${BIZ_A}`, 'bo:0:0:short',
       `bo:0:0:${packed(BIZ_A, leadIds[0])}=`, `bS:0:${BIZ_A}\n`, `bX:0:${BIZ_A}`, `BS:0:${BIZ_A}`, `br:0:${BIZ_A} `, `bi:${BIZ_A}`, `bv:0:0:${BIZ_A}`, `bs:0:${BIZ_A.toUpperCase()}`,
-      `bP:${BIZ_A}`, `bP:0:${BIZ_A}x`, `bW:0:${BIZ_A}\n`, `bp:1000:${BIZ_A}`, `Bp:0:${BIZ_A}`, `bP:0:0:${BIZ_A}`, `bW:0:${BIZ_A.toUpperCase()}`]) {
+      `bP:${BIZ_A}`, `bP:0:${BIZ_A}x`, `bW:0:${BIZ_A}\n`, `bp:1000:${BIZ_A}`, `Bp:0:${BIZ_A}`, `bP:0:0:${BIZ_A}`, `bW:0:${BIZ_A.toUpperCase()}`,
+      // Extend: the confirm needs its date, the question takes none.
+      `bE:0:${BIZ_A}`, `bE:0:${BIZ_A}:`, `bE:0:${BIZ_A}:ABC123`, `bE:0:${BIZ_A}:123456789`, `bE:0:${BIZ_A}:t0a1b2\n`, `bE:0:${BIZ_A}:-1`,
+      `be:0:${BIZ_A}:t0a1b2`, `bE:${BIZ_A}:t0a1b2`, `bE:0:${BIZ_A.toUpperCase()}:t0a1b2`, `Be:0:${BIZ_A}`]) {
       const x = await run(cb(OP, data));
       if (!same(x.answers, [C.TOAST_NOT_FOUND]) || x.sends.length || x.edits.length || x.mail.length || writes(x.sb).length) malformed.push(JSON.stringify(data.slice(0, 8)));
     }
@@ -1024,6 +1061,8 @@ try {
     const taps = ['bl:0', 'bn:0', `bd:0:${BIZ_A}`, `bs:0:${BIZ_A}`, `bS:0:${BIZ_A}`, `br:0:${BIZ_P}`, `bv:0:${BIZ_A}`, `bi:0:${BIZ_A}`,
       `bq:0:0:${BIZ_A}`, `bo:0:0:${packed(BIZ_A, leadIds[0])}`, `bS:0:${BIZ_B}`, `bi:0:${BIZ_B}`, `bo:0:0:${packed(BIZ_B, leadIds[0])}`,
       `bt:0:${BIZ_A}`, `bT:0:${BIZ_A}`, `pb:${BIZ_A}`, `pc:${BIZ_A}`, `pc:${BIZ_B}`, `p:${row}`, `P:${row}`, `q:${row}`,
+      // Extend: the question and the confirm, for the chat's own business and another.
+      `be:0:${BIZ_A}`, `bE:0:${BIZ_A}:${untilToken(Date.now() + 30 * DAY)}`, `be:0:${BIZ_B}`, `bE:0:${BIZ_B}:${untilToken(Date.now() + 30 * DAY)}`,
       // Replace phone: the question, the confirm and Cancel, from both origins,
       // for the chat's own business and for another one.
       `bp:0:${BIZ_A}`, `bP:0:${BIZ_A}`, `bc:0:${BIZ_A}`, `bw:0:${BIZ_A}`, `bW:0:${BIZ_A}`, `bu:0:${BIZ_A}`, `bP:0:${BIZ_B}`, `bW:0:${BIZ_B}`,
@@ -1540,7 +1579,7 @@ try {
   leadIds = seedSeven();
   {
     const STEPS = ['db.binding_lookup', 'db.business_page', 'db.chat_count_page', 'db.business_by_id', 'db.business_by_slug', 'db.chat_list',
-      'db.lead_totals', 'db.lead_count_recent', 'db.operator_lead_page', 'db.operator_lead_by_id', 'db.business_status_update',
+      'db.lead_totals', 'db.lead_count_recent', 'db.operator_lead_page', 'db.operator_lead_by_id', 'db.business_status_update', 'db.business_paid_until_update',
       'db.rate_limit', 'db.rate_limit_clear', 'db.chat_count', 'db.chat_remove_all', 'db.invite_mint', 'db.invite_expire_others',
       'db.invite_take_back', 'lookup.bot_username',
       'mail.suspension_notice', 'tg.send_message', 'tg.answer_callback', 'tg.edit_message_text'];
@@ -1596,6 +1635,12 @@ try {
       [cb(OWNER, `bS:0:${BIZ_B}`), 'cb.operator_suspend', 'callback', 1, 1],
       // Replace, from the business screen: two phones, so two notices.
       [cb(OP, `bW:0:${BIZ_A}`), 'cb.operator_replace', 'callback', 9, 5],
+      // Extend: the question is one read; the confirm one read and one write;
+      // a second confirm one read and nothing else.
+      [cb(OP, `be:0:${BIZ_B}`), 'cb.operator_extend_ask', 'callback', 2, 2],
+      [cb(OP, `bE:0:${BIZ_B}:${untilToken(Date.now() + 30 * DAY)}`), 'cb.operator_extend', 'callback', 3, 2],
+      [cb(OP, `bE:0:${BIZ_B}:${untilToken(Date.now() + 30 * DAY - 5000)}`), 'cb.operator_extend', 'callback', 2, 2],
+      [cb(OWNER, `bE:0:${BIZ_A}:${untilToken(Date.now() + 30 * DAY)}`), 'cb.operator_extend', 'callback', 1, 1],
     ];
     const problems = [];
     for (const [update, handlerName, type, db, tg] of flows) {
@@ -1693,6 +1738,300 @@ try {
       `all=${allOk} to=${all.to.length} retry=${retryOk} pending=${pending.length} none=${noneOk}`);
   }
 
+
+  /* ---------- billing on the operator's screens ---------- */
+
+  /* OB24: the billing line, in every state, to the character. */
+  store = freshStore();
+  {
+    const now = Date.now();
+    const set = (id, patch) => Object.assign(bizRow(id), patch);
+    const open = async (id, page = 0) => seen(await run(cb(OP, `bd:${page}:${id}`)));
+    const lastLine = (r) => textOf(r.edits[0]).split('\n').pop();
+    // Paid, connected (Beta Roofing has one phone): the whole screen.
+    const paidAt = now + 10 * DAY;
+    set(BIZ_B, { paid_until: new Date(paidAt).toISOString() });
+    const paid = await open(BIZ_B);
+    const paidOk = paid.edits.length === 1
+      && textOf(paid.edits[0]) === `Beta Roofing\nActive · beta\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total · 0 in the last 30 days\nPaid until: ${shortDate(paidAt)}`
+      && same(kbOf(paid.edits[0]), detailKb(BIZ_B, 0)) && writes(paid.sb).length === 0;
+    // Overdue, not connected (Fir & Sons has no phone): the suspension date
+    // is paid_until + 7 days.
+    const overdueAt = now - 2 * DAY;
+    set(biz(9), { paid_until: new Date(overdueAt).toISOString(), billing_warning_stage: 1 });
+    const overdue = await open(biz(9), 1);
+    const overdueOk = textOf(overdue.edits[0]) === `Fir & Sons\nActive · fir\n\nTelegram: Not connected\n\nLeads: 0 total · 0 in the last 30 days\nPaid until: ${shortDate(overdueAt)} (overdue, suspends ${shortDate(overdueAt + 7 * DAY)})`
+      && same(kbOf(overdue.edits[0]), detailKb(biz(9), 1));
+    // Past the grace period and not suspended yet (the job runs once a day).
+    set(biz(4), { paid_until: new Date(now - 8 * DAY).toISOString(), billing_warning_stage: 2 });
+    const expired = await open(biz(4));
+    const expiredOk = lastLine(expired) === `Paid until: ${shortDate(now - 8 * DAY)} (overdue, suspends at the next daily check)`;
+    // Suspended by the job: said in so many words, with the Reactivate layout.
+    set(BIZ_P, { paid_until: new Date(now - 9 * DAY).toISOString(), billing_warning_stage: 2, suspended_for_billing: true });
+    const unpaid = await open(BIZ_P, 2);
+    const unpaidOk = textOf(unpaid.edits[0]) === `Zz Paused\nSuspended · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total · 0 in the last 30 days\nSuspended for non-payment · paid until ${shortDate(now - 9 * DAY)}`
+      && same(kbOf(unpaid.edits[0]), suspendedKb(BIZ_P, 2));
+    // Suspended by hand: never "for non-payment", whatever the dates say.
+    set(BIZ_P, { suspended_for_billing: false });
+    const byHand = await open(BIZ_P, 2);
+    set(BIZ_P, { paid_until: new Date(now + 3 * DAY).toISOString() });
+    const byHandPaid = await open(BIZ_P, 2);
+    const byHandOk = lastLine(byHand) === `Paid until: ${shortDate(now - 9 * DAY)} (ended)` && !textOf(byHand.edits[0]).includes('non-payment')
+      && lastLine(byHandPaid) === `Paid until: ${shortDate(now + 3 * DAY)}`;
+    // A demo business is never enforced, and the line says so.
+    set(BIZ_A, { paid_until: new Date(now - 20 * DAY).toISOString() });
+    const demo = await open(BIZ_A);
+    const demoOk = lastLine(demo) === `Paid until: ${shortDate(now - 20 * DAY)} (demo: not enforced)`;
+    // Not billed.
+    const none = await open(biz(5));
+    const noneOk = lastLine(none) === 'Billing: not tracked' && same(kbOf(none.edits[0]), detailKb(biz(5), 0));
+    // The database has no billing columns: the screen still opens, from a
+    // second read that does not name them, and says billing is unavailable.
+    const missing = ({ table, method, params }) => (table === 'businesses' && method === 'GET' && String(param({ params }, 'select') || '').includes('paid_until')
+      ? new Response(JSON.stringify({ code: '42703', message: 'column businesses.paid_until does not exist' }), { status: 400, headers: { 'content-type': 'application/json' } })
+      : null);
+    sbHook = missing;
+    const bare = await open(BIZ_B);
+    const bareAsk = await run(cb(OP, `be:0:${BIZ_B}`));
+    const bareConfirm = await run(cb(OP, `bE:0:${BIZ_B}:${untilToken(now + 30 * DAY)}`));
+    const bareSuspend = await run(cb(OP, `bs:0:${BIZ_B}`));
+    sbHook = null;
+    const bareOk = bare.edits.length === 1 && lastLine(bare) === 'Billing: unavailable' && textOf(bare.edits[0]).startsWith('Beta Roofing\nActive · beta\n\nTelegram: Connected\n')
+      && same(kbOf(bare.edits[0]), detailKb(BIZ_B, 0))
+      && [bareAsk, bareConfirm].every((x) => x.edits.length === 1 && textOf(x.edits[0]) === C.OPERATOR_BILLING_UNAVAILABLE
+        && same(kbOf(x.edits[0]), backKb(BIZ_B, 0)) && writes(x.sb).length === 0 && x.sends.length === 0)
+      && bareSuspend.edits.length === 1 && textOf(bareSuspend.edits[0]).startsWith('Suspend Beta Roofing?');
+    // One billing line per screen, always the last.
+    const all = [paid, overdue, expired, unpaid, byHand, demo, none, bare];
+    const once = all.every((x) => textOf(x.edits[0]).split('\n').filter((l) => /^(Paid until|Billing|Suspended for non-payment)/.test(l)).length === 1);
+    line(paidOk && overdueOk && expiredOk && unpaidOk && byHandOk && demoOk && noneOk && bareOk && once,
+      'OB24', 'billing line: every state, exact; no columns -> unavailable',
+      `paid=${paidOk} overdue=${overdueOk} expired=${expiredOk} unpaid=${unpaidOk} byHand=${byHandOk} demo=${demoOk} none=${noneOk} bare=${bareOk} once=${once}`);
+  }
+
+  /* OB25: Extend 30 days asks first, with the computed date. */
+  store = freshStore();
+  {
+    const set = (id, patch) => Object.assign(bizRow(id), patch);
+    const near = (a, b) => Math.abs(a - b) < 15000;
+    const askFor = async (id, page = 0) => {
+      const t0 = Date.now();
+      const r = seen(await run(cb(OP, `be:${page}:${id}`)));
+      const kb = kbOf(r.edits[0]);
+      const data = kb[0] && kb[0][0] ? String(kb[0][0].callback_data) : '';
+      const token = data.split(':')[3] || '';
+      return { r, kb, token, target: tokenMs(token), t0, data };
+    };
+    const before = snapshot();
+    // Never billed: 30 days from now.
+    const fresh = await askFor(BIZ_B);
+    const freshOk = near(fresh.target, fresh.t0 + 30 * DAY)
+      && fresh.r.edits.length === 1 && fresh.r.edits[0].body.message_id === 9
+      && textOf(fresh.r.edits[0]) === `Extend Beta Roofing to ${shortDate(fresh.target)}?`
+      && same(fresh.kb, extendKb(BIZ_B, 0, fresh.token)) && same(fresh.r.answers, [''])
+      && fresh.r.sends.length === 0 && fresh.r.mail.length === 0 && writes(fresh.r.sb).length === 0
+      && Buffer.byteLength(fresh.data, 'utf8') <= 64 && fresh.r.sb.length === 2; // binding, business
+    // Still paid: the days it has are kept; 30 are added to paid_until.
+    const paidAt = Math.floor((Date.now() + 10 * DAY) / 1000) * 1000;
+    set(BIZ_B, { paid_until: new Date(paidAt).toISOString() });
+    const paid = await askFor(BIZ_B, 3);
+    const paidOk = paid.target === paidAt + 30 * DAY && textOf(paid.r.edits[0]) === `Extend Beta Roofing to ${shortDate(paidAt + 30 * DAY)}?`
+      && same(paid.kb, extendKb(BIZ_B, 3, paid.token));
+    // Overdue: the 30 days start now, not at the old date.
+    set(BIZ_B, { paid_until: new Date(Date.now() - 5 * DAY).toISOString(), billing_warning_stage: 1 });
+    const late = await askFor(BIZ_B);
+    const lateOk = near(late.target, late.t0 + 30 * DAY) && textOf(late.r.edits[0]) === `Extend Beta Roofing to ${shortDate(late.target)}?`;
+    // Suspended: the question says what else Confirm will do.
+    const susp = await askFor(BIZ_P, 2);
+    const suspOk = textOf(susp.r.edits[0]) === `Extend Zz Paused to ${shortDate(susp.target)}?\n\nIt is suspended. Confirm also reactivates it.`
+      && same(susp.kb, extendKb(BIZ_P, 2, susp.token)) && susp.r.sends.length === 0;
+    // Cancel is the business screen, and nothing moved: the two rows that
+    // were set by hand above are the only difference from the start.
+    const cancel = await run(cb(OP, `bd:0:${biz(5)}`));
+    const cancelOk = cancel.edits.length === 1 && textOf(cancel.edits[0]).endsWith('Billing: not tracked') && same(kbOf(cancel.edits[0]), detailKb(biz(5), 0));
+    set(BIZ_B, { paid_until: null, billing_warning_stage: 0 });
+    line(freshOk && paidOk && lateOk && suspOk && cancelOk && snapshot() === before,
+      'OB25', 'Extend asks first: the date, Confirm carries it, nothing written',
+      `fresh=${freshOk} paid=${paidOk} late=${lateOk} suspended=${suspOk} cancel=${cancelOk} unchanged=${snapshot() === before}`);
+  }
+
+  /* OB26: Confirm writes once; a second tap, or two at once, adds nothing. */
+  store = freshStore();
+  {
+    const set = (id, patch) => Object.assign(bizRow(id), patch);
+    const others = (id) => JSON.stringify({ b: store.businesses.filter((b) => b.id !== id), c: store.chats, k: store.codes, l: store.leads });
+    const before = others(BIZ_B);
+    // Overdue, final warning sent: the stage must be cleared with the date.
+    const oldAt = new Date(Date.now() - 6 * DAY).toISOString();
+    set(BIZ_B, { paid_until: oldAt, billing_warning_stage: 2 });
+    const ask = await run(cb(OP, `be:0:${BIZ_B}`));
+    const data = String(kbOf(ask.edits[0])[0][0].callback_data);
+    const target = tokenMs(data.split(':')[3]);
+    const iso = new Date(target).toISOString();
+    const r = seen(await run(cb(OP, data)));
+    const w = writes(r.sb);
+    const writeOk = w.length === 1 && w[0].table === 'businesses' && w[0].method === 'PATCH'
+      && param(w[0], 'id') === `eq.${BIZ_B}` && param(w[0], 'paid_until') === `lt.${iso}`
+      && same(w[0].body, { paid_until: iso, billing_warning_stage: 0 })
+      && Date.parse(bizRow(BIZ_B).paid_until) === target && bizRow(BIZ_B).billing_warning_stage === 0
+      && bizRow(BIZ_B).status === 'active' && bizRow(BIZ_B).suspended_for_billing === false;
+    // An active business: nobody is messaged, nothing else is touched.
+    const resultOk = r.sends.length === 0 && r.mail.length === 0 && r.edits.length === 1 && r.edits[0].body.message_id === 9
+      && textOf(r.edits[0]) === `Beta Roofing paid until ${shortDate(target)}`
+      && same(kbOf(r.edits[0]), backKb(BIZ_B, 0)) && same(r.answers, ['Extended.']) && others(BIZ_B) === before;
+    // The same button again: the date is already stored. No write, no notice,
+    // and no second period.
+    const afterFirst = snapshot();
+    const again = seen(await run(cb(OP, data)));
+    const third = await run(cb(OP, data));
+    const againOk = [again, third].every((x) => writes(x.sb).length === 0 && x.sends.length === 0 && x.mail.length === 0
+      && x.edits.length === 1 && textOf(x.edits[0]) === `Beta Roofing is already paid until ${shortDate(target)}. Nothing changed.`
+      && same(kbOf(x.edits[0]), backKb(BIZ_B, 0)) && same(x.answers, ['Already extended.']))
+      && snapshot() === afterFirst;
+    // A button for an EARLIER date than what is stored: also nothing.
+    const earlier = await run(cb(OP, `bE:0:${BIZ_B}:${untilToken(target - 3 * DAY)}`));
+    const earlierOk = writes(earlier.sb).length === 0 && same(earlier.answers, ['Already extended.']) && snapshot() === afterFirst;
+    // Never billed: the write is scoped to "still not billed".
+    const askNull = await run(cb(OP, `be:0:${biz(4)}`));
+    const dataNull = String(kbOf(askNull.edits[0])[0][0].callback_data);
+    const targetNull = tokenMs(dataNull.split(':')[3]);
+    const first = await run(cb(OP, dataNull));
+    const wn = writes(first.sb);
+    const nullOk = wn.length === 1 && param(wn[0], 'id') === `eq.${biz(4)}` && param(wn[0], 'paid_until') === 'is.null'
+      && same(wn[0].body, { paid_until: new Date(targetNull).toISOString(), billing_warning_stage: 0 })
+      && Date.parse(bizRow(biz(4)).paid_until) === targetNull && textOf(first.edits[0]) === `Cedar Co paid until ${shortDate(targetNull)}`;
+    // Two taps on the same Confirm, at the same moment: one period, not two.
+    const askRace = await run(cb(OP, `be:0:${biz(5)}`));
+    const dataRace = String(kbOf(askRace.edits[0])[0][0].callback_data);
+    const targetRace = tokenMs(dataRace.split(':')[3]);
+    await tgReset();
+    sbRequests = [];
+    await Promise.all([call(cb(OP, dataRace)), call(cb(OP, dataRace))]);
+    const raceEdits = of(await tgReqs(), 'editMessageText').map((x) => textOf(x)).sort();
+    const raceOk = Date.parse(bizRow(biz(5)).paid_until) === targetRace
+      && same(raceEdits, [`Delta Roofs is already paid until ${shortDate(targetRace)}. Nothing changed.`, `Delta Roofs paid until ${shortDate(targetRace)}`].sort());
+    // The write fails: nothing is reported as done, and nothing is stored.
+    const askFail = await run(cb(OP, `be:0:${biz(6)}`));
+    const dataFail = String(kbOf(askFail.edits[0])[0][0].callback_data);
+    sbHook = ({ table, method }) => (table === 'businesses' && method === 'PATCH' ? fail500() : null);
+    const failedWrite = await run(cb(OP, dataFail));
+    sbHook = null;
+    const failOk = bizRow(biz(6)).paid_until === null && failedWrite.edits.length === 0 && same(failedWrite.answers, [C.TOAST_GENERIC_ERROR])
+      && failedWrite.sends.length === 0;
+    line(writeOk && resultOk && againOk && earlierOk && nullOk && raceOk && failOk,
+      'OB26', 'Extend confirm: one forward-only update; repeat adds nothing',
+      `write=${writeOk} result=${resultOk} again=${againOk} earlier=${earlierOk} null=${nullOk} race=${raceOk} fail=${failOk}`);
+  }
+
+  /* OB27: a suspended business is reactivated by Extend, through Reactivate. */
+  store = freshStore();
+  {
+    const set = (id, patch) => Object.assign(bizRow(id), patch);
+    const PHONE_P = 777000111;
+    const confirmFor = async (id, page) => {
+      const ask = await run(cb(OP, `be:${page}:${id}`));
+      const data = String(kbOf(ask.edits[0])[0][0].callback_data);
+      return { data, target: tokenMs(data.split(':')[3]) };
+    };
+    // Suspended by the billing job.
+    set(BIZ_P, { paid_until: new Date(Date.now() - 9 * DAY).toISOString(), billing_warning_stage: 2, suspended_for_billing: true });
+    const a = await confirmFor(BIZ_P, 2);
+    const r = seen(await run(cb(OP, a.data)));
+    const w = writes(r.sb);
+    const status = w[1] ? String(param(w[1], 'status')) : '';
+    const writeOk = w.length === 2 && w.every((q) => q.table === 'businesses' && q.method === 'PATCH' && param(q, 'id') === `eq.${BIZ_P}`)
+      && same(w[0].body, { paid_until: new Date(a.target).toISOString(), billing_warning_stage: 0 })
+      // The Reactivate statement: scoped to the suspended statuses, and the
+      // "for non-payment" mark goes with it.
+      && /^in\.\("?paused"?,"?churned"?\)$/.test(status) && same(w[1].body, { status: 'active', suspended_for_billing: false })
+      && bizRow(BIZ_P).status === 'active' && bizRow(BIZ_P).suspended_for_billing === false
+      && bizRow(BIZ_P).billing_warning_stage === 0 && Date.parse(bizRow(BIZ_P).paid_until) === a.target;
+    // The phone is told exactly what Reactivate tells it, keyboard included.
+    const noticeOk = r.sends.length === 1 && String(r.sends[0].body.chat_id) === String(PHONE_P)
+      && textOf(r.sends[0]) === 'Your service is active again.' && same(r.sends[0].body.reply_markup, OWNER_KB) && r.mail.length === 0;
+    const resultOk = r.edits.length === 1 && textOf(r.edits[0]) === `Zz Paused paid until ${shortDate(a.target)} · reactivated`
+      && same(kbOf(r.edits[0]), backKb(BIZ_P, 2)) && same(r.answers, ['Extended.']);
+    // Again: no second notice, no write.
+    const again = await run(cb(OP, a.data));
+    const againOk = writes(again.sb).length === 0 && again.sends.length === 0 && same(again.answers, ['Already extended.']);
+    // The screen now: active, paid, the served layout.
+    const now = await run(cb(OP, `bd:2:${BIZ_P}`));
+    const nowOk = textOf(now.edits[0]) === `Zz Paused\nActive · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total · 0 in the last 30 days\nPaid until: ${shortDate(a.target)}`
+      && same(kbOf(now.edits[0]), detailKb(BIZ_P, 2));
+
+    // Suspended by hand (Alder, two phones), one notice refused: still
+    // reactivated, the failure counted; each phone gets its own keyboard.
+    set(BIZ_A, { status: 'paused' });
+    const b = await confirmFor(BIZ_A, 0);
+    tgHook = ({ method, chat }) => (method === 'sendMessage' && String(chat) === String(STAFF) ? tgRefuse() : null);
+    const hand = seen(await run(cb(OP, b.data)));
+    tgHook = null;
+    const hw = writes(hand.sb);
+    const handOk = hw.length === 2 && same(hw[1].body, { status: 'active' }) && bizRow(BIZ_A).status === 'active'
+      && textOf(hand.edits[0]) === `Alder Roofing paid until ${shortDate(b.target)} · reactivated · 1 notice failed`
+      && hand.sends.length === 1 && String(hand.sends[0].body.chat_id) === String(OWNER) && same(hand.sends[0].body.reply_markup, OWNER_KB);
+
+    // The phones cannot be read: the date is stored, the status is left for
+    // the Reactivate button, and the result says so.
+    set(BIZ_C, { status: 'paused' });
+    const c = await confirmFor(BIZ_C, 2);
+    sbHook = ({ table, params }) => (table === 'business_chats' && param({ params }, 'business_id') === `eq.${BIZ_C}` ? fail500() : null);
+    const blind = await run(cb(OP, c.data));
+    sbHook = null;
+    const blindOk = Date.parse(bizRow(BIZ_C).paid_until) === c.target && bizRow(BIZ_C).status === 'paused'
+      && textOf(blind.edits[0]) === `Juniper Roofing paid until ${shortDate(c.target)} · still suspended, press Reactivate`;
+
+    // Reactivate alone is not a payment: paid_until and the stage stay.
+    const stale = new Date(Date.now() - 30 * DAY).toISOString();
+    set(BIZ_B, { status: 'paused', paid_until: stale, billing_warning_stage: 2, suspended_for_billing: true });
+    const react = await run(cb(OP, `br:0:${BIZ_B}`));
+    const rw = writes(react.sb);
+    const reactOk = rw.length === 1 && same(rw[0].body, { status: 'active', suspended_for_billing: false })
+      && bizRow(BIZ_B).paid_until === stale && bizRow(BIZ_B).billing_warning_stage === 2 && bizRow(BIZ_B).status === 'active'
+      && textOf(react.edits[0]) === 'Beta Roofing reactivated';
+    // A manual Suspend never marks the business as unpaid: the statement
+    // names the status and nothing else.
+    set(biz(4), { paid_until: new Date(Date.now() + 5 * DAY).toISOString() });
+    const manual = await run(cb(OP, `bS:0:${biz(4)}`));
+    const mw = writes(manual.sb);
+    const manualOk = mw.length === 1 && same(mw[0].body, { status: 'paused' }) && bizRow(biz(4)).suspended_for_billing === false
+      && bizRow(biz(4)).status === 'paused';
+    line(writeOk && noticeOk && resultOk && againOk && nowOk && handOk && blindOk && reactOk && manualOk,
+      'OB27', 'Extend reactivates through Reactivate; Reactivate is not a payment',
+      `write=${writeOk} notice=${noticeOk} result=${resultOk} again=${againOk} screen=${nowOk} byHand=${handOk} blind=${blindOk} reactivate=${reactOk} manual=${manualOk}`);
+  }
+
+  /* OB28: a Confirm that is out of date writes nothing. */
+  store = freshStore();
+  {
+    const set = (id, patch) => Object.assign(bizRow(id), patch);
+    const paidAt = Math.floor((Date.now() + 10 * DAY) / 1000) * 1000;
+    set(BIZ_B, { paid_until: new Date(paidAt).toISOString() });
+    const before = snapshot();
+    const expired = [];
+    const tap = async (data, label) => {
+      const x = await run(cb(OP, data));
+      if (!same(x.answers, [EXPIRED]) || x.sends.length || x.mail.length || writes(x.sb).length || x.edits.length !== 1
+        || !textOf(x.edits[0]).startsWith('Beta Roofing\nActive · beta\n') && !textOf(x.edits[0]).startsWith('Cedar Co\nActive · cedar\n')) expired.push(label);
+    };
+    // One second further than one press can reach from here: refused. (A
+    // button can never add more than one period, whatever it carries.)
+    await tap(`bE:0:${BIZ_B}:${untilToken(paidAt + 30 * DAY + 1000)}`, 'one-second-over');
+    await tap(`bE:0:${BIZ_B}:${untilToken(paidAt + 60 * DAY)}`, 'two-periods');
+    await tap(`bE:0:${BIZ_B}:zzzzzzzz`, 'far-future');
+    // Not billed, and the button's date is already in the past, or far ahead.
+    await tap(`bE:0:${biz(4)}:${untilToken(Date.now() - DAY)}`, 'past');
+    await tap(`bE:0:${biz(4)}:${untilToken(Date.now() + 31 * DAY)}`, 'null-over');
+    await tap(`bE:0:${biz(4)}:0`, 'zero');
+    // Exactly what one press reaches is accepted (the boundary of the rule).
+    const exact = await run(cb(OP, `bE:0:${BIZ_B}:${untilToken(paidAt + 30 * DAY)}`));
+    const exactOk = writes(exact.sb).length === 1 && Date.parse(bizRow(BIZ_B).paid_until) === paidAt + 30 * DAY;
+    set(BIZ_B, { paid_until: new Date(paidAt).toISOString() });
+    line(expired.length === 0 && exactOk && snapshot() === before,
+      'OB28', 'stale Extend confirm: expired screen, nothing written',
+      `refused=${expired.join(',') || 'all'} exact=${exactOk} unchanged=${snapshot() === before}`);
+  }
+
   /* OB15: over the whole suite, every message the operator chat was sent. */
   {
     await tgReset();
@@ -1701,14 +2040,14 @@ try {
     const inline = toOperator.flatMap((x) => kbOf(x).flat());
     const EMOJI = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{FE0F}\u{200D}\u{2190}-\u{21FF}]/u;
     const withEmoji = allTg.flatMap((x) => kbOf(x).flat()).filter((b) => EMOJI.test(String(b.text)));
-    const PATTERNS = [/^(bl|bn):\d{1,3}$/, /^(bd|bs|bS|br|bv|bi|bp|bP|bc|bw|bW|bu):\d{1,3}:[0-9a-f-]{36}$/, /^bq:\d{1,2}:\d{1,3}:[0-9a-f-]{36}$/,
+    const PATTERNS = [/^(bl|bn):\d{1,3}$/, /^(bd|bs|bS|br|be|bv|bi|bp|bP|bc|bw|bW|bu):\d{1,3}:[0-9a-f-]{36}$/, /^bE:\d{1,3}:[0-9a-f-]{36}:[0-9a-z]{1,8}$/, /^bq:\d{1,2}:\d{1,3}:[0-9a-f-]{36}$/,
       /^bo:\d{1,2}:\d{1,3}:[A-Za-z0-9_-]{44}$/];
     const data = inline.map((b) => String(b.callback_data));
     const unshaped = data.filter((d) => Buffer.byteLength(d, 'utf8') > 64 || !PATTERNS.some((p) => p.test(d)));
     const STYLES = { Suspend: 'danger', 'Confirm suspend': 'danger', 'Replace phone': 'danger', 'Confirm replace': 'danger', Invite: 'primary', Reactivate: 'primary' };
     const styled = inline.filter((b) => (b.style || null) !== (STYLES[b.text] || null));
     const labels = [...new Set(inline.map((b) => b.text))].filter((t) => !/^\d$/.test(t)).sort();
-    const labelsOk = same(labels, ['Back', 'Cancel', 'Confirm replace', 'Confirm suspend', 'Invite', 'Leads', 'Newer', 'Older', 'Reactivate', 'Replace phone', 'Suspend']);
+    const labelsOk = same(labels, ['Back', 'Cancel', 'Confirm', 'Confirm replace', 'Confirm suspend', 'Extend 30 days', 'Invite', 'Leads', 'Newer', 'Older', 'Reactivate', 'Replace phone', 'Suspend']);
     // Nothing a customer typed, and no retired word, in anything the operator
     // chat was shown by the flows above.
     const words = operatorTexts.filter((t) => /Requests?\b|Terminate|\/phones|\/code\b/.test(t)
