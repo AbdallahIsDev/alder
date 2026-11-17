@@ -508,6 +508,44 @@ period. The seam for a payment provider exists: `applyPayment()` in
 call. Its contract is in the code: idempotent, never shortens a paid period,
 clears the warning stage, restores a business that was off for non-payment.
 
+### Payment-provider stage design notes
+
+Not built. These are the decisions the webhook will be written against, so the
+provider work does not have to invent them under time pressure. The reference
+for the provider itself is `docs/WHOP.md`; the seam in the code is
+`applyPayment()` in `lib/billing-ops.js`.
+
+- **`paid_until` comes from the provider's period end**, not from the moment the
+  webhook arrives. A delivery that is minutes or hours late must not shorten or
+  extend what the customer paid for. When the payload carries no period end, the
+  webhook does not guess: it logs and waits for the next delivery.
+- **Idempotency is keyed by the provider's delivery id.** Store the id before
+  acting on it, and treat a second delivery with the same id as a no-op that
+  still answers 2xx. `applyPayment()` is already idempotent for the same period
+  end, so a double tap and a double delivery reach the same state.
+- **Answer 2xx within 5 seconds.** Do the minimum inside the request (verify the
+  signature, record the delivery id, apply the payment) and let anything slower —
+  email, the Telegram notice, the notice-log row — run after the response. A
+  provider that waits too long retries, and a retry is harmless only because of
+  the delivery id.
+- **Deliveries repeat and can arrive out of order.** Never assume the newest
+  event is the last one received. Every decision is made from the payload's own
+  effective date, and the state on the row is compared to it, not to the order of
+  arrival. A duplicate payment notice is not a second payment.
+- **The provider's own cancellation does not terminate a business by itself.**
+  It records the fact; Alder's clock decides the status. Grace, suspension and
+  termination are the durations in `lib/lifecycle-config.js` and nothing in a
+  webhook shortens them.
+- **A refund means Terminate.** The business is `churned`, displayed as
+  "Terminated", and the everyday flow is the one in §3b: the form answers 410 and
+  stores nothing, the data stays for the retention window. Reason recorded as
+  `manual`, because nobody was reached about money — the refund already happened.
+- **A chargeback means suspend.** Money is contested, not returned: the service
+  stops now (`status = 'paused'`, `suspended_for_billing = true`) and the held
+  lead flow applies. It is a billing suspension, so the owner sees the
+  "Renew to see them." sentence and can reactivate by paying again; if the
+  chargeback stands, the operator terminates by hand.
+
 ### Migrations this needs
 
 - `0006_business_billing.sql`: the billing columns. Without it the business
