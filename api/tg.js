@@ -27,7 +27,8 @@ import {
   BOT_OWNER_ONLY, botForwardText,
   operatorCodeText, operatorCodeResendText,
   operatorBusinessListText, operatorBusinessListKeyboard, operatorBusinessDetailText, operatorBusinessDetailKeyboard,
-  operatorSuspendConfirmText, operatorSuspendConfirmKeyboard, operatorSuspendedText, operatorReactivatedText,
+  operatorSuspendConfirmText, operatorSuspendConfirmKeyboard, operatorSuspendedText,
+  operatorReactivateConfirmText, operatorReactivateConfirmKeyboard, operatorReactivatedText,
   operatorTerminateConfirmText, operatorTerminateConfirmKeyboard, operatorTerminatedText, operatorAlreadyTerminatedText,
   OPERATOR_TERMINATED, OPERATOR_ALREADY_TERMINATED,
   operatorAlreadySuspendedText, operatorAlreadyActiveText, operatorInviteSuspendedText,
@@ -1099,8 +1100,12 @@ async function sendBusinessDetail({ chatId, messageId, businessId, page, answer,
       held,
     },
   });
+  const suspended = isSuspendedStatus(business.status);
   const markup = operatorBusinessDetailKeyboard(business.id, page, {
-    suspended: isSuspendedStatus(business.status), terminated: business.status === 'churned',
+    suspended,
+    terminated: business.status === 'churned',
+    connected: Array.isArray(chats.value) && chats.value.length > 0,
+    billingSuspended: suspended && !business.billing_unavailable && business.suspended_for_billing === true,
   });
   await together([answer(toast), editList(chatId, messageId, text, markup)]);
 }
@@ -1261,22 +1266,18 @@ async function handleOperatorTerminate({ chatId, messageId, businessId, page, an
 }
 
 /**
- * Reactivate: one tap, no question (it only switches a service back on), for
- * a suspended and for a terminated business. reactivateBusiness()
- * (lib/service-status.js, shared with a recorded payment): the status goes to
- * 'active' in one UPDATE scoped by the id AND the suspended statuses, so a
- * business that was demo before comes back as active and a second tap
- * changes nothing. Then every bound phone is told, with its own role
- * keyboard on the same message (the main phone is the oldest binding), and
- * the owner address by email; the notice says how many leads were held. A
- * notice that fails blocks nothing. paid_until is not touched: reactivating
- * is not paying, so a business whose payment is still overdue is suspended
- * again by the next daily run.
+ * Reactivate: br opens a confirmation, bR does the work. A stale br from an
+ * old screen always lands on the question, never on the state change.
+ * reactivateBusiness() (lib/service-status.js, shared with a recorded
+ * payment) then writes 'active' in one UPDATE scoped by the id AND the
+ * suspended statuses, so a second tap changes nothing. Every bound phone
+ * gets its role keyboard back and the owner address gets the same email;
+ * the notice says how many leads were held. paid_until is not touched.
  */
-async function handleOperatorReactivate({ chatId, messageId, businessId, page, answer }) {
+async function handleOperatorReactivate({ chatId, messageId, businessId, page, answer, confirmed = false }) {
   const [biz, chats] = await together([
     settle(getBusinessById(businessId)),
-    settle(listBusinessChatsDetailed(businessId)),
+    confirmed ? settle(listBusinessChatsDetailed(businessId)) : null,
   ]);
   if (biz.error) throw biz.error;
   const business = biz.value;
@@ -1286,14 +1287,21 @@ async function handleOperatorReactivate({ chatId, messageId, businessId, page, a
     answer(OPERATOR_ALREADY_ACTIVE),
     editList(chatId, messageId, operatorAlreadyActiveText(business), back),
   ]);
+  if (!confirmed) {
+    await together([
+      answer(''),
+      editList(chatId, messageId, operatorReactivateConfirmText(business), operatorReactivateConfirmKeyboard(business.id, page)),
+    ]);
+    return;
+  }
   if (!isSuspendedStatus(business.status)) { await already(); return; }
   if (chats.error) throw chats.error;
 
-  const { changed, notice, held } = await reactivateBusiness({ business, rows: chats.value, reason: 'manual' }, SERVICE_IO);
+  const { changed, notice } = await reactivateBusiness({ business, rows: chats.value, reason: 'manual' }, SERVICE_IO);
   if (!changed) { await already(); return; }
   await together([
     answer(OPERATOR_REACTIVATED),
-    editList(chatId, messageId, operatorReactivatedText(business, { held, notice }), back),
+    editList(chatId, messageId, operatorReactivatedText(business, { notice }), back),
   ]);
 }
 
@@ -1362,8 +1370,7 @@ async function handleOperatorExtend({ chatId, messageId, businessId, page, answe
   await together([
     answer(OPERATOR_EXTENDED),
     editList(chatId, messageId, operatorExtendedText({
-      business, paidUntil: r.paidUntil, wasSuspended: r.wasSuspended, reactivated: r.reactivated,
-      failed: r.notice && Array.isArray(r.notice.failures) ? r.notice.failures.length : 0,
+      business, paidUntil: r.paidUntil, reactivated: r.reactivated, notice: r.notice || null,
     }), back),
   ]);
 }
@@ -1675,12 +1682,12 @@ const CB_OPERATOR_PICK = /^(pb|pc):([0-9a-f-]{36})$/;
 // bounded digits and every id is a uuid, as text or as 22 packed characters.
 // bl = the business list, bn = the /invite list.
 const CB_OP_LIST = /^(bl|bn):(\d{1,3})$/;
-// bd open, bs ask to suspend, bS suspend, br reactivate, be ask to extend
-// the paid period, bx ask to terminate, bX terminate; bt and bT were the
+// bd open, bs ask to suspend, bS suspend, br ask to reactivate, bR reactivate,
+// be ask to extend the paid period, bx ask to terminate, bX terminate; bt/bT were the
 // retired Terminate (it deleted data) and only ever answer "expired". The invite flow, once per origin (see OP_INVITE_STEPS): from the
 // /invite list bi open, bp ask to replace, bP replace, bc cancel; from the
 // business bv, bw, bW, bu.
-const CB_OP_BUSINESS = /^(bd|bs|bS|br|be|bi|bp|bP|bc|bv|bw|bW|bu|bt|bT|bx|bX):(\d{1,3}):([0-9a-f-]{36})$/;
+const CB_OP_BUSINESS = /^(bd|bs|bS|br|bR|be|bi|bp|bP|bc|bv|bw|bW|bu|bt|bT|bx|bX):(\d{1,3}):([0-9a-f-]{36})$/;
 // bE: extend to exactly <until> (whole seconds, base 36; lib/billing.js).
 const CB_OP_EXTEND = /^bE:(\d{1,3}):([0-9a-f-]{36}):([0-9a-z]{1,8})$/;
 const CB_OP_LEADS = /^bq:(\d{1,2}):(\d{1,3}):([0-9a-f-]{36})$/;
@@ -1694,7 +1701,7 @@ const OP_INVITE_STEPS = {
 };
 const OP_BUSINESS_HANDLER_NAMES = {
   bd: 'cb.operator_business_open', bs: 'cb.operator_suspend_ask', bS: 'cb.operator_suspend',
-  br: 'cb.operator_reactivate', be: 'cb.operator_extend_ask', bv: 'cb.operator_invite_business', bi: 'cb.operator_invite_open',
+  br: 'cb.operator_reactivate_ask', bR: 'cb.operator_reactivate', be: 'cb.operator_extend_ask', bv: 'cb.operator_invite_business', bi: 'cb.operator_invite_open',
   bp: 'cb.operator_replace_ask', bw: 'cb.operator_replace_ask',
   bP: 'cb.operator_replace', bW: 'cb.operator_replace',
   bc: 'cb.operator_replace_cancel', bu: 'cb.operator_replace_cancel',
@@ -1820,6 +1827,7 @@ async function handleCallback(cb, binding) {
         else if (kind === 'bs' || kind === 'bS') await handleOperatorSuspend({ ...at, confirmed: kind === 'bS' });
         else if (kind === 'bx' || kind === 'bX') await handleOperatorTerminate({ ...at, confirmed: kind === 'bX' });
         else if (kind === 'br') await handleOperatorReactivate(at);
+        else if (kind === 'bR') await handleOperatorReactivate({ ...at, confirmed: true });
         else if (kind === 'be') await handleOperatorExtend(at);
         else if (OP_INVITE_STEPS[kind]) {
           await operatorInviteStep({ ...at, from: OP_INVITE_STEPS[kind].from }, { step: OP_INVITE_STEPS[kind].step, businessId: at.businessId });
