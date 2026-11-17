@@ -1204,13 +1204,14 @@ try {
       `lines=${printed.length} cold=${printed.map((x) => x.cold).join(',')} steps=${printed.map((x) => x.steps.length).join(',')} dropped=${second && second.steps_dropped}`);
   }
 
-  /* LB24: held leads are marked in place, and the header states the TOTAL. The
-     renewal notice tells the owner "5 leads came in while your service was
-     suspended"; a page that counted only its own rows answered 2 for the same
-     fact. Six held leads here, so page 0 carries five held rows and says six,
-     page 1 carries one and still says six, and page 2 carries none and says
-     nothing. The fourth "held" line sits inside the existing block, the detail
-     gets one fact line, and /remove_lead carries none of it. */
+  /* LB24: held leads get their OWN group in /leads, and the heading states the
+     TOTAL. The renewal notice tells the owner "5 leads came in while your
+     service was suspended"; a page that counted only its own rows answered 2
+     for the same fact. Six held leads here: page 0 has five held rows under the
+     group heading, page 1 has one held row then "Other requests", page 2 has
+     no group at all. Numbers, ids, callbacks and the five-row page do not move,
+     and every held row keeps its "held" mark. The detail gets one fact line;
+     /remove_lead carries none of it. */
   store = freshStore();
   {
     const heldAt = '2026-11-14T12:00:00Z';
@@ -1230,10 +1231,11 @@ try {
     const first = (await sends()).pop();
     const firstText = String(first.body.text);
     const firstKb = kbOf(first);
-    const firstBlocks = firstText.split('\n\n').slice(1);
+    const blocksOf = (t) => t.split('\n\n').filter((b) => /^\d+\. /.test(b));
+    const firstBlocks = blocksOf(firstText);
     const heldRows = firstBlocks.filter((b) => b.split('\n').includes('held'));
     const header = 'Received while suspended: 6';
-    const firstOk = firstText.startsWith(`Recent requests\n${header}\n\n`)
+    const firstOk = firstText.startsWith(`Recent requests\n\n${header}\n\n`)
       && firstBlocks.length === 5 && heldRows.length === 5
       && heldRows.every((b) => /^[1-5]\. Held /.test(b.split('\n')[0]))
       && numbersOk(firstKb[0], 5)
@@ -1245,18 +1247,20 @@ try {
     await call(cb(OWNER, 'l:1'));
     const page1 = String((await edits())[0].body.text);
     const page1Kb = kbOf((await edits())[0]);
-    const page1Blocks = page1.split('\n\n').slice(1);
+    const page1Blocks = blocksOf(page1);
     const page1Held = page1Blocks.filter((b) => b.split('\n').includes('held'));
-    const page1Ok = page1.startsWith(`Recent requests\n${header}\n\n`) && page1Blocks.length === 5
+    const page1Ok = page1.startsWith(`Recent requests\n\n${header}\n\n`)
+      && page1.includes('\n\nOther requests\n\n') && page1Blocks.length === 5
       && page1Held.length === 1 && numbersOk(page1Kb[0], 5)
       && order1.every((id, i) => page1Kb[0][i].callback_data === `L:1:${id}`)
       && page1.split('\n').every((l) => l.length <= 34);
 
-    // A page with no held row is not told about held leads at all.
+    // A page with no held row has no held group and no "Other requests" either.
     await tgReset();
     await call(cb(OWNER, 'l:2'));
     const page2 = String((await edits())[0].body.text);
     const page2Ok = page2.startsWith('Recent requests\n\n') && !page2.includes('Received while suspended')
+      && !page2.includes('Other requests') && blocksOf(page2).length === 1
       && page2.split('\n').every((l) => l.length <= 34);
 
     await tgReset();
@@ -1276,8 +1280,8 @@ try {
       && !removeText.split('\n').includes('held') && !removeText.includes('Received while suspended');
 
     line(firstOk && page1Ok && page2Ok && detailOk && removeOk,
-      'LB24', 'held rows marked in place; the header states the total, not the page',
-      `p0=${firstText.split('\n')[1]} p1=${page1.split('\n')[1]} p2=${page2.split('\n')[1] || '(none)'} detail=${detailOk} remove=${removeOk}`);
+      'LB24', 'held rows in their own group; the heading states the total, not the page',
+      `p0=${firstText.split('\n')[2]} p1=${page1.split('\n')[2]} p2=${page2.split('\n')[1] || '(none)'} detail=${detailOk} remove=${removeOk}`);
   }
 
   /* LB25: migration 0007 may be absent. A detail read that fails on held_at

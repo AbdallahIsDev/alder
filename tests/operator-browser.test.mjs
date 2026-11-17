@@ -549,7 +549,7 @@ const NOTICE_EMAIL = 'Your service has been suspended by support.\n\nYour websit
 // What a phone of a business suspended by hand is told (lib/lifecycle-text.js),
 // written out here and not taken from the code under test.
 const SUPPORT = 'Contact support';
-const SUSPENDED_LINE = 'This service has been suspended\nby support.\n\nSend /status to see the current\nstate.\n\n' + SUPPORT;
+const SUSPENDED_LINE = 'This service has been suspended\nby support.\n\nNo termination date is set.\n\nSend /status to see the\ncountdown.\n\n' + SUPPORT;
 const SUSPENDED_TOAST = 'This service is suspended. Send /status.';
 const TERMINATED_TOAST = 'This service was terminated. Send /status.';
 const REFUSED_LINE = 'This service is suspended.\nA new phone cannot be connected\nright now.\n\n' + SUPPORT;
@@ -921,15 +921,25 @@ try {
     // The binding, then the business row for the reason and the dates.
     const bindingAndBusiness = (x, chat) => x.sb.length === 2 && x.sb[0].table === 'business_chats' && param(x.sb[0], 'tg_chat_id') === `eq.${chat}`
       && x.sb[1].table === 'businesses' && x.sb[1].method === 'GET' && param(x.sb[1], 'id') === `eq.${BIZ_A}`;
-    // Every command and every keyboard press but /status: the one short
+    // Every command and keyboard press but /status and /start: the one short
     // answer (state, reason, support link), the Status keyboard, no data,
     // and nothing read beyond the binding and the business row.
     const bad = [];
     for (const chat of [OWNER, STAFF]) {
-      for (const text of ['/leads', '/invite', '/recipients', '/remove_lead', '/help', '/start', '/start KEEPKEEPKEEP', 'Leads', 'Invite', 'Recipients', 'Help']) {
+      for (const text of ['/leads', '/invite', '/recipients', '/remove_lead', '/help', 'Leads', 'Invite', 'Recipients', 'Help']) {
         const x = await run(msg(chat, text));
         if (x.tg.length !== 1 || x.sends.length !== 1 || textOf(x.sends[0]) !== SUSPENDED_LINE || !supportLinked(x.sends[0])
           || !same(x.sends[0].body.reply_markup, STATUS_KB) || !bindingAndBusiness(x, chat) || x.mail.length) bad.push(`${chat === OWNER ? 'owner' : 'staff'}:${text}`);
+      }
+      // /start is kept: the usual "still connected" reply, the Status keyboard
+      // and only the binding read, not the suspended-state answer.
+      for (const text of ['/start', '/start KEEPKEEPKEEP']) {
+        const x = await run(msg(chat, text));
+        const want = text === '/start' ? C.BOT_ALREADY_CONNECTED : C.BOT_ALREADY_CONNECTED_CODE;
+        // The binding is read twice: once by /start, once to pick the keyboard.
+        // No business row and no lead is read.
+        if (x.sends.length !== 1 || textOf(x.sends[0]) !== want || !same(x.sends[0].body.reply_markup, STATUS_KB)
+          || x.sb.length !== 2 || x.sb.some((q) => q.table !== 'business_chats')) bad.push(`start:${text}`);
       }
       // /status, typed or pressed: the state, the reason and how many leads
       // are waiting, as a number. No lead row is read: one count.
@@ -961,7 +971,9 @@ try {
         if (!same(x.answers, [SUSPENDED_TOAST]) || x.sends.length || x.edits.length || x.mail.length || !onlyBinding(x, chat)) taps.push(data.slice(0, 2));
       }
     }
-    // Free text: the same answer, at most three times an hour.
+    // Free text: the SAME answer to every message, no three-an-hour cap.
+    // The suspended branch bypasses the generic plain-text hint, so five
+    // messages get five short answers with the Status keyboard.
     let replies = 0;
     for (let i = 0; i < 5; i++) {
       const x = await run(msg(STAFF, 'is anyone there'));
@@ -1020,7 +1032,7 @@ try {
     store.events = [];
     store.notices = [];
     const unchanged = JSON.stringify({ b: store.businesses, c: store.chats, k: store.codes, l: store.leads }) === JSON.stringify((({ b, c, k, l }) => ({ b, c, k, l }))(JSON.parse(before)));
-    line(bad.length === 0 && taps.length === 0 && replies === 3 && idOk && bindOk && refusedOk && formOk && servedOk && otherOk && unchanged,
+    line(bad.length === 0 && taps.length === 0 && replies === 5 && idOk && bindOk && refusedOk && formOk && servedOk && otherOk && unchanged,
       'OB9', 'suspended: /status only, no data; form held / unavailable',
       `commands=${bad.slice(0, 3).join(',') || 'ok'} taps=${taps.join(',') || 'ok'} free=${replies} id=${idOk} bind=${bindOk} intake=${refusedOk}/${formOk}/${servedOk} other=${otherOk} unchanged=${unchanged}`);
   }
@@ -1790,7 +1802,9 @@ try {
       // A suspended phone: the binding and the business row (reason, dates).
       [msg(OWNER, '/leads'), 'cmd.suspended', 'message', 2, 1],
       [msg(OWNER, 'Invite'), 'cmd.suspended', 'message', 2, 1],
-      [msg(OWNER, 'good morning'), 'text.suspended', 'message', 3, 1],
+      // Free text answers every time: no rate-limit read, so two reads like
+      // the other suspended commands.
+      [msg(OWNER, 'good morning'), 'text.suspended', 'message', 2, 1],
       [cb(OWNER, `L:0:${leadIds[0]}`), 'cb.suspended', 'callback', 1, 1],
       // /status: those two, when the suspension began, and one count.
       [msg(OWNER, '/status'), 'cmd.status', 'message', 4, 1],
@@ -2025,7 +2039,7 @@ try {
     const lateOk = near(late.target, late.t0 + 30 * DAY) && textOf(late.r.edits[0]) === `Extend Beta Roofing to ${shortDate(late.target)}?`;
     // Suspended: the question says what else Confirm will do.
     const susp = await askFor(BIZ_P, 2);
-    const suspOk = textOf(susp.r.edits[0]) === `Extend Zz Paused to ${shortDate(susp.target)}?\n\nIt is suspended. Confirm also reactivates it.`
+    const suspOk = textOf(susp.r.edits[0]) === `Extend Zz Paused to ${shortDate(susp.target)}?\n\nThis business was suspended.\nExtending restores the service.`
       && same(susp.kb, extendKb(BIZ_P, 2, susp.token)) && susp.r.sends.length === 0;
     // Cancel is the business screen, and nothing moved: the two rows that
     // were set by hand above are the only difference from the start.
@@ -2290,7 +2304,7 @@ try {
     const join = await run(msg(CHAT_X, 'KEEPKEEPKEEP'));
     const phoneOk = status.sends.length === 1 && textOf(status.sends[0]) === STATUS_TERMINATED && same(status.sends[0].body.reply_markup, STATUS_KB)
       && !status.sb.some((q) => q.table === 'v_client_leads')
-      && leads.sends.length === 1 && textOf(leads.sends[0]) === 'This service was terminated\nby support.\n\nSend /status to see the current\nstate.\n\n' + SUPPORT
+      && leads.sends.length === 1 && textOf(leads.sends[0]) === 'This service was terminated\nby support.\n\nNo termination date was set.\n\nDays left: 0. Send /status\nto see the current state.\n\n' + SUPPORT
       && !leads.sb.some((q) => q.table === 'v_client_leads')
       && same(tap.answers, [TERMINATED_TOAST]) && tap.sends.length === 0
       && join.sends.length === 1 && textOf(join.sends[0]) === 'This service was terminated.\nA new phone cannot be connected\nright now.\n\n' + SUPPORT
@@ -2316,7 +2330,7 @@ try {
     const backTarget = Number.parseInt(backData.split(':')[3], 36) * 1000;
     const back = await run(cb(OP, backData));
     const PAID_BACK = `Your service is active again.\nThank you for your payment.\n\nPaid until: ${shortDate(backTarget)}.\n\nSend /status at any time to see\nthe current state.\n\n${SUPPORT}`;
-    const backOk = textOf(backAsk.edits[0]).endsWith('\n\nIt is terminated. Confirm also reactivates it.')
+    const backOk = textOf(backAsk.edits[0]).endsWith('\n\nThis business was terminated.\nExtending restores the service.')
       && bizRow(BIZ_A).status === 'active'
       && textOf(back.edits[0]) === RESULT_EXTENDED_REACTIVATED('Extended: Alder Roofing', shortDate(backTarget), 'Telegram: sent to 2 phones')
       && back.sends.length === 2 && back.sends.every((m) => textOf(m) === PAID_BACK)
@@ -2324,7 +2338,7 @@ try {
     const extendAsk = await run(cb(OP, `be:2:${BIZ_P}`));
     const extendData = String(kbOf(extendAsk.edits[0])[0][0].callback_data);
     const extended = await run(cb(OP, extendData));
-    const extendOk = textOf(extendAsk.edits[0]).endsWith('\n\nIt is terminated. Confirm also reactivates it.')
+    const extendOk = textOf(extendAsk.edits[0]).endsWith('\n\nThis business was terminated.\nExtending restores the service.')
       && bizRow(BIZ_P).status === 'active' && textOf(extended.edits[0]).includes('\nService: reactivated\n')
       && textOf(extended.edits[0]).startsWith('Extended: Zz Paused\nPaid until: ');
     line(askOk && cancelOk && oldOk && writeOk && noticeOk && keptOk && resultOk && againOk && phoneOk && pausedOk && reactOk && backOk && extendOk,

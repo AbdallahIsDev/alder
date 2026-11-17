@@ -13,7 +13,7 @@ import { secretMatches } from '../lib/request.js';
 import * as notifyApi from '../lib/notify.js';
 import { runTimed, setHandler, timedAll } from '../lib/timing.js';
 import {
-  renderAlert, renderLeadList, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard,
+  renderAlert, renderHeldLeadList, jobDoneKeyboard, confirmKeyboard, tryAgainKeyboard,
   botLinkedText, BOT_HELP, BOT_ALREADY_CONNECTED, BOT_NOT_CONNECTED, BOT_BAD_CODE, BOT_PLAIN_TEXT,
   botInviteText, botRecipientsText, recipientsKeyboard, recipientConfirmText, recipientConfirmKeyboard,
   BOT_INVITE_CAPPED, BOT_INVITE_CANCEL_BUTTON, BOT_INVITE_CANCEL_ALREADY, BOT_INVITE_RATE_LIMIT,
@@ -235,11 +235,11 @@ function sendKeyboardRemoved(chatId) {
    invites and the leads stay where they are, and a recorded payment (Extend
    30 days) puts the status back. Reactivate applies to a suspended business
    only: on a terminated one it refuses and points at Extend. While it lasts,
-   a phone of that business has ONE working command, /status (also the one
-   button of its keyboard). Every
-   other command, keyboard press and free text gets a short answer that says
-   the service is off, why, and until when, with the support link; a button
-   tap gets the same as a toast. No lead data is shown, and nothing is
+   a phone of that business keeps /status and /start (the one keyboard button
+   is Status). Every other command, keyboard press and free text gets a short
+   answer that says the service is off, why, and until when, with the support
+   link; a button tap gets the same as a toast. There is no free-text cap:
+   each message is answered. No lead data is shown, and nothing is
    changed. The status arrives with the binding (one query, lib/db.js
    getChatBinding); the reason and the dates need the business row, which is
    read only when an answer is actually sent. */
@@ -454,18 +454,15 @@ async function sendLeadsPage(chatId, businessId, page, messageId, answer = null)
   const hasOlder = leads.length > LEADS_PAGE && safePage < LEADS_PAGE_MAX;
   const shown = leads.slice(0, LEADS_PAGE);
   const empty = !shown.length;
-  // The header counts EVERY held lead of this business, not the held rows on
-  // this page: the renewal notice says "5 leads came in while your service was
-  // suspended", and a page that answers "2" for the same fact is simply a
-  // different number. The count is read only when this page actually carries a
-  // held row, so a business with no held leads pays nothing for it and the call
-  // budget of an ordinary /leads is unchanged. The list itself keeps its order
-  // and five rows; no second list, numbering or callback is added.
+  // The group heading counts EVERY held lead of this business, not just the
+  // rows on this page: the renewal notice says "5 leads came in while your
+  // service was suspended", and a page that answered "2" for the same fact
+  // would be a different number. The count is read only when this page carries
+  // a held row, so an ordinary /leads pays nothing extra. The rows keep their
+  // order, their number, their callback and their "held" mark: only the
+  // DISPLAY is split into a held group and the remaining requests.
   const heldTotal = shown.some((l) => l.held_at) ? await countHeldLeads(businessId) : 0;
-  const listText = renderLeadList(shown);
-  const text = empty ? 'No requests yet.'
-    : heldTotal ? listText.replace('Recent requests\n', `Recent requests\nReceived while suspended: ${heldTotal}\n`)
-      : listText;
+  const text = empty ? 'No requests yet.' : renderHeldLeadList(shown, Date.now(), heldTotal);
   const markup = empty ? { reply_markup: { inline_keyboard: [] } } : leadListKeyboard(shown, safePage, hasOlder);
   if (messageId) {
     const [, edited] = await together([
@@ -2163,24 +2160,21 @@ async function handleUpdate(u, chat) {
       // suspended business's phone still gets it.
       await replyMessage(chatId, operatorIdMessage(chatId, { operator: false }));
     } else if (first === '/status') {
-      // Every bound phone, in service or not: the one command a suspended or
+      // Every bound phone, in service or not: the command a suspended or
       // terminated business keeps.
       await handleStatus(chatId, binding);
+    } else if (first === '/start') {
+      // Also kept when the business is off: /start says the phone is still
+      // connected, it is not the suspended-state answer.
+      await handleStart(chatId, arg);
     } else if (bindingSuspended(binding)) {
       // A phone of a suspended or terminated business: the same short answer
-      // (state, reason, date, support link) for every other command and every
-      // keyboard press, and no data. Free text gets it under the plain-text
-      // hint's limit (3 an hour, silent when the counter is unreachable), so
-      // the bot cannot be made to answer without end.
+      // (state, reason, date, support link) for every other command, keyboard
+      // press and free text, and no data. No per-chat cap: every message is
+      // answered, as promised to the owner.
       const command = !!pressed || !!COMMAND_HANDLER_NAMES[first];
       setHandler(command ? 'cmd.suspended' : 'text.suspended');
-      let within = command;
-      if (!command) {
-        try { within = await hitRateLimit('tghint:' + chatId, 3600, 3); } catch { within = false; }
-      }
-      if (within) await replySuspended(chatId, binding);
-    } else if (first === '/start') {
-      await handleStart(chatId, arg);
+      await replySuspended(chatId, binding);
     } else if (first === '/leads') {
       await handleLeads(chatId, binding);
     } else if (first === '/invite') {
