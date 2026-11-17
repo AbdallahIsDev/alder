@@ -14,6 +14,10 @@ promise something the system does not do.
 | `terms-of-service.md` | the business that buys the service | payment, the grace period, suspension, termination, data retention |
 | `privacy-notice.md` | the people who fill in a customer's website form | what is stored, who sees it, how long it is kept |
 | `data-processing-summary.md` | the business, and its lawyer | who decides about the data, who only stores it, where it is stored |
+| `LAWYER_REVIEW.md` | the lawyer, and the owner | review flags and proposed clauses for the blanks the drafts leave open |
+
+`LAWYER_REVIEW.md` is the review-flag index for the lawyer and the owner, not a
+customer-facing document: do not send it to a customer.
 
 ## Keep them equal to the code
 

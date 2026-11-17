@@ -52,12 +52,28 @@ Run steps 27b to 27n of `docs/MANUAL_TESTING.md` with a phone you hold.
       `/leads`, and no row was deleted at any step.
 - [ ] `public.business_events` has an `expected` row and an outcome row for
       every notice of the rehearsal.
+- [ ] Replace phone, end to end: steps 6a, 6b and 6c of
+      `docs/MANUAL_TESTING.md`. The question appears, **Cancel** leaves the old
+      phone connected, and **Confirm replace** ends its access, mints a new
+      invite, and answers "Already replaced." on a second tap.
+- [ ] Re-run every billing lifecycle stage on the TEST project: reminder,
+      overdue, final warning, suspension, termination warning, termination and
+      **Extend 30 days** restore (steps 27b to 27n of `docs/MANUAL_TESTING.md`;
+      rules in `docs/OPERATIONS.md` section 3b). Step 27g leaves the business
+      `active`, so the billing job enforces it.
+- [ ] On a business still marked `demo`, expect no billing enforcement at all
+      (`docs/OPERATIONS.md` section 3b). Check only the off-state behaviour:
+      suspended holds the form and tells the visitor to call; terminated makes
+      the form unavailable and stores nothing; `/status` answers with no lead
+      detail. No billing notice or state change is due on a demo.
 
 ## 4. The customer's paperwork
 
 - [ ] The customer has read and accepted the terms. The drafts are in
       `docs/legal-drafts/`. **They are drafts written by a developer, not
-      legal advice. Have a lawyer review them before a customer signs.**
+      legal advice. Have a lawyer review them before a customer signs.** The
+      review flags and proposed clauses for the gaps are indexed in
+      `docs/legal-drafts/LAWYER_REVIEW.md`.
 - [ ] The terms the customer accepted state the same durations as
       `lib/lifecycle-config.js`.
 - [ ] The customer's website has a privacy notice that names you as the
@@ -67,6 +83,21 @@ Run steps 27b to 27n of `docs/MANUAL_TESTING.md` with a phone you hold.
 - [ ] The payment provider account is live and can pay out: fees, payout method
       and the Egypt-specific options are in `docs/WHOP.md`. Confirm the payout
       route on the dashboard before the first customer pays.
+
+## 4b. Stage-2 gates, before the first live payment
+
+There is no payment-provider integration yet (roadmap). These are gates for
+when it is built, not checks of code that exists today.
+
+- [ ] Whop sandbox webhooks: replay the same `webhook-id`, send a duplicate and
+      send an older event after a newer one; check the handler answers 2xx
+      within five seconds and does not double-apply a payment. Reference
+      `docs/WHOP.md` sections 6.4 and 6.7. Sandbox does not cover every live
+      payment method.
+- [ ] Hosting: Vercel Hobby is non-commercial and allows one cron run per job
+      per day. Decide and switch to a commercially permitted plan (Pro or
+      another host) before taking payment. `docs/OPERATIONS.md` section 8 and
+      `SESSION_HANDOFF.md` section 7, fact 1.
 
 ## 5. Switching the customer on
 
