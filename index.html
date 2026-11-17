@@ -691,6 +691,17 @@
         <button type="button" data-slide="1" aria-pressed="false" data-page-node-id="ChQPrdtyN9iAyRiVKTX6Uw">2</button>
         <button type="button" data-slide="2" aria-pressed="false" data-page-node-id="0tRBW3sxyDqTEzZBRKAYqu">3</button>
       </div>
+      <!-- DEV-only controls added for the prototype audit: corner radius and the modal's auto-open delays.
+           No data-row attribute, so the mode filter below never hides them. The collapse toggle stays last. -->
+      <div class="dbg-row" data-dbg="radius"><span>Corner radius</span>
+        <button type="button" data-radius="default" aria-pressed="true">Default</button>
+        <button type="button" data-radius="custom" aria-pressed="false">Custom</button>
+        <input type="number" class="dbg-num" data-radius-px min="0" max="32" step="1" value="0" aria-label="Corner radius in pixels" hidden>
+      </div>
+      <div class="dbg-row" data-dbg="auto-delay"><span>Auto-open ms</span>
+        <label class="sr" for="dbg-delay-desktop">Desktop</label><input type="number" class="dbg-num" id="dbg-delay-desktop" data-delay="desktop" min="0" max="300000" step="1000" value="10000" aria-label="Auto-open delay desktop in milliseconds">
+        <label class="sr" for="dbg-delay-mobile">Mobile</label><input type="number" class="dbg-num" id="dbg-delay-mobile" data-delay="mobile" min="0" max="300000" step="1000" value="8000" aria-label="Auto-open delay mobile in milliseconds">
+      </div>
       <div class="dbg-read" data-page-node-id="Rv8XEv3djLOBrKbidiCcXh"></div>
       </div>
       <div class="dbg-row dbg-head"><span>Debug</span><button type="button" class="dbg-toggle" aria-expanded="false" aria-controls="dbg-body" aria-label="Expand debug panel"><svg viewBox="0 0 12 8" width="12" height="8" fill="none" aria-hidden="true"><path d="M1 6.5 6 1.5l5 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
@@ -1011,6 +1022,49 @@ var BIZ = {
       let wasOpen = false;
       try { wasOpen = sessionStorage.getItem('dbgPanelOpen') === '1' } catch (_) { }
       setOpen(wasOpen);
+
+      /* ---- Corner radius (DEV only, in memory). The stylesheet declares --box-radius: 0px once;
+         one rule feeds it to every boxed selector. "Default" removes the inline property, so the
+         page falls back to that 0px sharp look. Nothing is written to storage: a reload is sharp
+         again and a real visitor never sees a rounded box. */
+      const radiusPx = panel.querySelector('[data-radius-px]');
+      const radiusButtons = [...panel.querySelectorAll('[data-radius]')];
+      const syncRadius = () => {
+        const custom = html.style.getPropertyValue('--box-radius') !== '';
+        radiusButtons.forEach(b => b.setAttribute('aria-pressed', String((b.dataset.radius === 'custom') === custom)));
+        if (radiusPx) radiusPx.hidden = !custom;
+      };
+      const applyRadius = px => {
+        html.style.setProperty('--box-radius', Math.min(32, Math.max(0, Number(px) || 0)) + 'px');
+        if (radiusPx) radiusPx.value = html.style.getPropertyValue('--box-radius').replace('px', '');
+        syncRadius();
+      };
+      radiusButtons.forEach(b => b.addEventListener('click', () => {
+        if (b.dataset.radius === 'default') html.style.removeProperty('--box-radius');
+        else applyRadius(radiusPx ? radiusPx.value : 0);
+        syncRadius();
+      }));
+      if (radiusPx) radiusPx.addEventListener('input', () => applyRadius(radiusPx.value));
+      syncRadius();
+
+      /* ---- Auto-open delay (DEV only). window.AUTO is declared by the modal script LATER in this
+         page, so it is read and written only inside these handlers, never at panel setup. The page's
+         timer is scheduled at load: editing these affects the NEXT session/timer, not one already
+         pending. Clamped to 0..300000 ms and kept in memory only. */
+      panel.querySelectorAll('[data-delay]').forEach(input => {
+        const key = input.dataset.delay;
+        const paint = () => {
+          const a = window.AUTO;
+          if (a && a.delayMs && typeof a.delayMs[key] === 'number') input.value = a.delayMs[key];
+        };
+        if (window.AUTO) paint(); else addEventListener('load', paint, { once: true });
+        input.addEventListener('input', () => {
+          const a = window.AUTO;
+          if (!a || !a.delayMs) return;
+          a.delayMs[key] = Math.min(300000, Math.max(0, Number(input.value) || 0));
+          input.value = a.delayMs[key];
+        });
+      });
 
       /* ---- Hero type: video | slider. Stored, then reloaded: the hero scripts read HERO_MODE once. ---- */
       panel.querySelectorAll('[data-type]').forEach(b => {
@@ -2234,7 +2288,10 @@ var BIZ = {
      Closing by hand suppresses it for 30 days, a definite answer from the server
      suppresses it for good, and both are kept in localStorage with a timestamp,
      not sessionStorage: they are preferences, and they hold no contact data. */
-  var AUTO = {
+  /* Exposed on window so the DEV panel above can read/edit delayMs at event time. The panel script
+     runs earlier in the page, before this object exists; it never touches it during setup. Edits are
+     in-memory only, and the timer is already scheduled at load, so they affect the NEXT session/timer. */
+  var AUTO = window.AUTO = {
     delayMs: { desktop: 10000, mobile: 8000 },
     mobileMaxWidth: 760,                       /* the width the stylesheet calls a phone */
     closedKey: 'alder-est-closed-until-v1',    /* holds an epoch milliseconds stamp */

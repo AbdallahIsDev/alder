@@ -15,17 +15,20 @@
 //       fourth reads "Roof inspection"
 //   MD6 closing is deliberate: a click on the dimmed area does nothing and
 //       what was typed stays; the X, Escape and the last panel's Close close
-//   MD7 the X is 32px on every screen, with a 44px press area
+//   MD7 the X is 32px (16px icon) on every screen; the press area is 44px on
+//       desktop and 32px on phones
 //   MD8 the thank-you pane: three groups in order (mark + heading, recap,
 //       next steps with both buttons), the reveal order set on those groups'
 //       own classes rather than on :nth-child, and every "what happens next"
 //       line short enough to stay one line in the 246px box it gets at 320px
+//   MD12 DEV-only corner radius: one 0px custom property, one live rule, no storage
+//   MD13 DEV-only auto-open ms inputs write into AUTO.delayMs, in memory only
 //
 // Mutations (each breaks the check named):
 //   put a literal title back into an option                      -> MD1, MD3
 //   change a stored value (unsure -> inspection)                 -> MD1, MD5
 //   put data-close back on .est-scrim                            -> MD6
-//   make the X 40px again                                        -> MD7
+//   make the X 40px again, or give phones a 44px press area      -> MD7
 //   move the buttons back out of .est-next-group                 -> MD8
 //   go back to :nth-child delays                                 -> MD8
 //   lengthen one "what happens next" line past 34 characters     -> MD8
@@ -173,14 +176,37 @@ try {
   /* MD7 */
   {
     const block = (sel) => { const m = new RegExp(sel.replace(/[.:]/g, '\\$&') + '\\s*\\{([^}]*)\\}').exec(css); return m ? m[1].replace(/\s+/g, ' ') : ''; };
+    const media = (px) => {
+      const found = [], needle = `@media (max-width: ${px}px)`;
+      let from = 0;
+      for (;;) {
+        const i = css.indexOf(needle, from);
+        if (i < 0) break;
+        const open = css.indexOf('{', i);
+        let depth = 0, close = -1;
+        for (let j = open; j < css.length; j++) {
+          if (css[j] === '{') depth++;
+          else if (css[j] === '}') { depth--; if (depth === 0) { close = j; break } }
+        }
+        if (close < 0) break;
+        found.push(css.slice(open, close + 1));
+        from = close + 1;
+      }
+      return found;
+    };
     const x = block('.est-x'), after = block('.est-x::after'), svg = block('.est-x svg');
     const size = /width: 32px;/.test(x) && /height: 32px;/.test(x) && /position: relative;/.test(x);
-    const press = /content: "";/.test(after) && /position: absolute;/.test(after) && /inset: -6px/.test(after);
-    // One rule only: no media query gives it another size.
+    const desktopPress = /content: "";/.test(after) && /position: absolute;/.test(after) && /inset: -6px/.test(after);
+    /* BEFORE: the one base ::after rule (inset:-6px => 44px) was asserted for every screen.
+       AFTER: that rule is the desktop target; at <=760px a second rule sets inset:0, so the
+       press area is the visible 32px box. The icon and box size are unchanged everywhere. */
+    const phonePress = media(760).some(b => /\.est-x::after\s*\{[^}]*inset:\s*0\s*;?\s*\}/.test(b));
+    // One box rule only: no media query gives the button another size.
     const once = (css.match(/\.est-x\s*\{/g) || []).length === 1;
     const button = /<button type="button" class="est-x" data-close aria-label="Close"/.test(strip(html));
-    line(size && press && once && /width: 16px;/.test(svg) && button, 'MD7', 'the X: 32px everywhere, 44px press area, still a labelled button',
-      `size=${size} press=${press} once=${once} button=${button}`);
+    line(size && desktopPress && phonePress && once && /width: 16px;/.test(svg) && button,
+      'MD7', 'the X: 32px + 16px icon everywhere, 44px desktop / 32px phone press area',
+      `size=${size} desktop=${desktopPress} phone=${phonePress} once=${once} button=${button}`);
   }
 
   /* MD8: the thank-you pane. It is three groups now, not five siblings, so the
@@ -417,6 +443,107 @@ try {
     line(stampOk && heldByClose && expiredInvites && afterSubmit && whileOpen && whileMenu && pastFirst && afterCta && sentFlag && notWhileHidden && invitedOnReturn,
       'MD11', 'invitation guards: 30-day stamp, expired, sent, open modal/menu, scrolled, CTA, hidden tab',
       `stamp=${stampOk} closed=${heldByClose} expired=${expiredInvites} sent=${afterSubmit} open=${whileOpen} menu=${whileMenu} scrolled=${pastFirst} cta=${afterCta} flag=${sentFlag} hidden=${notWhileHidden} returned=${invitedOnReturn}`);
+  }
+
+  /* MD12: the DEV corner-radius control. One custom property declared once at 0px, one rule that
+     feeds it to the boxed selectors, and an in-memory live application. No storage write: a reload
+     returns to sharp, and production never sees the panel at all. */
+  {
+    const decls = (css.match(/--box-radius\s*:/g) || []).length;
+    const declared = decls === 1 && /--box-radius:\s*0px/.test(css);
+    const uses = (css.match(/border-radius:\s*var\(--box-radius,\s*0px\)/g) || []).length;
+    const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius,\s*0px\)[^}]*\}/.exec(css);
+    const selectors = rule ? rule[1] : '';
+    const boxed = ['.btn', '.menu-btn', '.bar', '.card', '.photo', '.hero-video', '[data-hero-video]', '.est-dialog', '.f input', '.f textarea', '.sel-btn']
+      .every(s => selectors.includes(s));
+    const markup = /data-dbg="radius"/.test(html)
+      && /data-radius="default"\s+aria-pressed="true"/.test(html)
+      && /data-radius="custom"\s+aria-pressed="false"/.test(html)
+      && /data-radius-px[^>]*min="0"[^>]*max="32"/.test(html);
+    const from = html.indexOf('---- Corner radius'), to = html.indexOf('---- Auto-open delay');
+    const handler = from > -1 && to > from ? html.slice(from, to) : '';
+    const noStorage = !!handler && !/localStorage|sessionStorage|setItem|removeItem/.test(handler)
+      && /setProperty\('--box-radius'/.test(handler) && /removeProperty\('--box-radius'/.test(handler);
+    line(declared && uses === 1 && boxed && markup && noStorage, 'MD12a',
+      'radius control: one 0px property, one live rule, no persistence',
+      `declared=${declared} uses=${uses} boxed=${boxed} markup=${markup} noStorage=${noStorage}`);
+
+    const { VirtualConsole } = await import('jsdom');
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const boot = (url) => new JSDOM(html, {
+      runScripts: 'dangerously', pretendToBeVisual: true, url, virtualConsole: new VirtualConsole(),
+      beforeParse(window) {
+        window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+        window.scrollTo = () => {};
+        window.CSS = { supports: () => true };
+        // The panel shares a script block with a counter that observes elements. Without this
+        // stub JSDOM throws there and the whole block (panel included) never runs.
+        window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+      },
+    });
+    const prod = boot('https://alder.test/');
+    const gated = !prod.window.document.querySelector('.dbg');
+    prod.window.close();
+    const dom = boot('http://localhost/');
+    const w = dom.window, d = w.document;
+    await wait(60);
+    const panel = d.querySelector('.dbg'), px = d.querySelector('[data-radius-px]');
+    const set = (el, v) => { el.value = v; el.dispatchEvent(new w.Event('input', { bubbles: true })); };
+    const click = (el) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+    const radius = () => d.documentElement.style.getPropertyValue('--box-radius');
+    set(px, '12');
+    const live = radius() === '12px';
+    set(px, '99');
+    const clampedHi = radius() === '32px' && px.value === '32';
+    set(px, '-5');
+    const clampedLo = radius() === '0px' && px.value === '0';
+    click(d.querySelector('[data-radius="custom"]'));
+    const custom = px.hidden === false && d.querySelector('[data-radius="custom"]').getAttribute('aria-pressed') === 'true';
+    click(d.querySelector('[data-radius="default"]'));
+    const reset = radius() === '' && px.hidden === true && d.querySelector('[data-radius="default"]').getAttribute('aria-pressed') === 'true';
+    const keys = Object.keys(w.localStorage).concat(Object.keys(w.sessionStorage)).join(' ');
+    const untouched = !/radius/i.test(keys);
+    w.close();
+    line(gated && !!panel && live && clampedHi && clampedLo && custom && reset && untouched, 'MD12b',
+      'radius applies live, clamps 0..32, Default clears, panel stays dev-only',
+      `gated=${gated} panel=${!!panel} live=${live} hi=${clampedHi} lo=${clampedLo} custom=${custom} reset=${reset} noStore=${untouched}`);
+  }
+
+  /* MD13: the two auto-open inputs. AUTO is defined after the panel script, so these are written
+     at input time through window.AUTO. The timer is already pending, so the change is for the next
+     session/timer; the comment says so and nothing is persisted. */
+  {
+    const { VirtualConsole } = await import('jsdom');
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const dom = new JSDOM(html, {
+      runScripts: 'dangerously', pretendToBeVisual: true, url: 'http://localhost/', virtualConsole: new VirtualConsole(),
+      beforeParse(window) {
+        window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+        window.scrollTo = () => {};
+        window.CSS = { supports: () => true };
+        window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+      },
+    });
+    const w = dom.window, d = w.document;
+    await wait(60);
+    const desk = d.querySelector('[data-delay="desktop"]'), mob = d.querySelector('[data-delay="mobile"]');
+    const markup = !!desk && !!mob && +desk.value === 10000 && +mob.value === 8000
+      && desk.min === '0' && desk.max === '300000' && mob.min === '0' && mob.max === '300000';
+    const set = (el, v) => { el.value = v; el.dispatchEvent(new w.Event('input', { bubbles: true })); };
+    set(desk, '12345');
+    const wrote = !!w.AUTO && !!w.AUTO.delayMs && w.AUTO.delayMs.desktop === 12345;
+    set(mob, '999999');
+    const clampedHi = !!w.AUTO && w.AUTO.delayMs.mobile === 300000 && +mob.value === 300000;
+    set(desk, '-10');
+    const clampedLo = !!w.AUTO && w.AUTO.delayMs.desktop === 0 && +desk.value === 0;
+    const from = html.indexOf('---- Auto-open delay'), to = html.indexOf('---- Hero type');
+    const handler = from > -1 && to > from ? html.slice(from, to) : '';
+    const noStorage = !!handler && !/torage|setItem|removeItem/.test(handler) && /a\.delayMs\[key\]/.test(handler);
+    const note = /timer is scheduled at load/.test(handler) && /NEXT session\/timer/.test(handler);
+    w.close();
+    line(markup && wrote && clampedHi && clampedLo && noStorage && note, 'MD13',
+      'auto-open ms inputs write AUTO.delayMs live, clamped, no storage',
+      `markup=${markup} wrote=${wrote} hi=${clampedHi} lo=${clampedLo} noStore=${noStorage} note=${note}`);
   }
 } catch (e) {
   line(false, 'MD0', 'modal suite threw', (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)));

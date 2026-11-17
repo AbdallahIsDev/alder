@@ -20,6 +20,7 @@
       --ink2: #2a2d33;
       --cream: #f1f1f1;
       --accent: #d93917;
+      --box-radius: 0px;
       --muted: #a9adb3;
       --pad: clamp(20px, 4vw, 48px);
       --gap: clamp(72px, 10vw, 140px);
@@ -2555,6 +2556,14 @@
       height: 16px
     }
 
+    /* Phones: the icon stays 16px in the same 32px box, but the press area is the box itself.
+       On desktop the base rule above keeps the 44px target (inset: -6px). */
+    @media (max-width: 760px) {
+      .est-x::after {
+        inset: 0
+      }
+    }
+
     /* body: scrolls on its own when a step is tall */
     .est-form {
       display: flex;
@@ -3807,6 +3816,15 @@
       background: var(--accent)
     }
 
+    .dbg input.dbg-num {
+      width: 60px;
+      padding: 6px 4px;
+      border: 0;
+      background: rgb(255 255 255/.12);
+      color: #fff;
+      font: 500 12px var(--f)
+    }
+
     /* collapse toggle: the footer row stays, every row above it folds away */
     .dbg-head {
       gap: 12px
@@ -4562,4 +4580,27 @@
       :root {
         --hm: max(240px, min(128vw, 66svh, calc(100svh - 440px)))
       }
+    }
+
+    /* DEV radius control: the ONLY radius rule driven by --box-radius. :root declares 0px, so the
+       default look is unchanged; the debug panel sets the property on <html> in memory only.
+       Only boxed elements are listed: round things (.av, .est-dots li, .est-ok, the spinner) stay
+       round. !important overrides the older "border-radius: 0" rules on fields. No other rule
+       may hardcode a radius value for these selectors. */
+    .btn,
+    .menu-btn,
+    .bar,
+    .card,
+    .card-text,
+    .photo,
+    .cta-img,
+    .hero-video,
+    [data-hero-video],
+    .frame,
+    .est-dialog,
+    .f input,
+    .f textarea,
+    .sel-btn,
+    .chk input {
+      border-radius: var(--box-radius, 0px) !important
     }
