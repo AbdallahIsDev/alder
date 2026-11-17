@@ -42,8 +42,15 @@ const OUT = path.join(ROOT, '_debug', 'client-build');
    unavailable business; its four service options and the no-JS form print
    the services section's own keys (the 4th is "Free roof inspection", with
    the new copy key footer12); the dimmed area no longer closes the form.
+   The manifest, robots and sitemap hashes are unchanged.
+
+   The modal round moves it 27a08c72… -> 193536b8… (index.html and
+   assets/css/styles.css): the thank-you screen is three groups instead of five
+   siblings, its three "what happens next" lines are one line each at 320px, the
+   held state really hides the recap and the next steps, the answers survive a
+   close in sessionStorage, and the form may invite itself once per session.
    The manifest, robots and sitemap hashes are unchanged. */
-const BASELINE = '27a08c720057c1caa1d6078e48c32755ba2a9f01ccbe98ebb20c60e062ff9172';
+const BASELINE = '193536b8ce8d523263e813cf33bffd430c1ee9e1ab02e284e734354e97439e36';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = 'dcd93cf0545e1bad61f0218310823424565419e811ba50b74a2e7f7642ce7053';
 const BASELINE_SITEMAP = 'f90e45bdfa569c01cc2c7fe584831cd9e03b212fbac43254454968bcc16c27e8';
