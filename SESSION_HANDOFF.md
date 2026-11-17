@@ -91,7 +91,11 @@ no `.env` (`tests/dev-root.mjs`).
 - `paid_until` NULL means **not billing-enforced**. Nothing is charged, warned or
   suspended for that business.
 - Termination is the existing status `churned`, displayed as "Terminated". Nothing
-  is ever deleted by the code; Extend or Reactivate brings a business back.
+  is ever deleted by the code; **Extend 30 days** is what restores a terminated
+  business. Reactivate applies to a suspended business only: the terminated
+  screen does not offer it, and a stale `br:`/`bR:` refuses with "Extend 30 days
+  restores it.", writing nothing (`handleOperatorReactivate`, 2026-11-17).
+  `reactivateBusiness()` still accepts `churned` for Extend and `applyPayment()`.
 - A held lead keeps its date order in `/leads` after reactivation; it is marked
   with a fourth `held` line, not split into a separate section. The page header
   states the **total** held leads of the business (`countHeldLeads`), never the
@@ -402,6 +406,7 @@ the modal's thank-you steps.
 | 2026-11-16 | Docs: `docs/WHOP.md` (one payment reference), Telegram audit status review, Creem/Polar pages isolated and ignored. |
 | 2026-11-17 | Held leads marked in `/leads` and detail without reordering or paging changes; held notice gained "Renew to see them."; terminated-site options documented, no implementation. |
 | 2026-11-17 | Operator business screen: two-line lead counts, four button matrices, asks and confirms, one fact per line (Part 1). |
+| 2026-11-17 | Terminated businesses are restored by Extend 30 days only: `handleOperatorReactivate` refuses a `churned` row on both the question and the confirm, with a new refusal screen and toast, writing nothing. `reactivateBusiness()` untouched. New OP61b/c/d, OB10 and OB29 assert the refusal and that Extend still restores. |
 | 2026-11-17 | `tests/webhook.test.mjs` brought up to Part 1: OP61 split into ask/perform/second-confirm, `bR:` added to the forged and stale lists, forged sweep now also proves the row is unchanged, OP63 drives Replace phone (`bw:`/`bW:` and `bp:`/`bP:`) instead of the old Invite button, and the terminated screen is asserted to offer no Reactivate. The mail-subject assertion reads `MAIL_REDIRECT_TO` instead of assuming a machine without it. Green: 115/115, 155 s. |
 | 2026-11-17 | Estimate modal: thank-you screen in three groups with a class-set reveal, one-line next steps, the held state really hides the recap and the steps, draft in sessionStorage with "Start over", one automatic open per session at 8 s / 10 s with a 30-day close suppression. `/leads` header states the total held leads. A support suspension says "Contact support to restore it." instead of "Renew". `npm run serve`. Payment-provider design notes in `docs/OPERATIONS.md` §3b. |
 
@@ -422,18 +427,18 @@ These were left open by the last live test and cannot be confirmed from the repo
 
 Open after the 2026-11-17 modal round:
 
-5. **Decision needed, one line of behaviour.** A stale `bR:` on a terminated
-   (`churned`) business sets it back to `active`. Verified against the TEST
-   project on 2026-11-17: `reactivateBusiness()` accepts every suspended status,
-   so a confirm button left over from before the termination still brings the
-   business back, notices included. That matches §2 ("Extend or Reactivate
-   brings a business back"), and it is also not what the testing brief for this
-   round says should happen. It is deliberately **not** asserted in
-   `tests/webhook.test.mjs` (the note sits in OP61) so that either answer can be
-   implemented without arguing with a test. The owner picks one:
-   (a) keep it — then assert it and say so in §2; (b) refuse a reactivate on a
-   terminated business — then a stale `bR:` should answer the "expired" line and
-   `reactivateBusiness()` should stop accepting `churned`.
+5. **Settled 2026-11-17: Extend 30 days is the only way back from terminated.**
+   `handleOperatorReactivate` refuses a `churned` row on both paths (`br:` and
+   `bR:`), answers "Terminated. Extend 30 days." and writes nothing.
+   `tests/webhook.test.mjs` OP61b/OP61c pin the refusal and OP61d that a
+   `paused` row still reactivates; `operator-browser` OB10 (the refusal) and
+   OB29 (Extend is the way back) cover it without a database.
+   `reactivateBusiness()` is unchanged, so Extend and `applyPayment()` still
+   restore. Two pieces of product copy still say the old
+   rule and were deliberately left for their own round:
+   `operatorTerminateConfirmText` ("Extend or Reactivate puts it back") and
+   `operatorInviteSuspendedText` ("… is terminated. Reactivate it first." —
+   a dead end now).
 6. `tests/lead-api.test.mjs`, `tests/review.test.mjs`, `tests/fallback.test.mjs`
    and `tests/isolation.test.mjs` were not run this round (they need a live
    `vercel dev` and/or the TEST project).

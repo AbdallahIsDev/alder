@@ -30,7 +30,7 @@ import {
   operatorSuspendConfirmText, operatorSuspendConfirmKeyboard, operatorSuspendedText,
   operatorReactivateConfirmText, operatorReactivateConfirmKeyboard, operatorReactivatedText,
   operatorTerminateConfirmText, operatorTerminateConfirmKeyboard, operatorTerminatedText, operatorAlreadyTerminatedText,
-  OPERATOR_TERMINATED, OPERATOR_ALREADY_TERMINATED,
+  OPERATOR_TERMINATED, OPERATOR_ALREADY_TERMINATED, operatorTerminatedReactivateText, OPERATOR_TERMINATED_EXTEND,
   operatorAlreadySuspendedText, operatorAlreadyActiveText, operatorInviteSuspendedText,
   operatorInviteListText, operatorInviteListKeyboard, operatorInviteBackKeyboard,
   operatorAlreadyConnectedText, operatorAlreadyConnectedKeyboard, operatorReplaceConfirmText, operatorReplaceConfirmKeyboard,
@@ -1278,6 +1278,11 @@ async function handleOperatorTerminate({ chatId, messageId, businessId, page, an
  * suspended statuses, so a second tap changes nothing. Every bound phone
  * gets its role keyboard back and the owner address gets the same email;
  * the notice says how many leads were held. paid_until is not touched.
+ *
+ * Terminated is not this button's business: both br and bR refuse a 'churned'
+ * row and point at Extend 30 days, writing nothing. reactivateBusiness() still
+ * accepts it for Extend and applyPayment(), so the guard lives here and only
+ * here.
  */
 async function handleOperatorReactivate({ chatId, messageId, businessId, page, answer, confirmed = false }) {
   const [biz, chats] = await together([
@@ -1292,6 +1297,19 @@ async function handleOperatorReactivate({ chatId, messageId, businessId, page, a
     answer(OPERATOR_ALREADY_ACTIVE),
     editList(chatId, messageId, operatorAlreadyActiveText(business), back),
   ]);
+  // Terminated: Extend 30 days is the only way back (owner, 2026-11-17). Refused
+  // on BOTH paths, before anything is read for writing: a stale br never offers
+  // a confirm it cannot honour, and a stale bR never restores a business the
+  // next daily run would terminate again (which told the owner "active again"
+  // for a day). Nothing is written, sent or logged. reactivateBusiness() is
+  // untouched: Extend and applyPayment() still use it to restore a business.
+  if (business.status === 'churned') {
+    await together([
+      answer(OPERATOR_TERMINATED_EXTEND),
+      editList(chatId, messageId, operatorTerminatedReactivateText(business), back),
+    ]);
+    return;
+  }
   if (!confirmed) {
     await together([
       answer(''),

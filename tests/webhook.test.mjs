@@ -2726,12 +2726,47 @@ try {
             [{ text: 'Back', callback_data: 'bl:0' }],
           ])
           && String(termScreenEdit.body.text).split('\n')[1] === 'Terminated · ' + INV_SLUG;
-        // Not asserted here: a stale bR: on a terminated business currently sets
-        // it back to 'active' (reactivateBusiness accepts every suspended
-        // status, churned included). That is the recorded decision "Extend or
-        // Reactivate brings a business back", and it is also not what this
-        // round's brief expects, so it is left unasserted until the owner picks
-        // one. See SESSION_HANDOFF.md §11.
+        // A stale confirm on the terminated row: the refusal, and nothing at all
+        // behind it. The row is compared byte for byte, so a status write, a
+        // notice, an event or a touched column would all show up.
+        const REFUSE_TERMINATED = 'ZZ Invite Fixture is terminated.\nExtend 30 days restores it.';
+        const BACK_ONLY = [[{ text: 'Back', callback_data: 'bd:0:' + invBiz.id }]];
+        const churnedRow = (await svc.from('businesses').select('*').eq('id', invBiz.id).maybeSingle()).data;
+        await reset();
+        await good(cb(OP, 'bR:0:' + invBiz.id));
+        const refuseConfirm = { sends: (await sends()).length, edits: await edits(), toast: await answersNow() };
+        const rowAfterRefuseConfirm = (await svc.from('businesses').select('*').eq('id', invBiz.id).maybeSingle()).data;
+        // A stale question must not even offer the confirm: no bR: in its reply.
+        await reset();
+        await good(cb(OP, 'br:0:' + invBiz.id));
+        const refuseAsk = { sends: (await sends()).length, edits: await edits(), toast: await answersNow() };
+        const rowAfterRefuseAsk = (await svc.from('businesses').select('*').eq('id', invBiz.id).maybeSingle()).data;
+        const refuseOk = (x) => x.sends === 0 && x.edits.length === 1
+          && x.edits[0].body.text === REFUSE_TERMINATED
+          && JSON.stringify(x.edits[0].body.reply_markup.inline_keyboard) === JSON.stringify(BACK_ONLY)
+          && x.toast === C2.OPERATOR_TERMINATED_EXTEND && !('parse_mode' in x.edits[0].body);
+        const terminatedRefuseOk = refuseOk(refuseConfirm) && refuseOk(refuseAsk)
+          && !JSON.stringify(refuseAsk.edits[0].body.reply_markup).includes('bR:')
+          && (await statusNow()) === 'churned'
+          && JSON.stringify(rowAfterRefuseConfirm) === JSON.stringify(churnedRow)
+          && JSON.stringify(rowAfterRefuseAsk) === JSON.stringify(churnedRow);
+        line(refuseOk(refuseConfirm) && JSON.stringify(rowAfterRefuseConfirm) === JSON.stringify(churnedRow),
+          'OP61b', 'stale bR: on a terminated business: refused, row untouched',
+          `sends=${refuseConfirm.sends} text=${JSON.stringify(refuseConfirm.edits[0] && refuseConfirm.edits[0].body.text)} toast=${refuseConfirm.toast} same=${JSON.stringify(rowAfterRefuseConfirm) === JSON.stringify(churnedRow)}`);
+        line(refuseOk(refuseAsk) && !JSON.stringify(refuseAsk.edits[0].body.reply_markup).includes('bR:')
+          && JSON.stringify(rowAfterRefuseAsk) === JSON.stringify(churnedRow),
+          'OP61c', 'stale br: on a terminated business: same refusal, no confirm offered',
+          `sends=${refuseAsk.sends} confirm=${JSON.stringify(refuseAsk.edits[0].body.reply_markup)} same=${JSON.stringify(rowAfterRefuseAsk) === JSON.stringify(churnedRow)}`);
+        // The guard did not swallow the real path: a suspended row still
+        // reaches the confirm and comes back.
+        await svc.from('businesses').update({ status: 'paused' }).eq('id', invBiz.id);
+        await reset();
+        await good(cb(OP, 'bR:0:' + invBiz.id));
+        const pausedSends = (await sends()).length;
+        const pausedToast = await answersNow();
+        const pausedPathOk = pausedSends === 2 && pausedToast === C2.OPERATOR_REACTIVATED && (await statusNow()) === 'active';
+        line(pausedPathOk, 'OP61d', 'the refusal does not swallow the real path: paused still reactivates',
+          `sends=${pausedSends} toast=${pausedToast} status=${await statusNow()}`);
         // Put the fixture back as it was.
         await svc.from('businesses').update({ status: statusAtStart }).eq('id', invBiz.id);
         await svc.from('bind_codes').update({ expires_at: new Date().toISOString() }).eq('code', pending);
@@ -2753,10 +2788,11 @@ try {
         const noticeOk = (req) => !!req && req.body.text === C2.BOT_DISCONNECTED
           && req.body.reply_markup && req.body.reply_markup.remove_keyboard === true;
         line(startingBindings === 2 && pKept === 1 && pNotices === 0 && pToast && oldTerminate
-          && termOk && afterOk && reactivateAskOk && reactivateOk && reactivateAgainOk && termScreenOk && ownerRemoved === 0
+          && termOk && afterOk && reactivateAskOk && reactivateOk && reactivateAgainOk && termScreenOk
+          && terminatedRefuseOk && pausedPathOk && ownerRemoved === 0
           && ownerNotices.length === 1 && noticeOk(ownerNotices[0]) && rebound === 2,
           'OP61', 'suspend / reactivate / owner remove: one notice + keyboard each',
-          `start=${startingBindings} P=${pKept}/${pNotices}/${pToast} old=${oldTerminate} suspend=${termOk} after=${afterOk} ask=${reactivateAskOk} reactivate=${reactivateOk} again=${reactivateAgainOk} termScreen=${termScreenOk} owner=${ownerNotices.length}/${ownerNotices.every(noticeOk)} rebound=${rebound}`);
+          `start=${startingBindings} P=${pKept}/${pNotices}/${pToast} old=${oldTerminate} suspend=${termOk} after=${afterOk} ask=${reactivateAskOk} reactivate=${reactivateOk} again=${reactivateAgainOk} termScreen=${termScreenOk} refuse=${terminatedRefuseOk} paused=${pausedPathOk} owner=${ownerNotices.length}/${ownerNotices.every(noticeOk)} rebound=${rebound}`);
       }
 
       // OP4: /businesses is the business list; the business screen marks the

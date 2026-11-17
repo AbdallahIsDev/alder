@@ -52,7 +52,8 @@
 //   OB10 Reactivate: one scoped UPDATE to active (a demo business comes back
 //        as active); every bound phone is told, with its own role keyboard,
 //        and the owner address by email; a second tap is harmless; the
-//        phones work again
+//        phones work again; a terminated business is refused on both the
+//        question and the confirm, writing nothing (Extend 30 days restores)
 //   OB29 Terminate by hand (bx asks, bX does it): one scoped UPDATE to
 //        'churned', never marked for non-payment; phones and owner told;
 //        nothing deleted; the bot is /status only; from a suspended business
@@ -1086,12 +1087,19 @@ try {
     const leads = await run(msg(OWNER, '/leads'));
     const backOk = textOf(detail.edits[0]).startsWith('Alder Roofing\nActive · alder-demo\n') && same(kbOf(detail.edits[0]), detailKb(BIZ_A, 0))
       && leads.sends.length === 1 && textOf(leads.sends[0]) !== SUSPENDED_LINE && leads.sb.some((q) => q.table === 'v_client_leads');
-    // A terminated business is reactivated the same way (no phone: the email only).
-    const terminatedAsk = await run(cb(OP, `br:2:${BIZ_C}`));
-    const churned = await run(cb(OP, `bR:2:${BIZ_C}`));
-    const churnedOk = terminatedAsk.edits.length === 1 && textOf(terminatedAsk.edits[0]).startsWith('Reactivate Juniper Roofing?')
-      && churned.edits.length === 1 && churned.edits[0].body.text === RESULT_NO_PHONE('Reactivated: Juniper Roofing')
-      && store.businesses.find((b) => b.id === BIZ_C).status === 'active' && churned.sends.length === 0 && churned.mail.length === 1;
+    // A terminated business is NOT reactivated: Extend 30 days is the way back
+    // (2026-11-17). The question refuses instead of offering a confirm it cannot
+    // honour, and the confirm refuses too. Nothing written, sent or mailed.
+    const TERMINATED_REFUSE_ASK = 'Juniper Roofing is terminated.\nExtend 30 days restores it.';
+    const churnedRow = JSON.stringify(bizRow(BIZ_C));
+    const terminatedAsk = seen(await run(cb(OP, `br:2:${BIZ_C}`)));
+    const churned = seen(await run(cb(OP, `bR:2:${BIZ_C}`)));
+    const churnedOk = [terminatedAsk, churned].every((x) => x.sends.length === 0 && x.mail.length === 0 && writes(x.sb).length === 0
+      && x.edits.length === 1 && textOf(x.edits[0]) === TERMINATED_REFUSE_ASK
+      && textOf(x.edits[0]).split('\n').every((l) => l.length <= 34)
+      && same(kbOf(x.edits[0]), backKb(BIZ_C, 2)) && same(x.answers, ['Terminated. Extend 30 days.']))
+      && !same(kbOf(terminatedAsk.edits[0]), [[{ text: 'Confirm reactivate', callback_data: `bR:2:${BIZ_C}`, style: 'success' }]])
+      && bizRow(BIZ_C).status === 'churned' && JSON.stringify(bizRow(BIZ_C)) === churnedRow;
     line(askOk && cancelOk && writeOk && noticeOk && resultOk && againOk && backOk && churnedOk,
       'OB10', 'reactivate: asks first, one scoped update, phones told with their keyboards',
       `ask=${askOk} cancel=${cancelOk} write=${writeOk} notice=${noticeOk} result=${resultOk} stale=${againOk} back=${backOk} churned=${churnedOk}`);
@@ -2222,7 +2230,7 @@ try {
 
   /* OB29: Terminate by hand. Asks first; one scoped update; the phones and
      the owner address are told; nothing is deleted; the bot is /status only;
-     Extend or Reactivate puts the business back. */
+     Extend 30 days puts the business back; Reactivate refuses it. */
   store = freshStore();
   leadIds = seedSeven();
   seedCode(BIZ_A, 'KEEPKEEPKEEP');
@@ -2293,12 +2301,25 @@ try {
     const pausedOk = bizRow(BIZ_P).status === 'churned' && textOf(fromPaused.edits[0]) === RESULT_ONE('Terminated: Zz Paused')
       && fromPaused.sends.length === 1 && textOf(fromPaused.sends[0]) === TERMINATED_NOTICE;
 
-    // Back in service: Reactivate (one tap), or Extend (a recorded payment).
+    // Back in service: Extend 30 days only. Reactivate refuses the terminated
+    // business (OB10 pins that), so the recorded payment is the way back, and
+    // the phones, the bindings and the leads are exactly as they were.
+    const refused = 'Alder Roofing is terminated.\nExtend 30 days restores it.';
     const reactAsk = await run(cb(OP, `br:0:${BIZ_A}`));
     const react = await run(cb(OP, `bR:0:${BIZ_A}`));
-    const reactOk = writes(reactAsk.sb).length === 0 && textOf(reactAsk.edits[0]).startsWith('Reactivate Alder Roofing?')
-      && bizRow(BIZ_A).status === 'active' && textOf(react.edits[0]) === RESULT_A('Reactivated: Alder Roofing')
-      && react.sends.length === 2 && react.sends.every((m) => textOf(m) === REACTIVATED_NOTICE)
+    const reactOk = writes(reactAsk.sb).length === 0 && writes(react.sb).length === 0
+      && textOf(reactAsk.edits[0]) === refused && textOf(react.edits[0]) === refused
+      && same(reactAsk.answers, ['Terminated. Extend 30 days.']) && same(react.answers, ['Terminated. Extend 30 days.'])
+      && react.sends.length === 0 && react.mail.length === 0 && bizRow(BIZ_A).status === 'churned';
+    const backAsk = await run(cb(OP, `be:0:${BIZ_A}`));
+    const backData = String(kbOf(backAsk.edits[0])[0][0].callback_data);
+    const backTarget = Number.parseInt(backData.split(':')[3], 36) * 1000;
+    const back = await run(cb(OP, backData));
+    const PAID_BACK = `Your service is active again.\nThank you for your payment.\n\nPaid until: ${shortDate(backTarget)}.\n\nSend /status at any time to see\nthe current state.\n\n${SUPPORT}`;
+    const backOk = textOf(backAsk.edits[0]).endsWith('\n\nIt is terminated. Confirm also reactivates it.')
+      && bizRow(BIZ_A).status === 'active'
+      && textOf(back.edits[0]) === RESULT_EXTENDED_REACTIVATED('Extended: Alder Roofing', shortDate(backTarget), 'Telegram: sent to 2 phones')
+      && back.sends.length === 2 && back.sends.every((m) => textOf(m) === PAID_BACK)
       && store.chats.filter((c) => c.business_id === BIZ_A).length === 2 && store.leads.filter((l) => l.business_id === BIZ_A).length === 7;
     const extendAsk = await run(cb(OP, `be:2:${BIZ_P}`));
     const extendData = String(kbOf(extendAsk.edits[0])[0][0].callback_data);
@@ -2306,9 +2327,9 @@ try {
     const extendOk = textOf(extendAsk.edits[0]).endsWith('\n\nIt is terminated. Confirm also reactivates it.')
       && bizRow(BIZ_P).status === 'active' && textOf(extended.edits[0]).includes('\nService: reactivated\n')
       && textOf(extended.edits[0]).startsWith('Extended: Zz Paused\nPaid until: ');
-    line(askOk && cancelOk && oldOk && writeOk && noticeOk && keptOk && resultOk && againOk && phoneOk && pausedOk && reactOk && extendOk,
+    line(askOk && cancelOk && oldOk && writeOk && noticeOk && keptOk && resultOk && againOk && phoneOk && pausedOk && reactOk && backOk && extendOk,
       'OB29', 'Terminate: asks, one scoped update, told, nothing deleted, restorable',
-      `ask=${askOk} cancel=${cancelOk} old=${oldOk} write=${writeOk} notice=${noticeOk} kept=${keptOk} result=${resultOk} again=${againOk} phone=${phoneOk} paused=${pausedOk} react=${reactOk} extend=${extendOk}`);
+      `ask=${askOk} cancel=${cancelOk} old=${oldOk} write=${writeOk} notice=${noticeOk} kept=${keptOk} result=${resultOk} again=${againOk} phone=${phoneOk} paused=${pausedOk} react=${reactOk} back=${backOk} extend=${extendOk}`);
   }
 
   /* OB15: over the whole suite, every message the operator chat was sent. */

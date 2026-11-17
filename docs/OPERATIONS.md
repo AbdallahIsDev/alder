@@ -284,18 +284,24 @@ already past the tenant check when the status changed is still delivered.
 **Terminate (operator).** One confirmation, from an active or a suspended
 business. The status is set to `churned`; the owner is told; the website form
 answers "not available" (HTTP 410) and stores nothing; the phones keep
-`/status` only. **Nothing is deleted**: Extend or Reactivate puts the business
+`/status` only. **Nothing is deleted**: **Extend 30 days** puts the business
 back exactly as it was. Deleting a business is the offboard script (section
 2), never a button.
 
-**Reactivate (operator).** One tap on a suspended or terminated business sets
-the status to `active` (a business that was `demo` before comes back as
+**Reactivate (operator).** One tap on a **suspended** business sets the status
+to `active` (a business that was `demo` before comes back as
 `active`, not `demo`) and tells every connected phone "Your service is active
 again." with its own keyboard and the number of leads that were held. Those
 leads are ordinary leads from that moment: `/leads` shows them. Reactivating
 is not paying: it does not change `paid_until`, so a business whose paid
 period is over is suspended again by the next daily runs. Use **Extend 30
 days** when the customer has paid.
+
+Reactivate is not offered on a terminated business and does not work from an
+old button either: both the question and the confirm answer "Extend 30 days
+restores it." and change nothing. Before 2026-11-17 a leftover confirm restored
+the business and told the owner "Your service is active again", then the next
+daily run terminated it again.
 
 If the phone list cannot be read when you press Suspend, Terminate or
 Reactivate, nothing changes and a toast says so. Press it again.
@@ -417,7 +423,7 @@ alert that one notice could not be delivered.
 
 `/status` only, as above. The website form answers "This business isn't
 accepting requests through this form right now. Please call them directly."
-(HTTP 410) and stores nothing. Extend or Reactivate puts everything back.
+(HTTP 410) and stores nothing. Extend 30 days puts everything back.
 
 #### Options for the site itself
 
