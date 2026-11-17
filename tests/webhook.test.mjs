@@ -1502,16 +1502,19 @@ try {
         // The last line is billing: the demo business is not billed ("not
         // tracked"), or the test database has no billing columns yet
         // (migration 0006 not applied: "unavailable"). Either is correct here.
+        // The lead counts are two lines now (total, then the 30-day window), and
+        // a business with a phone gets Replace phone (bw:), never Invite (bv:).
         const detailOk = phSends === 0 && pbToast.includes(C2.OPERATOR_SCREEN_EXPIRED) && phonesTitle.split('\n')[0] === 'Alder Roofing'
           && phonesTitle.split('\n')[1] === 'Demo · alder-demo' && /\n\nTelegram: Connected\nPhone 1 · main phone/.test(phonesTitle)
-          && /\n\nLeads: \d+ total · \d+ in the last 30 days(\nLast lead: [^\n]+)?\nBilling: (not tracked|unavailable)$/.test(phonesTitle)
-          && !/Requests|\d phones?/.test(phonesTitle)
+          && /\n\nLeads: \d+ total\nLast 30 days: \d+(\nLast lead: [^\n]+)?(\nHeld leads: \d+)?\nBilling: (not tracked|unavailable)$/.test(phonesTitle)
+          && !/Requests|\d phones?|in the last 30 days/.test(phonesTitle)
           && JSON.stringify(detailKb) === JSON.stringify([
-            [{ text: 'Suspend', callback_data: 'bs:0:' + bizA.id, style: 'danger' }, { text: 'Leads', callback_data: 'bq:0:0:' + bizA.id }],
-            [{ text: 'Extend 30 days', callback_data: 'be:0:' + bizA.id }, { text: 'Invite', callback_data: 'bv:0:' + bizA.id, style: 'primary' }],
+            [{ text: 'Suspend', callback_data: 'bs:0:' + bizA.id, style: 'danger' }, { text: 'Replace phone', callback_data: 'bw:0:' + bizA.id, style: 'primary' }],
+            [{ text: 'Extend 30 days', callback_data: 'be:0:' + bizA.id, style: 'primary' }, { text: 'Leads', callback_data: 'bq:0:0:' + bizA.id }],
             [{ text: 'Terminate', callback_data: 'bx:0:' + bizA.id, style: 'danger' }],
             [{ text: 'Back', callback_data: 'bl:0' }],
           ])
+          && !detailKb.flat().some((b) => String(b.callback_data).startsWith('bv:'))
           && !!bdEdit && bdEdit.body.text === phonesTitle;
 
         await svc.from('rate_limits').delete().eq('key', 'opcode:' + CODE_SLUG);
@@ -1574,10 +1577,13 @@ try {
         // exercised by OP6 (forged p: from a client), so this checks silence:
         // nothing sent, nothing edited, and the bindings are all still there.
         const boundBefore = (await svc.from('business_chats').select('id').eq('business_id', bizA.id)).data.length;
+        const statusBeforeForged = (await svc.from('businesses').select('*').eq('id', bizA.id).maybeSingle()).data;
         let foreignSends = 0;
         let foreignRefused = true;
+        // br: asks, bR: does: both are here, from a chat that is not the
+        // operator, and neither may answer with a confirmation or a result.
         for (const data of ['pb:' + bizA.id, 'bl:0', 'bn:0', 'bd:0:' + bizA.id, 'bt:0:' + bizA.id, 'bT:0:' + bizA.id, 'bs:0:' + bizA.id, 'bS:0:' + bizA.id,
-          'br:0:' + bizA.id, 'bv:0:' + bizA.id, 'bi:0:' + bizA.id, 'bq:0:0:' + bizA.id,
+          'br:0:' + bizA.id, 'bR:0:' + bizA.id, 'bv:0:' + bizA.id, 'bi:0:' + bizA.id, 'bq:0:0:' + bizA.id,
           // Extend: the question, and a confirm carrying a date 30 days ahead.
           'be:0:' + bizA.id, 'bE:0:' + bizA.id + ':' + Math.floor((Date.now() + 30 * 86400000) / 1000).toString(36),
           'bp:0:' + bizA.id, 'bP:0:' + bizA.id, 'bc:0:' + bizA.id, 'bw:0:' + bizA.id, 'bW:0:' + bizA.id, 'bu:0:' + bizA.id]) {
@@ -1588,6 +1594,8 @@ try {
           if (!out.filter((x) => x.path.includes('/answerCallbackQuery')).some((x) => String(x.body.text) === C2.TOAST_NOT_FOUND)) foreignRefused = false;
         }
         const boundAfter = (await svc.from('business_chats').select('id').eq('business_id', bizA.id)).data.length;
+        const statusAfterForged = (await svc.from('businesses').select('*').eq('id', bizA.id).maybeSingle()).data;
+        const forgedKept = JSON.stringify(statusAfterForged) === JSON.stringify(statusBeforeForged);
 
         line(numbersOk && pickText.startsWith('Businesses\n\n1. ') && phKeys === 'chat_id+text+disable_web_page_preview+reply_markup'
           && detailOk
@@ -1595,9 +1603,9 @@ try {
           && inviteOk
           && stale.includes(C2.OPERATOR_BUSINESS_GONE) && !!staleEdit && String(staleEdit.body.text).startsWith('Invite: pick a business')
           && goneOk
-          && foreignSends === 0 && foreignRefused && boundAfter === boundBefore && boundBefore > 0,
+          && foreignSends === 0 && foreignRefused && forgedKept && boundAfter === boundBefore && boundBefore > 0,
           'OP24', 'browser and /invite: in place, forged/stale/foreign refused',
-          `k=${codeKb ? codeKb.flat().map((b) => b.callback_data.slice(0,3)).join(',') : 'none'} pt=${JSON.stringify(pickText.slice(0, 12))} pk=${phKeys} detail=${detailOk} invite=${inviteOk} gone=${goneOk} f=${foreignSends}/${foreignRefused}`);
+          `k=${codeKb ? codeKb.flat().map((b) => b.callback_data.slice(0,3)).join(',') : 'none'} pt=${JSON.stringify(pickText.slice(0, 12))} pk=${phKeys} detail=${detailOk} invite=${inviteOk} gone=${goneOk} f=${foreignSends}/${foreignRefused}/${forgedKept}`);
       }
 
       // OP63: Replace phone against real rows (the "every other code"
@@ -1635,18 +1643,39 @@ try {
             answers: out.filter((x) => x.path.includes('/answerCallbackQuery')).map((x) => String(x.body.text || '')),
           };
         };
-        // Connected: the screen, and nothing written.
+        // Connected: the /invite list's screen (Replace phone bp:, primary) and
+        // the business screen's own button (Replace phone bw:), and nothing
+        // written by either.
         const open = await tap('bi:0:' + codeBiz.id);
         const openOk = open.edits.length === 1 && open.sends.length === 0
           && open.edits[0].text === 'ZZ Code Fixture · Already connected · 2 phones'
           && JSON.stringify(open.edits[0].reply_markup.inline_keyboard) === JSON.stringify([[
-            { text: 'Replace phone', callback_data: 'bp:0:' + codeBiz.id, style: 'danger' }, { text: 'Back', callback_data: 'bn:0' }]])
+            { text: 'Replace phone', callback_data: 'bp:0:' + codeBiz.id, style: 'primary' }, { text: 'Back', callback_data: 'bn:0' }]])
           && JSON.stringify(await liveOf(codeBiz.id)) === JSON.stringify(liveBefore) && (await boundTo(codeBiz.id)) === 2;
-        const ask = await tap('bp:0:' + codeBiz.id);
-        const askOk = ask.edits.length === 1 && ask.edits[0].text === C2.operatorReplaceConfirmText({ business: { name: 'ZZ Code Fixture' }, phones: 2 })
-          && (await boundTo(codeBiz.id)) === 2;
+        // The same business, opened from the browser: active with a phone, so the
+        // second button is Replace phone (bw:) and there is no Invite (bv:).
+        const screen = await tap('bd:0:' + codeBiz.id);
+        const screenRows = ((screen.edits[0] || {}).reply_markup || {}).inline_keyboard || [];
+        const screenOk = screen.edits.length === 1 && screen.sends.length === 0
+          && String(screen.edits[0].text).split('\n')[0] === 'ZZ Code Fixture'
+          && String(screen.edits[0].text).includes('Phone 2')
+          && JSON.stringify(screenRows) === JSON.stringify([
+            [{ text: 'Suspend', callback_data: 'bs:0:' + codeBiz.id, style: 'danger' }, { text: 'Replace phone', callback_data: 'bw:0:' + codeBiz.id, style: 'primary' }],
+            [{ text: 'Extend 30 days', callback_data: 'be:0:' + codeBiz.id, style: 'primary' }, { text: 'Leads', callback_data: 'bq:0:0:' + codeBiz.id }],
+            [{ text: 'Terminate', callback_data: 'bx:0:' + codeBiz.id, style: 'danger' }],
+            [{ text: 'Back', callback_data: 'bl:0' }],
+          ]);
+        // Ask, from the business screen's own button.
+        const ask = await tap('bw:0:' + codeBiz.id);
+        const askOk = ask.edits.length === 1 && ask.sends.length === 0
+          && ask.edits[0].text === C2.operatorReplaceConfirmText({ business: { name: 'ZZ Code Fixture' }, phones: 2 })
+          && JSON.stringify(ask.edits[0].reply_markup.inline_keyboard) === JSON.stringify([[
+            { text: 'Confirm replace', callback_data: 'bW:0:' + codeBiz.id, style: 'danger' },
+            { text: 'Cancel', callback_data: 'bu:0:' + codeBiz.id },
+          ]])
+          && (await boundTo(codeBiz.id)) === 2 && JSON.stringify(await liveOf(codeBiz.id)) === JSON.stringify(liveBefore);
         // Confirm.
-        const done = await tap('bP:0:' + codeBiz.id);
+        const done = await tap('bW:0:' + codeBiz.id);
         const liveAfter = await liveOf(codeBiz.id);
         const fresh = liveAfter[0] || '';
         if (fresh) createdCodes.push(fresh);
@@ -1664,9 +1693,16 @@ try {
           && toOp.length === 1 && String(toOp[0].text).endsWith('\n\n' + fresh) && !String(toOp[0].text).includes(CODE_SLUG)
           && (await svc.from('rate_limits').select('key').eq('key', 'opreplace:' + codeBiz.id)).data.length === 0
           && (await svc.from('businesses').select('status').eq('id', codeBiz.id).single()).data.status === 'demo';
-        // A second Confirm: one toast, nothing changed.
-        const again = await tap('bP:0:' + codeBiz.id);
+        // A second Confirm: one toast, nothing changed. The /invite origin's
+        // Confirm says the same thing, and its Ask says there is no phone left.
+        const again = await tap('bW:0:' + codeBiz.id);
         const againOk = again.answers.includes(C2.OPERATOR_ALREADY_REPLACED) && again.edits.length === 0 && again.sends.length === 0
+          && JSON.stringify(await liveOf(codeBiz.id)) === JSON.stringify(liveAfter);
+        const listConfirm = await tap('bP:0:' + codeBiz.id);
+        const listAsk = await tap('bp:0:' + codeBiz.id);
+        const listOriginOk = listConfirm.answers.includes(C2.OPERATOR_ALREADY_REPLACED)
+          && listConfirm.edits.length === 0 && listConfirm.sends.length === 0
+          && listAsk.answers.includes(C2.OPERATOR_NO_PHONE_NOW) && listAsk.sends.length === 0
           && JSON.stringify(await liveOf(codeBiz.id)) === JSON.stringify(liveAfter);
         // A replaced phone is just an unconnected chat; the older invite is dead.
         await reset();
@@ -1679,9 +1715,9 @@ try {
         await svc.from('business_chats').delete().in('tg_chat_id', [phoneA, phoneB]);
         await svc.from('bind_codes').update({ expires_at: new Date().toISOString() }).eq('business_id', codeBiz.id).is('used_at', null);
         await svc.from('rate_limits').delete().in('key', ['opcode:' + CODE_SLUG, 'opreplace:' + codeBiz.id]);
-        line(openOk && askOk && doneOk && againOk && exOk,
+        line(openOk && screenOk && askOk && doneOk && againOk && listOriginOk && exOk,
           'OP63', 'Replace phone on real rows: invite, scoped removal, notices',
-          `open=${openOk} ask=${askOk} done=${doneOk} again=${againOk} old=${exOk} live=${liveAfter.length}`);
+          `open=${openOk} screen=${screenOk} ask=${askOk} done=${doneOk} again=${againOk} list=${listOriginOk} old=${exOk} live=${liveAfter.length}`);
       }
 
       // OP17-OP20 run against real rows on a throwaway business: the cancel
@@ -2474,7 +2510,7 @@ try {
           'rl:' + lead, 'RL:' + lead, 'rc:' + lead, 'rm:1', 'Q:0:' + lead, 'E:0:' + lead,
           'i:c', 'pc:' + bizA.id, 'pb:' + bizA.id,
           'bl:0', 'bn:0', 'bd:0:' + invBiz.id, 'bt:0:' + invBiz.id, 'bT:0:' + invBiz.id, 'bs:0:' + invBiz.id, 'bS:0:' + invBiz.id,
-          'br:0:' + invBiz.id, 'bv:0:' + invBiz.id, 'bi:0:' + invBiz.id, 'bq:0:0:' + invBiz.id,
+          'br:0:' + invBiz.id, 'bR:0:' + invBiz.id, 'bv:0:' + invBiz.id, 'bi:0:' + invBiz.id, 'bq:0:0:' + invBiz.id,
           // Extend: the question, and a confirm carrying a date 30 days ahead.
           'be:0:' + invBiz.id, 'bE:0:' + invBiz.id + ':' + Math.floor((Date.now() + 30 * 86400000) / 1000).toString(36),
           'bp:0:' + invBiz.id, 'bP:0:' + invBiz.id, 'bc:0:' + invBiz.id, 'bw:0:' + invBiz.id, 'bW:0:' + invBiz.id, 'bu:0:' + invBiz.id]) {
@@ -2491,7 +2527,7 @@ try {
         // The operator's lists and its business browser, Suspend, Reactivate
         // and Invite included and aimed at this phone's OWN business: not
         // found, like any unknown tap.
-        const pickerRefused = ['pc', 'pb', 'bl', 'bn', 'bd', 'bt', 'bT', 'bs', 'bS', 'br', 'be', 'bE', 'bv', 'bi', 'bq', 'bp', 'bP', 'bc', 'bw', 'bW', 'bu']
+        const pickerRefused = ['pc', 'pb', 'bl', 'bn', 'bd', 'bt', 'bT', 'bs', 'bS', 'br', 'bR', 'be', 'bE', 'bv', 'bi', 'bq', 'bp', 'bP', 'bc', 'bw', 'bW', 'bu']
           .every((k) => (answers[k] || []).length === 1 && answers[k][0] === C2.TOAST_NOT_FOUND);
         line(refused && inviteRefused && pickerRefused && rowsKept === rowsAtStart && leadKept === 1 && liveAfter === liveBefore,
           'OP43', 'staff forged callbacks: refused, owner row, lead and codes intact',
@@ -2524,6 +2560,11 @@ try {
         const staffRow = (await svc.from('business_chats').select('id, tg_chat_id')
           .eq('business_id', invBiz.id).order('created_at').order('id')).data.find((r) => String(r.tg_chat_id) === String(invStaff));
         const statusNow = async () => (await svc.from('businesses').select('status').eq('id', invBiz.id).single()).data.status;
+        // lib/mail.js marks the subject when a redirect is configured:
+        // "[TEST for <original to>] <subject>". .env.test sets the redirect, so
+        // the plain subject is only right on a machine without it.
+        const mailSubject = (subject, to) => (process.env.MAIL_REDIRECT_TO
+          && String(process.env.MAIL_REDIRECT_PREFIX || '').toLowerCase() !== 'off' ? `[TEST for ${to}] ${subject}` : subject);
         const bindingsNow = async () => (await svc.from('business_chats').select('id').eq('business_id', invBiz.id)).data.length;
         const liveNow = async () => (await svc.from('bind_codes').select('code').eq('business_id', invBiz.id)
           .is('used_at', null).gt('expires_at', new Date().toISOString())).data.length;
@@ -2574,7 +2615,7 @@ try {
           && req.body.text.slice(req.body.entities[0].offset, req.body.entities[0].offset + req.body.entities[0].length) === 'Contact support';
         const noticeSent = (req) => !!req && req.body.text === SUSPENDED_BY_HAND && supportLink(req)
           && JSON.stringify(req.body.reply_markup) === STATUS_ONLY && !('parse_mode' in req.body);
-        const termOk = askEdit.body.text === 'Suspend ZZ Invite Fixture? Lead alerts and emails stop. The website form keeps saving new requests; they stay hidden until you reactivate. Nothing is deleted.'
+        const termOk = askEdit.body.text === 'Suspend ZZ Invite Fixture?\nAlerts and emails stop.\nThe site keeps saving\nrequests and holds them.\nNothing is deleted.\nThe owner can see the count.'
           && JSON.stringify(askEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[
             { text: 'Confirm suspend', callback_data: 'bS:0:' + invBiz.id, style: 'danger' },
             { text: 'Cancel', callback_data: 'bd:0:' + invBiz.id },
@@ -2583,8 +2624,8 @@ try {
           && (await statusNow()) === 'paused' && termSends.length === 2
           && [invOwner, invStaff].every((chat) => termSends.filter((x) => String(x.body.chat_id) === String(chat)).length === 1)
           && termSends.every(noticeSent)
-          && termEdit.body.text === 'ZZ Invite Fixture suspended'
-          && suspensionMails.length === 1 && suspensionMails[0].body.subject === 'Your service has been suspended'
+          && termEdit.body.text === 'Suspended: ZZ Invite Fixture\nTelegram: sent to 2 phones\nEmail: sent'
+          && suspensionMails.length === 1 && suspensionMails[0].body.subject === mailSubject('Your service has been suspended', 'inv@zz-test.invalid')
           && String(suspensionMails[0].body.text).includes('Your service has been suspended by support.')
           && String(suspensionMails[0].body.text).includes('Reply to this email and we will help.')
           && JSON.stringify(termEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[{ text: 'Back', callback_data: 'bd:0:' + invBiz.id }]])
@@ -2618,11 +2659,34 @@ try {
           && exStaffToast === 'This service is suspended. Send /status.' && exStaffDrawn === 0
           && newPhone === 'This service is suspended.\nA new phone cannot be connected\nright now.\n\nContact support' && newPhoneBound === 0 && !!pendingRow && pendingRow.used_at === null
           && againSends === 0 && againToast === C2.OPERATOR_ALREADY_SUSPENDED && (await statusNow()) === 'paused';
-        // Reactivate: active again, each phone told with its own keyboard.
+        // Reactivate, part 1: br ASKS. Nothing is written, nobody is told, and
+        // the business row is byte-identical afterwards.
+        const rowPaused = (await svc.from('businesses').select('*').eq('id', invBiz.id).maybeSingle()).data;
         await reset();
         await good(cb(OP, 'br:0:' + invBiz.id));
+        const askBackSends = (await sends()).length;
+        const askBackEdit = (await edits()).pop() || { body: {} };
+        const askBackToast = await answersNow();
+        const rowAfterAsk = (await svc.from('businesses').select('*').eq('id', invBiz.id).maybeSingle()).data;
+        const reactivateAskOk = askBackSends === 0 && askBackToast === ''
+          && askBackEdit.body.text === 'Reactivate ZZ Invite Fixture?\nAlerts and emails resume.\nRequests held while it was\noff become visible again.\nNothing is deleted.'
+          && JSON.stringify(askBackEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[
+            { text: 'Confirm reactivate', callback_data: 'bR:0:' + invBiz.id, style: 'success' },
+            { text: 'Cancel', callback_data: 'bd:0:' + invBiz.id },
+          ]])
+          && !('parse_mode' in askBackEdit.body)
+          && (await statusNow()) === 'paused'
+          && JSON.stringify(rowAfterAsk) === JSON.stringify(rowPaused);
+        // Reactivate, part 2: bR DOES IT. Active again, each phone told with its
+        // own keyboard, and the result screen states one fact per line.
+        await fetch(process.env.FAKE_RESEND_URL + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'ok', clearIdempotency: true }) });
+        await resetResend();
+        await reset();
+        await good(cb(OP, 'bR:0:' + invBiz.id));
         const backSends = await sends();
         const backEdit = (await edits()).pop() || { body: {} };
+        const backToast = await answersNow();
+        const rowActive = (await svc.from('businesses').select('*').eq('id', invBiz.id).maybeSingle()).data;
         const rowsOf = (req) => ((req && req.body.reply_markup && req.body.reply_markup.keyboard) || []).map((r) => r.map((b) => b.text));
         const toOwner = backSends.filter((x) => String(x.body.chat_id) === String(invOwner));
         const toStaff = backSends.filter((x) => String(x.body.chat_id) === String(invStaff));
@@ -2633,7 +2697,41 @@ try {
         const reactivateOk = (await statusNow()) === 'active' && backSends.length === 2
           && toOwner.length === 1 && toOwner[0].body.text === REACTIVATED_BY_HAND && JSON.stringify(rowsOf(toOwner[0])) === JSON.stringify([['Invite', 'Leads']])
           && toStaff.length === 1 && toStaff[0].body.text === REACTIVATED_BY_HAND && JSON.stringify(rowsOf(toStaff[0])) === JSON.stringify([['Leads']])
-          && backEdit.body.text === 'ZZ Invite Fixture reactivated' && servedAgain === C2.BOT_HELP;
+          && backToast === C2.OPERATOR_REACTIVATED
+          && backEdit.body.text === 'Reactivated: ZZ Invite Fixture\nTelegram: sent to 2 phones\nEmail: sent'
+          && JSON.stringify(backEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[{ text: 'Back', callback_data: 'bd:0:' + invBiz.id }]])
+          && servedAgain === C2.BOT_HELP;
+        // Reactivate, part 3: a second bR on the same message changes nothing.
+        await reset();
+        await good(cb(OP, 'bR:0:' + invBiz.id));
+        const againBackSends = (await sends()).length;
+        const againBackEdit = (await edits()).pop() || { body: {} };
+        const againBackToast = await answersNow();
+        const rowAfterAgain = (await svc.from('businesses').select('*').eq('id', invBiz.id).maybeSingle()).data;
+        const reactivateAgainOk = againBackSends === 0 && againBackToast === C2.OPERATOR_ALREADY_ACTIVE
+          && againBackEdit.body.text === 'ZZ Invite Fixture is already active.'
+          && JSON.stringify(againBackEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[{ text: 'Back', callback_data: 'bd:0:' + invBiz.id }]])
+          && (await statusNow()) === 'active'
+          && JSON.stringify(rowAfterAgain) === JSON.stringify(rowActive);
+        // Terminated: the screen offers Extend 30 days (which reactivates) and
+        // no Reactivate at all, so a fresh br:/bR: cannot be produced from it.
+        await svc.from('businesses').update({ status: 'churned' }).eq('id', invBiz.id);
+        await reset();
+        await good(cb(OP, 'bd:0:' + invBiz.id));
+        const termScreenEdit = (await edits()).pop() || { body: {} };
+        const termScreenKb = ((termScreenEdit.body.reply_markup || {}).inline_keyboard) || [];
+        const termScreenOk = termScreenKb.flat().every((b) => !/^b[rR]:/.test(String(b.callback_data)))
+          && JSON.stringify(termScreenKb) === JSON.stringify([
+            [{ text: 'Extend 30 days', callback_data: 'be:0:' + invBiz.id, style: 'primary' }, { text: 'Leads', callback_data: 'bq:0:0:' + invBiz.id }],
+            [{ text: 'Back', callback_data: 'bl:0' }],
+          ])
+          && String(termScreenEdit.body.text).split('\n')[1] === 'Terminated · ' + INV_SLUG;
+        // Not asserted here: a stale bR: on a terminated business currently sets
+        // it back to 'active' (reactivateBusiness accepts every suspended
+        // status, churned included). That is the recorded decision "Extend or
+        // Reactivate brings a business back", and it is also not what this
+        // round's brief expects, so it is left unasserted until the owner picks
+        // one. See SESSION_HANDOFF.md §11.
         // Put the fixture back as it was.
         await svc.from('businesses').update({ status: statusAtStart }).eq('id', invBiz.id);
         await svc.from('bind_codes').update({ expires_at: new Date().toISOString() }).eq('code', pending);
@@ -2655,10 +2753,10 @@ try {
         const noticeOk = (req) => !!req && req.body.text === C2.BOT_DISCONNECTED
           && req.body.reply_markup && req.body.reply_markup.remove_keyboard === true;
         line(startingBindings === 2 && pKept === 1 && pNotices === 0 && pToast && oldTerminate
-          && termOk && afterOk && reactivateOk && ownerRemoved === 0
+          && termOk && afterOk && reactivateAskOk && reactivateOk && reactivateAgainOk && termScreenOk && ownerRemoved === 0
           && ownerNotices.length === 1 && noticeOk(ownerNotices[0]) && rebound === 2,
           'OP61', 'suspend / reactivate / owner remove: one notice + keyboard each',
-          `start=${startingBindings} P=${pKept}/${pNotices}/${pToast} old=${oldTerminate} suspend=${termOk} after=${afterOk} reactivate=${reactivateOk} owner=${ownerNotices.length}/${ownerNotices.every(noticeOk)} rebound=${rebound}`);
+          `start=${startingBindings} P=${pKept}/${pNotices}/${pToast} old=${oldTerminate} suspend=${termOk} after=${afterOk} ask=${reactivateAskOk} reactivate=${reactivateOk} again=${reactivateAgainOk} termScreen=${termScreenOk} owner=${ownerNotices.length}/${ownerNotices.every(noticeOk)} rebound=${rebound}`);
       }
 
       // OP4: /businesses is the business list; the business screen marks the
