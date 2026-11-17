@@ -93,8 +93,11 @@ no `.env` (`tests/dev-root.mjs`).
 - Termination is the existing status `churned`, displayed as "Terminated". Nothing
   is ever deleted by the code; Extend or Reactivate brings a business back.
 - A held lead keeps its date order in `/leads` after reactivation; it is marked
-  with a fourth `held` line, not split into a separate section. One page header
-  counts the held rows on that page and one detail fact names the state.
+  with a fourth `held` line, not split into a separate section. The page header
+  states the **total** held leads of the business (`countHeldLeads`), never the
+  rows on the page — the renewal notice says the total and two numbers for one
+  fact is a bug. It is read only when the page carries a held row, so an
+  ordinary `/leads` costs what it always did. One detail fact names the state.
 - A suspended business's form **holds** leads: stored whole with `leads.held_at`,
   owner told a count and no detail, visitor told to call. A terminated business's
   form answers 410 and stores nothing.
@@ -106,8 +109,30 @@ no `.env` (`tests/dev-root.mjs`).
 - Hero video quality is non-negotiable. No re-encode, resize, replacement or
   slider change without an explicit instruction. Measured cost accepted:
   LCP ≈ 4.1 s on simulated mobile.
-- The estimate form's close button is 32 px with a 44 px press area (owner
-  decision 2026-11-16; it was 40 px). A click outside the form does not close it.
+- The estimate form's close button is 32 px with a 44 px press area **on every
+  screen, phones included** (owner decision 2026-11-16; it was 40 px). A click
+  outside the form does not close it.
+- The thank-you screen is three groups, each one beat of the reveal: the mark
+  with a split heading ("Thanks." + "We got your request."), the tinted recap,
+  then "What happens next" with Close and Call. Delays 160/240/320 ms after the
+  mark's 50 ms pop, set on the groups' classes, not on `:nth-child`. Each of the
+  three next-step lines stays on ONE line at 320 px: the reply promise is
+  deliberately NOT repeated here (it measured 2–3 lines at 320 px) and lives in
+  the fine print of step 4. The held / unavailable panel shows the title, its
+  words, Close and Call and nothing else.
+- The estimate answers persist in **sessionStorage** (`alder-est-draft-v1`:
+  `{ step, touched, values }`), never localStorage, and die with the tab. Saved
+  on every step change and input, restored on open, cleared on a definite answer
+  from the server, and a "Start over" button (shown only while a restored draft
+  exists) clears it. Every storage call is guarded: a browser that refuses
+  storage behaves as before. The honeypot field is never stored.
+- The form may open itself **once per tab session**: 10 s on a desktop, 8 s on a
+  phone (≤ 760 px), never on first paint, and only for a visitor who has not
+  used an estimate button, has not scrolled past the first section, is in a
+  visible tab, and has no open dialog. Closing stores a 30-day expiry stamp in
+  localStorage; a definite answer from the server stores a permanent flag
+  there. All constants in one `AUTO` object in `index.html`; they are not in the
+  debug menu yet.
 - Copy is plain, human and specific. No staccato fragments ("No fluff. Just
   results."), no comma-couplets used as a sentence, no colon-fragment openers.
   Full sentences with a reason in them.
@@ -132,9 +157,11 @@ review, sends daily operational summaries, and enforces a monthly subscription.
 | Email | Resend |
 | Local dev | `npx vercel@48.12.1 dev` on port 3000 (pinned) |
 
-Commands: `npm run build` (bake a client config into `dist/`), `images`, `icons`,
-`og`, `db:apply`, `bind -- <slug>`, `tg:commands` / `tg:commands:info`,
-`purge:expired`, `delete:lead`, `offboard`, `test:env-check`, `test:port-guard`.
+Commands: `npm run serve` (dependency-free static server for the repo root on
+127.0.0.1:8791, `npm run serve -- 3000` for another port), `npm run build` (bake
+a client config into `dist/`), `images`, `icons`, `og`, `db:apply`,
+`bind -- <slug>`, `tg:commands` / `tg:commands:info`, `purge:expired`,
+`delete:lead`, `offboard`, `test:env-check`, `test:port-guard`.
 Tests: `node tests/run.mjs [suites...]`.
 
 Key files: `api/{lead,tg,review,health,selfcheck,digest,billing}.js`;
@@ -236,7 +263,8 @@ closed with the same response as an unknown token.
 
 **Telegram** — owner and operator flows. Owner: `/leads` (5 per page, one message
 edited in place, numbers 1..N, Newer/Older only where real; held rows carry a
-fourth `held` line and the page header counts them without changing the order),
+fourth `held` line and the header states the business's total held leads without
+changing the order or the paging, and a page with no held row says nothing),
 lead detail with status actions and Back to the same page, `/remove_lead`
 (owner only, confirm before delete, no held mark), `/invite`, `/recipients`,
 `/status`, `/help`. A persistent reply
@@ -257,7 +285,10 @@ only when somebody was reached, and `applyPayment()` in `lib/billing-ops.js` as 
 single seam a payment provider will call. The operator presses **Extend 30 days**
 and confirms an exact date; a double tap adds nothing. Every notice round is
 logged in `business_events`, and `lib/notice-audit.js` reports a round that never
-finished.
+finished. `docs/OPERATIONS.md` §3b carries the payment-provider stage design
+notes (period end as the source of `paid_until`, idempotency by delivery id, 2xx
+within 5 s, repeats and out-of-order deliveries, cancellation does not terminate,
+refund = Terminate, chargeback = suspend).
 
 **Ops** — `GET /api/health` (event counts, no PII, `x-health-secret`),
 `GET /api/selfcheck` (per-business, daily 09:00 UTC), `GET /api/digest` (daily
@@ -355,6 +386,7 @@ the modal's thank-you steps.
 | **Terminated-site presentation** | Three options documented in `docs/OPERATIONS.md` (serve today, per-host holding page, redirect to operator contact). Not built; owner decides later. |
 | **Telegram audit leftovers** | Named lead buttons (name/service/age instead of 1..5) and merging `/remove_lead` into the lead detail. Everything else in `docs/audits/telegram-bot-audit.md` is done or rejected on purpose. |
 | **Retention automation** | A purge job matching the 60-day rule. |
+| **Auto-open constants in the debug menu** | Deferred on purpose (the task allowed it to wait). `AUTO` in `index.html` is the only place they live; showing them in the `DEV`-gated panel would help a rehearsal. |
 | **Supabase key migration** | Swap env values before early 2027; tighten `db-wall` first. |
 
 ---
@@ -369,6 +401,8 @@ the modal's thank-you steps.
 | 2026-11-16 | Service lifecycle: one config file for every duration, reminder → grace → suspension → termination, held leads, `/status`, `business_events` notice log with a daily audit. Migration `0007`. |
 | 2026-11-16 | Docs: `docs/WHOP.md` (one payment reference), Telegram audit status review, Creem/Polar pages isolated and ignored. |
 | 2026-11-17 | Held leads marked in `/leads` and detail without reordering or paging changes; held notice gained "Renew to see them."; terminated-site options documented, no implementation. |
+| 2026-11-17 | Operator business screen: two-line lead counts, four button matrices, asks and confirms, one fact per line (Part 1). |
+| 2026-11-17 | Estimate modal: thank-you screen in three groups with a class-set reveal, one-line next steps, the held state really hides the recap and the steps, draft in sessionStorage with "Start over", one automatic open per session at 8 s / 10 s with a 30-day close suppression. `/leads` header states the total held leads. A support suspension says "Contact support to restore it." instead of "Renew". `npm run serve`. Payment-provider design notes in `docs/OPERATIONS.md` §3b. |
 
 ---
 
@@ -384,3 +418,20 @@ These were left open by the last live test and cannot be confirmed from the repo
 3. Migration `0007` application status on the TEST project and on production.
 4. `npm run tg:commands` after the lifecycle deploy — the live operator menu was
    out of date once before.
+
+Open after the 2026-11-17 modal round:
+
+5. `tests/webhook.test.mjs` (the database-backed half of the browser coverage)
+   fails OP24, OP61 and OP63 against the TEST project. It fails **identically on
+   16d78fc**, the Part 1 tip, so it is not from this round: the operator flows it
+   drives and the state of that project need a look before the next deploy.
+6. `tests/lead-api.test.mjs`, `tests/review.test.mjs`, `tests/fallback.test.mjs`
+   and `tests/isolation.test.mjs` were not run this round (they need a live
+   `vercel dev` and/or the TEST project).
+7. The automatic open and the draft were measured in Chrome at a 375 px viewport
+   (8.3 s open, 6.3 s closed, no second open after a reload) and at 1280 px
+   (open after 9.9 s, closed before). Not yet on a real phone, and not with a
+   real `sessionStorage` that is disabled by the visitor.
+8. The three next-step lines were measured at 320, 375 and 1440 px (one line
+   each, longest 192 px of the 246 px box at 320). Not measured in Safari or
+   Firefox.
