@@ -1717,7 +1717,7 @@ try {
       [`bP:0:${BIZ_C}`, listBack(0)],
     ]) {
       const x = seen(await run(cb(OP, data)));
-      const want = data.endsWith(BIZ_C) ? 'Juniper Roofing is terminated. Reactivate it first.' : LINE;
+      const want = data.endsWith(BIZ_C) ? 'Juniper Roofing is terminated.\nExtend 30 days restores it.' : LINE;
       if (!same(x.answers, ['']) || x.sends.length || x.edits.length !== 1 || textOf(x.edits[0]) !== want || !same(kbOf(x.edits[0]), back) || !noWrite(x)) bad.push(data.slice(0, 2));
     }
     const typed = seen(await run(msg(OP, '/invite zz-paused')));
@@ -2235,7 +2235,7 @@ try {
   leadIds = seedSeven();
   seedCode(BIZ_A, 'KEEPKEEPKEEP');
   {
-    const TERMINATE_ASK = 'Terminate Alder Roofing?\nAlerts and emails stop.\nThe website form shows\n"not available".\nNothing is deleted: Extend\nor Reactivate puts it back.';
+    const TERMINATE_ASK = 'Terminate Alder Roofing?\nAlerts and emails stop.\nThe website form shows\n"not available".\nNothing is deleted: Extend\n30 days puts it back.';
     const before = snapshot();
     const ask = seen(await run(cb(OP, `bx:0:${BIZ_A}`)));
     const askKb = kbOf(ask.edits[0]);

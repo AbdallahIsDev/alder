@@ -184,6 +184,8 @@ they lead somewhere). A number, **Invite** on a business's screen and
   `/invite`; the operator has no button for it.
 - **Suspended.** One line, `<Name> is suspended. Reactivate it first.`, and
   **Back**.
+- **Terminated.** `<Name> is terminated.` / `Extend 30 days restores it.`, and
+  **Back**: a terminated business is restored by Extend, never by Reactivate.
 
 The code is the same single-use, 24-hour code; a new one cancels that
 business's older unused ones (the first message says how many); the limit is

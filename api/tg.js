@@ -232,9 +232,11 @@ function sendKeyboardRemoved(chatId) {
 /* ---------- suspended or terminated business ----------
    Suspend sets businesses.status to 'paused', Terminate to 'churned' (shown
    as "Terminated"). Nothing is deleted either way: the phones stay bound, the
-   invites and the leads stay where they are, and Reactivate or a recorded
-   payment puts the status back. While it lasts, a phone of that business has
-   ONE working command, /status (also the one button of its keyboard). Every
+   invites and the leads stay where they are, and a recorded payment (Extend
+   30 days) puts the status back. Reactivate applies to a suspended business
+   only: on a terminated one it refuses and points at Extend. While it lasts,
+   a phone of that business has ONE working command, /status (also the one
+   button of its keyboard). Every
    other command, keyboard press and free text gets a short answer that says
    the service is off, why, and until when, with the support link; a button
    tap gets the same as a toast. No lead data is shown, and nothing is
@@ -1228,8 +1230,9 @@ async function handleOperatorSuspend({ chatId, messageId, businessId, page, answ
  * terminateBusiness() in lib/service-status.js, the SAME function the daily
  * job calls at the end of the suspended period: status 'churned' in one
  * scoped UPDATE, then the termination notice to every phone and the owner
- * address. Nothing is deleted, so Extend or Reactivate puts the business
- * back. A termination made here is never marked "for non-payment".
+ * address. Nothing is deleted, so Extend 30 days puts the business back;
+ * Reactivate refuses a terminated one. A termination made here is never
+ * marked "for non-payment".
  *
  * The buttons are bx (ask) and bX (confirm). bt / bT, the letters of the
  * Terminate that used to delete a business, stay retired.

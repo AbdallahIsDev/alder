@@ -322,11 +322,11 @@ const samples = sampleTelegramTexts();
       === 'Code for alder-demo: K7M2QPX9RT4W\n\nExpires in 24 hours. 2 phones removed (1 notice not delivered). 2 older invites were cancelled. The next message is for the client — forward it as it is.'
     && C.operatorSuspendConfirmText(biz) === 'Suspend Alder Roofing?\nAlerts and emails stop.\nThe site keeps saving\nrequests and holds them.\nNothing is deleted.\nThe owner can see the count.'
     && C.operatorReactivateConfirmText(biz) === 'Reactivate Alder Roofing?\nAlerts and emails resume.\nRequests held while it was\noff become visible again.\nNothing is deleted.'
-    && C.operatorTerminateConfirmText(biz) === 'Terminate Alder Roofing?\nAlerts and emails stop.\nThe website form shows\n"not available".\nNothing is deleted: Extend\nor Reactivate puts it back.'
+    && C.operatorTerminateConfirmText(biz) === 'Terminate Alder Roofing?\nAlerts and emails stop.\nThe website form shows\n"not available".\nNothing is deleted: Extend\n30 days puts it back.'
     && C.operatorTerminatedText({ business: biz, notice: { phones: 2, phonesOk: 2, email: 'sent' } }) === 'Terminated: Alder Roofing\nTelegram: sent to 2 phones\nEmail: sent'
     && C.operatorTerminatedText({ business: biz, notice: { phones: 2, phonesOk: 1, email: 'sent' } }) === 'Terminated: Alder Roofing\nTelegram: failed (alert sent)\nEmail: sent'
     && C.operatorAlreadyTerminatedText(biz) === 'Alder Roofing is already terminated.'
-    && C.operatorInviteSuspendedText({ ...biz, status: 'churned' }) === 'Alder Roofing is terminated. Reactivate it first.'
+    && C.operatorInviteSuspendedText({ ...biz, status: 'churned' }) === 'Alder Roofing is terminated.\nExtend 30 days restores it.'
     && C.OPERATOR_TERMINATED === 'Terminated.' && C.OPERATOR_ALREADY_TERMINATED === 'Already terminated.'
     // "churned" is the stored value; the word shown is "Terminated".
     && C.businessStatusWord('churned') === 'Terminated' && C.businessStatusWord('paused') === 'Suspended'
