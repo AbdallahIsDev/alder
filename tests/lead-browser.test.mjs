@@ -140,6 +140,7 @@ const match = (row, params) => {
     const v = row[key];
     if (raw.startsWith('eq.')) { if (String(v) !== raw.slice(3)) return false; continue; }
     if (raw === 'is.null') { if (v !== null && v !== undefined) return false; continue; }
+    if (raw === 'not.is.null') { if (v === null || v === undefined) return false; continue; }
     if (raw.startsWith('gt.')) { if (!(new Date(v) > new Date(raw.slice(3)))) return false; continue; }
     if (raw.startsWith('lt.')) { if (!(new Date(v) < new Date(raw.slice(3)))) return false; continue; }
     if (raw.startsWith('in.(')) {
@@ -219,6 +220,9 @@ const install = () => {
     if (table === 'v_client_leads') {
       let rows = store.leads.filter((r) => match(r, params));
       rows = rows.slice().sort(byOrder(u.searchParams.get('order')));
+      // A count-only read (head: true, Prefer: count=exact) answers in the
+      // content-range header, like the real one: countHeldLeads asks this way.
+      if (countRequested(init)) return countHeader(rows.length);
       const offset = Number(u.searchParams.get('offset') || 0);
       const limit = u.searchParams.get('limit');
       if (limit !== null) rows = rows.slice(offset, offset + Number(limit));
@@ -1200,20 +1204,26 @@ try {
       `lines=${printed.length} cold=${printed.map((x) => x.cold).join(',')} steps=${printed.map((x) => x.steps.length).join(',')} dropped=${second && second.steps_dropped}`);
   }
 
-  /* LB24: held leads are marked in place. The page header counts only this
-     page, the fourth "held" line sits inside the existing block, the detail
+  /* LB24: held leads are marked in place, and the header states the TOTAL. The
+     renewal notice tells the owner "5 leads came in while your service was
+     suspended"; a page that counted only its own rows answered 2 for the same
+     fact. Six held leads here, so page 0 carries five held rows and says six,
+     page 1 carries one and still says six, and page 2 carries none and says
+     nothing. The fourth "held" line sits inside the existing block, the detail
      gets one fact line, and /remove_lead carries none of it. */
   store = freshStore();
   {
     const heldAt = '2026-11-14T12:00:00Z';
-    const h1 = seedLead(BIZ_A, { name: 'Held First', created_at: '2026-11-15T12:00:00Z' });
-    const h2 = seedLead(BIZ_A, { name: 'Held Second', created_at: '2026-11-14T13:00:00Z' });
-    for (const id of [h1, h2]) store.leads.find((l) => l.id === id).held_at = heldAt;
+    const held = [];
+    const names = ['Held First', 'Held Second', 'Held Three', 'Held Four', 'Held Five', 'Held Six'];
+    for (let i = 0; i < 6; i++) held.push(seedLead(BIZ_A, { name: names[i], created_at: `2026-11-${String(25 - i).padStart(2, '0')}T12:00:00Z` }));
+    for (const id of held) store.leads.find((l) => l.id === id).held_at = heldAt;
     const normal = [];
     for (let i = 0; i < 5; i++) {
-      normal.push(seedLead(BIZ_A, { name: `Normal ${i}`, created_at: `2026-11-${String(13 - i).padStart(2, '0')}T12:00:00Z` }));
+      normal.push(seedLead(BIZ_A, { name: `Normal ${i}`, created_at: `2026-11-${String(10 - i).padStart(2, '0')}T12:00:00Z` }));
     }
-    const order0 = [h1, h2, ...normal.slice(0, 3)];
+    const order0 = held.slice(0, 5);
+    const order1 = [held[5], ...normal.slice(0, 4)];
 
     await tgReset();
     await call(msg(OWNER, '/leads'));
@@ -1222,24 +1232,35 @@ try {
     const firstKb = kbOf(first);
     const firstBlocks = firstText.split('\n\n').slice(1);
     const heldRows = firstBlocks.filter((b) => b.split('\n').includes('held'));
-    const header = 'Received while suspended: 2';
+    const header = 'Received while suspended: 6';
     const firstOk = firstText.startsWith(`Recent requests\n${header}\n\n`)
-      && firstBlocks.length === 5 && heldRows.length === 2
-      && heldRows.every((b) => /^([12])\. Held (First|Second)$/.test(b.split('\n')[0]))
+      && firstBlocks.length === 5 && heldRows.length === 5
+      && heldRows.every((b) => /^[1-5]\. Held /.test(b.split('\n')[0]))
       && numbersOk(firstKb[0], 5)
       && order0.every((id, i) => firstKb[0][i].callback_data === `L:0:${id}`)
       && firstText.split('\n').every((l) => l.length <= 34);
 
+    // One held row on this page, six in the business: the header does not shrink.
     await tgReset();
     await call(cb(OWNER, 'l:1'));
     const page1 = String((await edits())[0].body.text);
+    const page1Kb = kbOf((await edits())[0]);
     const page1Blocks = page1.split('\n\n').slice(1);
-    const page1Ok = page1.startsWith('Recent requests\n\n') && page1Blocks.length === 2
-      && !page1.includes('Received while suspended') && !page1.split('\n').includes('held')
+    const page1Held = page1Blocks.filter((b) => b.split('\n').includes('held'));
+    const page1Ok = page1.startsWith(`Recent requests\n${header}\n\n`) && page1Blocks.length === 5
+      && page1Held.length === 1 && numbersOk(page1Kb[0], 5)
+      && order1.every((id, i) => page1Kb[0][i].callback_data === `L:1:${id}`)
       && page1.split('\n').every((l) => l.length <= 34);
 
+    // A page with no held row is not told about held leads at all.
     await tgReset();
-    await call(cb(OWNER, `L:0:${h1}`));
+    await call(cb(OWNER, 'l:2'));
+    const page2 = String((await edits())[0].body.text);
+    const page2Ok = page2.startsWith('Recent requests\n\n') && !page2.includes('Received while suspended')
+      && page2.split('\n').every((l) => l.length <= 34);
+
+    await tgReset();
+    await call(cb(OWNER, `L:0:${held[0]}`));
     const heldDetail = String((await edits())[0].body.text);
     await tgReset();
     await call(cb(OWNER, `L:0:${normal[0]}`));
@@ -1254,9 +1275,9 @@ try {
     const removeOk = removeText.startsWith(C.REMOVE_LEAD_TITLE)
       && !removeText.split('\n').includes('held') && !removeText.includes('Received while suspended');
 
-    line(firstOk && page1Ok && detailOk && removeOk,
-      'LB24', 'held rows marked in place; page count, detail, removal clean',
-      `header=${firstText.split('\n')[1]} heldRows=${heldRows.length} detail=${detailOk} remove=${removeOk}`);
+    line(firstOk && page1Ok && page2Ok && detailOk && removeOk,
+      'LB24', 'held rows marked in place; the header states the total, not the page',
+      `p0=${firstText.split('\n')[1]} p1=${page1.split('\n')[1]} p2=${page2.split('\n')[1] || '(none)'} detail=${detailOk} remove=${removeOk}`);
   }
 
   /* LB25: migration 0007 may be absent. A detail read that fails on held_at

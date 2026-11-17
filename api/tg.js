@@ -452,12 +452,17 @@ async function sendLeadsPage(chatId, businessId, page, messageId, answer = null)
   const hasOlder = leads.length > LEADS_PAGE && safePage < LEADS_PAGE_MAX;
   const shown = leads.slice(0, LEADS_PAGE);
   const empty = !shown.length;
-  // One count line, only for this page. The list itself keeps its order and
-  // five rows; no second list, numbering or callback is added for held leads.
-  const heldCount = shown.reduce((n, l) => n + (l.held_at ? 1 : 0), 0);
+  // The header counts EVERY held lead of this business, not the held rows on
+  // this page: the renewal notice says "5 leads came in while your service was
+  // suspended", and a page that answers "2" for the same fact is simply a
+  // different number. The count is read only when this page actually carries a
+  // held row, so a business with no held leads pays nothing for it and the call
+  // budget of an ordinary /leads is unchanged. The list itself keeps its order
+  // and five rows; no second list, numbering or callback is added.
+  const heldTotal = shown.some((l) => l.held_at) ? await countHeldLeads(businessId) : 0;
   const listText = renderLeadList(shown);
   const text = empty ? 'No requests yet.'
-    : heldCount ? listText.replace('Recent requests\n', `Recent requests\nReceived while suspended: ${heldCount}\n`)
+    : heldTotal ? listText.replace('Recent requests\n', `Recent requests\nReceived while suspended: ${heldTotal}\n`)
       : listText;
   const markup = empty ? { reply_markup: { inline_keyboard: [] } } : leadListKeyboard(shown, safePage, hasOlder);
   if (messageId) {
