@@ -61,6 +61,13 @@ separate databases); do not claim the shared key provides isolation.
   forwarding fields, unknown/malformed hosts, preview mapping, chat binding,
   inactive clients, and daily-job filtering before real onboarding.
 
+**Relationship to `docs/MULTI_TENANT_DESIGN.md`.** That document is the target
+design for one deployment serving many clients; it is not superseded. What exists
+today is only its routing seam, in a reduced form: `businesses.site_host` plus
+`lib/tenant.js`, instead of the `sites` / `site_domains` tables it proposes. The
+content-in-the-database, the per-host renderer, the asset move and the provisioning
+commands are all still ahead. Its §9 records the implementation status step by step.
+
 ## Architecture B — escape hatch
 
 A client needing a genuinely custom UI, an SEO remedy incompatible with shared

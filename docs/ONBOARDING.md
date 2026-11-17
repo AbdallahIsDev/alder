@@ -11,18 +11,23 @@ No secrets or customer data belong in this document.
 
 ## Current manual steps
 
-Until the architecture decision is implemented, these are the repo's current
-setup tasks, not a safe self-service flow:
+The tenant seam is implemented; provisioning is not. These are the current setup
+tasks, not a safe self-service flow:
 
 1. Choose one deployment/client and its domain. Do not take payment on Vercel
    Hobby; its current terms restrict it to personal, non-commercial use. Choose
    Vercel Pro or another host whose commercial terms fit.
 2. Add one `public.businesses` row with the client's slug, name, owner email,
-   timezone, and review URL. `timezone` exists in the schema; country, phone
-   region, site URL, sender, legal text, and retention settings do not.
-3. Add `clients/<slug>.json` and build the selected page with that client. This
-   currently controls static copy and the optional email sender; it does not
-   resolve the API tenant securely.
+   timezone, review URL, **and `site_host`**. `site_host` is the exact Host the
+   site is served on (`www.acmeroof.com` — lowercase, no scheme, no port, no
+   trailing dot). It is what `resolveTenant()` matches: a business without it is
+   never served, and its form fails closed with a 404. `timezone` exists in the
+   schema; country, phone region, site URL, sender, legal text, and retention
+   settings do not.
+3. Add `clients/<slug>.json` and build the selected page with that client. It
+   controls the static copy, the domain used for `robots.txt`/`sitemap.xml`, and
+   the optional email sender. It is build-time input only: the API tenant comes
+   from `site_host` and the request Host, never from this file.
 4. Configure the deployment's environment names listed below, its email sender,
    domain, database, and outbound services. Use TEST credentials in previews.
 5. Deploy the page and check its canonical URL, legal links, sender, and form.
@@ -82,15 +87,18 @@ endpoint creates them.
 
 ## Telegram menu and buttons
 
-The bot menu has four entries (names only, no secrets):
+The owner menu has six entries (names only, no secrets):
 
 - `leads` — Your latest requests
 - `invite` — Connect a second phone
 - `recipients` — Who receives alerts
+- `remove_lead` — Remove a request
+- `status` — Your service status
 - `help` — How this works
 
-After deploy, run `npm run tg:commands` once: it sets the four commands plus
-the bot description and short description (`setMyDescription` /
+The operator chat has its own scoped menu: `businesses`, `invite`, `help`, `id`.
+After deploy, run `npm run tg:commands` once: it sets both menus plus the bot
+description and short description (`setMyDescription` /
 `setMyShortDescription`); print the names afterwards with
 `npm run tg:commands:info`. The profile photo is set manually in BotFather
 with `/setuserpic`. Every bot message reads as if the bot belongs to this

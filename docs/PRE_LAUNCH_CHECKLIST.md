@@ -64,6 +64,9 @@ Run steps 27b to 27n of `docs/MANUAL_TESTING.md` with a phone you hold.
       service that stores form submissions.
 - [ ] You know how the customer pays, and where you will see that a payment
       arrived. The system does not see payments: you press **Extend 30 days**.
+- [ ] The payment provider account is live and can pay out: fees, payout method
+      and the Egypt-specific options are in `docs/WHOP.md`. Confirm the payout
+      route on the dashboard before the first customer pays.
 
 ## 5. Switching the customer on
 

@@ -1,8 +1,12 @@
 # Multi-tenant design: one deployment, many clients
 
-**Status:** proposal. Docs only — no code, no migration, no schema applied.
-Most file:line references below were read on 2026-11-09 at `origin/main`
-(`de2c8fe`). Rows 12–13 were refreshed against the current build on 2026-11-12.
+**Status:** the target design, **partly implemented**. The tenant seam exists
+(`businesses.site_host` + `lib/tenant.js`); the tables, the renderer, the asset move
+and the provisioning commands do not. **§9 records exactly what is built, what is
+partial and what is missing** — read it first, then treat §2–§7 as the plan.
+
+Sections 1–8 were written on 2026-11-09 against `origin/main` (`de2c8fe`); their
+file:line references describe that commit and may have moved since.
 
 The goal: one deployment serves every client. The layout stays identical; only
 client data and page content change. Assets (logo, photos, video) must not ship
@@ -446,3 +450,54 @@ client to serve.
 - Supabase Storage's public-read bandwidth cost at this project's scale.
 - Whether Vercel's Deployment Storage counts the uploaded source as well as the
   build output (see the `vercel-storage` PR). If it does, step 1 is worth double.
+
+---
+
+## 9. Implementation status — audited 2026-11-17
+
+Measured against the code at `56bcd5c`. Short version: **the routing seam exists in
+a reduced form; the data model, the renderer and the asset move do not.** Nothing
+in §2–§7 has been applied.
+
+| # | Step (§7) | State | Evidence |
+|---|---|---|---|
+| 1 | Hero videos and og image out of `assets/` into storage | **Not started** | Six `.mp4` files, 111 MB, still in `assets/images/hero/`. No storage client anywhere in `api/`, `lib/` or `scripts/`. |
+| 2 | One `lib/fill-template.js` for the build and the runtime | **Not started** | The file does not exist. `build-static.js:145` has its own replacer; `index.html` still carries 116 `{{tokens}}` and its own runtime fill for `file://`. |
+| 3 | `sites`, `site_domains`, `site_assets` + RLS | **Not started, half-replaced** | Migrations `0001–0007` contain none of the three tables. The routing half exists in a reduced form: `businesses.site_host` (`0005`) plus `lib/tenant.js`. |
+| 4 | Copy out of `index.html` into content + schema | **Mostly done, at build time** | `clients/alder.json` holds 28 `biz` keys and 79 `copy` keys. The build refuses unknown keys, BIZ collisions, unused copy keys and any surviving token (`build-static.js:96-113`). Missing: a JSON Schema, a `content_version`, and storage in the database. |
+| 5 | `new-client` / `publish-client` | **Not started** | Neither script exists in `package.json`. Creating a client is still copy a JSON file, insert a row, attach a domain, mint a code. |
+| 6 | Host-based renderer | **Done for the API, not for the page** | `resolveTenant()` selects the business from the request `Host` for `/api/lead` and `/api/review`, fails closed, and is covered by two-tenant tests. The HTML is still baked per build: `lib/client.js` picks a client by the `CLIENT` env var, not by `Host`. |
+| 7 | Per-site brand and email logo at send time | **Not started** | `lib/brand.generated.json` is one brand for the whole deployment; `lib/mail.js:119` attaches its logo. `lib/client.js:38` resolves a sender from the client file, but by env var, not by host. |
+| 8 | Per-site `noindex` instead of the global header | **Not started** | `vercel.json:95` sends `X-Robots-Tag: noindex, nofollow` on every response. The moment a second client exists, that header must go or both clients are deindexed. |
+
+### What is already better than this document assumed
+
+- **The tenant boundary is real and tested.** Two tenants, forged body slug, forged
+  `business_id`, forged `X-Forwarded-Host`, unknown and malformed host, and a token
+  from tenant A used on tenant B — all covered. That was step 6's hard half.
+- **The copy split happened.** The page's text is already keyed data, not markup.
+  Moving it from a file to a `jsonb` column is a data migration, not a rewrite.
+- **The build is per-client and validated.** `--client`, `CLIENT`, refusal on a bad
+  file, generated `robots.txt` and `sitemap.xml` from that client's domain.
+
+### What still blocks "one deployment, many clients"
+
+1. **The page is still one client per build.** This is the whole feature. Until a
+   function renders HTML per `Host`, every client is a deployment.
+2. **The host lives in two places conceptually.** This document says
+   `site_domains.host` (one row per apex and per www); the code says
+   `businesses.site_host` (one value per business, unique). Decide which is
+   authoritative **before** step 3, or the renderer and the API will disagree about
+   which host is whose. Today apex and www cannot both be served for one business
+   without a redirect.
+3. **Assets are inside the deployment.** 111 MB of video per client is what makes
+   option (c) expensive and what filled the Vercel storage allowance.
+4. **The fill exists twice.** Adding a third copy in a renderer is how `//n` shipped.
+5. **No provisioning command.** Onboarding is eight manual steps per client; at any
+   volume that is the bottleneck, not the rendering.
+
+### Suggested order, unchanged by this audit
+
+Step 2 (one fill), then 1 (assets), then 3 (tables, with the host decision above),
+then 6 (renderer), then 5 (commands), then 7 and 8. Steps 4 and the copy split are
+already done; only the storage location is left.

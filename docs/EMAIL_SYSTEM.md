@@ -306,34 +306,43 @@ chat gets "I only respond to commands. …", at most 3 per chat per hour
 sends nothing; the text is never logged or stored). Stickers, photos, voice,
 edited messages, `my_chat_member` and group/channel updates get no reply.
 
-**/leads format** (`renderLeadList` in `lib/content.js`): plain text, one
-title line "Recent requests", a blank line, then one three-line block per
-lead with a blank line between leads (none after the last): name truncated to
-28 chars, then "`Service label` · `phone`", then "`age` · `status`". No
-numbering, no "—" character anywhere; " · " only as separators. Status uses
-one shared map (`open 🟡 New`, `contacted 🔵 Contacted`, `quoted 🟣 Quoted`,
-`won 🏆 Won`, `lost ⚪ Lost`, `done ✅ Done`; unknown statuses show the raw
-word). Phones go through `displayPhone`.
+**/leads format** (`renderLeadList` in `lib/content.js`): one message, five leads
+a page, plain text. Title line "Recent requests", a blank line, then one
+three-line block per lead with a blank line between leads (none after the last):
+`1. Name` (truncated to 28 chars), then `Service label · phone`, then
+`status · age`. Below the text sits ONE row of number buttons `1..N` matching the
+numbers in the text, then at most one navigation row (`Newer`, `Older`, or both)
+and only for the ends that lead somewhere — there is no disabled button. Tapping a
+number edits the same message into the lead detail; `Back` restores that exact
+page. No "—" character anywhere; " · " only as separators. Status uses one shared
+map (`open 🟡 New`, `contacted 🔵 Contacted`, `quoted 🟣 Quoted`, `won 🏆 Won`,
+`lost ⚪ Lost`, `done ✅ Done`; unknown statuses show the raw word). Phones go
+through `displayPhone`. `/remove_lead` uses the same browser in removal mode.
 
 **Bot profile descriptions:** `npm run tg:commands` (run once by the owner
-after deploy) sets the two menu commands (`leads`, `help`) plus the bot
+after deploy) sets both command menus (see the next section) plus the bot
 description (≤512 chars) and short description (≤120 chars) via
 `setMyDescription` / `setMyShortDescription` in `lib/tg.js`;
-`npm run tg:commands:info` prints the command names. The profile photo is
+`npm run tg:commands:info` prints both live menus. The profile photo is
 set manually in BotFather with `/setuserpic`.
 
 ## Telegram menu commands
 
-The bot menu has exactly two entries (names only):
+Two menus, one per role:
 
-- `leads` — Show recent requests
-- `help` — How this bot works
+- **Owner (default scope):** `leads`, `invite`, `recipients`, `remove_lead`,
+  `status`, `help`.
+- **Operator (chat scope, `BotCommandScopeChat`):** `businesses`, `invite`,
+  `help`, `id`.
 
-Set them with `npm run tg:commands` (calls `setMyCommands`) and print the
-names with `npm run tg:commands:info` (calls `getMyCommands`).
-`/help` in the chat replies with the same short text for linked and unlinked
-chats and reveals no business data. `/leads` still returns no lead data for
-unlinked chats.
+`npm run tg:commands` sets both, and also sets the bot description and short
+description. Run it after any deploy that adds or renames a command, from a shell
+that has `OPERATOR_CHAT_ID`; without it the operator chat keeps its old menu and
+the script prints `OPERATOR MENU NOT UPDATED`. `npm run tg:commands:info` prints
+both live menus and whether the operator one is up to date.
+
+`/help` replies with the same short text for linked and unlinked chats and reveals
+no business data. `/leads` returns no lead data for unlinked chats.
 
 ## Phone validation and storage
 
@@ -367,15 +376,18 @@ digits, one leading `+`, spaces `( ) - .` only, `maxlength="20"`,
 
 ## Env var names
 
-The email and Telegram code reads these names (never values - do not copy
-`.env` content into docs, tickets or screenshots):
+The email and Telegram code reads these names (never values — do not copy
+`.env` content into docs, tickets or screenshots).
 
-`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`,
-`IP_HASH_SALT`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
-`TELEGRAM_WEBHOOK_SECRET`, `RESEND_API_KEY`, `MAIL_FROM`, `MAIL_REDIRECT_TO`,
-`MAIL_REDIRECT_PREFIX` (set to `off` to remove the `[TEST for ...]` subject
-prefix; recipients are still redirected to `MAIL_REDIRECT_TO`), `SITE_URL`,
-`DATABASE_URL` (local migrations only).
+- **Mail:** `RESEND_API_KEY`, `MAIL_FROM`, `MAIL_REDIRECT_TO`,
+  `MAIL_REDIRECT_PREFIX` (set to `off` to drop the `[TEST for ...]` subject
+  prefix; recipients are still redirected), `SITE_URL`.
+- **Telegram:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET`,
+  `TELEGRAM_BOT_USERNAME`, `OPERATOR_CHAT_ID`, `OPERATOR_EMAIL`.
+- **Limits and jobs:** `AUTOREPLY_DAILY_CAP`, `RECIPIENTS_MAX`, `INVITES_MAX`,
+  `BIND_TRIES_GLOBAL_PER_HOUR`, `NOTIFY_DEADLINE_MS`, `DIGEST_ENABLED`,
+  `DIGEST_UNTOUCHED_DAYS`, `HEALTH_SECRET`, `CRON_SECRET`.
+- **Local only:** `DATABASE_URL` (migrations).
 
 ## Running the tests
 
@@ -395,9 +407,9 @@ in-process (e.g. `node tests/run.mjs tests/webhook.test.mjs`). Per-suite
 seconds and the total always print. Outbound HTTP uses a 3000 ms timeout in
 production; the `OUTBOUND_TIMEOUT_MS=200` override applies only when
 `VERCEL_ENV` is exactly `development` (the runner sets it), and only an
-integer 200–3000 is honoured. An unset `VERCEL_ENV` is not dev. The suites read the production database — back
-up and reset `alder-demo` first, and restore afterwards (see
-`HANDOFF_alder_session.md`).
+integer 200–3000 is honoured. An unset `VERCEL_ENV` is not dev. The suites read
+the dedicated TEST project with `TEST_ENV=1`, never production (see
+`docs/TEST_PROJECT.md`).
 
 ## Preview gallery
 

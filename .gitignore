@@ -39,6 +39,11 @@ npm-debug.log*
 _debug/
 *experiments*/
 
+# --- alternative payment providers (research only) --------------------------
+# Creem and Polar were evaluated and rejected in favour of Whop. Their pages are
+# kept locally for reference and must never ship: docs/WHOP.md is the tracked one.
+docs/alt-providers/
+
 # --- tooling state ----------------------------------------------------------
 # `vercel link` writes projectId and orgId here. Machine-specific, never shared.
 .vercel/
