@@ -16,12 +16,19 @@
 //   MD6 closing is deliberate: a click on the dimmed area does nothing and
 //       what was typed stays; the X, Escape and the last panel's Close close
 //   MD7 the X is 32px on every screen, with a 44px press area
+//   MD8 the thank-you pane: three groups in order (mark + heading, recap,
+//       next steps with both buttons), the reveal order set on those groups'
+//       own classes rather than on :nth-child, and every "what happens next"
+//       line short enough to stay one line in the 246px box it gets at 320px
 //
 // Mutations (each breaks the check named):
 //   put a literal title back into an option                      -> MD1, MD3
 //   change a stored value (unsure -> inspection)                 -> MD1, MD5
 //   put data-close back on .est-scrim                            -> MD6
 //   make the X 40px again                                        -> MD7
+//   move the buttons back out of .est-next-group                 -> MD8
+//   go back to :nth-child delays                                 -> MD8
+//   lengthen one "what happens next" line past 34 characters     -> MD8
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -174,6 +181,40 @@ try {
     const button = /<button type="button" class="est-x" data-close aria-label="Close"/.test(strip(html));
     line(size && press && once && /width: 16px;/.test(svg) && button, 'MD7', 'the X: 32px everywhere, 44px press area, still a labelled button',
       `size=${size} press=${press} once=${once} button=${button}`);
+  }
+
+  /* MD8: the thank-you pane. It is three groups now, not five siblings, so the
+     reveal order must not be numbered by position. Parsed as DOM, not as text:
+     "the buttons are inside the group" is a nesting question, and an index
+     comparison cannot answer it. The three "what happens next" lines are the
+     visitor's promise, so they are held to the line budget measured in a
+     browser: the text box is 246px wide at 320px and the longest of the three
+     measures 192px, about 6.6px a character. 34 characters keeps every one of
+     them on a single line at 320, 375 and desktop width. */
+  {
+    const d = new JSDOM(html).window.document;
+    const pane = d.querySelector('.est-done');
+    const kids = pane ? [...pane.children].map((c) => c.className) : [];
+    const order = same(kids, ['est-done-top', 'est-recap', 'est-next-group']);
+    // group 1: the mark and the split heading, side by side
+    const top = pane && pane.querySelector(':scope > .est-done-top');
+    const topOk = !!top && !!top.querySelector('.est-ok') && top.querySelector('.est-head h3#est-thanks')?.textContent.trim().length > 0
+      && top.querySelector('.est-head p.lead')?.textContent.trim().length > 0;
+    // group 3: the steps and BOTH buttons, inside the group
+    const group = pane && pane.querySelector(':scope > .est-next-group');
+    const steps = group ? [...group.querySelectorAll('.est-after .est-steps > li')].map((li) => li.textContent.trim()) : [];
+    const nextOk = !!group && !!group.querySelector(':scope > .est-after') && !!group.querySelector(':scope > .est-actions')
+      && !!group.querySelector('.est-actions button.btn.ghost[data-close]')
+      && /^tel:/.test(group.querySelector('.est-actions a.btn.phone')?.getAttribute('href') || '')
+      && d.querySelectorAll('.est-done .est-actions').length === 1;
+    // the reveal order lives on the groups' classes, never on a child index
+    const revealOk = /\.est-done-top\s*\{\s*--i:\s*0\s*\}/.test(css) && /\.est-done>\.est-recap\s*\{\s*--i:\s*1\s*\}/.test(css)
+      && /\.est-next-group\s*\{\s*--i:\s*2\s*\}/.test(css)
+      && !/\.est-done[^{]*:nth-child/.test(css) && /\.est-done:not\(\[hidden\]\)>\*\s*\{/.test(css);
+    // the copy: one line each, and no promise that cannot fit on one
+    const copyOk = steps.length === 3 && steps.every((t) => t.length > 0 && t.length <= 34 && !t.includes('{{'));
+    line(order && topOk && nextOk && revealOk && copyOk, 'MD8', 'thank-you: three groups, class-set reveal order, one-line steps',
+      `order=${order} top=${topOk} next=${nextOk} reveal=${revealOk} copy=${copyOk} longest=${Math.max(0, ...steps.map((t) => t.length))}`);
   }
 } catch (e) {
   line(false, 'MD0', 'modal suite threw', (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)));

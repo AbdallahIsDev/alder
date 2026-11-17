@@ -2524,11 +2524,12 @@
       display: grid;
       place-items: center;
       background: none;
-      border: 1px solid var(--line);
-      color: var(--fg);
+      border: 0;
+      color: #fff;
+      opacity: .55;
       cursor: pointer;
       flex: none;
-      transition: background .2s, transform .15s
+      transition: background .2s, opacity .2s, transform .15s
     }
 
     .est-x::after {
@@ -2537,8 +2538,12 @@
       inset: -6px
     }
 
-    .est-x:hover {
-      background: var(--card-h)
+    .est-x:hover,
+    .est-x:active {
+      background: rgb(255 255 255/.05);
+      border: 0;
+      color: #fff;
+      opacity: 1
     }
 
     .est-x:active {
@@ -3120,9 +3125,28 @@
       display: none
     }
 
+    /* Group 1: the mark on the left, the heading and subtitle on the right. */
+    .est-done-top {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      width: 100%;
+      min-width: 0
+    }
+
+    .est-done-top .est-head {
+      flex: 1 1 auto;
+      min-width: 0
+    }
+
+    .est-done-top h3 {
+      overflow-wrap: anywhere
+    }
+
     .est-ok {
       width: 48px;
       height: 48px;
+      flex: 0 0 48px;
       display: grid;
       place-items: center;
       background: var(--accent);
@@ -3139,6 +3163,18 @@
       display: none
     }
 
+    /* A hidden recap or next-steps block has to disappear for real: both carry
+       display:flex, and in a browser that beats the attribute's own rule, so the
+       held state would still show the visitor's address and the three steps.
+       The modal script sets the attribute (recapBox.hidden / after.hidden). */
+    .est-done .est-recap[hidden] {
+      display: none
+    }
+
+    .est-done .est-after[hidden] {
+      display: none
+    }
+
     .est-done:not([hidden]) .est-ok {
       animation: estPop .55s cubic-bezier(.2, .9, .3, 1.2) .05s both
     }
@@ -3149,25 +3185,26 @@
       animation: estDraw .45s ease .35s forwards
     }
 
-    .est-done:not([hidden])> :nth-child(n+2) {
+    /* Three beats, one per group: the mark with its heading, then the recap, then
+       the next steps with the two buttons. The order is set on the group's own
+       class, not on its position, so the delay cannot be renumbered by adding or
+       removing a child (the recap is hidden in the held state, and it is still
+       the second beat). The mark pops at 50ms first; these three follow it. */
+    .est-done:not([hidden])>* {
       animation: estRise .55s cubic-bezier(.2, .7, .2, 1) both;
       animation-delay: calc(var(--i, 0) * 80ms + 160ms)
     }
 
-    .est-done> :nth-child(2) {
+    .est-done-top {
       --i: 0
     }
 
-    .est-done> :nth-child(3) {
+    .est-done>.est-recap {
       --i: 1
     }
 
-    .est-done> :nth-child(4) {
+    .est-next-group {
       --i: 2
-    }
-
-    .est-done> :nth-child(5) {
-      --i: 3
     }
 
     @keyframes estPop {
@@ -3190,12 +3227,15 @@
       }
     }
 
+    /* Group 2: the only tinted surface. The padding keeps text off the border. */
     .est-recap {
       display: flex;
       flex-direction: column;
       width: 100%;
       margin: 0;
-      border-top: 1px solid var(--line);
+      padding: 0 16px;
+      border: 1px solid var(--line);
+      background: rgb(255 255 255/.10);
       font-size: var(--fs)
     }
 
@@ -3205,6 +3245,19 @@
       gap: 12px;
       padding: 12px 0;
       border-bottom: 1px solid var(--line)
+    }
+
+    .est-recap div:last-child {
+      border-bottom: 0
+    }
+
+    /* Group 3: the next steps and the two buttons travel together. */
+    .est-next-group {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      width: 100%;
+      min-width: 0
     }
 
     .est-recap dt {

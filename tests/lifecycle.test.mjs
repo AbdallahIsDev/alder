@@ -42,7 +42,9 @@
 //        lib/lifecycle-config.js holds, and every draft is marked as a draft
 //   LC11 the page: the modal has a panel for each answer with the same
 //        sentences the endpoint gives the no-JS form, a Call button, and no
-//        reply promise; the generic error panel is not used for either
+//        reply promise; the generic error panel is not used for either, and
+//        in the held state the recap and the next steps are hidden by a rule
+//        of their own (display:flex beats the hidden attribute in a browser)
 //
 // Mutation (each makes a check fail; revert afterwards):
 //   api/lead.js: drop `if (held) { ... return okReply(); }`      -> LC2
@@ -50,6 +52,8 @@
 //   api/lead.js: answer 404 for 'churned'                        -> LC7
 //   lib/held-leads.js: raise the email claim's max to 2          -> LC3
 //   lib/held-leads.js: skip the hourly claim                     -> LC5
+//   assets/css/styles.css: drop the .est-recap[hidden] /
+//     .est-after[hidden] rules (they show again in the held state) -> LC11
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -403,11 +407,16 @@ try {
     const branchOk = /out && out\.held === true \? 'held' : ''/.test(html)
       && /err && err\.body && err\.body\.unavailable === true\) \{ showSent\(data, false, 'unavailable'\); return; \}\s*showError\(err\)/.test(html);
     // The panel: its own title and words, no recap, no "what happens next",
-    // no success mark, and the Call button of the done pane stays.
+    // no success mark, and the Call button of the done pane stays. Two of those
+    // are switched off by the hidden attribute, and a display:flex rule of their
+    // own beats that attribute in a browser, so each needs a rule of its own or
+    // the held visitor still sees their address and the three steps.
+    const hides = (sel) => new RegExp(sel.replace(/[.[\]]/g, '\\$&') + '\\s*\\{\\s*display:\\s*none\\s*\\}').test(css);
     const panelOk = /function showSent\(data, already, kind\)/.test(html) && /after\.hidden = !!notice/.test(html)
       && /recapBox\.hidden = !!already \|\| !!notice/.test(html) && /done\.classList\.toggle\('est-plain', !!notice\)/.test(html)
       && /\.est-done\.est-plain \.est-ok\s*\{\s*display:\s*none/.test(css)
-      && /<section class="est-pane est-done"[\s\S]*?<a class="btn phone" href="tel:\{\{tel\}\}"/.test(html);
+      && hides('.est-done .est-recap[hidden]') && hides('.est-done .est-after[hidden]')
+      && /<section class="est-pane est-done"[\s\S]*?<button type="button" class="btn ghost" data-close[\s\S]*?<a class="btn phone" href="tel:\{\{tel\}\}"/.test(html);
     const promiseFree = ![HELD_PAGE, GONE_PAGE].some((t) => /reply|within|soon|shortly|get back/i.test(t));
     // deliver() must hand the body on: resolve with the parsed JSON, reject with it.
     const deliverOk = /estimateDeliver/.test(html);

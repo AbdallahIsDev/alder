@@ -826,11 +826,15 @@
         <div class="est-alert" role="alert" tabindex="-1" hidden data-page-node-id="4nNkbTIXVLUPlb0DtUCHLE"><b data-page-node-id="Ow5PXozA2Onybgp27WUkMW">We couldn’t send your request.</b><span data-page-node-id="4ZpjlDJACLDG3SjTp7xLj8">Check your connection and try again. If it keeps failing, call us on <a href="tel:{{tel}}" data-page-node-id="DvEQdFrBB81SAESswHmpGH">{{phone}}</a>.</span></div>
 
         <section class="est-pane est-done" hidden tabindex="-1" data-page-node-id="YOFKPlpXGGFuQIcy9lQ7Xx">
-          <span class="est-ok" aria-hidden="true" data-page-node-id="jyKcYGcN4ZzXFpEYLdzjSi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" data-page-node-id="i9gSY9oPZnVUlOJOPmKScE"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1" data-page-node-id="ichkaMk46N4VeIBt3HdJ7Q"/></svg></span>
-          <div class="est-head" data-page-node-id="2UNJsxAGGf5Bx3EHy0Gy1t"><h3 id="est-thanks" data-page-node-id="UVe3v1YdJJ7KiZ33pWlKNS">Thanks, we got your request.</h3><p class="lead" data-page-node-id="fymQ8nLuu1F9SyBCCIXhmK">We’ll reply within {{reply}}.</p></div>
+          <div class="est-done-top">
+            <span class="est-ok" aria-hidden="true" data-page-node-id="jyKcYGcN4ZzXFpEYLdzjSi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" data-page-node-id="i9gSY9oPZnVUlOJOPmKScE"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1" data-page-node-id="ichkaMk46N4VeIBt3HdJ7Q"/></svg></span>
+            <div class="est-head" data-page-node-id="2UNJsxAGGf5Bx3EHy0Gy1t"><h3 id="est-thanks" data-page-node-id="UVe3v1YdJJ7KiZ33pWlKNS">Thanks.</h3><p class="lead" data-page-node-id="fymQ8nLuu1F9SyBCCIXhmK">We got your request.</p></div>
+          </div>
           <dl class="est-recap" data-page-node-id="Gxhnd3cASW1DG4a2DQO9kq"></dl>
-          <div class="est-after" data-page-node-id="msbRnyFX6BxUndEDpwd0OW"><p class="label" data-page-node-id="FRb05Os7OPa6CX4SFUbV44">What happens next</p><ol class="est-steps" data-page-node-id="3Db21IUpO5xvQAJW3GHpdl"><li data-page-node-id="5XYNxPOX9ucAgERsH0W3Ni">We read your request and call or text to confirm the details.</li><li data-page-node-id="ENBQn4pBHkkTGxSNh8CvD6">We set up a free inspection at a time that suits you.</li><li data-page-node-id="LUOSiAy9TSXZbWPxlHGnj4">You get a clear written price within {{reply}}.</li></ol></div>
-          <div class="est-actions" data-page-node-id="wGgnMRNGlYT3HAsfa0P4zh"><button type="button" class="btn ghost" data-close data-page-node-id="ijiAQlwEif20sh9ccZUk6c">Close</button><a class="btn phone" href="tel:{{tel}}" aria-label="Call {{phone}}" data-page-node-id="V1kVIuqiJvbS8rFkbOIFts"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-phone"/></svg><span>Call {{phone}}</span></a></div>
+          <div class="est-next-group">
+            <div class="est-after" data-page-node-id="msbRnyFX6BxUndEDpwd0OW"><p class="label" data-page-node-id="FRb05Os7OPa6CX4SFUbV44">What happens next</p><ol class="est-steps" data-page-node-id="3Db21IUpO5xvQAJW3GHpdl"><li data-page-node-id="5XYNxPOX9ucAgERsH0W3Ni">We call to confirm the details.</li><li data-page-node-id="ENBQn4pBHkkTGxSNh8CvD6">We set up a free inspection.</li><li data-page-node-id="LUOSiAy9TSXZbWPxlHGnj4">You get a written estimate.</li></ol></div>
+            <div class="est-actions" data-page-node-id="wGgnMRNGlYT3HAsfa0P4zh"><button type="button" class="btn ghost" data-close data-page-node-id="ijiAQlwEif20sh9ccZUk6c">Close</button><a class="btn phone" href="tel:{{tel}}" aria-label="Call {{phone}}" data-page-node-id="V1kVIuqiJvbS8rFkbOIFts"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-phone"/></svg><span>Call {{phone}}</span></a></div>
+          </div>
         </section>
 
       </div>
@@ -2036,7 +2040,7 @@ var BIZ = {
     setBusy(false); state = 'sent';
     swap(done, 1, function () {
       var first = (data.name || '').split(/\s+/)[0];
-      done.querySelector('#est-thanks').textContent = notice ? notice.title : (already ? 'You already sent this request — we have it.' : (first ? 'Thanks, ' + first + '. We got your request.' : 'Thanks, we got your request.'));
+      done.querySelector('#est-thanks').textContent = notice ? notice.title : (already ? 'You already sent this request — we have it.' : (first ? 'Thanks, ' + first + '.' : 'Thanks.'));
       /* held / unavailable: no check mark, no recap, no "what happens next", and none of the reply promises */
       done.classList.toggle('est-plain', !!notice);
       if (notice) done.setAttribute('data-kind', kind); else done.removeAttribute('data-kind');
