@@ -5,7 +5,7 @@
 //
 // What it proves (lib/billing.js + lib/lifecycle-config.js):
 //   BL1  the constants: 3 / 5 / 10 / 60 / 30 days, one support address, and
-//        that no other source file states the address as a literal
+//        that no other source file states the address or a duration as a literal
 //   BL2  billingState: null / missing / unparseable paid_until is "not
 //        enforced"; every boundary (D-3d, D, D+5d, D+15d) is inclusive on the
 //        left and exclusive on the right; the end date and the days left of
@@ -69,6 +69,26 @@ const biz = (patch = {}) => ({ id: 'b1', name: 'Alder Roofing', slug: 'alder', s
   };
   ['lib', 'api', 'scripts'].forEach(walk);
   line(hits.length === 0, 'BL1d', 'support address is not hardcoded outside the config', hits.join(','));
+
+  /* BL1e: every DURATION lives in lib/lifecycle-config.js. A second named
+     declaration or a literal period in the rules fails here. Milliseconds-per-day
+     conversions (DAY_MS = 86400000) and copy such as "Extend 30 days" are not
+     durations and are deliberately not matched. */
+  const DURATION_NAMES = '(?:RENEWAL_REMINDER_DAYS|GRACE_DAYS|SUSPENDED_DAYS|TERMINATE_AFTER_DAYS|RETENTION_DAYS|EXTEND_DAYS|FINAL_WARNING_DAYS_BEFORE|TERMINATION_WARNING_DAYS_BEFORE)';
+  const redeclared = new RegExp(`\\b${DURATION_NAMES}\\s*=`);
+  const literalDays = /\b(?:3|5|10|15|30|60)\s*\*\s*(?:DAY_MS|86400000)\b|\b(?:DAY_MS|86400000)\s*\*\s*(?:3|5|10|15|30|60)\b/;
+  const durationHits = [];
+  const walkDurations = (dir) => {
+    for (const f of fs.readdirSync(path.join(ROOT, dir))) {
+      const rel = `${dir}/${f}`;
+      if (fs.statSync(path.join(ROOT, rel)).isDirectory()) { walkDurations(rel); continue; }
+      if (!/\.(js|mjs)$/.test(f) || rel === 'lib/lifecycle-config.js') continue;
+      const src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+      if (redeclared.test(src) || literalDays.test(src)) durationHits.push(rel);
+    }
+  };
+  ['lib', 'api', 'scripts'].forEach(walkDurations);
+  line(durationHits.length === 0, 'BL1e', 'no lifecycle duration declared or hardcoded outside the config', durationHits.join(','));
 }
 
 /* BL2 */
