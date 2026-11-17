@@ -77,7 +77,8 @@ no `.env` (`tests/dev-root.mjs`).
 - Owner = the oldest connected phone. Only it may invite or remove phones; staff
   phones read leads and nothing else.
 - The operator is a separate private chat (`OPERATOR_CHAT_ID`), never a business
-  binding. Operator text never reaches an owner chat.
+  binding and never `TELEGRAM_CHAT_ID` (that old single-tenant variable is not a
+  fallback). Operator text never reaches an owner chat.
 - Alerts are best-effort. A guaranteed outbox is a future implementation, not a
   current promise.
 - Review flow: everyone is sent to the Google review link, whatever the rating.
@@ -86,8 +87,10 @@ no `.env` (`tests/dev-root.mjs`).
 
 - Every duration lives in `lib/lifecycle-config.js` and nowhere else: reminder at
   D−3, grace 5 days, suspended 10 days, termination at D+15, one payment = 30
-  days, data kept 60 days. A test (Gate BL) fails if a duration is written
-  anywhere else.
+  days, data kept 60 days. `BL1d` fails if the support address is written
+  elsewhere; `BL1e` fails if a duration is declared or a period is hardcoded
+  elsewhere (ms-per-day conversions and copy such as "Extend 30 days" are not
+  durations).
 - `paid_until` NULL means **not billing-enforced**. Nothing is charged, warned or
   suspended for that business.
 - Termination is the existing status `churned`, displayed as "Terminated". Nothing
@@ -96,15 +99,20 @@ no `.env` (`tests/dev-root.mjs`).
   screen does not offer it, and a stale `br:`/`bR:` refuses with "Extend 30 days
   restores it.", writing nothing (`handleOperatorReactivate`, 2026-11-17).
   `reactivateBusiness()` still accepts `churned` for Extend and `applyPayment()`.
-- A held lead keeps its date order in `/leads` after reactivation; it is marked
-  with a fourth `held` line, not split into a separate section. The page header
-  states the **total** held leads of the business (`countHeldLeads`), never the
-  rows on the page — the renewal notice says the total and two numbers for one
-  fact is a bug. It is read only when the page carries a held row, so an
-  ordinary `/leads` costs what it always did. One detail fact names the state.
+- A held lead keeps its number, id, callback and date order in `/leads` after
+  reactivation; it is shown in its own **"Received while suspended"** group,
+  with the remaining rows under "Other requests", and every held row keeps a
+  fourth `held` line so it stays marked. The group heading states the **total**
+  held leads of the business (`countHeldLeads`), never just the rows on the page
+  — the renewal notice says the total and two numbers for one fact is a bug. It
+  is read only when the page carries a held row, so an ordinary `/leads` costs
+  what it always did. A page with no held row has no group. One detail fact
+  names the state.
 - A suspended business's form **holds** leads: stored whole with `leads.held_at`,
   owner told a count and no detail, visitor told to call. A terminated business's
-  form answers 410 and stores nothing.
+  form answers 410 and stores nothing. Every held-lead Telegram notice carries
+  the same four core lines ending "Renew to see them."; a support suspension
+  adds one line, "Contact support to restore it.", and its own state hint.
 - Retention is 60 days after termination, kept **by hand**. There is no purge job.
   To be reviewed by a lawyer; drafts in `docs/legal-drafts/`.
 
@@ -113,9 +121,10 @@ no `.env` (`tests/dev-root.mjs`).
 - Hero video quality is non-negotiable. No re-encode, resize, replacement or
   slider change without an explicit instruction. Measured cost accepted:
   LCP ≈ 4.1 s on simulated mobile.
-- The estimate form's close button is 32 px with a 44 px press area **on every
-  screen, phones included** (owner decision 2026-11-16; it was 40 px). A click
-  outside the form does not close it.
+- The estimate form's close button is a 32 px box with a 16 px icon on every
+  screen. The press area is 44 px on desktop and 32 px on phones (≤ 760 px;
+  owner decision 2026-11-17, reversing the earlier all-screen 44 px rule). A
+  click outside the form does not close it.
 - The thank-you screen is three groups, each one beat of the reveal: the mark
   with a split heading ("Thanks." + "We got your request."), the tinted recap,
   then "What happens next" with Close and Call. Delays 160/240/320 ms after the
@@ -135,8 +144,14 @@ no `.env` (`tests/dev-root.mjs`).
   used an estimate button, has not scrolled past the first section, is in a
   visible tab, and has no open dialog. Closing stores a 30-day expiry stamp in
   localStorage; a definite answer from the server stores a permanent flag
-  there. All constants in one `AUTO` object in `index.html`; they are not in the
-  debug menu yet.
+  there. All constants in one `AUTO` object in `index.html`, also exposed on
+  `window` and editable from the DEV-gated debug menu (in memory only; the timer
+  already scheduled at load is unaffected).
+- The DEV-gated debug menu carries a "Corner radius" [Default] [Custom] control:
+  Default = 0 px (today's sharp look); Custom reveals a 0–32 px field applied
+  live to every boxed element through ONE CSS custom property, `--box-radius`.
+  Nothing persists; production defaults do not change. The owner will pick a
+  value later, and a future prompt will make it permanent and remove the control.
 - Copy is plain, human and specific. No staccato fragments ("No fluff. Just
   results."), no comma-couplets used as a sentence, no colon-fragment openers.
   Full sentences with a reason in them.
@@ -266,9 +281,11 @@ re-announces a lead whose first attempt died before alerting. Unknown host fails
 closed with the same response as an unknown token.
 
 **Telegram** — owner and operator flows. Owner: `/leads` (5 per page, one message
-edited in place, numbers 1..N, Newer/Older only where real; held rows carry a
-fourth `held` line and the header states the business's total held leads without
-changing the order or the paging, and a page with no held row says nothing),
+edited in place, numbers 1..N, Newer/Older only where real; held rows sit in a
+"Received while suspended" group with the remaining rows under "Other requests",
+keep a fourth `held` line, and the group heading states the business's total
+held leads without changing the order or the paging; a page with no held row has
+no group),
 lead detail with status actions and Back to the same page, `/remove_lead`
 (owner only, confirm before delete, no held mark), `/invite`, `/recipients`,
 `/status`, `/help`. A persistent reply
@@ -390,7 +407,6 @@ the modal's thank-you steps.
 | **Terminated-site presentation** | Three options documented in `docs/OPERATIONS.md` (serve today, per-host holding page, redirect to operator contact). Not built; owner decides later. |
 | **Telegram audit leftovers** | Named lead buttons (name/service/age instead of 1..5) and merging `/remove_lead` into the lead detail. Everything else in `docs/audits/telegram-bot-audit.md` is done or rejected on purpose. |
 | **Retention automation** | A purge job matching the 60-day rule. |
-| **Auto-open constants in the debug menu** | Deferred on purpose (the task allowed it to wait). `AUTO` in `index.html` is the only place they live; showing them in the `DEV`-gated panel would help a rehearsal. |
 | **Supabase key migration** | Swap env values before early 2027; tighten `db-wall` first. |
 
 ---
@@ -410,6 +426,7 @@ the modal's thank-you steps.
 | 2026-11-17 | Terminated businesses are restored by Extend 30 days only: `handleOperatorReactivate` refuses a `churned` row on both the question and the confirm, with a new refusal screen and toast, writing nothing. `reactivateBusiness()` untouched. New OP61b/c/d, OB10 and OB29 assert the refusal and that Extend still restores. |
 | 2026-11-17 | `tests/webhook.test.mjs` brought up to Part 1: OP61 split into ask/perform/second-confirm, `bR:` added to the forged and stale lists, forged sweep now also proves the row is unchanged, OP63 drives Replace phone (`bw:`/`bW:` and `bp:`/`bP:`) instead of the old Invite button, and the terminated screen is asserted to offer no Reactivate. The mail-subject assertion reads `MAIL_REDIRECT_TO` instead of assuming a machine without it. Green: 115/115, 155 s. |
 | 2026-11-17 | Estimate modal: thank-you screen in three groups with a class-set reveal, one-line next steps, the held state really hides the recap and the steps, draft in sessionStorage with "Start over", one automatic open per session at 8 s / 10 s with a 30-day close suppression. `/leads` header states the total held leads. A support suspension says "Contact support to restore it." instead of "Renew". `npm run serve`. Payment-provider design notes in `docs/OPERATIONS.md` §3b. |
+| 2026-11-17 | Task-gap round: DEV debug menu gained a live `--box-radius` [Default]/[Custom] control and the AUTO delay inputs; X press area 44 px desktop / 32 px phone. `/leads` held rows moved into their own "Received while suspended" group. `/start` excluded from the suspended reply, no free-text cap while off, and the suspended/terminated reply always states a date (or that none is set) and the countdown. Extend's terminated question now says "This business was terminated. Extending restores the service." Held notices use the same four core lines for both reasons. Operator identity is `OPERATOR_CHAT_ID` only. New `BL1e` duration gate. Checklists and `docs/legal-drafts/LAWYER_REVIEW.md` added. |
 
 ---
 
@@ -451,3 +468,7 @@ Open after the 2026-11-17 modal round:
 8. The three next-step lines were measured at 320, 375 and 1440 px (one line
    each, longest 192 px of the 246 px box at 320). Not measured in Safari or
    Firefox.
+9. The new `--box-radius` control and the phone-sized X press area were verified
+   by JSDOM and CSS text assertions only, not in a real browser on a phone.
+10. `tests/notify.test.mjs` B1d failed once in a twelve-suite run and passed on a
+   clean rerun (62/62); it is timing-sensitive, not a confirmed regression.
