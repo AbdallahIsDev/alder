@@ -16,8 +16,8 @@ Roofing-2/
 ## Run it
 
 ```bash
-python -m http.server 8791
-# → http://127.0.0.1:8791/index.html
+npm run serve
+# → http://127.0.0.1:8791/index.html     (python -m http.server 8791 does the same)
 ```
 
 A server is needed (not `file://`) so the deferred scripts and lazy images behave
