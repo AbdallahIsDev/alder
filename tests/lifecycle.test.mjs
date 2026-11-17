@@ -80,7 +80,7 @@ const PII = { name: 'Dana Whitfield', phone: '5155550142', email: 'dana.w@fixtur
 const SUPPORT_URL = 'https://t.me/AbdallahIsDev';
 const STATUS_KB = { keyboard: [[{ text: 'Status' }]], is_persistent: true, resize_keyboard: true };
 const HELD_NOTICE = 'A new lead just submitted your\nform. Your service is suspended,\nso the details are hidden.\nRenew to see them.\n\nSend /status to see the\ncountdown.\n\nContact support';
-const HELD_NOTICE_MANUAL = 'A new lead just submitted your\nform. Your service is suspended,\nso the details are hidden.\nRenew to see them.\n\nSend /status to see the current\nstate.\n\nContact support';
+const HELD_NOTICE_MANUAL = 'A new lead just submitted your\nform. Your service is suspended,\nso the details are hidden.\nContact support to restore it.\n\nSend /status to see the current\nstate.\n\nContact support';
 const HELD_MAIL = (n) => `${n} new request${n === 1 ? ' has' : 's have'} come in through your website form while your service is suspended.\n\nThe details are hidden until the service is active again.\n\nReply to this email and we will help.`;
 const HELD_PAGE = 'Your request was saved, but this business can\u2019t respond through this form right now. For the fastest help, please call them directly.';
 const GONE_PAGE = 'This business isn\u2019t accepting requests through this form right now. Please call them directly.';
