@@ -288,11 +288,14 @@ try {
     a.w.estimateShowSent({ name: 'Sam Ortiz', zip: '50267', phone: '+1 515 555 0100', claim: false }, false, '');
     await wait(80);
     const cleared = a.w.sessionStorage.getItem(KEY) === null && a.d.querySelector('.est-restart').hidden === true;
-    /* F. localStorage is never touched: this is contact data */
-    const noLocal = a.w.localStorage.length === 0;
+    /* F. localStorage holds preferences only: a stamp or a flag. The answers and
+       the contact details belong in sessionStorage, which dies with the tab. */
+    const stored = Object.entries({ ...a.w.localStorage });
+    const noLocal = stored.every(([, v]) => /^\d+$/.test(String(v)))
+      && !/50265|50267|Sam|Ortiz|unsure|515/.test(JSON.stringify(stored));
     a.w.close();
     line(untouched && saves && stepSaved && restored && overOk && beforeAnswer && cleared && noLocal,
-      'MD9', 'draft: written on input and on a step, restored, cleared, sessionStorage only',
+      'MD9', 'draft: written on input and on a step, restored, cleared, no contact in localStorage',
       `untouched=${untouched} saves=${saves} step=${stepSaved} restored=${restored} over=${overOk} cleared=${cleared} local=${noLocal}`);
 
     /* G. a browser that refuses storage: the modal still works, exactly as before */
@@ -314,6 +317,106 @@ try {
     g.w.close();
     line(threw && survived, 'MD9b', 'storage that throws: no error, the form works as before',
       `threw=${threw} open=${openOk} survived=${survived} errors=${g.errors.length}`);
+  }
+
+  /* MD10: the invitation. One automatic open per tab session, 10 s after load
+     on a desktop and 8 s on a phone, from one config object. jsdom has no
+     layout and no clock, so the two things the rule reads are stubbed on
+     purpose: the section's rect (this suite proves the rule READS a rect, not
+     what a browser computes) and the timer (the page's timer is captured by its
+     own name, so the delay constant can be asserted instead of waited for). */
+  {
+    const { VirtualConsole } = await import('jsdom');
+    const boot = ({ width = 1024, rectBottom = 100, seed = {}, visibility = 'visible' } = {}) => {
+      const timers = [], vis = { now: visibility };
+      const dom = new JSDOM(html, {
+        runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://alder.test/', virtualConsole: new VirtualConsole(),
+        beforeParse(window) {
+          window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+          window.scrollTo = () => {};
+          window.CSS = { supports: () => true };
+          Object.defineProperty(window, 'innerWidth', { configurable: true, get: () => width });
+          Object.defineProperty(window.document, 'visibilityState', { configurable: true, get: () => vis.now });
+          window.Element.prototype.getBoundingClientRect = function () {
+            return { top: rectBottom - 100, bottom: rectBottom, left: 0, right: 320, width: 320, height: 100, x: 0, y: rectBottom - 100 };
+          };
+          const realSetTimeout = window.setTimeout.bind(window);
+          window.setTimeout = function (fn, ms) { timers.push({ fn, ms }); return realSetTimeout(fn, ms); };
+          for (const [k, v] of Object.entries(seed)) window.localStorage.setItem(k, v);
+        },
+      });
+      const w = dom.window;
+      return { dom, w, d: w.document, vis, invite: () => timers.filter((t) => t.fn && t.fn.name === 'estInvite') };
+    };
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const click = (w, el) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+    const isOpen = (x) => x.d.getElementById('est').classList.contains('open');
+    const invited = (x) => x.w.sessionStorage.getItem('alder-est-invited-v1');
+    const fire = async (x) => { const t = x.invite(); if (t.length === 1) t[0].fn(); await wait(150); return t; };
+
+    /* the delay, and never on first paint */
+    const desk = boot();
+    const deskTimers = desk.invite();
+    const noFirstPaint = !isOpen(desk);
+    await fire(desk);
+    const openedOnce = isOpen(desk) && deskTimers.length === 1 && deskTimers[0].ms === 10000 && invited(desk) === '1';
+    click(desk.w, desk.d.querySelector('.est-x'));
+    await wait(120);
+    await fire(desk);
+    const oncePerSession = !isOpen(desk);       /* the second call has nothing left to do */
+    desk.w.close();
+    const mob = boot({ width: 375 });
+    const mobTimers = mob.invite();
+    await fire(mob);
+    const phoneDelay = mobTimers.length === 1 && mobTimers[0].ms === 8000 && isOpen(mob);
+    mob.w.close();
+    line(noFirstPaint && openedOnce && oncePerSession && phoneDelay,
+      'MD10', 'invitation: 10 s desktop, 8 s phone, opened once per session',
+      `paint=${noFirstPaint} opened=${openedOnce} once=${oncePerSession} phone=${phoneDelay}`);
+
+    /* every guard, one at a time */
+    const closed = boot(); await fire(closed);
+    click(closed.w, closed.d.querySelector('.est-x')); await wait(120);
+    const stamp = Number(closed.w.localStorage.getItem('alder-est-closed-until-v1'));
+    const stampOk = Math.abs(stamp - (Date.now() + 30 * 24 * 3600 * 1000)) < 5 * 60000;
+    closed.w.close();
+    const suppressed = boot({ seed: { 'alder-est-closed-until-v1': String(Date.now() + 29 * 24 * 3600 * 1000) } });
+    await fire(suppressed); const heldByClose = !isOpen(suppressed); suppressed.w.close();
+    const expired = boot({ seed: { 'alder-est-closed-until-v1': String(Date.now() - 1000) } });
+    await fire(expired); const expiredInvites = isOpen(expired); expired.w.close();
+    const sent = boot({ seed: { 'alder-est-sent-v1': '1' } });
+    await fire(sent); const afterSubmit = !isOpen(sent); sent.w.close();
+    const sending = boot();
+    sending.d.getElementById('est').classList.add('open');          /* the modal, opened by hand */
+    await fire(sending); const whileOpen = invited(sending) === null; sending.w.close();
+    const menu = boot();
+    menu.d.getElementById('menu').classList.add('open');            /* the menu overlay */
+    await fire(menu); const whileMenu = !isOpen(menu) && invited(menu) === null; menu.w.close();
+    const scrolled = boot({ rectBottom: -40 });                     /* scrolled past the first section */
+    await fire(scrolled); const pastFirst = !isOpen(scrolled); scrolled.w.close();
+    const clicked = boot();
+    click(clicked.w, clicked.d.querySelector('[data-open-estimate]')); await wait(120);
+    click(clicked.w, clicked.d.querySelector('.est-x')); await wait(120);
+    clicked.w.localStorage.clear();               /* the 30-day stamp is not the reason here; the click is */
+    await fire(clicked); const afterCta = !isOpen(clicked) && invited(clicked) === null; clicked.w.close();
+    /* a real answer writes the permanent flag, and a hidden tab waits for its return */
+    const answered = boot();
+    click(answered.w, answered.d.querySelector('[data-open-estimate]')); await wait(120);
+    answered.w.estimateShowSent({ name: 'Sam Ortiz', zip: '50265', phone: '+1 515 555 0100', claim: false }, false, '');
+    await wait(80);
+    const sentFlag = answered.w.localStorage.getItem('alder-est-sent-v1') === '1' && invited(answered) === null;
+    answered.w.close();
+    const hiddenTab = boot({ visibility: 'hidden' });
+    await fire(hiddenTab);
+    const notWhileHidden = !isOpen(hiddenTab) && invited(hiddenTab) === null;
+    hiddenTab.vis.now = 'visible';
+    hiddenTab.d.dispatchEvent(new hiddenTab.w.Event('visibilitychange'));
+    await wait(150);
+    const invitedOnReturn = isOpen(hiddenTab) && invited(hiddenTab) === '1';
+    hiddenTab.w.close();
+    line(stampOk && heldByClose && expiredInvites && afterSubmit && whileOpen && whileMenu && pastFirst && afterCta && sentFlag && notWhileHidden && invitedOnReturn,
+      'MD11', 'invitation guards: 30-day stamp, expired, sent, open modal/menu, scrolled, CTA, hidden tab',
+      `stamp=${stampOk} closed=${heldByClose} expired=${expiredInvites} sent=${afterSubmit} open=${whileOpen} menu=${whileMenu} scrolled=${pastFirst} cta=${afterCta} flag=${sentFlag} hidden=${notWhileHidden} returned=${invitedOnReturn}`);
   }
 } catch (e) {
   line(false, 'MD0', 'modal suite threw', (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)));

@@ -1984,16 +1984,18 @@ var BIZ = {
      The honeypot field is never stored: a stored value would come back on the
      next open and make a real visitor look like a bot to the 2 s check. */
   var drafted = false, DRAFT_KEY = 'alder-est-draft-v1', DRAFT_FIELDS = ['service', 'zip', 'home', 'age', 'timing', 'name', 'phone', 'email', 'notes'];
+  /* Every storage call goes through one of these four: a browser that refuses
+     storage (private mode, quota, cookies off) answers null, and the caller
+     falls back to the behaviour it had before there was any storage. */
+  function ssGet(key) { try { return window.sessionStorage ? window.sessionStorage.getItem(key) : null; } catch (e) { return null; } }
+  function ssSet(key, value) { try { if (window.sessionStorage) window.sessionStorage.setItem(key, String(value)); return true; } catch (e) { return false; } }
+  function ssRemove(key) { try { if (window.sessionStorage) window.sessionStorage.removeItem(key); return true; } catch (e) { return false; } }
+  function lsGet(key) { try { return window.localStorage ? window.localStorage.getItem(key) : null; } catch (e) { return null; } }
+  function lsSet(key, value) { try { if (window.localStorage) window.localStorage.setItem(key, String(value)); return true; } catch (e) { return false; } }
   function draftStore(mode, data) {
-    try {
-      var ss = window.sessionStorage;
-      if (!ss) return null;
-      if (mode === 'read') { var raw = ss.getItem(DRAFT_KEY); return raw ? JSON.parse(raw) : null; }
-      if (mode === 'write') { ss.setItem(DRAFT_KEY, JSON.stringify(data)); return true; }
-      ss.removeItem(DRAFT_KEY); return true;
-    } catch (e) {
-      return null;                                                 /* refused: today's behaviour */
-    }
+    if (mode === 'read') { var raw = ssGet(DRAFT_KEY); try { return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
+    if (mode === 'write') return ssSet(DRAFT_KEY, JSON.stringify(data));
+    return ssRemove(DRAFT_KEY);
   }
   function draftValues() {
     var v = {};
@@ -2118,9 +2120,11 @@ var BIZ = {
       recapBox.hidden = !!already || !!notice;
       if (!already && !notice) recap(data);
       /* Every path here is a definite answer from the server (sent, already,
-         held, unavailable): the draft has done its job. A failure does not
-         reach this function, so the answers survive a retry. */
+         held, unavailable): the draft has done its job, and the form must never
+         invite itself again in this browser. A failure does not reach this
+         function, so the answers and the invitation survive a retry. */
       clearDraft();
+      lsSet(AUTO.sentKey, '1');
       alertBox.hidden = true; nav.hidden = true; label.textContent = notice ? notice.label : (already ? 'Request already received' : 'Request sent');
       dots.forEach(function (d) { d.classList.remove('on', 'busy'); d.classList.toggle('done', kind !== 'unavailable'); }); body.scrollTop = 0;
     }).then(function () { if (root.classList.contains('open')) done.focus({ preventScroll: true }); });
@@ -2217,10 +2221,50 @@ var BIZ = {
     behind().forEach(function (el) { el.removeAttribute('inert'); });
     if (window.__lenis) { window.__lenis.start(); window.__lenis.scrollTo(savedY, { immediate: true }); }
     window.scrollTo({ top: savedY, behavior: 'instant' });
+    lsSet(AUTO.closedKey, Date.now() + AUTO.suppressMs);              /* no second invitation for 30 days */
     if (state === 'sent' && !moving) { form.reset(); [].forEach.call(form.querySelectorAll('.err'), function (x) { x.textContent = ''; }); reset(); } /* answers live only in the open page and are cleared here */
     var t = trigger && trigger.closest('.menu') ? document.querySelector('.menu-btn') : trigger; if (t && t.focus) t.focus({ preventScroll: true });
   }
-  document.querySelectorAll('[data-open-estimate]').forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); open(a); }); });
+  /* ---------- the one invitation ----------
+     The modal may open itself ONCE in a tab session, and only for a visitor who
+     has not asked for it already and is still reading this page in a visible
+     tab. Every constant lives in AUTO. Nothing here can cover the page on first
+     paint: the earliest possible open is 8 seconds after load.
+
+     Closing by hand suppresses it for 30 days, a definite answer from the server
+     suppresses it for good, and both are kept in localStorage with a timestamp,
+     not sessionStorage: they are preferences, and they hold no contact data. */
+  var AUTO = {
+    delayMs: { desktop: 10000, mobile: 8000 },
+    mobileMaxWidth: 760,                       /* the width the stylesheet calls a phone */
+    closedKey: 'alder-est-closed-until-v1',    /* holds an epoch milliseconds stamp */
+    sentKey: 'alder-est-sent-v1',              /* holds '1', no expiry: never again */
+    invitedKey: 'alder-est-invited-v1',        /* holds '1' for this tab session */
+    suppressMs: 30 * 24 * 60 * 60 * 1000
+  };
+  var ctaClicked = false, autoDue = false;
+  function invitationAllowed() {
+    if (ctaClicked) return false;                                     /* they already asked for the form */
+    if (root.classList.contains('open')) return false;                /* this modal is open */
+    var menu = document.getElementById('menu');
+    if (menu && menu.classList.contains('open')) return false;        /* the menu overlay is open */
+    if (document.visibilityState !== 'visible') return false;         /* a background tab is not reading */
+    if (ssGet(AUTO.invitedKey) || lsGet(AUTO.sentKey)) return false;  /* once per session, never after a send */
+    var first = document.querySelector('main > section') || document.querySelector('main > .masthead');
+    if (first && first.getBoundingClientRect().bottom <= 0) return false;  /* scrolled past the first section */
+    return !(Number(lsGet(AUTO.closedKey)) > Date.now());             /* closed by hand, within 30 days */
+  }
+  function invite() {
+    if (!autoDue || !invitationAllowed()) return;
+    ssSet(AUTO.invitedKey, '1');
+    var t = document.querySelector('[data-open-estimate]');
+    open(t);                                                          /* focus returns to it on close */
+  }
+  /* The delay is a wait, not a deadline: a tab that is hidden when the delay
+     ends opens the moment it comes back, if it is still allowed then. */
+  setTimeout(function estInvite() { autoDue = true; invite(); }, (window.innerWidth <= AUTO.mobileMaxWidth ? AUTO.delayMs.mobile : AUTO.delayMs.desktop));
+  document.addEventListener('visibilitychange', invite);
+  document.querySelectorAll('[data-open-estimate]').forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); ctaClicked = true; open(a); }); });
   /* Closing is always deliberate: the X, the Close button of the last panel, or Escape. The dimmed area around the
      dialog (.est-scrim) carries no data-close, so a click or a tap beside the form (easy to do on a phone) does nothing. */
   root.addEventListener('click', function (e) { if (e.target.closest('[data-close]')) close(); });
