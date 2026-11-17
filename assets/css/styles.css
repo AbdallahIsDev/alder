@@ -3050,6 +3050,30 @@
       visibility: hidden
     }
 
+    /* Start over: the same quiet text as Back, and it only exists while there is
+       a restored draft to throw away (the script unhides it). It clears the
+       stored answers, empties the form and returns to step 1. */
+    .est-restart {
+      height: 46px;
+      padding: 0 8px;
+      background: none;
+      border: 0;
+      color: var(--mut);
+      font: 500 var(--fs) var(--f);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      cursor: pointer;
+      transition: color .2s
+    }
+
+    .est-restart:hover {
+      color: var(--fg)
+    }
+
+    .est-restart[hidden] {
+      display: none
+    }
+
     .btn.est-next {
       --est-btn: var(--accent);
       margin-left: auto;

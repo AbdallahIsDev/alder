@@ -838,7 +838,7 @@
         </section>
 
       </div>
-      <div class="est-nav" data-page-node-id="B0vLwWBf8QZmtP3QryfKqN"><button type="button" class="est-back" hidden data-page-node-id="KdU69DFQ25ZkHhJAJb2BtG">Back</button><button type="button" class="btn est-next" data-page-node-id="GqYjko1IZEPPNsCjIYbbP6"><span data-page-node-id="NXOfcbOSJzA3VMKsplP7sg">Continue</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" data-page-node-id="1PePcnFJ6Wt3C9HaAmPjy8"><path d="M3 8h10M9 4l4 4-4 4" data-page-node-id="pEOMI0T8tw3vyLiPr1Gl5M"/></svg></button></div>
+      <div class="est-nav" data-page-node-id="B0vLwWBf8QZmtP3QryfKqN"><button type="button" class="est-back" hidden data-page-node-id="KdU69DFQ25ZkHhJAJb2BtG">Back</button><button type="button" class="est-restart" hidden>Start over</button><button type="button" class="btn est-next" data-page-node-id="GqYjko1IZEPPNsCjIYbbP6"><span data-page-node-id="NXOfcbOSJzA3VMKsplP7sg">Continue</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" data-page-node-id="1PePcnFJ6Wt3C9HaAmPjy8"><path d="M3 8h10M9 4l4 4-4 4" data-page-node-id="pEOMI0T8tw3vyLiPr1Gl5M"/></svg></button></div>
     </form>
   </div>
 </div>
@@ -1741,6 +1741,7 @@ var BIZ = {
   var body = root.querySelector('.est-body'), panes = [].slice.call(root.querySelectorAll('.est-pane[data-step]')), done = root.querySelector('.est-done');
   var alertBox = root.querySelector('.est-alert'), nav = root.querySelector('.est-nav'), back = root.querySelector('.est-back'), next = root.querySelector('.est-next'), nextTxt = next.querySelector('span');
   var label = root.querySelector('.est-step'), dots = [].slice.call(root.querySelectorAll('.est-dots li')), header = document.querySelector('header');
+  var restart = root.querySelector('.est-restart');
   /* everything behind the modal is inert while it is open; the debug panel stays usable */
   var behind = function () { return [].slice.call(document.querySelectorAll('main > :not(.dbg), footer')); };
   var total = panes.length, step = 0, trigger = null, savedY = 0, state = 'edit' /* edit | sending | sent */, moving = false, E = form.elements, hAnim = null;
@@ -1965,12 +1966,66 @@ var BIZ = {
     label.textContent = 'Step ' + (n + 1) + ' of ' + total;
     dots.forEach(function (d, i) { d.classList.remove('busy'); d.classList.toggle('on', i === n); d.classList.toggle('done', i < n); });
     body.scrollTop = 0;
+    saveDraft();
   }
   function setNext(t) { nextTxt.textContent = t; }
   function goTo(n) { var dir = n > step ? 1 : -1; return swap(panes[n], dir, function () { alertBox.hidden = true; chrome(n); }).then(focusFirst); }
   function reset() {                                                          /* no animation: used on load and after the thank-you is closed */
     state = 'edit'; moving = false; panes.forEach(function (p, i) { p.hidden = i !== 0; }); done.hidden = true; alertBox.hidden = true; nav.hidden = false;
     form.removeAttribute('aria-busy'); body.removeAttribute('inert'); next.disabled = back.disabled = false; next.classList.remove('busy'); selects.forEach(function (x) { x.render(); x.close(); }); chrome(0);
+  }
+  /* ---------- draft ----------
+     The answers survive a mistake, not the browser: sessionStorage only, never
+     localStorage, because this is contact data and it must die with the tab. One
+     key, one shape { step, values }, written on every step change and on every
+     input. Every storage call is guarded, so a browser that refuses storage
+     (private mode, quota, cookies off) behaves exactly as it did before: the
+     answers live in the open page and nowhere else.
+     The honeypot field is never stored: a stored value would come back on the
+     next open and make a real visitor look like a bot to the 2 s check. */
+  var drafted = false, DRAFT_KEY = 'alder-est-draft-v1', DRAFT_FIELDS = ['service', 'zip', 'home', 'age', 'timing', 'name', 'phone', 'email', 'notes'];
+  function draftStore(mode, data) {
+    try {
+      var ss = window.sessionStorage;
+      if (!ss) return null;
+      if (mode === 'read') { var raw = ss.getItem(DRAFT_KEY); return raw ? JSON.parse(raw) : null; }
+      if (mode === 'write') { ss.setItem(DRAFT_KEY, JSON.stringify(data)); return true; }
+      ss.removeItem(DRAFT_KEY); return true;
+    } catch (e) {
+      return null;                                                 /* refused: today's behaviour */
+    }
+  }
+  function draftValues() {
+    var v = {};
+    DRAFT_FIELDS.forEach(function (k) { var el = E[k]; if (el) v[k] = el.value || ''; });
+    v.claim = !!E.claim.checked;
+    return v;
+  }
+  /* "Touched", not "non-empty": the roof-age select starts on "Not sure", so a
+     non-empty test would always find an answer and store a draft nobody wrote. */
+  function saveDraft(touched) {
+    if (touched) drafted = true;
+    if (state !== 'edit' || !root.classList.contains('open')) return; /* closed, or a send in flight */
+    if (!drafted) { draftStore('clear'); return; }                 /* nothing typed yet: nothing to restore */
+    draftStore('write', { step: step, touched: true, values: draftValues() });
+  }
+  function clearDraft() { draftStore('clear'); drafted = false; restart.hidden = true; }
+  /** Fill the form from this tab's draft and jump to the step it was left on. */
+  function restoreDraft() {
+    var d = draftStore('read');
+    if (!d || d.touched !== true || !d.values || typeof d.values !== 'object') return false;
+    var v = d.values;
+    DRAFT_FIELDS.forEach(function (k) {
+      var el = E[k];
+      if (el && typeof v[k] === 'string') el.value = v[k];          /* a radio group takes .value too */
+    });
+    E.claim.checked = v.claim === true;
+    drafted = true;                                                /* a restored draft is a draft */
+    selects.forEach(function (x) { x.render(); });                 /* the themed dropdown reads the select */
+    var n = Math.max(0, Math.min(total - 1, Math.floor(Number(d.step)) || 0));
+    panes.forEach(function (p, i) { p.hidden = i !== n; });
+    alertBox.hidden = true; chrome(n); restart.hidden = false;
+    return true;
   }
   function focusFirst() {
     if (state !== 'edit' || !root.classList.contains('open')) return;
@@ -1995,7 +2050,18 @@ var BIZ = {
     e.preventDefault(); advance();
   });
   next.addEventListener('click', advance);
+  form.addEventListener('input', function () { saveDraft(true); });    /* typing */
+  form.addEventListener('change', function () { saveDraft(true); });    /* a radio, a checkbox, the select */
   back.addEventListener('click', function () { if (state === 'edit' && !moving && step > 0) goTo(step - 1); });
+  restart.addEventListener('click', function () {
+    if (state !== 'edit' || moving) return;
+    clearDraft();
+    form.reset();
+    [].forEach.call(form.querySelectorAll('.err'), function (x) { x.textContent = ''; });
+    selects.forEach(function (x) { x.render(); x.close(); });
+    if (step === 0) { focusFirst(); return; }
+    goTo(0);
+  });
 
   function setBusy(on) {
     state = on ? 'sending' : 'edit'; form.setAttribute('aria-busy', on); next.disabled = back.disabled = on; next.classList.toggle('busy', on);
@@ -2051,6 +2117,10 @@ var BIZ = {
       // Hide the recap rather than presenting those new values as received.
       recapBox.hidden = !!already || !!notice;
       if (!already && !notice) recap(data);
+      /* Every path here is a definite answer from the server (sent, already,
+         held, unavailable): the draft has done its job. A failure does not
+         reach this function, so the answers survive a retry. */
+      clearDraft();
       alertBox.hidden = true; nav.hidden = true; label.textContent = notice ? notice.label : (already ? 'Request already received' : 'Request sent');
       dots.forEach(function (d) { d.classList.remove('on', 'busy'); d.classList.toggle('done', kind !== 'unavailable'); }); body.scrollTop = 0;
     }).then(function () { if (root.classList.contains('open')) done.focus({ preventScroll: true }); });
@@ -2139,6 +2209,7 @@ var BIZ = {
     html.classList.add('est-open'); if (window.__lenis) window.__lenis.stop();
     behind().forEach(function (el) { el.setAttribute('inert', ''); });
     root.classList.add('open'); root.setAttribute('aria-hidden', 'false');
+    restoreDraft();                                            /* this tab's draft: same step, same answers */
     setTimeout(function () { if (state === 'sent') done.focus({ preventScroll: true }); else focusFirst(); if (!dlg.contains(document.activeElement)) dlg.focus({ preventScroll: true }); }, 60);
   }
   function close() {

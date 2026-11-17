@@ -216,6 +216,105 @@ try {
     line(order && topOk && nextOk && revealOk && copyOk, 'MD8', 'thank-you: three groups, class-set reveal order, one-line steps',
       `order=${order} top=${topOk} next=${nextOk} reveal=${revealOk} copy=${copyOk} longest=${Math.max(0, ...steps.map((t) => t.length))}`);
   }
+
+  /* MD9: the draft. Contact data goes to sessionStorage and nowhere else (it
+     must die with the tab), it is written on every step change and every input,
+     it comes back when the modal is opened again in the same tab, and it is
+     cleared on a definite answer from the server. A browser that refuses
+     storage must behave exactly as it did before: the answers live in the open
+     page only. Each scenario gets its own page so the storage starts empty. */
+  {
+    const { VirtualConsole } = await import('jsdom');
+    const KEY = 'alder-est-draft-v1';
+    const boot = (extra) => {
+      const errors = [];
+      const vc = new VirtualConsole();
+      vc.on('jsdomError', (e) => errors.push(String((e && e.message) || e)));
+      const dom = new JSDOM(html, {
+        runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://alder.test/', virtualConsole: vc,
+        beforeParse(window) {
+          window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+          window.scrollTo = () => {};
+          window.CSS = { supports: () => true };
+          if (extra) extra(window);
+        },
+      });
+      return { dom, w: dom.window, d: dom.window.document, errors };
+    };
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const click = (w, el) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+    const visibleStep = (d) => [...d.querySelectorAll('.est-pane[data-step]')].findIndex((p) => !p.hidden) + 1;
+    const draft = (w) => JSON.parse(w.sessionStorage.getItem(KEY) || 'null');
+
+    /* A. an untouched open leaves nothing behind, and typing writes the answers */
+    const a = boot();
+    click(a.w, a.d.querySelector('[data-open-estimate]'));
+    await wait(120);
+    click(a.w, a.d.querySelector('.est-x'));
+    await wait(120);
+    const untouched = a.w.sessionStorage.getItem(KEY) === null;      // the select's own default is not an answer
+    click(a.w, a.d.querySelector('[data-open-estimate]'));
+    await wait(120);
+    const pick = a.d.querySelector('input[name="service"][value="unsure"]');
+    pick.checked = true; pick.dispatchEvent(new a.w.Event('change', { bubbles: true }));
+    const zip = a.d.getElementById('e-zip');
+    zip.value = '50265'; zip.dispatchEvent(new a.w.Event('input', { bubbles: true }));
+    const afterTyping = draft(a.w);
+    const saves = !!afterTyping && afterTyping.touched === true && afterTyping.values.zip === '50265'
+      && afterTyping.values.service === 'unsure' && afterTyping.step === 0;
+    /* B. a step change writes the step */
+    click(a.w, a.d.querySelector('.est-next'));
+    await wait(260);
+    const stepped = draft(a.w);
+    const stepSaved = stepped && stepped.step === 1 && stepped.values.zip === '50265';
+    /* C. reopening in the same tab restores both */
+    click(a.w, a.d.querySelector('.est-x'));
+    await wait(120);
+    click(a.w, a.d.querySelector('[data-open-estimate]'));
+    await wait(200);
+    const restartBtn = a.d.querySelector('.est-restart');
+    const restored = visibleStep(a.d) === 2 && a.d.getElementById('e-zip').value === '50265'
+      && (a.d.querySelector('input[name="service"]:checked') || {}).value === 'unsure'
+      && !!restartBtn && restartBtn.hidden === false && restartBtn.textContent.trim() === 'Start over';
+    /* D. Start over throws the draft away and returns to step 1 */
+    click(a.w, restartBtn);
+    await wait(220);
+    const overOk = a.w.sessionStorage.getItem(KEY) === null && visibleStep(a.d) === 1
+      && a.d.getElementById('e-zip').value === '' && !a.d.querySelector('input[name="service"]:checked')
+      && a.d.querySelector('.est-restart').hidden === true;
+    /* E. a definite answer from the server clears it */
+    zip.value = '50267'; zip.dispatchEvent(new a.w.Event('input', { bubbles: true }));
+    const beforeAnswer = a.w.sessionStorage.getItem(KEY) !== null;
+    a.w.estimateShowSent({ name: 'Sam Ortiz', zip: '50267', phone: '+1 515 555 0100', claim: false }, false, '');
+    await wait(80);
+    const cleared = a.w.sessionStorage.getItem(KEY) === null && a.d.querySelector('.est-restart').hidden === true;
+    /* F. localStorage is never touched: this is contact data */
+    const noLocal = a.w.localStorage.length === 0;
+    a.w.close();
+    line(untouched && saves && stepSaved && restored && overOk && beforeAnswer && cleared && noLocal,
+      'MD9', 'draft: written on input and on a step, restored, cleared, sessionStorage only',
+      `untouched=${untouched} saves=${saves} step=${stepSaved} restored=${restored} over=${overOk} cleared=${cleared} local=${noLocal}`);
+
+    /* G. a browser that refuses storage: the modal still works, exactly as before */
+    const g = boot((window) => Object.defineProperty(window, 'sessionStorage', { configurable: true, get() { throw new Error('storage blocked'); } }));
+    let threw = false;
+    try { void g.w.sessionStorage; } catch { threw = true; }
+    click(g.w, g.d.querySelector('[data-open-estimate]'));
+    await wait(120);
+    const openOk = g.d.getElementById('est').classList.contains('open');
+    const gzip = g.d.getElementById('e-zip');
+    g.d.querySelector('input[name="service"][value="repair"]').checked = true;
+    gzip.value = '50266'; gzip.dispatchEvent(new g.w.Event('input', { bubbles: true }));
+    click(g.w, g.d.querySelector('.est-next'));
+    await wait(260);
+    // jsdom has no IntersectionObserver or media pipeline: those errors are the
+    // harness, not the page. What must not appear is the storage error escaping.
+    const survived = openOk && visibleStep(g.d) === 2 && g.d.getElementById('e-zip').value === '50266'
+      && g.errors.filter((m) => /storage blocked/.test(m)).length === 0;
+    g.w.close();
+    line(threw && survived, 'MD9b', 'storage that throws: no error, the form works as before',
+      `threw=${threw} open=${openOk} survived=${survived} errors=${g.errors.length}`);
+  }
 } catch (e) {
   line(false, 'MD0', 'modal suite threw', (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)));
 }
