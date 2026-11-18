@@ -4654,3 +4654,15 @@
     .dbg input.dbg-num {
       border-radius: var(--box-radius, 0px) !important
     }
+
+    /* The primary CTA's arrow square is NOT the <i>: the button-hover system paints a 34px
+       background gradient on .bx-p and makes <i> transparent. A background image cannot be
+       rounded by border-radius, so while the DEV radius is active the square becomes a real
+       box again. html[data-radius] is set only by the debug panel, in memory, never in prod. */
+    html[data-radius="custom"] .bx-p {
+      background-image: none
+    }
+
+    html[data-radius="custom"] .bx-p i {
+      background: var(--bx-fill)
+    }

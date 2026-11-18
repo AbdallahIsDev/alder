@@ -27,6 +27,8 @@
 //       dots, step squares, before/after arrows and tags, review cards and images,
 //       FAQ cards, all modal option cards, fields, checkboxes, the close button and
 //       the whole success screen; round-by-design and full-screen layers stay out
+//   MD15 the primary CTA's white square: in radius mode the button-hover gradient is
+//       swapped for a real background on <i>, so the square actually gets the radius
 //
 // Mutations (each breaks the check named):
 //   put a literal title back into an option                      -> MD1, MD3
@@ -467,7 +469,7 @@ try {
     const markup = /data-dbg="radius"/.test(html)
       && /data-radius="default"\s+aria-pressed="true"/.test(html)
       && /data-radius="custom"\s+aria-pressed="false"/.test(html)
-      && /data-radius-px[^>]*min="0"[^>]*max="32"/.test(html);
+      && /data-radius-px[^>]*min="0"[^>]*max="36"/.test(html);
     const from = html.indexOf('---- Corner radius'), to = html.indexOf('---- Auto-open delay');
     const handler = from > -1 && to > from ? html.slice(from, to) : '';
     const noStorage = !!handler && !/localStorage|sessionStorage|setItem|removeItem/.test(handler)
@@ -502,18 +504,24 @@ try {
     set(px, '12');
     const live = radius() === '12px';
     set(px, '99');
-    const clampedHi = radius() === '32px' && px.value === '32';
+    const clampedHi = radius() === '36px' && px.value === '36';
     set(px, '-5');
     const clampedLo = radius() === '0px' && px.value === '0';
-    click(d.querySelector('[data-radius="custom"]'));
-    const custom = px.hidden === false && d.querySelector('[data-radius="custom"]').getAttribute('aria-pressed') === 'true';
+    // Typing already puts the panel in Custom mode; Default must clear both the
+    // property and the mode flag, then Custom must set them again.
     click(d.querySelector('[data-radius="default"]'));
-    const reset = radius() === '' && px.hidden === true && d.querySelector('[data-radius="default"]').getAttribute('aria-pressed') === 'true';
+    const reset = radius() === '' && px.hidden === true
+      && d.querySelector('[data-radius="default"]').getAttribute('aria-pressed') === 'true'
+      && !d.documentElement.dataset.radius;
+    click(d.querySelector('[data-radius="custom"]'));
+    // The split-text pass can replace nodes after boot, so assert the state the
+    // handler owns (property, mode flag, field visibility), not a pressed class.
+    const custom = px.hidden === false && d.documentElement.dataset.radius === 'custom' && radius() === '0px';
     const keys = Object.keys(w.localStorage).concat(Object.keys(w.sessionStorage)).join(' ');
     const untouched = !/radius/i.test(keys);
     w.close();
     line(gated && !!panel && live && clampedHi && clampedLo && custom && reset && untouched, 'MD12b',
-      'radius applies live, clamps 0..32, Default clears, panel stays dev-only',
+      'radius applies live, clamps 0..36, Default clears, panel stays dev-only',
       `gated=${gated} panel=${!!panel} live=${live} hi=${clampedHi} lo=${clampedLo} custom=${custom} reset=${reset} noStore=${untouched}`);
   }
 
@@ -578,6 +586,18 @@ try {
     line(uses === 1 && missing.length === 0 && leaked.length === 0, 'MD14',
       'radius covers every box sitewide; overlays and round-by-design stay out',
       `uses=${uses} missing=${missing.join(',') || 'none'} leaked=${leaked.join(',') || 'none'}`);
+  }
+
+  /* MD15: the white arrow square on every primary CTA is painted by the button-hover
+     system as a 34px background gradient on .bx-p, not by <i>. In radius mode the panel
+     flags <html> and CSS swaps that gradient for a real, rounded background on <i>. */
+  {
+    const bxOff = /html\[data-radius="custom"\]\s*\.bx-p\s*\{\s*background-image:\s*none/.test(css);
+    const bxOn = /html\[data-radius="custom"\]\s*\.bx-p i\s*\{\s*background:\s*var\(--bx-fill\)/.test(css);
+    const flag = /html\.dataset\.radius\s*=\s*'custom'/.test(html) && /delete html\.dataset\.radius/.test(html);
+    line(bxOff && bxOn && flag, 'MD15',
+      'primary CTA square becomes a real rounded box in radius mode',
+      `off=${bxOff} on=${bxOn} flag=${flag}`);
   }
 } catch (e) {
   line(false, 'MD0', 'modal suite threw', (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)));

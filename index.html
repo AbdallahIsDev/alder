@@ -696,7 +696,7 @@
       <div class="dbg-row" data-dbg="radius"><span>Corner radius</span>
         <button type="button" data-radius="default" aria-pressed="true">Default</button>
         <button type="button" data-radius="custom" aria-pressed="false">Custom</button>
-        <input type="number" class="dbg-num" data-radius-px min="0" max="32" step="1" value="0" aria-label="Corner radius in pixels" hidden>
+        <input type="number" class="dbg-num" data-radius-px min="0" max="36" step="1" value="0" aria-label="Corner radius in pixels" hidden>
       </div>
       <div class="dbg-row" data-dbg="auto-delay"><span>Auto-open ms</span>
         <label class="sr" for="dbg-delay-desktop">Desktop</label><input type="number" class="dbg-num" id="dbg-delay-desktop" data-delay="desktop" min="0" max="300000" step="1000" value="10000" aria-label="Auto-open delay desktop in milliseconds">
@@ -1026,7 +1026,9 @@ var BIZ = {
       /* ---- Corner radius (DEV only, in memory). The stylesheet declares --box-radius: 0px once;
          one rule feeds it to every boxed selector. "Default" removes the inline property, so the
          page falls back to that 0px sharp look. Nothing is written to storage: a reload is sharp
-         again and a real visitor never sees a rounded box. */
+         again and a real visitor never sees a rounded box. The data-radius flag is also in-memory
+         only: it lets the button-hover system swap its 34px background-gradient square for a real
+         rounded box, because a background image cannot be rounded by border-radius. */
       const radiusPx = panel.querySelector('[data-radius-px]');
       const radiusButtons = [...panel.querySelectorAll('[data-radius]')];
       const syncRadius = () => {
@@ -1035,13 +1037,16 @@ var BIZ = {
         if (radiusPx) radiusPx.hidden = !custom;
       };
       const applyRadius = px => {
-        html.style.setProperty('--box-radius', Math.min(32, Math.max(0, Number(px) || 0)) + 'px');
+        html.style.setProperty('--box-radius', Math.min(36, Math.max(0, Number(px) || 0)) + 'px');
+        html.dataset.radius = 'custom';
         if (radiusPx) radiusPx.value = html.style.getPropertyValue('--box-radius').replace('px', '');
         syncRadius();
       };
       radiusButtons.forEach(b => b.addEventListener('click', () => {
-        if (b.dataset.radius === 'default') html.style.removeProperty('--box-radius');
-        else applyRadius(radiusPx ? radiusPx.value : 0);
+        if (b.dataset.radius === 'default') {
+          html.style.removeProperty('--box-radius');
+          delete html.dataset.radius;
+        } else applyRadius(radiusPx ? radiusPx.value : 0);
         syncRadius();
       }));
       if (radiusPx) radiusPx.addEventListener('input', () => applyRadius(radiusPx.value));
