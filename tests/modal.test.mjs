@@ -23,6 +23,10 @@
 //       line short enough to stay one line in the 246px box it gets at 320px
 //   MD12 DEV-only corner radius: one 0px custom property, one live rule, no storage
 //   MD13 DEV-only auto-open ms inputs write into AUTO.delayMs, in memory only
+//   MD14 the radius rule covers EVERY visible box sitewide: arrow squares, badge/label
+//       dots, step squares, before/after arrows and tags, review cards and images,
+//       FAQ cards, all modal option cards, fields, checkboxes, the close button and
+//       the whole success screen; round-by-design and full-screen layers stay out
 //
 // Mutations (each breaks the check named):
 //   put a literal title back into an option                      -> MD1, MD3
@@ -32,6 +36,7 @@
 //   move the buttons back out of .est-next-group                 -> MD8
 //   go back to :nth-child delays                                 -> MD8
 //   lengthen one "what happens next" line past 34 characters     -> MD8
+//   drop a boxed selector from the radius rule                   -> MD12a / MD14
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -454,7 +459,10 @@ try {
     const uses = (css.match(/border-radius:\s*var\(--box-radius,\s*0px\)/g) || []).length;
     const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius,\s*0px\)[^}]*\}/.exec(css);
     const selectors = rule ? rule[1] : '';
-    const boxed = ['.btn', '.menu-btn', '.bar', '.card', '.photo', '.hero-video', '[data-hero-video]', '.est-dialog', '.f input', '.f textarea', '.sel-btn']
+    const boxed = ['.btn', '.btn i', '.menu-btn', '.bar', '.card', '.photo', '.ph', '.cta-img', '.hero-video',
+      '[data-hero-video]', '.badge::before', '.label::before', '.step .n', '.ba-nav button', '.tag', '.rv',
+      '.rv-media img', '.fi', '.est-x', '.opt', '.opt::after', '.f input', '.f textarea', '.sel-btn',
+      '.chk input', '.est-ok', '.est-recap', '.est-dialog']
       .every(s => selectors.includes(s));
     const markup = /data-dbg="radius"/.test(html)
       && /data-radius="default"\s+aria-pressed="true"/.test(html)
@@ -544,6 +552,32 @@ try {
     line(markup && wrote && clampedHi && clampedLo && noStorage && note, 'MD13',
       'auto-open ms inputs write AUTO.delayMs live, clamped, no storage',
       `markup=${markup} wrote=${wrote} hi=${clampedHi} lo=${clampedLo} noStore=${noStorage} note=${note}`);
+  }
+
+  /* MD14: sitewide coverage. Every visible box, including ::before/::after boxes
+     and the images that a parent's radius cannot clip, is in the ONE live rule.
+     Full-viewport layers and the two things that must stay round stay out. */
+  {
+    const clean = css.replace(/\/\*[\s\S]*?\*\//g, '');   /* comments name excluded selectors; strip them */
+    const uses = (clean.match(/border-radius:\s*var\(--box-radius,\s*0px\)/g) || []).length;
+    const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius,\s*0px\)[^}]*\}/.exec(clean);
+    const list = rule ? rule[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+    const required = ['.btn', '.btn i', '.menu-btn', '.bar', '.card', '.card-text', '.photo', '.ph', '.ph::after',
+      '.cta-img', '.hero-video', '[data-hero-video]', '.frame', '.badge::before', '.label::before',
+      '.cta-sec .label::before', '.ft-trust>span', '.ft-trust>span::before', '.ft-social a',
+      '.steps::before', '.steps::after', '.step .n', '.ba-nav button', '.tag', '.handle::before',
+      '.pair figcaption', '.rv', '.rv-media', '.rv-media img', '.rv-text', '.fi', '.q', '.tot',
+      '.menu-top', '.menu-acts', '.menu-foot', '.menu nav a::before', '.est-dialog', '.est-dots li',
+      '.est-x', '.opt', '.opt::after', '.f input', '.f textarea', '.sel-btn', '.sel-list', '.sel-list li',
+      '.sel-list li[aria-selected="true"]::after', '.chk input', '.est-alert', '.est-back', '.est-restart',
+      '.est-ok', '.est-recap', '.est-recap div',
+      '.est-next-group', '.est-after', '.est-steps li::before', '.est-actions', '.dbg button', '.dbg input.dbg-num'];
+    const missing = required.filter(s => !list.includes(s));
+    const keepOut = ['.av', '.est-next.busy::after', '.est', '.est-scrim', '.menu', '.pre'];
+    const leaked = keepOut.filter(s => list.includes(s));
+    line(uses === 1 && missing.length === 0 && leaked.length === 0, 'MD14',
+      'radius covers every box sitewide; overlays and round-by-design stay out',
+      `uses=${uses} missing=${missing.join(',') || 'none'} leaked=${leaked.join(',') || 'none'}`);
   }
 } catch (e) {
   line(false, 'MD0', 'modal suite threw', (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)));

@@ -4584,23 +4584,73 @@
 
     /* DEV radius control: the ONLY radius rule driven by --box-radius. :root declares 0px, so the
        default look is unchanged; the debug panel sets the property on <html> in memory only.
-       Only boxed elements are listed: round things (.av, .est-dots li, .est-ok, the spinner) stay
-       round. !important overrides the older "border-radius: 0" rules on fields. No other rule
-       may hardcode a radius value for these selectors. */
+       EVERY visible box on the page is listed: buttons and their arrow squares, label and badge
+       dots (::before), numbered steps, before/after arrows and labels, review cards and their
+       images, FAQ cards, the modal's option cards, fields, checkboxes, close button, success
+       groups and every pseudo-element box. Images are listed too, because a parent's radius does
+       not clip a child without overflow:hidden. Deliberately NOT listed: full-viewport overlays
+       (.est, .est-scrim, .menu, .pre), things that must stay round by design (.av, the busy
+       spinner) and SVG paths. !important overrides the older "border-radius: 0" field rules. */
     .btn,
+    .btn i,
     .menu-btn,
     .bar,
     .card,
     .card-text,
     .photo,
+    .ph,
+    .ph::after,
     .cta-img,
     .hero-video,
     [data-hero-video],
     .frame,
+    .badge::before,
+    .label::before,
+    .cta-sec .label::before,
+    .ft-trust>span,
+    .ft-trust>span::before,
+    .ft-social a,
+    .steps::before,
+    .steps::after,
+    .step .n,
+    .ba-nav button,
+    .tag,
+    .handle::before,
+    .pair figcaption,
+    .rv,
+    .rv-media,
+    .rv-media img,
+    .rv-text,
+    .fi,
+    .q,
+    .tot,
+    .menu-top,
+    .menu-acts,
+    .menu-foot,
+    .menu nav a::before,
     .est-dialog,
+    .est-dots li,
+    .est-x,
+    .opt,
+    .opt::after,
     .f input,
     .f textarea,
     .sel-btn,
-    .chk input {
+    .sel-list,
+    .sel-list li,
+    .sel-list li[aria-selected="true"]::after,
+    .chk input,
+    .est-alert,
+    .est-back,
+    .est-restart,
+    .est-ok,
+    .est-recap,
+    .est-recap div,
+    .est-next-group,
+    .est-after,
+    .est-steps li::before,
+    .est-actions,
+    .dbg button,
+    .dbg input.dbg-num {
       border-radius: var(--box-radius, 0px) !important
     }
