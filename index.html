@@ -659,10 +659,10 @@
 
     <!-- BACK TO TOP: appears after half a screen. The accent ring is the scroll readout and closes
          on hover; the arrow is the only content, the label is on the button for screen readers.
-         The ring path starts and ends on the top-left corner; the square cap fills the corner and
-         bridges the last unit of the left edge - see the note on .tot. -->
+         The ring is a rounded square with the same 12px radius as the button, so the progress
+         outline and the button's corners agree. -->
     <button class="tot" type="button" aria-label="Back to top">
-      <svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><path d="M1 1H47V47H1V2" pathLength="100"/></svg>
+      <svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><path d="M13 1H35A12 12 0 0 1 47 13V35A12 12 0 0 1 35 47H13A12 12 0 0 1 1 35V13A12 12 0 0 1 13 1Z" pathLength="100"/></svg>
       <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 16.5V4M4.6 9.4 10 4l5.4 5.4"/></svg>
     </button>
 

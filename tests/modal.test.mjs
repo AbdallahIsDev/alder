@@ -547,12 +547,13 @@ try {
     const images = /\.photo,[\s\S]{0,200}\.ph,[\s\S]{0,200}\.frame,[\s\S]{0,200}\.cta-img,[\s\S]{0,200}\.rv,[\s\S]{0,200}\.rv-media\s*\{\s*border-radius:\s*calc\(var\(--box-radius\) \* 2\)/.test(css);
     const cta = /\.cta-sec\s*\{\s*border-radius:\s*calc\(var\(--box-radius\) \* 4\)/.test(css);
     const ctaFill = /\.page\s*\{[^}]*background:\s*linear-gradient\([^}]*var\(--ink\)/.test(css);
+    const totRing = /class="ring"[\s\S]{0,140}<path d="M13 1H35A12 12/.test(html);
     const singleRing = !/\.f input:focus,\s*\.f textarea:focus\s*\{\s*border-color:\s*var\(--ctl-focus\)/.test(css)
       && /\.f input:focus,\s*\.f textarea:focus\s*\{\s*border-color:\s*var\(--ctl-line\)/.test(css)
       && !/\.sel\.open \.sel-btn\s*\{\s*border-color:\s*var\(--ctl-focus\)/.test(css);
-    line(base && dbl && quad && img12 && images && cta && ctaFill && singleRing, 'MD16',
-      '12px base, 24px images/cards, 48px CTA section, footer-coloured corners, one ring',
-      `base=${base} dbl=${dbl} quad=${quad} img12=${img12} images=${images} cta=${cta} fill=${ctaFill} ring=${singleRing}`);
+    line(base && dbl && quad && img12 && images && cta && ctaFill && totRing && singleRing, 'MD16',
+      '12px base, 24px images/cards, 48px CTA, footer corners, rounded back-to-top, one ring',
+      `base=${base} dbl=${dbl} quad=${quad} img12=${img12} images=${images} cta=${cta} fill=${ctaFill} tot=${totRing} ring=${singleRing}`);
   }
 } catch (e) {
   line(false, 'MD0', 'modal suite threw', (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)));

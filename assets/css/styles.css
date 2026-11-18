@@ -3664,13 +3664,9 @@
        On hover the ring closes to a full frame - the "reached the bottom" state - and the arrow
        picks up the accent. The box never fills: it keeps the same pale ground in every state, so
        it never becomes a second CTA.
-       The ring's path starts and ends on the top-left corner, and the stroke is square-capped. A
-       dash that begins on a corner with butt caps leaves the outer 1px corner square unpainted, so
-       the frame showed through there in every state, even at full progress. Starting the path 3
-       units down the left edge fixed that but put a visible stub of line below the corner, which
-       read as the ring starting twice. A square cap extends a dash half a stroke-width along the
-       path, so the start fills the corner on its own and the end bridges the last unit of the left
-       edge - the line now begins exactly on the corner and nowhere else.
+       The ring is a rounded square with the same 12px radius as the button, so the progress
+       outline follows the button's corners instead of drawing a sharp square inside a rounded box.
+       A square cap still extends the dash half a stroke-width at the join, so the ends meet cleanly.
        html.tot-dark (set by the script once the page edge has passed the button) swaps the ground
        to the footer's own ink, so the square reads as part of the dark section rather than as a
        white card floating on top of it. */
