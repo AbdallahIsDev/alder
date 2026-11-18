@@ -149,9 +149,17 @@ no `.env` (`tests/dev-root.mjs`).
   already scheduled at load is unaffected).
 - The DEV-gated debug menu carries a "Corner radius" [Default] [Custom] control:
   Default = 0 px (today's sharp look); Custom reveals a 0–32 px field applied
-  live to every boxed element through ONE CSS custom property, `--box-radius`.
-  Nothing persists; production defaults do not change. The owner will pick a
-  value later, and a future prompt will make it permanent and remove the control.
+  live to EVERY visible box through ONE CSS custom property, `--box-radius`:
+  buttons and their arrow squares, badge and label dots (`::before`), step
+  squares, before/after arrows and tags, review cards and images, FAQ cards,
+  the floating CTA, all modal option cards, fields, checkboxes, the close
+  button and the whole success screen. Images and pseudo-element boxes have
+  their own selectors because a parent's radius does not clip a child. Three
+  things stay out: full-viewport overlays (`.est`, `.est-scrim`, `.menu`, the
+  disabled preloader), round-by-design avatars and the busy spinner, and SVG
+  paths. Nothing persists; production defaults do not change. The owner will
+  pick a value later, and a future prompt will make it permanent and remove
+  the control.
 - Copy is plain, human and specific. No staccato fragments ("No fluff. Just
   results."), no comma-couplets used as a sentence, no colon-fragment openers.
   Full sentences with a reason in them.
@@ -427,6 +435,7 @@ the modal's thank-you steps.
 | 2026-11-17 | `tests/webhook.test.mjs` brought up to Part 1: OP61 split into ask/perform/second-confirm, `bR:` added to the forged and stale lists, forged sweep now also proves the row is unchanged, OP63 drives Replace phone (`bw:`/`bW:` and `bp:`/`bP:`) instead of the old Invite button, and the terminated screen is asserted to offer no Reactivate. The mail-subject assertion reads `MAIL_REDIRECT_TO` instead of assuming a machine without it. Green: 115/115, 155 s. |
 | 2026-11-17 | Estimate modal: thank-you screen in three groups with a class-set reveal, one-line next steps, the held state really hides the recap and the steps, draft in sessionStorage with "Start over", one automatic open per session at 8 s / 10 s with a 30-day close suppression. `/leads` header states the total held leads. A support suspension says "Contact support to restore it." instead of "Renew". `npm run serve`. Payment-provider design notes in `docs/OPERATIONS.md` §3b. |
 | 2026-11-17 | Task-gap round: DEV debug menu gained a live `--box-radius` [Default]/[Custom] control and the AUTO delay inputs; X press area 44 px desktop / 32 px phone. `/leads` held rows moved into their own "Received while suspended" group. `/start` excluded from the suspended reply, no free-text cap while off, and the suspended/terminated reply always states a date (or that none is set) and the countdown. Extend's terminated question now says "This business was terminated. Extending restores the service." Held notices use the same four core lines for both reasons. Operator identity is `OPERATOR_CHAT_ID` only. New `BL1e` duration gate. Checklists and `docs/legal-drafts/LAWYER_REVIEW.md` added. |
+| 2026-11-18 | Radius audit: the one `--box-radius` rule now covers every visible box sitewide, including `::before`/`::after` boxes, arrow squares, step squares, before/after tags, review cards and their images, FAQ cards, modal option cards, fields, checkboxes, the X button and the whole success screen. Overlays, round avatars, the busy spinner and SVG paths stay out. `MD14` pins the coverage. |
 
 ---
 
@@ -468,7 +477,8 @@ Open after the 2026-11-17 modal round:
 8. The three next-step lines were measured at 320, 375 and 1440 px (one line
    each, longest 192 px of the 246 px box at 320). Not measured in Safari or
    Firefox.
-9. The new `--box-radius` control and the phone-sized X press area were verified
-   by JSDOM and CSS text assertions only, not in a real browser on a phone.
+9. The `--box-radius` control, its sitewide coverage and the phone-sized X press
+   area were verified by JSDOM and CSS text assertions only, not in a real
+   browser on a phone.
 10. `tests/notify.test.mjs` B1d failed once in a twelve-suite run and passed on a
    clean rerun (62/62); it is timing-sensitive, not a confirmed regression.
