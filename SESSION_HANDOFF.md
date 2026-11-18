@@ -148,7 +148,7 @@ no `.env` (`tests/dev-root.mjs`).
   `window` and editable from the DEV-gated debug menu (in memory only; the timer
   already scheduled at load is unaffected).
 - The DEV-gated debug menu carries a "Corner radius" [Default] [Custom] control:
-  Default = 0 px (today's sharp look); Custom reveals a 0–32 px field applied
+  Default = 0 px (today's sharp look); Custom reveals a 0–36 px field applied
   live to EVERY visible box through ONE CSS custom property, `--box-radius`:
   buttons and their arrow squares, badge and label dots (`::before`), step
   squares, before/after arrows and tags, review cards and images, FAQ cards,
@@ -436,6 +436,7 @@ the modal's thank-you steps.
 | 2026-11-17 | Estimate modal: thank-you screen in three groups with a class-set reveal, one-line next steps, the held state really hides the recap and the steps, draft in sessionStorage with "Start over", one automatic open per session at 8 s / 10 s with a 30-day close suppression. `/leads` header states the total held leads. A support suspension says "Contact support to restore it." instead of "Renew". `npm run serve`. Payment-provider design notes in `docs/OPERATIONS.md` §3b. |
 | 2026-11-17 | Task-gap round: DEV debug menu gained a live `--box-radius` [Default]/[Custom] control and the AUTO delay inputs; X press area 44 px desktop / 32 px phone. `/leads` held rows moved into their own "Received while suspended" group. `/start` excluded from the suspended reply, no free-text cap while off, and the suspended/terminated reply always states a date (or that none is set) and the countdown. Extend's terminated question now says "This business was terminated. Extending restores the service." Held notices use the same four core lines for both reasons. Operator identity is `OPERATOR_CHAT_ID` only. New `BL1e` duration gate. Checklists and `docs/legal-drafts/LAWYER_REVIEW.md` added. |
 | 2026-11-18 | Radius audit: the one `--box-radius` rule now covers every visible box sitewide, including `::before`/`::after` boxes, arrow squares, step squares, before/after tags, review cards and their images, FAQ cards, modal option cards, fields, checkboxes, the X button and the whole success screen. Overlays, round avatars, the busy spinner and SVG paths stay out. `MD14` pins the coverage. |
+| 2026-11-18 | The white arrow square of each primary CTA is a 34px background gradient on `.bx-p`, not the `<i>`, so `border-radius` could not round it. In radius mode the panel sets an in-memory `data-radius="custom"` flag and CSS swaps that gradient for a real, rounded background on `<i>` (`MD15`). The field's cap is now 36 px, not 32 px. |
 
 ---
 
