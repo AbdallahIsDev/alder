@@ -147,19 +147,24 @@ no `.env` (`tests/dev-root.mjs`).
   there. All constants in one `AUTO` object in `index.html`, also exposed on
   `window` and editable from the DEV-gated debug menu (in memory only; the timer
   already scheduled at load is unaffected).
-- The DEV-gated debug menu carries a "Corner radius" [Default] [Custom] control:
-  Default = 0 px (today's sharp look); Custom reveals a 0–36 px field applied
-  live to EVERY visible box through ONE CSS custom property, `--box-radius`:
-  buttons and their arrow squares, badge and label dots (`::before`), step
-  squares, before/after arrows and tags, review cards and images, FAQ cards,
-  the floating CTA, all modal option cards, fields, checkboxes, the close
-  button and the whole success screen. Images and pseudo-element boxes have
-  their own selectors because a parent's radius does not clip a child. Three
-  things stay out: full-viewport overlays (`.est`, `.est-scrim`, `.menu`, the
-  disabled preloader), round-by-design avatars and the busy spinner, and SVG
-  paths. Nothing persists; production defaults do not change. The owner will
-  pick a value later, and a future prompt will make it permanent and remove
-  the control.
+- The permanent corner radius is **12 px**, set once as `--box-radius: 12px`.
+  It applies to EVERY visible box: buttons, badge and label dots (`::before`),
+  step squares, before/after arrows and tags, FAQ cards, the modal's option
+  cards, fields, checkboxes (row and box), the close button and the whole
+  success screen. Multiples of the SAME token cover the exceptions: 24 px
+  (2×) for standalone images (About, services, before/after viewer, CTA) and
+  for review cards; 12 px for the image inside a review card (24 px card minus
+  its padding); 48 px (4×) for the CTA section; 7 px for the white arrow square
+  inside a primary button (12 px button radius − 6 px right padding + 1 px).
+  That square is a real background on `<i>`, not the hover gradient, so it can
+  be rounded. Three things stay out: full-viewport overlays (`.est`,
+  `.est-scrim`, `.menu`, the disabled preloader), round-by-design avatars and
+  the busy spinner, and SVG paths.
+- The DEV-gated debug menu still has a [Default] [Custom] control: Default
+  returns to the permanent 12 px; Custom reveals a 0–36 px field that changes
+  `--box-radius` live, in memory only. Nothing persists.
+- Form focus shows ONE ring, the accent `:focus-visible` outline. The old white
+  focus border on inputs and the open select was removed.
 - Copy is plain, human and specific. No staccato fragments ("No fluff. Just
   results."), no comma-couplets used as a sentence, no colon-fragment openers.
   Full sentences with a reason in them.
@@ -436,7 +441,8 @@ the modal's thank-you steps.
 | 2026-11-17 | Estimate modal: thank-you screen in three groups with a class-set reveal, one-line next steps, the held state really hides the recap and the steps, draft in sessionStorage with "Start over", one automatic open per session at 8 s / 10 s with a 30-day close suppression. `/leads` header states the total held leads. A support suspension says "Contact support to restore it." instead of "Renew". `npm run serve`. Payment-provider design notes in `docs/OPERATIONS.md` §3b. |
 | 2026-11-17 | Task-gap round: DEV debug menu gained a live `--box-radius` [Default]/[Custom] control and the AUTO delay inputs; X press area 44 px desktop / 32 px phone. `/leads` held rows moved into their own "Received while suspended" group. `/start` excluded from the suspended reply, no free-text cap while off, and the suspended/terminated reply always states a date (or that none is set) and the countdown. Extend's terminated question now says "This business was terminated. Extending restores the service." Held notices use the same four core lines for both reasons. Operator identity is `OPERATOR_CHAT_ID` only. New `BL1e` duration gate. Checklists and `docs/legal-drafts/LAWYER_REVIEW.md` added. |
 | 2026-11-18 | Radius audit: the one `--box-radius` rule now covers every visible box sitewide, including `::before`/`::after` boxes, arrow squares, step squares, before/after tags, review cards and their images, FAQ cards, modal option cards, fields, checkboxes, the X button and the whole success screen. Overlays, round avatars, the busy spinner and SVG paths stay out. `MD14` pins the coverage. |
-| 2026-11-18 | The white arrow square of each primary CTA is a 34px background gradient on `.bx-p`, not the `<i>`, so `border-radius` could not round it. In radius mode the panel sets an in-memory `data-radius="custom"` flag and CSS swaps that gradient for a real, rounded background on `<i>` (`MD15`). The field's cap is now 36 px, not 32 px. |
+| 2026-11-18 | The white arrow square of each primary CTA is a background gradient on `.bx-p`, not the `<i>`, so `border-radius` could not round it. In radius mode the panel set an in-memory `data-radius="custom"` flag and CSS swapped that gradient for a real, rounded background on `<i>` (`MD15`). The field's cap became 36 px. |
+| 2026-11-18 | Permanent radii: `--box-radius` is now 12 px in production. 24 px for standalone images and review cards, 12 px for the image inside a review card, 48 px for the CTA section, 7 px for the primary button's white arrow square (button radius − right padding + 1). The CTA square is permanently a real box, so the hover gradient flood no longer plays. The checkbox row in step 3 gained the 12 px radius. Focus now shows one accent ring: the white focus border on fields and the open select was removed. `MD16` pins the values. |
 
 ---
 
