@@ -27,8 +27,9 @@
 //       dots, step squares, before/after arrows and tags, review cards and images,
 //       FAQ cards, all modal option cards, fields, checkboxes, the close button and
 //       the whole success screen; round-by-design and full-screen layers stay out
-//   MD15 the primary CTA's white square: in radius mode the button-hover gradient is
-//       swapped for a real background on <i>, so the square actually gets the radius
+//   MD15 the primary CTA's white square is a real rounded box (7px) permanently
+//   MD16 the permanent radii: 12px base, 24px standalone images and review cards,
+//       12px review-card image, 48px CTA section, and ONE accent focus ring
 //
 // Mutations (each breaks the check named):
 //   put a literal title back into an option                      -> MD1, MD3
@@ -457,9 +458,9 @@ try {
      returns to sharp, and production never sees the panel at all. */
   {
     const decls = (css.match(/--box-radius\s*:/g) || []).length;
-    const declared = decls === 1 && /--box-radius:\s*0px/.test(css);
-    const uses = (css.match(/border-radius:\s*var\(--box-radius,\s*0px\)/g) || []).length;
-    const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius,\s*0px\)[^}]*\}/.exec(css);
+    const declared = decls === 1 && /--box-radius:\s*12px/.test(css);
+    const uses = (css.match(/border-radius:\s*var\(--box-radius,\s*12px\)/g) || []).length;
+    const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius,\s*12px\)[^}]*\}/.exec(css);
     const selectors = rule ? rule[1] : '';
     const boxed = ['.btn', '.btn i', '.menu-btn', '.bar', '.card', '.photo', '.ph', '.cta-img', '.hero-video',
       '[data-hero-video]', '.badge::before', '.label::before', '.step .n', '.ba-nav button', '.tag', '.rv',
@@ -475,7 +476,7 @@ try {
     const noStorage = !!handler && !/localStorage|sessionStorage|setItem|removeItem/.test(handler)
       && /setProperty\('--box-radius'/.test(handler) && /removeProperty\('--box-radius'/.test(handler);
     line(declared && uses === 1 && boxed && markup && noStorage, 'MD12a',
-      'radius control: one 0px property, one live rule, no persistence',
+      'radius control: one 12px property, one live rule, no persistence',
       `declared=${declared} uses=${uses} boxed=${boxed} markup=${markup} noStorage=${noStorage}`);
 
     const { VirtualConsole } = await import('jsdom');
@@ -567,8 +568,8 @@ try {
      Full-viewport layers and the two things that must stay round stay out. */
   {
     const clean = css.replace(/\/\*[\s\S]*?\*\//g, '');   /* comments name excluded selectors; strip them */
-    const uses = (clean.match(/border-radius:\s*var\(--box-radius,\s*0px\)/g) || []).length;
-    const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius,\s*0px\)[^}]*\}/.exec(clean);
+    const uses = (clean.match(/border-radius:\s*var\(--box-radius,\s*12px\)/g) || []).length;
+    const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius,\s*12px\)[^}]*\}/.exec(clean);
     const list = rule ? rule[1].split(',').map(s => s.trim()).filter(Boolean) : [];
     const required = ['.btn', '.btn i', '.menu-btn', '.bar', '.card', '.card-text', '.photo', '.ph', '.ph::after',
       '.cta-img', '.hero-video', '[data-hero-video]', '.frame', '.badge::before', '.label::before',
@@ -577,7 +578,7 @@ try {
       '.pair figcaption', '.rv', '.rv-media', '.rv-media img', '.rv-text', '.fi', '.q', '.tot',
       '.menu-top', '.menu-acts', '.menu-foot', '.menu nav a::before', '.est-dialog', '.est-dots li',
       '.est-x', '.opt', '.opt::after', '.f input', '.f textarea', '.sel-btn', '.sel-list', '.sel-list li',
-      '.sel-list li[aria-selected="true"]::after', '.chk input', '.est-alert', '.est-back', '.est-restart',
+      '.sel-list li[aria-selected="true"]::after', '.chk', '.chk input', '.est-alert', '.est-back', '.est-restart',
       '.est-ok', '.est-recap', '.est-recap div',
       '.est-next-group', '.est-after', '.est-steps li::before', '.est-actions', '.dbg button', '.dbg input.dbg-num'];
     const missing = required.filter(s => !list.includes(s));
@@ -589,15 +590,31 @@ try {
   }
 
   /* MD15: the white arrow square on every primary CTA is painted by the button-hover
-     system as a 34px background gradient on .bx-p, not by <i>. In radius mode the panel
-     flags <html> and CSS swaps that gradient for a real, rounded background on <i>. */
+     system as a background gradient on .bx-p, not by <i>. It is now a REAL rounded box
+     permanently, 7px (12px button radius minus the 6px right padding plus 1px). */
   {
-    const bxOff = /html\[data-radius="custom"\]\s*\.bx-p\s*\{\s*background-image:\s*none/.test(css);
-    const bxOn = /html\[data-radius="custom"\]\s*\.bx-p i\s*\{\s*background:\s*var\(--bx-fill\)/.test(css);
-    const flag = /html\.dataset\.radius\s*=\s*'custom'/.test(html) && /delete html\.dataset\.radius/.test(html);
-    line(bxOff && bxOn && flag, 'MD15',
-      'primary CTA square becomes a real rounded box in radius mode',
-      `off=${bxOff} on=${bxOn} flag=${flag}`);
+    const bxOff = /html\.bx \.bx-p\s*\{\s*background-image:\s*none/.test(css);
+    const bxOn = /html\.bx \.bx-p i\s*\{\s*background:\s*var\(--bx-fill\)/.test(css);
+    const bxRadius = /html\.bx \.bx-p i\s*\{\s*border-radius:\s*calc\(var\(--box-radius\) - 5px\)/.test(css);
+    line(bxOff && bxOn && bxRadius, 'MD15',
+      'primary CTA square is a real box with a 7px radius',
+      `off=${bxOff} on=${bxOn} radius=${bxRadius}`);
+  }
+
+  /* MD16: the permanent radii and the single focus ring. */
+  {
+    const base = /--box-radius:\s*12px/.test(css);
+    const dbl = /calc\(var\(--box-radius\) \* 2\)/.test(css);
+    const quad = /calc\(var\(--box-radius\) \* 4\)/.test(css);
+    const img12 = /\.rv-media img\s*\{\s*border-radius:\s*var\(--box-radius\)/.test(css);
+    const images = /\.photo,[\s\S]{0,200}\.ph,[\s\S]{0,200}\.frame,[\s\S]{0,200}\.cta-img,[\s\S]{0,200}\.rv,[\s\S]{0,200}\.rv-media\s*\{\s*border-radius:\s*calc\(var\(--box-radius\) \* 2\)/.test(css);
+    const cta = /\.cta-sec\s*\{\s*border-radius:\s*calc\(var\(--box-radius\) \* 4\)/.test(css);
+    const singleRing = !/\.f input:focus,\s*\.f textarea:focus\s*\{\s*border-color:\s*var\(--ctl-focus\)/.test(css)
+      && /\.f input:focus,\s*\.f textarea:focus\s*\{\s*border-color:\s*var\(--ctl-line\)/.test(css)
+      && !/\.sel\.open \.sel-btn\s*\{\s*border-color:\s*var\(--ctl-focus\)/.test(css);
+    line(base && dbl && quad && img12 && images && cta && singleRing, 'MD16',
+      '12px base, 24px images/cards, 48px CTA section, one accent focus ring',
+      `base=${base} dbl=${dbl} quad=${quad} img12=${img12} images=${images} cta=${cta} ring=${singleRing}`);
   }
 } catch (e) {
   line(false, 'MD0', 'modal suite threw', (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)));

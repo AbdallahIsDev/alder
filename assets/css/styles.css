@@ -20,7 +20,7 @@
       --ink2: #2a2d33;
       --cream: #f1f1f1;
       --accent: #d93917;
-      --box-radius: 0px;
+      --box-radius: 12px;
       --muted: #a9adb3;
       --pad: clamp(20px, 4vw, 48px);
       --gap: clamp(72px, 10vw, 140px);
@@ -293,7 +293,7 @@
 
     /* BUTTON SIZE: every button gets its height from ONE token, --btn-h (48px; the header buttons drop to 44px, see below).
        Height is fixed and the content is centred, so primary and secondary buttons are sized the same way.
-       --btn-pad is the gap between the 34px band (arrow square / label / icon) and the button's edge: (height - 2px border - 34px) / 2,
+       --btn-pad is the gap between the 36px band (arrow square / label / icon) and the button's edge: (height - 2px border - 36px) / 2,
        so 6px at 48px and 4px at 44px. The primary button uses it on the right (the square keeps the same space on top, right
        and bottom); its left padding is --btn-pad + 8px (14px at 48px). */
     .btn {
@@ -319,8 +319,8 @@
     .btn i {
       display: grid;
       place-items: center;
-      width: 34px;
-      height: 34px;
+      width: 36px;
+      height: 36px;
       background: var(--accent);
       color: #fff
     }
@@ -2767,8 +2767,9 @@
       transition: transform .25s cubic-bezier(.2, .7, .2, 1)
     }
 
+    /* Keep one focus ring: the accent outline, never a second white border. */
     .sel.open .sel-btn {
-      border-color: var(--ctl-focus)
+      border-color: var(--ctl-line)
     }
 
     .sel.open .sel-btn svg {
@@ -2892,9 +2893,11 @@
       border-radius: 0
     }
 
+    /* ONE ring only: the global :focus-visible outline is the accent ring. A
+       second, white border here used to draw a second ring around the field. */
     .f input:focus,
     .f textarea:focus {
-      border-color: var(--ctl-focus)
+      border-color: var(--ctl-line)
     }
 
     .f ::placeholder {
@@ -4093,11 +4096,11 @@
     /* ===== BUTTON HOVER: fill + roll (locked) =====
        The <html> tag carries a static class "bx"; it is only there to raise these selectors above .btn.dark and friends.
        The script wraps the label text in <span class="bx-l"> and, for the phone button, the icon in <span class="bx-ic">.
-       Both are exactly 34px tall, the band between the button's vertical padding (6px, or 4px in the 44px header buttons), with
+       Both are exactly 36px tall, the band between the button's vertical padding (6px, or 4px in the 44px header buttons), with
        overflow clipped, so they are the clip box. Inside, the real text is transparent (it only sizes the box) and the label is drawn
        by the span's ::before (the visible copy) and ::after (the copy waiting below), from its data-label. Because the clip box does
        not move and the copies only translate, the copies start to disappear as soon as they reach the padding area and nothing
-       can drift out of step. The arrow square (<i>) is its own 34px clip box. All of them leave at the same line.
+       can drift out of step. The arrow square (<i>) is its own 36px clip box. All of them leave at the same line.
        On hover the arrow square's fill grows until it floods the whole button and the label and arrow roll up, each replaced by
        a copy entering from below. The leaving copy keeps its colour and the entering copy is already white: no colour, opacity or
        blur transition anywhere.
@@ -4162,13 +4165,13 @@
       --bx-c: #fff
     }
 
-    /* the label clip box: 34px band; 3px of side room (padding + equal negative margin) so overflow clipping never trims a glyph */
+    /* the label clip box: 36px band; 3px of side room (padding + equal negative margin) so overflow clipping never trims a glyph */
     html.bx .bx-l {
       position: relative;
       display: block;
       flex: none;
-      height: 34px;
-      line-height: 34px;
+      height: 36px;
+      line-height: 36px;
       white-space: nowrap;
       padding-inline: 3px;
       margin-inline: -3px;
@@ -4185,8 +4188,8 @@
       position: absolute;
       left: 3px;
       top: 0;
-      height: 34px;
-      line-height: 34px;
+      height: 36px;
+      line-height: 36px;
       white-space: nowrap;
       pointer-events: none;
       transition: transform var(--bx-d) var(--bx-ease)
@@ -4198,24 +4201,24 @@
 
     html.bx .bx-l::after {
       color: var(--bx-hc, #fff);
-      transform: translateY(34px)
+      transform: translateY(36px)
     }
 
     html.bx :is(.bx-p, .bx-s, .bx-ph):is(:hover, :focus-visible) .bx-l::before {
-      transform: translateY(-34px)
+      transform: translateY(-36px)
     }
 
     html.bx :is(.bx-p, .bx-s, .bx-ph):is(:hover, :focus-visible) .bx-l::after {
       transform: none
     }
 
-    /* phone icon: same 34px band */
+    /* phone icon: same 36px band */
     html.bx .bx-ic {
       position: relative;
       display: block;
       flex: none;
       width: 22px;
-      height: 34px;
+      height: 36px;
       overflow: hidden;
       overflow: clip
     }
@@ -4223,18 +4226,18 @@
     html.bx .bx-ic>svg {
       display: block;
       width: 22px;
-      height: 34px;
+      height: 36px;
       transition: transform var(--bx-d) var(--bx-ease)
     }
 
     html.bx .bx-ic>svg.bx-2 {
       position: absolute;
       inset: 0;
-      transform: translateY(34px)
+      transform: translateY(36px)
     }
 
     html.bx .bx-ph:is(:hover, :focus-visible) .bx-ic>svg:not(.bx-2) {
-      transform: translateY(-34px)
+      transform: translateY(-36px)
     }
 
     html.bx .bx-ph:is(:hover, :focus-visible) .bx-ic>svg.bx-2 {
@@ -4256,18 +4259,18 @@
 
     html.bx .bx-p i>svg.bx-2 {
       display: block;
-      transform: translateY(34px)
+      transform: translateY(36px)
     }
 
     html.bx .bx-p:is(:hover, :focus-visible) i>svg:not(.bx-2) {
-      transform: translateY(-34px)
+      transform: translateY(-36px)
     }
 
     html.bx .bx-p:is(:hover, :focus-visible) i>svg.bx-2 {
       transform: none
     }
 
-    /* the square's colour moves from <i> into the button's own background, a 34px square pinned where the square is
+    /* the square's colour moves from <i> into the button's own background, a 36px square pinned where the square is
        (1px border + --btn-pad from the right edge, centred vertically), which grows to the full box on hover */
     html.bx .bx-p i {
       background: transparent
@@ -4278,7 +4281,7 @@
       background-repeat: no-repeat;
       background-origin: border-box;
       background-clip: border-box;
-      background-size: 34px 34px;
+      background-size: 36px 36px;
       background-position: calc(100% - 1px - var(--btn-pad)) 50%;
       transition: background-size var(--bx-d) var(--bx-ease), background-position var(--bx-d) var(--bx-ease)
     }
@@ -4293,7 +4296,7 @@
     }
 
     /* No transitions until the script has tagged the buttons AND a frame has painted in their final state (html.bx-on).
-       Tagging swaps the arrow square from the <i>'s own background to the button's 34px gradient; without this gate the browser
+       Tagging swaps the arrow square from the <i>'s own background to the button's 36px gradient; without this gate the browser
        animates that gradient from its default spot (left edge) to the right, which is visible on the header button
        because it has no fade-in to hide it. */
     html.bx:not(.bx-on) :is(.bx-p, .bx-s, .bx-ph),
@@ -4582,15 +4585,15 @@
       }
     }
 
-    /* DEV radius control: the ONLY radius rule driven by --box-radius. :root declares 0px, so the
-       default look is unchanged; the debug panel sets the property on <html> in memory only.
-       EVERY visible box on the page is listed: buttons and their arrow squares, label and badge
-       dots (::before), numbered steps, before/after arrows and labels, review cards and their
-       images, FAQ cards, the modal's option cards, fields, checkboxes, close button, success
-       groups and every pseudo-element box. Images are listed too, because a parent's radius does
-       not clip a child without overflow:hidden. Deliberately NOT listed: full-viewport overlays
-       (.est, .est-scrim, .menu, .pre), things that must stay round by design (.av, the busy
-       spinner) and SVG paths. !important overrides the older "border-radius: 0" field rules. */
+    /* ONE base radius, --box-radius = 12px, drives EVERY visible box. The DEV panel can still
+       change it in memory (0..36); Default returns to the permanent 12px. EVERY visible box is
+       listed: buttons and their arrow squares, label and badge dots (::before), numbered steps,
+       before/after arrows and tags, review cards and images, FAQ cards, the modal's option cards,
+       fields, checkboxes, the close button and the whole success screen. Images are listed too,
+       because a parent's radius does not clip a child without overflow:hidden. The few boxes that
+       need a different multiple of the same token are overridden just below. Deliberately NOT
+       listed: full-viewport overlays (.est, .est-scrim, .menu, .pre), things that must stay round
+       by design (.av, the busy spinner) and SVG paths. */
     .btn,
     .btn i,
     .menu-btn,
@@ -4639,6 +4642,7 @@
     .sel-list,
     .sel-list li,
     .sel-list li[aria-selected="true"]::after,
+    .chk,
     .chk input,
     .est-alert,
     .est-back,
@@ -4652,17 +4656,43 @@
     .est-actions,
     .dbg button,
     .dbg input.dbg-num {
-      border-radius: var(--box-radius, 0px) !important
+      border-radius: var(--box-radius, 12px) !important
     }
 
-    /* The primary CTA's arrow square is NOT the <i>: the button-hover system paints a 34px
-       background gradient on .bx-p and makes <i> transparent. A background image cannot be
-       rounded by border-radius, so while the DEV radius is active the square becomes a real
-       box again. html[data-radius] is set only by the debug panel, in memory, never in prod. */
-    html[data-radius="custom"] .bx-p {
+    /* The primary CTA's white square is painted as a background gradient on .bx-p by the
+       button-hover system, with <i> transparent. A gradient cannot be rounded, so the square
+       is a real box permanently: same fill, no gradient. The arrow roll still works. */
+    html.bx .bx-p {
       background-image: none
     }
 
-    html[data-radius="custom"] .bx-p i {
+    html.bx .bx-p i {
       background: var(--bx-fill)
+    }
+
+    /* Standalone images (About, services, before/after viewer, CTA) and the review cards
+       take 2x the base = 24px. A review card's inner image sits inside the card's padding,
+       so it takes 1x = 12px. The CTA section itself takes 4x = 48px. */
+    .photo,
+    .ph,
+    .ph::after,
+    .frame,
+    .cta-img,
+    .rv,
+    .rv-media {
+      border-radius: calc(var(--box-radius) * 2) !important
+    }
+
+    .rv-media img {
+      border-radius: var(--box-radius) !important
+    }
+
+    .cta-sec {
+      border-radius: calc(var(--box-radius) * 4) !important
+    }
+
+    /* The arrow square sits inside the button's right padding (6px) plus 1px, so with a
+       12px button radius its own radius is 7px. */
+    html.bx .bx-p i {
+      border-radius: calc(var(--box-radius) - 5px) !important
     }
