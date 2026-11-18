@@ -21,12 +21,21 @@
       --cream: #f1f1f1;
       --accent: #d93917;
       --box-radius: 12px;
+      --clip: hidden;                 /* @supports below upgrades this to clip */
       --muted: #a9adb3;
       --pad: clamp(20px, 4vw, 48px);
       --gap: clamp(72px, 10vw, 140px);
       --fs: clamp(14px, .5vw + 8.5px, 18px);
       --f: 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
       --f2: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif
+    }
+
+    /* Progressive enhancements without duplicate declarations (Biome noDuplicateProperties):
+       one property reads a token, and @supports swaps only the token's value. */
+    @supports (overflow: clip) {
+      :root {
+        --clip: clip
+      }
     }
 
     * {
@@ -241,10 +250,15 @@
     }
 
     .page {
+      position: relative;
       display: flex;
       flex-direction: column;
       gap: var(--gap);
-      padding-bottom: var(--gap)
+      padding-bottom: var(--gap);
+      /* The CTA is pulled down over the footer by a negative margin equal to
+         this padding. Its 48px bottom corners must reveal the footer's colour,
+         not white, so the bottom strip of the page ground is dark. */
+      background: linear-gradient(to bottom, #fff calc(100% - var(--gap)), var(--ink) calc(100% - var(--gap)))
     }
 
     .ph {
@@ -505,9 +519,9 @@
       top: 0;
       left: 0;
       width: 100%;
-      height: 100vh;
-      height: max(100lvh, var(--hero-h, 0px));
       /* --hero-h is set by script so a hero taller than the window is still fully covered */
+      --slide-h: 100vh;
+      height: var(--slide-h);
       opacity: 0;
       transition: opacity 1.5s ease
     }
@@ -534,10 +548,17 @@
       top: 0;
       left: 0;
       width: 100%;
-      height: 100vh;
-      height: max(100lvh, var(--hero-h, 0px));
+      --slide-h: 100vh;
+      height: var(--slide-h);
       z-index: 0;
       pointer-events: none
+    }
+
+    @supports (height: 100lvh) {
+      .slide,
+      .hero-video {
+        --slide-h: max(100lvh, var(--hero-h, 0px))
+      }
     }
 
     .hero-video video,
@@ -1671,8 +1692,7 @@
        title and the text in two separate rows that each took half the image height, which is what stretched them apart. */
     .cta-sec {
       position: relative;
-      overflow: hidden;
-      overflow: clip;
+      overflow: var(--clip);
       margin-bottom: calc(-1*var(--gap));
       background: var(--accent);
       color: #fff
@@ -3612,8 +3632,7 @@
 
     html.rv-ready:not(.ft-tall) .page {
       position: relative;
-      z-index: 1;
-      background: #fff
+      z-index: 1
     }
 
     html.rv-ready:not(.ft-tall) .ft {
@@ -4176,15 +4195,14 @@
       padding-inline: 3px;
       margin-inline: -3px;
       color: transparent;
-      overflow: hidden;
-      overflow: clip
+      overflow: var(--clip)
     }
 
     /* ::before = the visible copy, ::after = the copy waiting below. Both pinned to the band's top-left (3px = the side room) */
     html.bx .bx-l::before,
     html.bx .bx-l::after {
-      content: attr(data-label);
-      content: attr(data-label) / "";
+      --bx-label: attr(data-label);
+      content: var(--bx-label);
       position: absolute;
       left: 3px;
       top: 0;
@@ -4193,6 +4211,15 @@
       white-space: nowrap;
       pointer-events: none;
       transition: transform var(--bx-d) var(--bx-ease)
+    }
+
+    /* Keep the plain attr() fallback; browsers that support alt text on generated
+       content get it by swapping only the token, not by redeclaring `content`. */
+    @supports (content: attr(data-label) / "") {
+      html.bx .bx-l::before,
+      html.bx .bx-l::after {
+        --bx-label: attr(data-label) / ""
+      }
     }
 
     html.bx .bx-l::before {
@@ -4219,8 +4246,7 @@
       flex: none;
       width: 22px;
       height: 36px;
-      overflow: hidden;
-      overflow: clip
+      overflow: var(--clip)
     }
 
     html.bx .bx-ic>svg {

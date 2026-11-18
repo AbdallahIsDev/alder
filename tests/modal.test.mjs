@@ -21,7 +21,7 @@
 //       next steps with both buttons), the reveal order set on those groups'
 //       own classes rather than on :nth-child, and every "what happens next"
 //       line short enough to stay one line in the 246px box it gets at 320px
-//   MD12 DEV-only corner radius: one 0px custom property, one live rule, no storage
+//   MD12 the debug panel no longer has a corner-radius control; delays remain
 //   MD13 DEV-only auto-open ms inputs write into AUTO.delayMs, in memory only
 //   MD14 the radius rule covers EVERY visible box sitewide: arrow squares, badge/label
 //       dots, step squares, before/after arrows and tags, review cards and images,
@@ -39,7 +39,7 @@
 //   move the buttons back out of .est-next-group                 -> MD8
 //   go back to :nth-child delays                                 -> MD8
 //   lengthen one "what happens next" line past 34 characters     -> MD8
-//   drop a boxed selector from the radius rule                   -> MD12a / MD14
+//   drop a boxed selector from the radius rule                   -> MD14
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -453,77 +453,14 @@ try {
       `stamp=${stampOk} closed=${heldByClose} expired=${expiredInvites} sent=${afterSubmit} open=${whileOpen} menu=${whileMenu} scrolled=${pastFirst} cta=${afterCta} flag=${sentFlag} hidden=${notWhileHidden} returned=${invitedOnReturn}`);
   }
 
-  /* MD12: the DEV corner-radius control. One custom property declared once at 0px, one rule that
-     feeds it to the boxed selectors, and an in-memory live application. No storage write: a reload
-     returns to sharp, and production never sees the panel at all. */
+  /* MD12: the radius is permanent, so the DEV panel no longer has a radius row.
+     The auto-open delay row stays. */
   {
-    const decls = (css.match(/--box-radius\s*:/g) || []).length;
-    const declared = decls === 1 && /--box-radius:\s*12px/.test(css);
-    const uses = (css.match(/border-radius:\s*var\(--box-radius,\s*12px\)/g) || []).length;
-    const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius,\s*12px\)[^}]*\}/.exec(css);
-    const selectors = rule ? rule[1] : '';
-    const boxed = ['.btn', '.btn i', '.menu-btn', '.bar', '.card', '.photo', '.ph', '.cta-img', '.hero-video',
-      '[data-hero-video]', '.badge::before', '.label::before', '.step .n', '.ba-nav button', '.tag', '.rv',
-      '.rv-media img', '.fi', '.est-x', '.opt', '.opt::after', '.f input', '.f textarea', '.sel-btn',
-      '.chk input', '.est-ok', '.est-recap', '.est-dialog']
-      .every(s => selectors.includes(s));
-    const markup = /data-dbg="radius"/.test(html)
-      && /data-radius="default"\s+aria-pressed="true"/.test(html)
-      && /data-radius="custom"\s+aria-pressed="false"/.test(html)
-      && /data-radius-px[^>]*min="0"[^>]*max="36"/.test(html);
-    const from = html.indexOf('---- Corner radius'), to = html.indexOf('---- Auto-open delay');
-    const handler = from > -1 && to > from ? html.slice(from, to) : '';
-    const noStorage = !!handler && !/localStorage|sessionStorage|setItem|removeItem/.test(handler)
-      && /setProperty\('--box-radius'/.test(handler) && /removeProperty\('--box-radius'/.test(handler);
-    line(declared && uses === 1 && boxed && markup && noStorage, 'MD12a',
-      'radius control: one 12px property, one live rule, no persistence',
-      `declared=${declared} uses=${uses} boxed=${boxed} markup=${markup} noStorage=${noStorage}`);
-
-    const { VirtualConsole } = await import('jsdom');
-    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-    const boot = (url) => new JSDOM(html, {
-      runScripts: 'dangerously', pretendToBeVisual: true, url, virtualConsole: new VirtualConsole(),
-      beforeParse(window) {
-        window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-        window.scrollTo = () => {};
-        window.CSS = { supports: () => true };
-        // The panel shares a script block with a counter that observes elements. Without this
-        // stub JSDOM throws there and the whole block (panel included) never runs.
-        window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
-      },
-    });
-    const prod = boot('https://alder.test/');
-    const gated = !prod.window.document.querySelector('.dbg');
-    prod.window.close();
-    const dom = boot('http://localhost/');
-    const w = dom.window, d = w.document;
-    await wait(60);
-    const panel = d.querySelector('.dbg'), px = d.querySelector('[data-radius-px]');
-    const set = (el, v) => { el.value = v; el.dispatchEvent(new w.Event('input', { bubbles: true })); };
-    const click = (el) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
-    const radius = () => d.documentElement.style.getPropertyValue('--box-radius');
-    set(px, '12');
-    const live = radius() === '12px';
-    set(px, '99');
-    const clampedHi = radius() === '36px' && px.value === '36';
-    set(px, '-5');
-    const clampedLo = radius() === '0px' && px.value === '0';
-    // Typing already puts the panel in Custom mode; Default must clear both the
-    // property and the mode flag, then Custom must set them again.
-    click(d.querySelector('[data-radius="default"]'));
-    const reset = radius() === '' && px.hidden === true
-      && d.querySelector('[data-radius="default"]').getAttribute('aria-pressed') === 'true'
-      && !d.documentElement.dataset.radius;
-    click(d.querySelector('[data-radius="custom"]'));
-    // The split-text pass can replace nodes after boot, so assert the state the
-    // handler owns (property, mode flag, field visibility), not a pressed class.
-    const custom = px.hidden === false && d.documentElement.dataset.radius === 'custom' && radius() === '0px';
-    const keys = Object.keys(w.localStorage).concat(Object.keys(w.sessionStorage)).join(' ');
-    const untouched = !/radius/i.test(keys);
-    w.close();
-    line(gated && !!panel && live && clampedHi && clampedLo && custom && reset && untouched, 'MD12b',
-      'radius applies live, clamps 0..36, Default clears, panel stays dev-only',
-      `gated=${gated} panel=${!!panel} live=${live} hi=${clampedHi} lo=${clampedLo} custom=${custom} reset=${reset} noStore=${untouched}`);
+    const noRadiusUi = !/data-dbg="radius"|data-radius-px|data-radius="(default|custom)"|dataset\.radius/.test(html);
+    const delaysStay = /data-dbg="auto-delay"/.test(html) && /data-delay="desktop"/.test(html) && /data-delay="mobile"/.test(html);
+    line(noRadiusUi && delaysStay, 'MD12',
+      'debug panel: no radius control, auto-open delays remain',
+      `noRadius=${noRadiusUi} delays=${delaysStay}`);
   }
 
   /* MD13: the two auto-open inputs. AUTO is defined after the panel script, so these are written
@@ -609,12 +546,13 @@ try {
     const img12 = /\.rv-media img\s*\{\s*border-radius:\s*var\(--box-radius\)/.test(css);
     const images = /\.photo,[\s\S]{0,200}\.ph,[\s\S]{0,200}\.frame,[\s\S]{0,200}\.cta-img,[\s\S]{0,200}\.rv,[\s\S]{0,200}\.rv-media\s*\{\s*border-radius:\s*calc\(var\(--box-radius\) \* 2\)/.test(css);
     const cta = /\.cta-sec\s*\{\s*border-radius:\s*calc\(var\(--box-radius\) \* 4\)/.test(css);
+    const ctaFill = /\.page\s*\{[^}]*background:\s*linear-gradient\([^}]*var\(--ink\)/.test(css);
     const singleRing = !/\.f input:focus,\s*\.f textarea:focus\s*\{\s*border-color:\s*var\(--ctl-focus\)/.test(css)
       && /\.f input:focus,\s*\.f textarea:focus\s*\{\s*border-color:\s*var\(--ctl-line\)/.test(css)
       && !/\.sel\.open \.sel-btn\s*\{\s*border-color:\s*var\(--ctl-focus\)/.test(css);
-    line(base && dbl && quad && img12 && images && cta && singleRing, 'MD16',
-      '12px base, 24px images/cards, 48px CTA section, one accent focus ring',
-      `base=${base} dbl=${dbl} quad=${quad} img12=${img12} images=${images} cta=${cta} ring=${singleRing}`);
+    line(base && dbl && quad && img12 && images && cta && ctaFill && singleRing, 'MD16',
+      '12px base, 24px images/cards, 48px CTA section, footer-coloured corners, one ring',
+      `base=${base} dbl=${dbl} quad=${quad} img12=${img12} images=${images} cta=${cta} fill=${ctaFill} ring=${singleRing}`);
   }
 } catch (e) {
   line(false, 'MD0', 'modal suite threw', (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)));
