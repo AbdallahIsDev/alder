@@ -164,6 +164,10 @@ no `.env` (`tests/dev-root.mjs`).
   auto-open delay inputs. The radius is permanent, in the stylesheet.
 - The CTA section's 48 px bottom corners reveal the footer colour, not the
   page's white ground: the bottom strip of `.page` is painted in `var(--ink)`.
+- The back-to-top button's progress ring is a rounded square with the same
+  12 px radius as the button, so the outline no longer draws a sharp square
+  inside a rounded box. `pathLength="100"` and the scroll-progress dash are
+  unchanged.
 - Form focus shows ONE ring, the accent `:focus-visible` outline. The old white
   focus border on inputs and the open select was removed.
 - Progressive fallbacks (`vh`→`lvh`, `hidden`→`clip`, `attr()`→alt text) use one
@@ -448,6 +452,7 @@ the modal's thank-you steps.
 | 2026-11-18 | The white arrow square of each primary CTA is a background gradient on `.bx-p`, not the `<i>`, so `border-radius` could not round it. In radius mode the panel set an in-memory `data-radius="custom"` flag and CSS swapped that gradient for a real, rounded background on `<i>` (`MD15`). The field's cap became 36 px. |
 | 2026-11-18 | Permanent radii: `--box-radius` is now 12 px in production. 24 px for standalone images and review cards, 12 px for the image inside a review card, 48 px for the CTA section, 7 px for the primary button's white arrow square (button radius − right padding + 1). The CTA square is permanently a real box, so the hover gradient flood no longer plays. The checkbox row in step 3 gained the 12 px radius. Focus now shows one accent ring: the white focus border on fields and the open select was removed. `MD16` pins the values. |
 | 2026-11-18 | Removed the corner-radius row (markup and JS) from the DEV panel; the auto-open delay inputs stay. The CTA's rounded bottom corners now reveal the footer colour by painting the page's bottom strip in `var(--ink)`. Fixed the six duplicated CSS properties flagged by Biome using token + `@supports` fallbacks; `CSS8` pins it. |
+| 2026-11-18 | The back-to-top progress ring became a rounded square with the button's 12 px radius. Its SVG path and the stale square-cap comment were updated; `MD16` checks the new path. |
 
 ---
 
