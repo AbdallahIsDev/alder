@@ -160,11 +160,15 @@ no `.env` (`tests/dev-root.mjs`).
   be rounded. Three things stay out: full-viewport overlays (`.est`,
   `.est-scrim`, `.menu`, the disabled preloader), round-by-design avatars and
   the busy spinner, and SVG paths.
-- The DEV-gated debug menu still has a [Default] [Custom] control: Default
-  returns to the permanent 12 px; Custom reveals a 0–36 px field that changes
-  `--box-radius` live, in memory only. Nothing persists.
+- The DEV-gated debug menu has **no corner-radius control**; it keeps only the
+  auto-open delay inputs. The radius is permanent, in the stylesheet.
+- The CTA section's 48 px bottom corners reveal the footer colour, not the
+  page's white ground: the bottom strip of `.page` is painted in `var(--ink)`.
 - Form focus shows ONE ring, the accent `:focus-visible` outline. The old white
   focus border on inputs and the open select was removed.
+- Progressive fallbacks (`vh`→`lvh`, `hidden`→`clip`, `attr()`→alt text) use one
+  property reading a token plus `@supports`, never two declarations of the same
+  property in one block (Biome `noDuplicateProperties` stays clean).
 - Copy is plain, human and specific. No staccato fragments ("No fluff. Just
   results."), no comma-couplets used as a sentence, no colon-fragment openers.
   Full sentences with a reason in them.
@@ -443,6 +447,7 @@ the modal's thank-you steps.
 | 2026-11-18 | Radius audit: the one `--box-radius` rule now covers every visible box sitewide, including `::before`/`::after` boxes, arrow squares, step squares, before/after tags, review cards and their images, FAQ cards, modal option cards, fields, checkboxes, the X button and the whole success screen. Overlays, round avatars, the busy spinner and SVG paths stay out. `MD14` pins the coverage. |
 | 2026-11-18 | The white arrow square of each primary CTA is a background gradient on `.bx-p`, not the `<i>`, so `border-radius` could not round it. In radius mode the panel set an in-memory `data-radius="custom"` flag and CSS swapped that gradient for a real, rounded background on `<i>` (`MD15`). The field's cap became 36 px. |
 | 2026-11-18 | Permanent radii: `--box-radius` is now 12 px in production. 24 px for standalone images and review cards, 12 px for the image inside a review card, 48 px for the CTA section, 7 px for the primary button's white arrow square (button radius − right padding + 1). The CTA square is permanently a real box, so the hover gradient flood no longer plays. The checkbox row in step 3 gained the 12 px radius. Focus now shows one accent ring: the white focus border on fields and the open select was removed. `MD16` pins the values. |
+| 2026-11-18 | Removed the corner-radius row (markup and JS) from the DEV panel; the auto-open delay inputs stay. The CTA's rounded bottom corners now reveal the footer colour by painting the page's bottom strip in `var(--ink)`. Fixed the six duplicated CSS properties flagged by Biome using token + `@supports` fallbacks; `CSS8` pins it. |
 
 ---
 
