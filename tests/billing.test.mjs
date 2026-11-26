@@ -280,12 +280,29 @@ const biz = (patch = {}) => ({ id: 'b1', name: 'Alder Roofing', slug: 'alder', s
     && B.extendTargetAllowed(now + 30 * DAY, null, now) && !B.extendTargetAllowed(null, cur, now)
     && !B.extendTargetAllowed(max, cur, max + 1);            // an old button: its date is in the past
   line(ok, 'BL9b', 'extendTargetAllowed: future only, at most one period');
-  // A Confirm minted for an unbilled business 20 days ago is still in the
-  // future, but applying it would buy only 10 days. It must be refused.
+  // A Confirm minted 20 days ago still carries the period end paid for at the
+  // mint moment. Applying it grants exactly that 30-day period, never a longer
+  // one and never a recomputed period from the tap time.
   const stale = now - 20 * DAY + 30 * DAY;
-  const staleOk = !B.extendTargetAllowed(stale, null, now);
-  line(staleOk, 'BL9c', 'a stale future Confirm cannot grant less than one period',
+  const staleOk = B.extendTargetAllowed(stale, null, now)
+    && !B.extendTargetAllowed(now + 31 * DAY, null, now);
+  line(staleOk, 'BL9c', 'a stale Confirm keeps its original period; a longer one is refused',
     `stale=${new Date(stale).toISOString()}`);
+  // A real Confirm is minted once and tapped seconds later. The 30-day target
+  // must stay valid for every billing state, and a double tap must still reach
+  // applyPayment's idempotent no-op.
+  const mint = T('2026-11-27T10:00:00Z');
+  const confirm = mint + 5000;
+  const period = 30 * DAY;
+  const overdue = mint - 6 * DAY;
+  const future = mint + 5 * DAY;
+  const targetFor = (cur) => B.nextPaidUntil(cur, mint, 30);
+  const delayedOk = B.extendTargetAllowed(targetFor(null), null, confirm)
+    && B.extendTargetAllowed(targetFor(overdue), overdue, confirm)
+    && B.extendTargetAllowed(targetFor(future), future, confirm)
+    && B.extendTargetAllowed(targetFor(future), targetFor(future), confirm);
+  line(delayedOk, 'BL9d', 'a legitimate Confirm survives a 5 s tap delay in every state',
+    `null=${B.extendTargetAllowed(targetFor(null), null, confirm)} overdue=${B.extendTargetAllowed(targetFor(overdue), overdue, confirm)} future=${B.extendTargetAllowed(targetFor(future), future, confirm)} double=${B.extendTargetAllowed(targetFor(future), targetFor(future), confirm)}`);
 }
 
 console.log(`\nGate BL (billing rules): ${total - failed}/${total} PASS`);
