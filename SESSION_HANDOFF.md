@@ -459,6 +459,7 @@ the modal's thank-you steps.
 | 2026-11-26 | Hardening phase 3: fixed DEV gate on production hosts, silent cron owner emails, notice-alert claim release, stale billing Reactivate, held-lead replay leak and status race, modal key on close/reopen, scoped held count, stale Extend token, lifecycle date copy, docs and serve. New tests MD17–MD19, OF1–OF5, LC17, LB26, BL9c, OB31, PL1–PL3. |
 | 2026-11-26 | Hardening phase 4: one design-token file (`design-tokens.json`) drives CSS custom properties and numeric email values through `npm run tokens`; radius default stays 12px. `docs/DESIGN_TOKENS.md` and `DT1`–`DT3` added. |
 | 2026-11-26 | Hardening phase 5: production host is a `{{prodHost}}` build token instead of a hardcoded Alder domain; build baseline and OP61 copy updated; C35 made deterministic with DB-clock feedback. `npm run build` exit 0 with no leftover `{{`. |
+| 2026-11-27 | Pre-launch verify: production migration 0007 applied; PR #39 description added. Phase 3 fixes — delayed Extend Confirm accepted with its original 30-day end, held replay stays held, fresh status read logs a code, build bakes both production hosts, token JSON uses `createRequire`, Vercel production alias is denied by the DEV gate. |
 
 ---
 

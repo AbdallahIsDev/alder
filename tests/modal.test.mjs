@@ -532,6 +532,35 @@ try {
       `prod=${prod.noDev} preview=${preview.noDev} local=${local.noDev} noAlias=${noAlias}`);
   }
 
+  /* MD20: production can also be reached through its Vercel alias. That host
+     must be denied as well as the client's own domain. */
+  {
+    const { VirtualConsole } = await import('jsdom');
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const gateHtml = html.replace('{{prodHost}}', 'www.alderroof.com')
+      .replace('{{prodVercelHost}}', 'alder-roofing.vercel.app');
+    const boot = async (url) => {
+      const dom = new JSDOM(gateHtml, {
+        runScripts: 'dangerously', pretendToBeVisual: true, url, virtualConsole: new VirtualConsole(),
+        beforeParse(window) {
+          window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+          window.scrollTo = () => {};
+          window.CSS = { supports: () => true };
+          window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+        },
+      });
+      await wait(80);
+      const noDev = dom.window.document.documentElement.classList.contains('no-dev');
+      dom.window.close();
+      return noDev;
+    };
+    const aliasDenied = await boot('https://alder-roofing.vercel.app/?dev=1');
+    const previewAllowed = !(await boot('https://alder-roofing-git-hardening.vercel.app/?dev=1'));
+    line(aliasDenied && previewAllowed, 'MD20',
+      'DEV gate denies the Vercel production alias, allows preview',
+      `aliasDenied=${aliasDenied} previewAllowed=${previewAllowed}`);
+  }
+
   /* MD19: the auto-open guard must measure the masthead (hero + stats), not
      the first <section>, which is About further down the page. */
   {

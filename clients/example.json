@@ -115,6 +115,7 @@
     "servicesTitleC": " of a sample roof"
   },
   "domain": "https://northline.example",
+  "vercelProdHost": "northline.vercel.app",
   "lastmod": "2026-01-01",
   "sender": "alerts@northline.example"
 }

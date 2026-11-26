@@ -123,5 +123,6 @@
     "servicesTitleC": " of your roof"
   },
   "domain": "https://www.alderroof.com",
+  "vercelProdHost": "alder-roofing.vercel.app",
   "lastmod": "2026-10-03"
 }
