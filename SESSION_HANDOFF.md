@@ -11,7 +11,7 @@ is gone on purpose, except for a short log at the end.
 > change it in the same task, not later. `AGENTS.md` carries the same rule for any
 > agent working in this repo. Never write a secret value in this file; names only.
 
-**Last updated:** 2026-11-17.
+**Last updated:** 2026-11-26.
 
 ---
 
@@ -453,6 +453,7 @@ the modal's thank-you steps.
 | 2026-11-18 | Permanent radii: `--box-radius` is now 12 px in production. 24 px for standalone images and review cards, 12 px for the image inside a review card, 48 px for the CTA section, 7 px for the primary button's white arrow square (button radius − right padding + 1). The CTA square is permanently a real box, so the hover gradient flood no longer plays. The checkbox row in step 3 gained the 12 px radius. Focus now shows one accent ring: the white focus border on fields and the open select was removed. `MD16` pins the values. |
 | 2026-11-18 | Removed the corner-radius row (markup and JS) from the DEV panel; the auto-open delay inputs stay. The CTA's rounded bottom corners now reveal the footer colour by painting the page's bottom strip in `var(--ink)`. Fixed the six duplicated CSS properties flagged by Biome using token + `@supports` fallbacks; `CSS8` pins it. |
 | 2026-11-18 | The back-to-top progress ring became a rounded square with the button's 12 px radius. Its SVG path and the stale square-cap comment were updated; `MD16` checks the new path. |
+| 2026-11-26 | Hardening phase 0: TEST project restored; the runner's `site_host` failure now prints a sanitised, 200-char `error.message` and `error.status` (`RD1`). Migration `0007` applied to TEST only; `leads.held_at` and `business_events` now present. 43 suites registered. |
 
 ---
 
@@ -465,7 +466,9 @@ These were left open by the last live test and cannot be confirmed from the repo
    `billing_warning_stage` 0 and `suspended_for_billing` false.
 2. A test business `ZZ Billing Test` may still exist in production. Remove it and
    its leads if it does.
-3. Migration `0007` application status on the TEST project and on production.
+3. Migration `0007` was applied to TEST on 2026-11-26 (`npm run db:apply -- --only
+   supabase/migrations/0007_lifecycle.sql`); production status is still unverified and the
+   owner applies it.
 4. `npm run tg:commands` after the lifecycle deploy — the live operator menu was
    out of date once before.
 
