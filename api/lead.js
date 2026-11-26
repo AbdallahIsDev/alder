@@ -6,7 +6,7 @@
 // Nothing here logs a name, phone, email, note, raw IP, token or URL. Failures are codes only.
 
 import { randomUUID } from 'node:crypto';
-import TOKENS from '../lib/design-tokens.generated.json' with { type: 'json' };
+import TOKENS from '../lib/design-tokens.js';
 import { hashIp } from '../lib/hash.js';
 import { clientIp } from '../lib/request.js';
 import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
