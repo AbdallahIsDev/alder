@@ -456,6 +456,8 @@ the modal's thank-you steps.
 | 2026-11-26 | Hardening phase 0: TEST project restored; the runner's `site_host` failure now prints a sanitised, 200-char `error.message` and `error.status` (`RD1`). Migration `0007` applied to TEST only; `leads.held_at` and `business_events` now present. 43 suites registered. |
 | 2026-11-26 | Hardening phase 1: baseline runner (41 suites; two production-reading suites skipped) had four failures — stale build hash, 2 GB disk floor, B19 regex, B1d timing. All fixed; the five affected suites were re-run green. B1d is now DB-clock-checked with a bounded retry. |
 | 2026-11-26 | Hardening phase 2: fresh five-pass re-audit, 76 rows (DONE 54 / PARTIAL 13 / MISSING 9) in `_debug/audit-report.md`. Two new highs: held-lead replay PII leak after reactivation and modal close-during-send key reset. |
+| 2026-11-26 | Hardening phase 3: fixed DEV gate on production hosts, silent cron owner emails, notice-alert claim release, stale billing Reactivate, held-lead replay leak and status race, modal key on close/reopen, scoped held count, stale Extend token, lifecycle date copy, docs and serve. New tests MD17–MD19, OF1–OF5, LC17, LB26, BL9c, OB31, PL1–PL3. |
+| 2026-11-26 | Hardening phase 4: one design-token file (`design-tokens.json`) drives CSS custom properties and numeric email values through `npm run tokens`; radius default stays 12px. `docs/DESIGN_TOKENS.md` and `DT1`–`DT3` added. |
 
 ---
 

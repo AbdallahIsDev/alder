@@ -28,6 +28,7 @@ import { listBusinessChats, listActiveBusinesses, sweepExpired, hitRateLimit, cl
 import { sendMessage } from '../lib/tg.js';
 import { sendMail, mailRedirectInProduction } from '../lib/mail.js';
 import { deliverToBusinesses } from '../lib/ops-delivery.js';
+import { logOwnerMailExpected, logOwnerMailOutcome, reportOwnerMailFailure } from '../lib/owner-mail-failure.js';
 import { selfCheckEmail } from '../lib/email-builders.js';
 import { eventCountsByBusiness } from '../lib/digest-db.js';
 import { FAILED_KINDS, selfCheckText, operatorAlarmBody, operatorAlarmText, shouldAlertBusiness, failedTotal } from '../lib/ops-copy.js';
@@ -222,13 +223,20 @@ export default async function handler(req, res) {
         // one message to protect a shared inbox loses a client's only warning.
         sendMailFor: async (id) => {
           const b = byId.get(id);
+          await logOwnerMailExpected(id, 'selfcheck');
           if (!b || !b.owner_email) return { ok: false, status: 'no_owner_email' };
-          return sendMail({
+          const r = await sendMail({
             to: b.owner_email,
             fromName: 'Lead Alerts',
             ...selfCheckEmail(counts.get(id) || {}, dateKey, b),
             idempotencyKey: `selfcheck:${id}:${dateKey}`,
           });
+          if (r && r.ok) await logOwnerMailOutcome(id, 'selfcheck', r);
+          return r;
+        },
+        onMailFailure: async (id, result) => {
+          const b = byId.get(id);
+          if (b) await reportOwnerMailFailure({ business: b, type: 'selfcheck', result, dateKey });
         },
       });
       sent = r.sent;
@@ -271,7 +279,8 @@ export default async function handler(req, res) {
     if (!requestedBusiness) {
       try {
         const a = await auditOwnerNotices();
-        console.error('notice_audit', a.skipped || [a.rounds, a.missing, a.operator].join(' '));
+        if (a.ok === false) console.error('notice_audit_unavailable');
+        else console.error('notice_audit', a.skipped || [a.rounds, a.missing, a.operator].join(' '));
       } catch (e) { console.error('notice_audit_failed', (e && e.code) || 'no_code'); }
     }
 

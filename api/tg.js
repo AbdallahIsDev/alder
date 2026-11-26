@@ -31,6 +31,7 @@ import {
   operatorReactivateConfirmText, operatorReactivateConfirmKeyboard, operatorReactivatedText,
   operatorTerminateConfirmText, operatorTerminateConfirmKeyboard, operatorTerminatedText, operatorAlreadyTerminatedText,
   OPERATOR_TERMINATED, OPERATOR_ALREADY_TERMINATED, operatorTerminatedReactivateText, OPERATOR_TERMINATED_EXTEND,
+  operatorBillingReactivateText, OPERATOR_BILLING_EXTEND,
   operatorAlreadySuspendedText, operatorAlreadyActiveText, operatorInviteSuspendedText,
   operatorInviteListText, operatorInviteListKeyboard, operatorInviteBackKeyboard,
   operatorAlreadyConnectedText, operatorAlreadyConnectedKeyboard, operatorReplaceConfirmText, operatorReplaceConfirmKeyboard,
@@ -454,14 +455,20 @@ async function sendLeadsPage(chatId, businessId, page, messageId, answer = null)
   const hasOlder = leads.length > LEADS_PAGE && safePage < LEADS_PAGE_MAX;
   const shown = leads.slice(0, LEADS_PAGE);
   const empty = !shown.length;
-  // The group heading counts EVERY held lead of this business, not just the
-  // rows on this page: the renewal notice says "5 leads came in while your
-  // service was suspended", and a page that answered "2" for the same fact
-  // would be a different number. The count is read only when this page carries
-  // a held row, so an ordinary /leads pays nothing extra. The rows keep their
-  // order, their number, their callback and their "held" mark: only the
-  // DISPLAY is split into a held group and the remaining requests.
-  const heldTotal = shown.some((l) => l.held_at) ? await countHeldLeads(businessId) : 0;
+  // The heading must say the same number as the renewal notice: leads held in
+  // the CURRENT suspension, not every held row ever. It uses the same scoped
+  // helper as the notice, falls back to the rows on this page if the count
+  // cannot be read, and is only read when a held row is shown. Order, numbers,
+  // callbacks and held marks are untouched; only the display is grouped.
+  const heldRows = shown.filter((l) => l.held_at).length;
+  let heldTotal = null;                                        // null = count unreadable
+  if (heldRows) {
+    const scoped = await heldLeadCount({ id: businessId }, {
+      countHeldLeads: dbApi.countHeldLeads,
+      lastBusinessEventAt: dbApi.lastBusinessEventAt,
+    }).catch(() => null);
+    heldTotal = scoped === null || scoped === undefined ? null : Math.max(0, scoped);
+  }
   const text = empty ? 'No requests yet.' : renderHeldLeadList(shown, Date.now(), heldTotal);
   const markup = empty ? { reply_markup: { inline_keyboard: [] } } : leadListKeyboard(shown, safePage, hasOlder);
   if (messageId) {
@@ -1307,6 +1314,16 @@ async function handleOperatorReactivate({ chatId, messageId, businessId, page, a
     await together([
       answer(OPERATOR_TERMINATED_EXTEND),
       editList(chatId, messageId, operatorTerminatedReactivateText(business), back),
+    ]);
+    return;
+  }
+  // A billing suspension has no Reactivate button: only a recorded payment
+  // clears suspended_for_billing. A stale br:/bR: must not restore the service
+  // without one, or the next daily run would terminate it again.
+  if (business.suspended_for_billing) {
+    await together([
+      answer(OPERATOR_BILLING_EXTEND),
+      editList(chatId, messageId, operatorBillingReactivateText(business), back),
     ]);
     return;
   }

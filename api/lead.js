@@ -6,10 +6,11 @@
 // Nothing here logs a name, phone, email, note, raw IP, token or URL. Failures are codes only.
 
 import { randomUUID } from 'node:crypto';
+import TOKENS from '../lib/design-tokens.generated.json' with { type: 'json' };
 import { hashIp } from '../lib/hash.js';
 import { clientIp } from '../lib/request.js';
 import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
-import { insertLead, addEvent, hitRateLimit, getLeadForReplay, getLeadDeliveryState, claimLeadNotification, releaseLeadNotification } from '../lib/db.js';
+import { insertLead, addEvent, hitRateLimit, getBusinessById, getLeadForReplay, getLeadDeliveryState, claimLeadNotification, releaseLeadNotification } from '../lib/db.js';
 import { findRecentDuplicate } from '../lib/lead-intake.js';
 import { isOwnerEmailReplayRetryable, notifyAllAfterLead } from '../lib/notify.js';
 import { resolveTenant } from '../lib/tenant.js';
@@ -45,7 +46,7 @@ const clean = (v) => String(v).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\
 function htmlPage(title, message, businessName) {
   const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title></head>
-<body style="margin:0;padding:40px 20px;background:#fafafa;font:16px/1.6 Arial,Helvetica,sans-serif;color:#1c1f24"><main style="max-width:480px;margin:0 auto;background:#fff;padding:32px;border-radius:8px">
+<body style="margin:0;padding:40px 20px;background:#fafafa;font:16px/1.6 Arial,Helvetica,sans-serif;color:#1c1f24"><main style="max-width:480px;margin:0 auto;background:#fff;padding:32px;border-radius:${TOKENS.radius.apiCard}">
 <h1 style="font-size:22px;margin:0 0 16px">${esc(businessName || 'Request')}</h1>
 <p>${esc(message)}</p>
 <p style="margin-top:24px"><a href="/" style="color:#1c1f24">Back to the site</a></p>
@@ -159,21 +160,6 @@ export default async function handler(req, res) {
     return isForm ? badForm(null) : res.status(400).json({ ok: false });
   }
 
-  // Rate limit 1: per caller, keyed by a salted hash. The raw IP is never stored or logged.
-  // Fail open: if the counter itself is unreachable, a real lead matters more than the cap.
-  const ipHash = hashIp(clientIp(req));
-  if (!ipHash) {
-    console.error('lead_rate_limit_salt_missing');
-    return isForm ? htmlReply(500, 'Try again', 'Please try again shortly.', null) : res.status(500).json({ ok: false });
-  }
-  try {
-    if (!(await hitRateLimit(ipHash, IP_LIMIT.window, IP_LIMIT.max))) {
-      return isForm ? htmlReply(429, 'Try again', 'Please try again later.', null) : res.status(429).json({ ok: false });
-    }
-  } catch (e) {
-    console.error('lead_rate_limit_failed', (e && e.code) || 'no_code');
-  }
-
   // Allow-lists and length caps (same limits as the form's maxlength).
   // Phone is validated AFTER the business lookup, but the region is always
   // 'US': lib/db.js getActiveBusinessBySlug does not select a country column
@@ -200,12 +186,27 @@ export default async function handler(req, res) {
   const tenant = await resolveTenant(req, { anyStatus: true });
   if (!tenant) return tenantNotFound(); // unknown/malformed host, or lookup failure
   const { business } = tenant;
-  const held = business.status === 'paused';
+  let held = business.status === 'paused';
   if (business.status === 'churned') {
     // Its own result: not ok, not a 404, and never the generic 5xx panel.
     return isForm
       ? htmlReply(410, 'Not available', UNAVAILABLE_MESSAGE, business.name)
       : res.status(410).json({ ok: false, unavailable: true });
+  }
+  // Rate limit 1: per caller, keyed by a salted hash. It runs AFTER the tenant
+  // check so a terminated host always answers its own 410, never a generic
+  // 429 from an unrelated flood. The raw IP is never stored or logged.
+  const ipHash = hashIp(clientIp(req));
+  if (!ipHash) {
+    console.error('lead_rate_limit_salt_missing');
+    return isForm ? htmlReply(500, 'Try again', 'Please try again shortly.', null) : res.status(500).json({ ok: false });
+  }
+  try {
+    if (!(await hitRateLimit(ipHash, IP_LIMIT.window, IP_LIMIT.max))) {
+      return isForm ? htmlReply(429, 'Try again', 'Please try again later.', null) : res.status(429).json({ ok: false });
+    }
+  } catch (e) {
+    console.error('lead_rate_limit_failed', (e && e.code) || 'no_code');
   }
   if (!held && business.status !== 'demo' && business.status !== 'active') return tenantNotFound();
   const okReply = () => {
@@ -286,6 +287,20 @@ export default async function handler(req, res) {
       return null;
     });
 
+  // The tenant row was read before validation. A support action in that window
+  // can change the state: decide held vs normal from a fresh row immediately
+  // before the insert, so a lead that arrives after reactivation is never
+  // marked held and a lead that arrives after termination is never stored.
+  const current = await getBusinessById(business.id).catch(() => null);
+  if (current) {
+    if (current.status === 'churned') {
+      return isForm
+        ? htmlReply(410, 'Not available', UNAVAILABLE_MESSAGE, business.name)
+        : res.status(410).json({ ok: false, unavailable: true });
+    }
+    held = current.status === 'paused';
+  }
+
   let leadId;
   try {
     leadId = await insertLead({
@@ -315,6 +330,10 @@ export default async function handler(req, res) {
     try {
       const stored = await getLeadForReplay(business.id, idem);
       if (stored) {
+        // The row was held when it was stored and was never announced. A later
+        // reactivation must not turn this replay into the first announcement:
+        // that would leak the visitor's details after the fact.
+        if (stored.held_at) return okReply();
         const state = await getLeadDeliveryState(stored.id);
         // The first invocation can also die between the insert and its first
         // event. The retry writes the missing created row, with the same advisory

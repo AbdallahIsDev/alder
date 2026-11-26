@@ -80,6 +80,7 @@ const build = (client) => {
 try {
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const css = fs.readFileSync(path.join(ROOT, 'assets/css/styles.css'), 'utf8');
+  const tokensCss = fs.readFileSync(path.join(ROOT, 'assets/css/tokens.generated.css'), 'utf8');
   const leadSrc = fs.readFileSync(path.join(ROOT, 'api/lead.js'), 'utf8');
   const SERVICES = JSON.parse(/const SERVICES = (\[[^\]]*\]);/.exec(leadSrc)[1].replace(/'/g, '"'));
   const VALUES = ['replacement', 'storm', 'repair', 'unsure'];
@@ -500,15 +501,70 @@ try {
       `markup=${markup} wrote=${wrote} hi=${clampedHi} lo=${clampedLo} noStore=${noStorage} note=${note}`);
   }
 
+  /* MD17: the DEV gate must not be openable on a production host by URL. Local
+     and Vercel preview hosts may still use ?dev=1; the production alias may not. */
+  {
+    const { VirtualConsole } = await import('jsdom');
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const boot = async (url) => {
+      const dom = new JSDOM(html, {
+        runScripts: 'dangerously', pretendToBeVisual: true, url, virtualConsole: new VirtualConsole(),
+        beforeParse(window) {
+          window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+          window.scrollTo = () => {};
+          window.CSS = { supports: () => true };
+          window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+        },
+      });
+      await wait(80);
+      const noDev = dom.window.document.documentElement.classList.contains('no-dev');
+      const panel = !!dom.window.document.querySelector('.dbg');
+      dom.window.close();
+      return { noDev, panel };
+    };
+    const prod = await boot('https://alder-roofing.vercel.app/?dev=1');
+    const preview = await boot('https://alder-roofing-git-hardening.vercel.app/?dev=1');
+    const local = await boot('http://localhost:8791/?dev=1');
+    const noAlias = !/[?&]debug=1/.test(html);
+    line(prod.noDev && !preview.noDev && !local.noDev && noAlias, 'MD17',
+      'DEV panel: ?dev=1 denied on production, allowed on local and preview',
+      `prod=${prod.noDev} preview=${preview.noDev} local=${local.noDev} noAlias=${noAlias}`);
+  }
+
+  /* MD19: the auto-open guard must measure the masthead (hero + stats), not
+     the first <section>, which is About further down the page. */
+  {
+    const guard = /var first = document\.querySelector\('main > \.masthead'\) \|\| document\.querySelector\('main > section'\)/.test(html);
+    const stubBlind = /getBoundingClientRect/.test(html) && /bottom <= 0/.test(html);
+    line(guard && stubBlind, 'MD19', 'auto-open first-section guard uses the masthead',
+      `guard=${guard} stillChecks=${stubBlind}`);
+  }
+
+  /* MD18: closing during a send is allowed, but reopening must not hand the
+     request a new idempotency key, and a second send while busy is ignored. */
+  {
+    const at = (s, e) => { const a = html.indexOf(s), b = html.indexOf(e, a); return a > -1 && b > a ? html.slice(a, b) : ''; };
+    const openFn = at('function open(t)', 'function close()');
+    const closeFn = at('function close()', '/* ---------- the one invitation');
+    const sendFn = at('function send()', '/* The two panels');
+    const resume = /state === 'sending'/.test(openFn) && /if \(!resuming && window\.estimateReset\)/.test(openFn)
+      && /setBusy\(true\)/.test(openFn);
+    const guarded = /if \(state === 'sending'\) return;/.test(sendFn);
+    const closeAllowed = !/if \(state === 'sending'\) return;/.test(closeFn);
+    line(resume && guarded && closeAllowed, 'MD18',
+      'close during send: reopen keeps the key, second send ignored',
+      `resume=${resume} guarded=${guarded} closeAllowed=${closeAllowed}`);
+  }
+
   /* MD14: sitewide coverage. Every visible box, including ::before/::after boxes
      and the images that a parent's radius cannot clip, is in the ONE live rule.
      Full-viewport layers and the two things that must stay round stay out. */
   {
     const clean = css.replace(/\/\*[\s\S]*?\*\//g, '');   /* comments name excluded selectors; strip them */
-    const uses = (clean.match(/border-radius:\s*var\(--box-radius,\s*12px\)/g) || []).length;
-    const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius,\s*12px\)[^}]*\}/.exec(clean);
+    const uses = (clean.match(/border-radius:\s*var\(--box-radius\)/g) || []).length;
+    const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius\)[^}]*\}/.exec(clean);
     const list = rule ? rule[1].split(',').map(s => s.trim()).filter(Boolean) : [];
-    const required = ['.btn', '.btn i', '.menu-btn', '.bar', '.card', '.card-text', '.photo', '.ph', '.ph::after',
+    const required = ['.btn', '.btn i', '.menu-btn', '.menu-close', '.dbg', '.dbg .dbg-toggle', '.bar', '.card', '.card-text', '.photo', '.ph', '.ph::after',
       '.cta-img', '.hero-video', '[data-hero-video]', '.frame', '.badge::before', '.label::before',
       '.cta-sec .label::before', '.ft-trust>span', '.ft-trust>span::before', '.ft-social a',
       '.steps::before', '.steps::after', '.step .n', '.ba-nav button', '.tag', '.handle::before',
@@ -521,7 +577,9 @@ try {
     const missing = required.filter(s => !list.includes(s));
     const keepOut = ['.av', '.est-next.busy::after', '.est', '.est-scrim', '.menu', '.pre'];
     const leaked = keepOut.filter(s => list.includes(s));
-    line(uses === 1 && missing.length === 0 && leaked.length === 0, 'MD14',
+    // The main sitewide rule plus the review image's own clipping rule both
+    // read the same token; there is no second numeric value anywhere.
+    line(uses === 2 && missing.length === 0 && leaked.length === 0, 'MD14',
       'radius covers every box sitewide; overlays and round-by-design stay out',
       `uses=${uses} missing=${missing.join(',') || 'none'} leaked=${leaked.join(',') || 'none'}`);
   }
@@ -532,7 +590,7 @@ try {
   {
     const bxOff = /html\.bx \.bx-p\s*\{\s*background-image:\s*none/.test(css);
     const bxOn = /html\.bx \.bx-p i\s*\{\s*background:\s*var\(--bx-fill\)/.test(css);
-    const bxRadius = /html\.bx \.bx-p i\s*\{\s*border-radius:\s*calc\(var\(--box-radius\) - 5px\)/.test(css);
+    const bxRadius = /html\.bx \.bx-p i\s*\{\s*border-radius:\s*var\(--radius-arrow\)/.test(css);
     line(bxOff && bxOn && bxRadius, 'MD15',
       'primary CTA square is a real box with a 7px radius',
       `off=${bxOff} on=${bxOn} radius=${bxRadius}`);
@@ -540,7 +598,8 @@ try {
 
   /* MD16: the permanent radii and the single focus ring. */
   {
-    const base = /--box-radius:\s*12px/.test(css);
+    const base = /--box-radius:\s*12px/.test(tokensCss) && /--radius-image:\s*24px/.test(tokensCss)
+      && /--radius-section:\s*48px/.test(tokensCss) && /--radius-arrow:\s*7px/.test(tokensCss);
     const dbl = /calc\(var\(--box-radius\) \* 2\)/.test(css);
     const quad = /calc\(var\(--box-radius\) \* 4\)/.test(css);
     const img12 = /\.rv-media img\s*\{\s*border-radius:\s*var\(--box-radius\)/.test(css);

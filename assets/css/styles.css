@@ -1,3 +1,5 @@
+    @import url('./tokens.generated.css');
+
     @font-face {
       font-family: 'Geist';
       font-style: normal;
@@ -20,7 +22,6 @@
       --ink2: #2a2d33;
       --cream: #f1f1f1;
       --accent: #d93917;
-      --box-radius: 12px;
       --clip: hidden;                 /* @supports below upgrades this to clip */
       --muted: #a9adb3;
       --pad: clamp(20px, 4vw, 48px);
@@ -4607,18 +4608,18 @@
       }
     }
 
-    /* ONE base radius, --box-radius = 12px, drives EVERY visible box. The DEV panel can still
-       change it in memory (0..36); Default returns to the permanent 12px. EVERY visible box is
-       listed: buttons and their arrow squares, label and badge dots (::before), numbered steps,
-       before/after arrows and tags, review cards and images, FAQ cards, the modal's option cards,
-       fields, checkboxes, the close button and the whole success screen. Images are listed too,
-       because a parent's radius does not clip a child without overflow:hidden. The few boxes that
-       need a different multiple of the same token are overridden just below. Deliberately NOT
-       listed: full-viewport overlays (.est, .est-scrim, .menu, .pre), things that must stay round
-       by design (.av, the busy spinner) and SVG paths. */
+    /* ONE base radius, --box-radius, comes from design-tokens.json via
+       tokens.generated.css. Every visible box is listed below, including the
+       menu close button and the DEV panel boxes. Images are listed too because
+       a parent's radius does not clip a child without overflow:hidden. The few
+       boxes that need a different multiple of the same token are overridden just
+       below. Deliberately NOT listed: full-viewport overlays (.est, .est-scrim,
+       .menu, .pre), things that must stay round by design (.av, the busy
+       spinner) and SVG paths. */
     .btn,
     .btn i,
     .menu-btn,
+    .menu-close,
     .bar,
     .card,
     .card-text,
@@ -4676,9 +4677,11 @@
     .est-after,
     .est-steps li::before,
     .est-actions,
+    .dbg,
+    .dbg .dbg-toggle,
     .dbg button,
     .dbg input.dbg-num {
-      border-radius: var(--box-radius, 12px) !important
+      border-radius: var(--box-radius) !important
     }
 
     /* The primary CTA's white square is painted as a background gradient on .bx-p by the
@@ -4716,5 +4719,5 @@
     /* The arrow square sits inside the button's right padding (6px) plus 1px, so with a
        12px button radius its own radius is 7px. */
     html.bx .bx-p i {
-      border-radius: calc(var(--box-radius) - 5px) !important
+      border-radius: var(--radius-arrow) !important
     }

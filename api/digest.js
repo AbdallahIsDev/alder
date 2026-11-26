@@ -20,6 +20,7 @@ import { secretMatches } from '../lib/request.js';
 import { hitRateLimit, clearRateLimit } from '../lib/db.js';
 import { digestCounts, digestTargets } from '../lib/digest-db.js';
 import { deliverToBusinesses } from '../lib/ops-delivery.js';
+import { logOwnerMailExpected, logOwnerMailOutcome, reportOwnerMailFailure } from '../lib/owner-mail-failure.js';
 import { sendMessage } from '../lib/tg.js';
 import { sendMail } from '../lib/mail.js';
 import { digestEmail } from '../lib/email-builders.js';
@@ -117,12 +118,20 @@ export default async function handler(req, res) {
       chatsFor: (id) => chatMap.get(id) || [],
       sendTg: (chat, body) => sendMessage(chat, body),
       sendMailFor: async (id) => {
-        const owner = byId.get(id) && byId.get(id).ownerEmail;
+        const b = byId.get(id);
+        await logOwnerMailExpected(id, 'digest');
+        const owner = b && b.ownerEmail;
         if (!owner) return { ok: false, status: 'no_owner_email' };
-        return sendMail({
-          to: owner, fromName: 'Lead Alerts', ...digestEmail(counts.get(id), dateKey, byId.get(id)),
+        const r = await sendMail({
+          to: owner, fromName: 'Lead Alerts', ...digestEmail(counts.get(id), dateKey, b),
           idempotencyKey: `digest:${id}:${dateKey}`,
         });
+        if (r && r.ok) await logOwnerMailOutcome(id, 'digest', r);
+        return r;
+      },
+      onMailFailure: async (id, result) => {
+        const b = byId.get(id);
+        if (b) await reportOwnerMailFailure({ business: { id: b.id, name: b.name, slug: b.slug }, type: 'digest', result, dateKey });
       },
     });
 
