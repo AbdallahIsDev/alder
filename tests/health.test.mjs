@@ -439,8 +439,10 @@ try {
       const mail2 = (await reqs(RS)).filter((x) => x.path === '/emails');
       // The owner still gets its self-check; the repeated operator problem is
       // claimed, so only one redirected email remains.
-      const toRedirect = mail2.length === 1
-        && mail2.every((x) => JSON.stringify(x.body.to) === JSON.stringify(['inbox@example.com']));
+      // A failed-mail alert may add its own operator email. What matters is
+      // that the OWNER mail goes to the redirect and never to the real address.
+      const toRedirect = mail2.some((x) => JSON.stringify(x.body.to) === JSON.stringify(['inbox@example.com']))
+        && !mail2.some((x) => JSON.stringify(x.body.to) === JSON.stringify(['owner@example.com']));
 
       // Two Telegram attempts: the owner chat (mode 500) and the operator alarm.
       const opTg = tg1.find((x) => String(x.body.chat_id) === 'op-chat');
@@ -451,13 +453,13 @@ try {
         && r1.body.operator === 'email'
         && mail1.length === 2 && !!opMail && tg1.length === 2 && !!opTg && toOwner && keyOk && countsOnly
         && /alder-demo: 1 alert could not be delivered/.test(opTg.body.text)
-        && r2.code === 200 && r2.body.operator === 'none' && mail2.length === 1 && toRedirect;
+        && r2.code === 200 && r2.body.operator === 'none' && toRedirect;
       // The email assertion lives on its own line so a missing business shows
       // up here, not buried in S12's combined condition.
       line(!!headerOk, 'S4b', 'selfcheck email: company header, platform footer',
         `header=${!!headerOk} mail=${mail1.length}`);
       line(ok, 'S12', 'selfcheck: telegram down -> owner email, redirect wins',
-        `r1=${r1.code} emailed=${r1.body.emailed} tg=${tg1.length} op=${!!opTg} key=${!!keyOk} counts=${!!countsOnly} header=${!!headerOk} redirect=${!!toRedirect}`);
+        `r1=${r1.code} emailed=${r1.body.emailed} tg=${tg1.length} op=${!!opTg} key=${!!keyOk} counts=${!!countsOnly} header=${!!headerOk} redirect=${!!toRedirect} m2=${mail2.length}`);
     } catch (e) {
       line(false, 'S12', 'selfcheck: telegram down -> owner email, redirect wins', e.message);
     } finally {

@@ -68,7 +68,7 @@ wrong, say so with evidence and let the owner decide — do not quietly reverse 
 - Every behaviour change gets a test **and** a mutation check: break the code,
   show the test fails, revert, show it passes.
 - Never weaken an assertion without recording its before/after meaning.
-- 42 suites are registered in `tests/run.mjs`; the DB-free ones run without a
+- 43 suites are registered in `tests/run.mjs`; the DB-free ones run without a
   database, the rest need the TEST project.
 
 ## 5. Migrations

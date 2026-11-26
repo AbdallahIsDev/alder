@@ -449,20 +449,28 @@ try {
     }
 
     {
-      const lockLead = await mkFailedRetry('Live Lock', 'livelock@example.com');
-      // Same guard as db-wall test 6: do not straddle a bucket boundary.
-      const msLeft = 10000 - (Date.now() % 10000);
-      if (msLeft < 3000) await new Promise((r) => setTimeout(r, msLeft + 50));
-      // Claim through the same RPC the handler uses, with the same key shape
-      // (failure generation 1) and the same 5-minute window, so it is live.
-      const lockKey = 'retry:' + lockLead + ':1';
-      await svc.from('rate_limits').delete().eq('key', lockKey);
-      await svc.rpc('hit_rate_limit', { p_key: lockKey, p_window_seconds: 300, p_max: 1 });
-      await good(cb(chatB, 'r:' + lockLead));
-      const emails = (await resendCalls()).length;
-      const sentFlag = await svc.from('lead_events').select('id').eq('lead_id', lockLead).eq('kind', 'review_requested');
-      line(emails === 0 && (sentFlag.data || []).length === 0, 'C35',
-        'live retry claim blocks the send', `emails=${emails}`);
+      // The claim is a 300 s fixed bucket on the DATABASE clock. A 10 s local
+      // margin cannot see that boundary; use the RPC itself to confirm the claim
+      // is live and retry the whole scenario if a tap lands across an edge.
+      let ok = false, detail = '', attempts = 0;
+      while (!ok && attempts < 3) {
+        attempts++;
+        const lockLead = await mkFailedRetry('Live Lock', 'livelock@example.com');
+        const msLeft = 300000 - (Date.now() % 300000);
+        if (msLeft < 15000) await new Promise((r) => setTimeout(r, msLeft + 50));
+        const lockKey = 'retry:' + lockLead + ':1';
+        const hit = () => svc.rpc('hit_rate_limit', { p_key: lockKey, p_window_seconds: 300, p_max: 1 });
+        await svc.from('rate_limits').delete().eq('key', lockKey);
+        await hit();
+        let live = false;
+        for (let i = 0; i < 5 && !live; i++) { await hit(); const r = await hit(); live = r.data === false; }
+        await good(cb(chatB, 'r:' + lockLead));
+        const emails = (await resendCalls()).length;
+        const sentFlag = await svc.from('lead_events').select('id').eq('lead_id', lockLead).eq('kind', 'review_requested');
+        ok = live && emails === 0 && (sentFlag.data || []).length === 0;
+        detail = `emails=${emails} live=${live} tries=${attempts}`;
+      }
+      line(ok, 'C35', 'live retry claim blocks the send', detail);
     }
 
     // C38/C39: concurrent 409 means the original is still in progress, not
@@ -2654,7 +2662,7 @@ try {
         await good(cb(OP, 'bS:0:' + invBiz.id));
         const againSends = (await sends()).length;
         const againToast = await answersNow();
-        const afterOk = exOwnerReq.body.text === 'This service has been suspended\nby support.\n\nNo termination date is set.\n\nSend /status to see the\ncountdown.\n\nContact support'
+        const afterOk = exOwnerReq.body.text === 'This service has been suspended\nby support.\n\nNo termination date is set.\n\nSend /status at any time to see\nthe current state.\n\nContact support'
           && supportLink(exOwnerReq) && JSON.stringify(exOwnerReq.body.reply_markup) === STATUS_ONLY
           && exStaffToast === 'This service is suspended. Send /status.' && exStaffDrawn === 0
           && newPhone === 'This service is suspended.\nA new phone cannot be connected\nright now.\n\nContact support' && newPhoneBound === 0 && !!pendingRow && pendingRow.used_at === null

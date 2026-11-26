@@ -109,6 +109,7 @@
 import { loadEnv } from './env.mjs';
 import { fakeRes } from './helpers.mjs';
 import * as C from '../lib/content.js';
+import * as LT from '../lib/lifecycle-text.js';
 import { FIXTURE_CHATS } from './fixture-ids.mjs';
 
 loadEnv();
@@ -549,12 +550,12 @@ const NOTICE_EMAIL = 'Your service has been suspended by support.\n\nYour websit
 // What a phone of a business suspended by hand is told (lib/lifecycle-text.js),
 // written out here and not taken from the code under test.
 const SUPPORT = 'Contact support';
-const SUSPENDED_LINE = 'This service has been suspended\nby support.\n\nNo termination date is set.\n\nSend /status to see the\ncountdown.\n\n' + SUPPORT;
+const SUSPENDED_LINE = 'This service has been suspended\nby support.\n\nNo termination date is set.\n\nSend /status at any time to see\nthe current state.\n\n' + SUPPORT;
 const SUSPENDED_TOAST = 'This service is suspended. Send /status.';
 const TERMINATED_TOAST = 'This service was terminated. Send /status.';
 const REFUSED_LINE = 'This service is suspended.\nA new phone cannot be connected\nright now.\n\n' + SUPPORT;
 const STATUS_SUSPENDED = 'Status: Suspended\n\nReason: suspended by support.\n\n' + SUPPORT;
-const STATUS_TERMINATED = 'Status: Terminated\n\nTerminated by support.\n\nYour website form no longer\naccepts requests. Your data has\nnot been deleted.\n\n' + SUPPORT;
+const STATUS_TERMINATED = 'Status: Terminated\n\nTerminated by support.\nNo termination date was set.\n\nYour website form no longer\naccepts requests. Your data has\nnot been deleted.\n\n' + SUPPORT;
 const TERMINATED_NOTICE = 'Your service has been\nterminated by support.\n\nYour website form no longer\naccepts requests. Your data has\nnot been deleted.\n\nSend /status at any time to see\nthe current state.\n\n' + SUPPORT;
 const REACTIVATED_NOTICE = 'Your service is active again.\nSupport has reactivated it.\n\nSend /status at any time to see\nthe current state.\n\n' + SUPPORT;
 /** The one keyboard of a suspended or terminated business's phone. */
@@ -2189,16 +2190,18 @@ try {
       && blind.mail.length === 1 && blind.sends.filter((m) => String(m.body.chat_id) === String(OP)).length === 1
       && store.notices.some((n) => n.business_id === BIZ_C && n.status === 'failed' && n.error_class === 'phones_unreadable');
 
-    // Reactivate alone is not a payment: paid_until and the stage stay.
+    // A billing suspension is not unlocked by a stale Reactivate: only a
+    // payment (Extend) may clear suspended_for_billing. Both paths refuse.
     const stale = new Date(Date.now() - 30 * DAY).toISOString();
     set(BIZ_B, { status: 'paused', paid_until: stale, billing_warning_stage: 2, suspended_for_billing: true });
+    const billingRow = bizRow(BIZ_B);
     const reactAsk = await run(cb(OP, `br:0:${BIZ_B}`));
     const react = await run(cb(OP, `bR:0:${BIZ_B}`));
-    const rw = writes(react.sb);
-    const reactOk = textOf(reactAsk.edits[0]).startsWith('Reactivate Beta Roofing?') && writes(reactAsk.sb).length === 0
-      && rw.length === 1 && same(rw[0].body, { status: 'active', suspended_for_billing: false })
-      && bizRow(BIZ_B).paid_until === stale && bizRow(BIZ_B).billing_warning_stage === 2 && bizRow(BIZ_B).status === 'active'
-      && textOf(react.edits[0]) === RESULT_ONE('Reactivated: Beta Roofing');
+    const rw = [...writes(reactAsk.sb), ...writes(react.sb)];
+    const reactOk = rw.length === 0 && same(bizRow(BIZ_B), billingRow)
+      && react.sends.length === 0 && react.mail.length === 0
+      && textOf(reactAsk.edits[0]).includes('Extend 30 days restores it.')
+      && textOf(react.edits[0]).includes('Extend 30 days restores it.');
     // A manual Suspend never marks the business as unpaid: the statement
     // names the status and nothing else.
     set(biz(4), { paid_until: new Date(Date.now() + 5 * DAY).toISOString() });
@@ -2377,6 +2380,19 @@ try {
       && unshaped.length === 0 && styled.length === 0 && labelsOk && operatorTexts.length > 30 && words.length === 0,
       'OB15', 'no parse_mode, no emoji, anchored callbacks <= 64 bytes, styles',
       `requests=${allTg.length} buttons=${inline.length} parse=${withParse.length} emoji=${withEmoji.length} unshaped=${unshaped.slice(0, 2).join(',') || 'none'} styled=${styled.slice(0, 2).map((b) => b.text).join(',') || 'none'} labels=${labelsOk} words=${words.length}`);
+  }
+
+  /* OB31: a manually terminated business with a future paid_until must not
+     invent a termination date, and /status must say when no date was set. */
+  {
+    const now = Date.now();
+    const business = { status: 'churned', suspended_for_billing: false, paid_until: new Date(now + 90 * DAY).toISOString() };
+    const reply = LT.suspendedReply({ business, now }).text;
+    const status = LT.statusText({ business, now }).text;
+    const ok = !reply.includes('Terminated on') && reply.includes('No termination date was set.')
+      && status.includes('Status: Terminated') && status.includes('No termination date was set.');
+    line(ok, 'OB31', 'manual termination has no invented date; /status says so',
+      `replyDate=${reply.includes('Terminated on')} statusNoDate=${status.includes('No termination date was set.')}`);
   }
 } catch (e) {
   line(false, 'OB0', 'operator-browser suite threw', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e));

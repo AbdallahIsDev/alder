@@ -10,6 +10,7 @@
 //   CSS1  the built page links exactly one stylesheet, relative, and has no <style>
 //   CSS2  every non-data url() resolves to a file, relative to the CSS file
 //   CSS3  the two font files are the ../fonts/ form the move requires
+//   CSS8  no declaration block repeats a property (Biome noDuplicateProperties)
 //
 // Mutation: put one font path back to url(assets/fonts/…) and CSS2 fails.
 
@@ -126,6 +127,32 @@ try {
   const ghostOk = /min-height:\s*52px/.test(ghost) && /rgb\(255 255 255\/\.05\)/.test(ghost);
   line(callOk && hoverOk && ghostOk, 'CSS4', 'modal Call is filled, hover keeps it filled',
     `call=${callOk} hover=${hoverOk} close=${ghostOk}`);
+
+  /* CSS8: progressive fallbacks use a token + @supports, never two declarations
+     of the same property in one block. Biome flags those as suspicious. */
+  {
+    const clean = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const stack = [new Map()];
+    const dupes = [];
+    let n = 0;
+    for (const raw of clean.split('\n')) {
+      n++;
+      const t = raw.trim();
+      if (!t) continue;
+      const m = /^([-a-zA-Z]+)\s*:/.exec(t);
+      if (m && !t.startsWith('@') && !t.includes('{') && stack.length) {
+        const top = stack[stack.length - 1];
+        if (top.has(m[1])) dupes.push(`${n}:${m[1]}`);
+        else top.set(m[1], n);
+      }
+      const opens = (t.match(/{/g) || []).length;
+      const closes = (t.match(/}/g) || []).length;
+      for (let i = 0; i < opens; i++) stack.push(new Map());
+      for (let i = 0; i < closes && stack.length > 1; i++) stack.pop();
+    }
+    line(dupes.length === 0, 'CSS8', 'no duplicate properties in any declaration block',
+      dupes.join(' ') || 'none');
+  }
 } catch (e) {
   line(false, 'CSS0', 'stylesheet harness ran', e && e.message ? e.message.slice(0, 80) : 'threw');
 } finally {

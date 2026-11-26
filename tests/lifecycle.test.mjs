@@ -423,6 +423,25 @@ try {
     line(textsOk && branchOk && panelOk && promiseFree && deliverOk, 'LC11', 'the page: a panel per answer, the same words, no promise',
       `texts=${textsOk} branch=${branchOk} panel=${panelOk} promise=${promiseFree}`);
   }
+
+  /* LC17: a held lead replayed after reactivation must stay silent. The key now
+     belongs to an active business, but the stored row was held and was never
+     announced: announcing it here would leak its details to the owner. Run last
+     so it cannot disturb the state the earlier assertions share. */
+  {
+    fresh();
+    const key = 'lc17-held-replay-0001';
+    const first = await submit('alder.test', { key });
+    set(A, { status: 'active' });
+    const again = await submit('alder.test', { key });
+    const bodies = JSON.stringify([...again.tg.map((m) => m.body), ...again.mail.map((m) => m.body)]);
+    const ok = first.out.body && first.out.body.held === true
+      && again.out.code === 200 && again.out.body && again.out.body.ok === true
+      && leadsOf(A).length === 1 && !!leadsOf(A)[0].held_at
+      && again.sends.length === 0 && again.mail.length === 0 && leaks(bodies).length === 0;
+    line(ok, 'LC17', 'held lead replay after reactivation stays silent',
+      `first=${JSON.stringify(first.out.body)} again=${JSON.stringify(again.out.body)} leads=${leadsOf(A).length} tg=${again.sends.length} mail=${again.mail.length}`);
+  }
 } catch (e) {
   line(false, 'LC0', 'lifecycle suite threw', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e));
 }

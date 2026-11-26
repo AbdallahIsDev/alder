@@ -49,8 +49,14 @@ const OUT = path.join(ROOT, '_debug', 'client-build');
    siblings, its three "what happens next" lines are one line each at 320px, the
    held state really hides the recap and the next steps, the answers survive a
    close in sessionStorage, and the form may invite itself once per session.
-   The manifest, robots and sitemap hashes are unchanged. */
-const BASELINE = '193536b8ce8d523263e813cf33bffd430c1ee9e1ab02e284e734354e97439e36';
+   The manifest, robots and sitemap hashes are unchanged.
+
+   The radius rounds move the HTML to e9dccc4d… (permanent 12 px scale,
+   sitewide radius rule, CTA corners, back-to-top ring, no DEV radius row).
+   Before 2026-11-26 this assertion pinned the origin/main build 193536b8…;
+   after it pins this branch's build. Cost: an accidental HTML edit still fails
+   until the baseline is moved deliberately. */
+const BASELINE = 'bd9186c57c46ddc520ed13149e6bac075c97057a96922b134fdd43790e2b44fd';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = 'dcd93cf0545e1bad61f0218310823424565419e811ba50b74a2e7f7642ce7053';
 const BASELINE_SITEMAP = 'f90e45bdfa569c01cc2c7fe584831cd9e03b212fbac43254454968bcc16c27e8';

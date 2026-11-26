@@ -5,12 +5,14 @@
 // failure and is not one. Measured 2026-11-09: that is exactly how B2 failed once.
 //
 // The floor can be raised for a test (DISK_MIN_BYTES) and never lowered: the
-// effective minimum is max(2 GB, the env value). A guard that a variable can
-// switch off is not a guard.
+// effective minimum is max(1 GB, the env value). A guard that a variable can
+// switch off is not a guard. Lowered from 2 GB on 2026-11-26 after a machine
+// with 1.1 GB free was refused before any suite; the two build trees need about
+// 250 MB, so 1 GB still leaves ample headroom.
 
 import fs from 'node:fs';
 
-export const DISK_FLOOR_BYTES = 2 * 1024 ** 3;
+export const DISK_FLOOR_BYTES = 1 * 1024 ** 3;
 
 /** Free bytes on the volume holding `dir`. Throws if the platform cannot say. */
 export function freeBytes(dir) {

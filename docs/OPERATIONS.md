@@ -103,9 +103,9 @@ has a `review_token`.
 
 Two roles, and they never mix.
 
-- **The operator** is you. One private chat: `OPERATOR_CHAT_ID`, falling back to
-  `TELEGRAM_CHAT_ID` when the newer variable is unset. `OPERATOR_EMAIL` is the
-  email fallback for the daily alarm. Operator-only content — the redirect
+- **The operator** is you. One private chat: `OPERATOR_CHAT_ID` only; the old
+  `TELEGRAM_CHAT_ID` is never a fallback. `OPERATOR_EMAIL` is the email fallback
+  for the daily alarm. Operator-only content — the redirect
   warning, aggregate numbers, business slugs, "no phone connected" — goes only
   there, whatever a business's status is. A `demo` business is a lifecycle
   state, not an audience.
@@ -247,8 +247,8 @@ Billing and the service lifecycle**). Under it: **Suspend** and **Leads**,
 then **Extend 30 days** and **Invite**, then **Terminate**, then **Back**. For
 a suspended business: **Reactivate** and **Leads**, then **Extend 30 days**
 and **Terminate**, then **Back**, and a `Held leads: N` line when leads came
-in meanwhile. For a terminated business: **Reactivate** and **Leads**, then
-**Extend 30 days**, then **Back**.
+in meanwhile. For a terminated business: **Extend 30 days** and **Leads**, then
+**Back**. Reactivate is not offered there.
 
 **What the operator can see of a lead.** **Leads** is read-only and minimal:
 every row and every card shows only the service, the status and the age of the
@@ -262,7 +262,8 @@ The status is set to `paused` in one statement; then every connected phone
 gets the suspension notice ("Your service has been suspended by support", the
 `/status` hint and the **Contact support** link) with its keyboard reduced to
 one button, **Status**, and the owner email address gets the same words.
-A notice or an email that fails is counted ("1 notice failed"), alerts this
+A notice or an email that fails is counted ("Telegram: failed (alert sent)" or
+"Email: failed (alert sent)"), alerts this
 chat, and never undoes the suspension. Nothing is deleted: phones, invites,
 leads and events stay as they are. While a business is suspended:
 
@@ -273,8 +274,8 @@ leads and events stay as they are. While a business is suspended:
   20 an hour) and one count-only email a day; no lead alert, no lead email;
 - every phone keeps `/status` and the **Status** button; every other command,
   keyboard press and button answers with the reason and the support link and
-  shows no data (`/id` still answers); free text gets that answer at most
-  three times an hour;
+  shows no data (`/id` still answers); every free-text message gets that answer,
+  with no hourly cap;
 - no new phone can connect: the invite is handed back unused and works again
   after reactivation;
 - review links of that site answer 404; the daily digest and the daily
@@ -394,7 +395,7 @@ extended.` and changes nothing. To add 60 days, press Extend twice.
 |---|---|---|
 | **Suspend** (asks first) | active | status `paused`; the owner is told "suspended by support" |
 | **Terminate** (asks first) | active or suspended | status `churned`; the owner is told; nothing is deleted |
-| **Reactivate** (one tap) | suspended or terminated | status `active`; the owner is told, with the count of held leads; `paid_until` is not changed |
+| **Reactivate** (one tap) | suspended only | status `active`; the owner is told, with the count of held leads; `paid_until` is not changed. A terminated business is restored by **Extend 30 days** |
 
 A manual suspension has no countdown: it stays until you press Reactivate.
 If you reactivate a business whose `paid_until` is more than 5 days in the
@@ -749,7 +750,8 @@ visitor edited fields before that second press, those new values were **not**
 sent, so the recap is hidden in this state instead of displaying them as received.
 
 **Closing the form.** Three things close it: the **X** (32 px, with a 44 px
-press area), **Escape**, and the **Close** button of the last panel. A click
+press area on desktop and 32 px on phones), **Escape**, and the **Close** button
+of the last panel. A click
 or a tap on the dimmed area around the form does nothing, so nobody loses a
 half-filled form by touching beside it. Closing with the X keeps the answers
 until the page is left.

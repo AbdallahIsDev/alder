@@ -65,6 +65,10 @@ const DEFAULT_SUITES = [
   { file: 'tests/lifecycle.test.mjs', needsHttp: false },
   { file: 'tests/modal.test.mjs', needsHttp: false },
   { file: 'tests/runner-flags.test.mjs', needsHttp: false },
+  { file: 'tests/runner-diagnostic.test.mjs', needsHttp: false },
+  { file: 'tests/owner-mail-failure.test.mjs', needsHttp: false },
+  { file: 'tests/prelaunch-consistency.test.mjs', needsHttp: false },
+  { file: 'tests/design-tokens.test.mjs', needsHttp: false },
   { file: 'tests/disk-preflight.test.mjs', needsHttp: false },
   { file: 'tests/skip-summary.test.mjs', needsHttp: false },
   { file: 'tests/delete-scripts.test.mjs', needsHttp: false },
@@ -295,7 +299,15 @@ assertTestProject();
 // host and map loopback HTTP to it; production can never enable this alias.
 {
   const { error } = await svc.from('businesses').update({ site_host: 'alder-demo.test' }).eq('slug', ALDER_DEMO);
-  if (error) { out(`FAIL  runner  could not assign TEST site_host: ${error.code || 'no_code'}`); process.exit(1); }
+  if (error) {
+    const msg = String(error.message || '')
+      .replace(/https?:\/\/\S+/g, '(url-redacted)')
+      .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '(ip-redacted)')
+      .slice(0, 200);
+    const status = error.status === undefined || error.status === null ? 'none' : error.status;
+    out(`FAIL  runner  could not assign TEST site_host: code=${error.code || 'no_code'} status=${status} message=${msg}`);
+    process.exit(1);
+  }
   process.env.TENANT_HOST_MAP = JSON.stringify({ localhost: 'alder-demo.test', '127.0.0.1': 'alder-demo.test' });
 }
 

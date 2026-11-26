@@ -116,6 +116,9 @@ if (clash.length) fail('clients/' + opt.client + '.json copy key(s) collide with
 
 /* ---- merge client overrides ---- */
 let biz = Object.assign({}, template, clientFile.biz, copy);
+if (clientFile.domain) {
+  try { biz.prodHost = new URL(clientFile.domain).hostname; } catch { /* the domain check below fails with a clear message */ }
+}
 if (opt.config) {
   if (!fs.existsSync(opt.config)) fail('Config file not found: ' + opt.config);
   let over; try { over = JSON.parse(fs.readFileSync(opt.config, 'utf8')); } catch (e) { fail('Config is not valid JSON: ' + e.message); }
@@ -246,6 +249,11 @@ if (survivors.length) fail('placeholder tokens survived the build:\n' + survivor
    sync-brand.mjs writes lib/brand.generated.json and assets/email/*.png from the
    page's :root block and logo, so the emails always match the landing page. */
 import { spawnSync } from 'node:child_process';
+const tokenSync = spawnSync(process.execPath, [path.join(__dirname, 'scripts', 'sync-design-tokens.mjs')], {
+  cwd: __dirname, stdio: 'inherit',
+});
+if (tokenSync.status !== 0) fail('sync-design-tokens.mjs failed; not building with stale tokens.');
+
 const sync = spawnSync(process.execPath, [path.join(__dirname, 'scripts', 'sync-brand.mjs')], {
   cwd: __dirname, stdio: 'inherit',
   env: {

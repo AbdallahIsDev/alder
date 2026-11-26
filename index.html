@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="bx" data-page-node-id="lomSK6Lrp5COiedjjPfIZf">
+<html lang="en" class="bx" data-prod-host="{{prodHost}}" data-page-node-id="lomSK6Lrp5COiedjjPfIZf">
 
 <head data-page-node-id="qA66i1soIRBJHtNRlA6SzR">
   <meta charset="utf-8" data-page-node-id="W2m4P2JcBHb8fUCfnpcshs">
@@ -110,16 +110,21 @@
   /* DEBUG GATE (temporary). The panel and the hero switches are code in every build but only run on a
      development origin, so the published site never renders them and never offers the old slider:
        localhost / 127.0.0.1 / ::1 / *.local / file://   - always
-       any other host with ?dev=1 or ?debug=1            - sticky, so a phone preview keeps it across the
-                                                           reload the Hero type buttons cause
+       a Vercel PREVIEW host with ?dev=1                 - sticky across the Hero reloads
+       the production host / a client domain             - never, even with ?dev=1
      Everything below reads DEV. Deleting the panel means deleting this script, the .dbg markup, the DEBUG
      CSS block and the DEBUG PANEL script; nothing else depends on it. */
   var DEV = (function () {
     try {
       if (location.protocol === 'file:') return true;
-      var h = location.hostname;
+      var h = String(location.hostname || '').toLowerCase();
       if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]' || /\.local$/.test(h)) return true;
-      if (/[?&](dev|debug)=1(?:&|#|$)/.test(location.search)) {
+      /* Only a preview deployment may opt in by URL. The production alias and
+         every client domain are ordinary hosts: a query string cannot unlock them. */
+      var prod = document.documentElement.getAttribute('data-prod-host') || '';
+      var preview = /\.vercel\.app$/.test(h) && (prod.charAt(0) === '{' || h !== prod);
+      if (!preview) return false;
+      if (/[?&]dev=1(?:&|#|$)/.test(location.search)) {
         try { sessionStorage.setItem('dbgDev', '1') } catch (e2) { }
         return true;
       }
@@ -659,10 +664,10 @@
 
     <!-- BACK TO TOP: appears after half a screen. The accent ring is the scroll readout and closes
          on hover; the arrow is the only content, the label is on the button for screen readers.
-         The ring path starts and ends on the top-left corner; the square cap fills the corner and
-         bridges the last unit of the left edge - see the note on .tot. -->
+         The ring is a rounded square with the same 12px radius as the button, so the progress
+         outline and the button's corners agree. -->
     <button class="tot" type="button" aria-label="Back to top">
-      <svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><path d="M1 1H47V47H1V2" pathLength="100"/></svg>
+      <svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><path d="M13 1H35A12 12 0 0 1 47 13V35A12 12 0 0 1 35 47H13A12 12 0 0 1 1 35V13A12 12 0 0 1 13 1Z" pathLength="100"/></svg>
       <svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 16.5V4M4.6 9.4 10 4l5.4 5.4"/></svg>
     </button>
 
@@ -691,13 +696,8 @@
         <button type="button" data-slide="1" aria-pressed="false" data-page-node-id="ChQPrdtyN9iAyRiVKTX6Uw">2</button>
         <button type="button" data-slide="2" aria-pressed="false" data-page-node-id="0tRBW3sxyDqTEzZBRKAYqu">3</button>
       </div>
-      <!-- DEV-only controls added for the prototype audit: corner radius and the modal's auto-open delays.
-           No data-row attribute, so the mode filter below never hides them. The collapse toggle stays last. -->
-      <div class="dbg-row" data-dbg="radius"><span>Corner radius</span>
-        <button type="button" data-radius="default" aria-pressed="true">Default</button>
-        <button type="button" data-radius="custom" aria-pressed="false">Custom</button>
-        <input type="number" class="dbg-num" data-radius-px min="0" max="32" step="1" value="0" aria-label="Corner radius in pixels" hidden>
-      </div>
+      <!-- DEV-only control for the modal's auto-open delays. No data-row attribute, so the mode
+           filter below never hides it. The collapse toggle stays last. -->
       <div class="dbg-row" data-dbg="auto-delay"><span>Auto-open ms</span>
         <label class="sr" for="dbg-delay-desktop">Desktop</label><input type="number" class="dbg-num" id="dbg-delay-desktop" data-delay="desktop" min="0" max="300000" step="1000" value="10000" aria-label="Auto-open delay desktop in milliseconds">
         <label class="sr" for="dbg-delay-mobile">Mobile</label><input type="number" class="dbg-num" id="dbg-delay-mobile" data-delay="mobile" min="0" max="300000" step="1000" value="8000" aria-label="Auto-open delay mobile in milliseconds">
@@ -773,7 +773,7 @@
         </select></p>
       <p style="margin:0 0 16px"><label for="ns-notes">Anything we should know? (optional)</label><br>
         <textarea id="ns-notes" name="notes" maxlength="2000" rows="4" style="width:100%;padding:8px"></textarea></p>
-      <button type="submit" style="padding:10px 20px;background:#1c1f24;color:#fff;border:0;border-radius:4px;cursor:pointer">Send my request</button>
+      <button type="submit" style="padding:10px 20px;background:#1c1f24;color:#fff;border:0;border-radius:var(--radius-nojs, 4px);cursor:pointer">Send my request</button>
     </form>
   </section>
 </noscript>
@@ -1022,30 +1022,6 @@ var BIZ = {
       let wasOpen = false;
       try { wasOpen = sessionStorage.getItem('dbgPanelOpen') === '1' } catch (_) { }
       setOpen(wasOpen);
-
-      /* ---- Corner radius (DEV only, in memory). The stylesheet declares --box-radius: 0px once;
-         one rule feeds it to every boxed selector. "Default" removes the inline property, so the
-         page falls back to that 0px sharp look. Nothing is written to storage: a reload is sharp
-         again and a real visitor never sees a rounded box. */
-      const radiusPx = panel.querySelector('[data-radius-px]');
-      const radiusButtons = [...panel.querySelectorAll('[data-radius]')];
-      const syncRadius = () => {
-        const custom = html.style.getPropertyValue('--box-radius') !== '';
-        radiusButtons.forEach(b => b.setAttribute('aria-pressed', String((b.dataset.radius === 'custom') === custom)));
-        if (radiusPx) radiusPx.hidden = !custom;
-      };
-      const applyRadius = px => {
-        html.style.setProperty('--box-radius', Math.min(32, Math.max(0, Number(px) || 0)) + 'px');
-        if (radiusPx) radiusPx.value = html.style.getPropertyValue('--box-radius').replace('px', '');
-        syncRadius();
-      };
-      radiusButtons.forEach(b => b.addEventListener('click', () => {
-        if (b.dataset.radius === 'default') html.style.removeProperty('--box-radius');
-        else applyRadius(radiusPx ? radiusPx.value : 0);
-        syncRadius();
-      }));
-      if (radiusPx) radiusPx.addEventListener('input', () => applyRadius(radiusPx.value));
-      syncRadius();
 
       /* ---- Auto-open delay (DEV only). window.AUTO is declared by the modal script LATER in this
          page, so it is read and written only inside these handlers, never at panel setup. The page's
@@ -2133,6 +2109,9 @@ var BIZ = {
      silent fake "sent" and nothing is delivered. A second send within 30 s of the last one is refused. `elapsed` travels with the data so the server can check it too. */
   var openedAt = Date.now(), lastSent = 0;
   function send() {
+    /* A send already in flight owns the idempotency key. A second tap (or a
+       reopened form) must not start another POST under a different key. */
+    if (state === 'sending') return;
     var data = collect(); data.elapsed = Date.now() - openedAt;
     reflow(function () { alertBox.hidden = true; }, 260); setBusy(true);
     if (data.website || data.elapsed < 2000) { setTimeout(function () { showSent(data); }, 1000); return; }
@@ -2260,15 +2239,21 @@ var BIZ = {
   /* ---------- open / close: no layout shift (scrollbar-gutter), page scroll locked and inert, modal body scrolls, position restored ---------- */
   function open(t) {
     if (root.classList.contains('open')) return;
-    if (window.estimateReset) window.estimateReset();          /* one idempotency key per form-open */
-    openedAt = Date.now();                                     /* elapsed is measured from here, not from page load */
+    var resuming = state === 'sending';                        /* closed mid-send: the key is still in flight */
+    if (!resuming && window.estimateReset) window.estimateReset(); /* one key per new submission */
+    if (!resuming) openedAt = Date.now();                      /* elapsed is measured from here, not from page load */
     trigger = t || document.activeElement; savedY = window.scrollY;
     if (!CSS.supports('scrollbar-gutter', 'stable')) { var sw = innerWidth - html.clientWidth; if (sw > 0) { html.style.paddingRight = sw + 'px'; if (header) header.style.right = 12 + sw + 'px'; } }
     html.classList.add('est-open'); if (window.__lenis) window.__lenis.stop();
     behind().forEach(function (el) { el.setAttribute('inert', ''); });
     root.classList.add('open'); root.setAttribute('aria-hidden', 'false');
-    restoreDraft();                                            /* this tab's draft: same step, same answers */
-    setTimeout(function () { if (state === 'sent') done.focus({ preventScroll: true }); else focusFirst(); if (!dlg.contains(document.activeElement)) dlg.focus({ preventScroll: true }); }, 60);
+    if (!resuming) restoreDraft();                             /* this tab's draft: same step, same answers */
+    setTimeout(function () {
+      if (resuming) setBusy(true);                             /* the old request still owns the screen */
+      else if (state === 'sent') done.focus({ preventScroll: true });
+      else focusFirst();
+      if (!dlg.contains(document.activeElement)) dlg.focus({ preventScroll: true });
+    }, 60);
   }
   function close() {
     root.classList.remove('open'); root.setAttribute('aria-hidden', 'true'); html.classList.remove('est-open'); html.style.paddingRight = ''; if (header) header.style.right = '';
@@ -2307,7 +2292,7 @@ var BIZ = {
     if (menu && menu.classList.contains('open')) return false;        /* the menu overlay is open */
     if (document.visibilityState !== 'visible') return false;         /* a background tab is not reading */
     if (ssGet(AUTO.invitedKey) || lsGet(AUTO.sentKey)) return false;  /* once per session, never after a send */
-    var first = document.querySelector('main > section') || document.querySelector('main > .masthead');
+    var first = document.querySelector('main > .masthead') || document.querySelector('main > section');
     if (first && first.getBoundingClientRect().bottom <= 0) return false;  /* scrolled past the first section */
     return !(Number(lsGet(AUTO.closedKey)) > Date.now());             /* closed by hand, within 30 days */
   }

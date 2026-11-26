@@ -280,6 +280,12 @@ const biz = (patch = {}) => ({ id: 'b1', name: 'Alder Roofing', slug: 'alder', s
     && B.extendTargetAllowed(now + 30 * DAY, null, now) && !B.extendTargetAllowed(null, cur, now)
     && !B.extendTargetAllowed(max, cur, max + 1);            // an old button: its date is in the past
   line(ok, 'BL9b', 'extendTargetAllowed: future only, at most one period');
+  // A Confirm minted for an unbilled business 20 days ago is still in the
+  // future, but applying it would buy only 10 days. It must be refused.
+  const stale = now - 20 * DAY + 30 * DAY;
+  const staleOk = !B.extendTargetAllowed(stale, null, now);
+  line(staleOk, 'BL9c', 'a stale future Confirm cannot grant less than one period',
+    `stale=${new Date(stale).toISOString()}`);
 }
 
 console.log(`\nGate BL (billing rules): ${total - failed}/${total} PASS`);

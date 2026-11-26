@@ -47,8 +47,9 @@ confirmation email.
 
 - As long as the business uses the service, unless the business or you ask
   for deletion earlier.
-- After the business stops using the service: up to 60 days, then it is
-  deleted.
+- After the business stops using the service: up to 60 days, then it may be
+  deleted by hand. There is no automatic purge. **[REVIEW FLAG]** The owner and
+  lawyer must decide whether this is a promise or a permission.
 
 ## Your rights
 

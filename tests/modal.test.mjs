@@ -21,8 +21,15 @@
 //       next steps with both buttons), the reveal order set on those groups'
 //       own classes rather than on :nth-child, and every "what happens next"
 //       line short enough to stay one line in the 246px box it gets at 320px
-//   MD12 DEV-only corner radius: one 0px custom property, one live rule, no storage
+//   MD12 the debug panel no longer has a corner-radius control; delays remain
 //   MD13 DEV-only auto-open ms inputs write into AUTO.delayMs, in memory only
+//   MD14 the radius rule covers EVERY visible box sitewide: arrow squares, badge/label
+//       dots, step squares, before/after arrows and tags, review cards and images,
+//       FAQ cards, all modal option cards, fields, checkboxes, the close button and
+//       the whole success screen; round-by-design and full-screen layers stay out
+//   MD15 the primary CTA's white square is a real rounded box (7px) permanently
+//   MD16 the permanent radii: 12px base, 24px standalone images and review cards,
+//       12px review-card image, 48px CTA section, and ONE accent focus ring
 //
 // Mutations (each breaks the check named):
 //   put a literal title back into an option                      -> MD1, MD3
@@ -32,6 +39,7 @@
 //   move the buttons back out of .est-next-group                 -> MD8
 //   go back to :nth-child delays                                 -> MD8
 //   lengthen one "what happens next" line past 34 characters     -> MD8
+//   drop a boxed selector from the radius rule                   -> MD14
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -72,6 +80,7 @@ const build = (client) => {
 try {
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const css = fs.readFileSync(path.join(ROOT, 'assets/css/styles.css'), 'utf8');
+  const tokensCss = fs.readFileSync(path.join(ROOT, 'assets/css/tokens.generated.css'), 'utf8');
   const leadSrc = fs.readFileSync(path.join(ROOT, 'api/lead.js'), 'utf8');
   const SERVICES = JSON.parse(/const SERVICES = (\[[^\]]*\]);/.exec(leadSrc)[1].replace(/'/g, '"'));
   const VALUES = ['replacement', 'storm', 'repair', 'unsure'];
@@ -445,68 +454,14 @@ try {
       `stamp=${stampOk} closed=${heldByClose} expired=${expiredInvites} sent=${afterSubmit} open=${whileOpen} menu=${whileMenu} scrolled=${pastFirst} cta=${afterCta} flag=${sentFlag} hidden=${notWhileHidden} returned=${invitedOnReturn}`);
   }
 
-  /* MD12: the DEV corner-radius control. One custom property declared once at 0px, one rule that
-     feeds it to the boxed selectors, and an in-memory live application. No storage write: a reload
-     returns to sharp, and production never sees the panel at all. */
+  /* MD12: the radius is permanent, so the DEV panel no longer has a radius row.
+     The auto-open delay row stays. */
   {
-    const decls = (css.match(/--box-radius\s*:/g) || []).length;
-    const declared = decls === 1 && /--box-radius:\s*0px/.test(css);
-    const uses = (css.match(/border-radius:\s*var\(--box-radius,\s*0px\)/g) || []).length;
-    const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius,\s*0px\)[^}]*\}/.exec(css);
-    const selectors = rule ? rule[1] : '';
-    const boxed = ['.btn', '.menu-btn', '.bar', '.card', '.photo', '.hero-video', '[data-hero-video]', '.est-dialog', '.f input', '.f textarea', '.sel-btn']
-      .every(s => selectors.includes(s));
-    const markup = /data-dbg="radius"/.test(html)
-      && /data-radius="default"\s+aria-pressed="true"/.test(html)
-      && /data-radius="custom"\s+aria-pressed="false"/.test(html)
-      && /data-radius-px[^>]*min="0"[^>]*max="32"/.test(html);
-    const from = html.indexOf('---- Corner radius'), to = html.indexOf('---- Auto-open delay');
-    const handler = from > -1 && to > from ? html.slice(from, to) : '';
-    const noStorage = !!handler && !/localStorage|sessionStorage|setItem|removeItem/.test(handler)
-      && /setProperty\('--box-radius'/.test(handler) && /removeProperty\('--box-radius'/.test(handler);
-    line(declared && uses === 1 && boxed && markup && noStorage, 'MD12a',
-      'radius control: one 0px property, one live rule, no persistence',
-      `declared=${declared} uses=${uses} boxed=${boxed} markup=${markup} noStorage=${noStorage}`);
-
-    const { VirtualConsole } = await import('jsdom');
-    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-    const boot = (url) => new JSDOM(html, {
-      runScripts: 'dangerously', pretendToBeVisual: true, url, virtualConsole: new VirtualConsole(),
-      beforeParse(window) {
-        window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
-        window.scrollTo = () => {};
-        window.CSS = { supports: () => true };
-        // The panel shares a script block with a counter that observes elements. Without this
-        // stub JSDOM throws there and the whole block (panel included) never runs.
-        window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
-      },
-    });
-    const prod = boot('https://alder.test/');
-    const gated = !prod.window.document.querySelector('.dbg');
-    prod.window.close();
-    const dom = boot('http://localhost/');
-    const w = dom.window, d = w.document;
-    await wait(60);
-    const panel = d.querySelector('.dbg'), px = d.querySelector('[data-radius-px]');
-    const set = (el, v) => { el.value = v; el.dispatchEvent(new w.Event('input', { bubbles: true })); };
-    const click = (el) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
-    const radius = () => d.documentElement.style.getPropertyValue('--box-radius');
-    set(px, '12');
-    const live = radius() === '12px';
-    set(px, '99');
-    const clampedHi = radius() === '32px' && px.value === '32';
-    set(px, '-5');
-    const clampedLo = radius() === '0px' && px.value === '0';
-    click(d.querySelector('[data-radius="custom"]'));
-    const custom = px.hidden === false && d.querySelector('[data-radius="custom"]').getAttribute('aria-pressed') === 'true';
-    click(d.querySelector('[data-radius="default"]'));
-    const reset = radius() === '' && px.hidden === true && d.querySelector('[data-radius="default"]').getAttribute('aria-pressed') === 'true';
-    const keys = Object.keys(w.localStorage).concat(Object.keys(w.sessionStorage)).join(' ');
-    const untouched = !/radius/i.test(keys);
-    w.close();
-    line(gated && !!panel && live && clampedHi && clampedLo && custom && reset && untouched, 'MD12b',
-      'radius applies live, clamps 0..32, Default clears, panel stays dev-only',
-      `gated=${gated} panel=${!!panel} live=${live} hi=${clampedHi} lo=${clampedLo} custom=${custom} reset=${reset} noStore=${untouched}`);
+    const noRadiusUi = !/data-dbg="radius"|data-radius-px|data-radius="(default|custom)"|dataset\.radius/.test(html);
+    const delaysStay = /data-dbg="auto-delay"/.test(html) && /data-delay="desktop"/.test(html) && /data-delay="mobile"/.test(html);
+    line(noRadiusUi && delaysStay, 'MD12',
+      'debug panel: no radius control, auto-open delays remain',
+      `noRadius=${noRadiusUi} delays=${delaysStay}`);
   }
 
   /* MD13: the two auto-open inputs. AUTO is defined after the panel script, so these are written
@@ -544,6 +499,121 @@ try {
     line(markup && wrote && clampedHi && clampedLo && noStorage && note, 'MD13',
       'auto-open ms inputs write AUTO.delayMs live, clamped, no storage',
       `markup=${markup} wrote=${wrote} hi=${clampedHi} lo=${clampedLo} noStore=${noStorage} note=${note}`);
+  }
+
+  /* MD17: the DEV gate must not be openable on a production host by URL. Local
+     and Vercel preview hosts may still use ?dev=1; the production alias may not. */
+  {
+    const { VirtualConsole } = await import('jsdom');
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const gateHtml = html.replace('{{prodHost}}', 'alder-roofing.vercel.app');
+    const boot = async (url) => {
+      const dom = new JSDOM(gateHtml, {
+        runScripts: 'dangerously', pretendToBeVisual: true, url, virtualConsole: new VirtualConsole(),
+        beforeParse(window) {
+          window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+          window.scrollTo = () => {};
+          window.CSS = { supports: () => true };
+          window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+        },
+      });
+      await wait(80);
+      const noDev = dom.window.document.documentElement.classList.contains('no-dev');
+      const panel = !!dom.window.document.querySelector('.dbg');
+      dom.window.close();
+      return { noDev, panel };
+    };
+    const prod = await boot('https://alder-roofing.vercel.app/?dev=1');
+    const preview = await boot('https://alder-roofing-git-hardening.vercel.app/?dev=1');
+    const local = await boot('http://localhost:8791/?dev=1');
+    const noAlias = !/[?&]debug=1/.test(html);
+    line(prod.noDev && !preview.noDev && !local.noDev && noAlias, 'MD17',
+      'DEV panel: ?dev=1 denied on production, allowed on local and preview',
+      `prod=${prod.noDev} preview=${preview.noDev} local=${local.noDev} noAlias=${noAlias}`);
+  }
+
+  /* MD19: the auto-open guard must measure the masthead (hero + stats), not
+     the first <section>, which is About further down the page. */
+  {
+    const guard = /var first = document\.querySelector\('main > \.masthead'\) \|\| document\.querySelector\('main > section'\)/.test(html);
+    const stubBlind = /getBoundingClientRect/.test(html) && /bottom <= 0/.test(html);
+    line(guard && stubBlind, 'MD19', 'auto-open first-section guard uses the masthead',
+      `guard=${guard} stillChecks=${stubBlind}`);
+  }
+
+  /* MD18: closing during a send is allowed, but reopening must not hand the
+     request a new idempotency key, and a second send while busy is ignored. */
+  {
+    const at = (s, e) => { const a = html.indexOf(s), b = html.indexOf(e, a); return a > -1 && b > a ? html.slice(a, b) : ''; };
+    const openFn = at('function open(t)', 'function close()');
+    const closeFn = at('function close()', '/* ---------- the one invitation');
+    const sendFn = at('function send()', '/* The two panels');
+    const resume = /state === 'sending'/.test(openFn) && /if \(!resuming && window\.estimateReset\)/.test(openFn)
+      && /setBusy\(true\)/.test(openFn);
+    const guarded = /if \(state === 'sending'\) return;/.test(sendFn);
+    const closeAllowed = !/if \(state === 'sending'\) return;/.test(closeFn);
+    line(resume && guarded && closeAllowed, 'MD18',
+      'close during send: reopen keeps the key, second send ignored',
+      `resume=${resume} guarded=${guarded} closeAllowed=${closeAllowed}`);
+  }
+
+  /* MD14: sitewide coverage. Every visible box, including ::before/::after boxes
+     and the images that a parent's radius cannot clip, is in the ONE live rule.
+     Full-viewport layers and the two things that must stay round stay out. */
+  {
+    const clean = css.replace(/\/\*[\s\S]*?\*\//g, '');   /* comments name excluded selectors; strip them */
+    const uses = (clean.match(/border-radius:\s*var\(--box-radius\)/g) || []).length;
+    const rule = /([^{}]+)\{\s*border-radius:\s*var\(--box-radius\)[^}]*\}/.exec(clean);
+    const list = rule ? rule[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+    const required = ['.btn', '.btn i', '.menu-btn', '.menu-close', '.dbg', '.dbg .dbg-toggle', '.bar', '.card', '.card-text', '.photo', '.ph', '.ph::after',
+      '.cta-img', '.hero-video', '[data-hero-video]', '.frame', '.badge::before', '.label::before',
+      '.cta-sec .label::before', '.ft-trust>span', '.ft-trust>span::before', '.ft-social a',
+      '.steps::before', '.steps::after', '.step .n', '.ba-nav button', '.tag', '.handle::before',
+      '.pair figcaption', '.rv', '.rv-media', '.rv-media img', '.rv-text', '.fi', '.q', '.tot',
+      '.menu-top', '.menu-acts', '.menu-foot', '.menu nav a::before', '.est-dialog', '.est-dots li',
+      '.est-x', '.opt', '.opt::after', '.f input', '.f textarea', '.sel-btn', '.sel-list', '.sel-list li',
+      '.sel-list li[aria-selected="true"]::after', '.chk', '.chk input', '.est-alert', '.est-back', '.est-restart',
+      '.est-ok', '.est-recap', '.est-recap div',
+      '.est-next-group', '.est-after', '.est-steps li::before', '.est-actions', '.dbg button', '.dbg input.dbg-num'];
+    const missing = required.filter(s => !list.includes(s));
+    const keepOut = ['.av', '.est-next.busy::after', '.est', '.est-scrim', '.menu', '.pre'];
+    const leaked = keepOut.filter(s => list.includes(s));
+    // The main sitewide rule plus the review image's own clipping rule both
+    // read the same token; there is no second numeric value anywhere.
+    line(uses === 2 && missing.length === 0 && leaked.length === 0, 'MD14',
+      'radius covers every box sitewide; overlays and round-by-design stay out',
+      `uses=${uses} missing=${missing.join(',') || 'none'} leaked=${leaked.join(',') || 'none'}`);
+  }
+
+  /* MD15: the white arrow square on every primary CTA is painted by the button-hover
+     system as a background gradient on .bx-p, not by <i>. It is now a REAL rounded box
+     permanently, 7px (12px button radius minus the 6px right padding plus 1px). */
+  {
+    const bxOff = /html\.bx \.bx-p\s*\{\s*background-image:\s*none/.test(css);
+    const bxOn = /html\.bx \.bx-p i\s*\{\s*background:\s*var\(--bx-fill\)/.test(css);
+    const bxRadius = /html\.bx \.bx-p i\s*\{\s*border-radius:\s*var\(--radius-arrow\)/.test(css);
+    line(bxOff && bxOn && bxRadius, 'MD15',
+      'primary CTA square is a real box with a 7px radius',
+      `off=${bxOff} on=${bxOn} radius=${bxRadius}`);
+  }
+
+  /* MD16: the permanent radii and the single focus ring. */
+  {
+    const base = /--box-radius:\s*12px/.test(tokensCss) && /--radius-image:\s*24px/.test(tokensCss)
+      && /--radius-section:\s*48px/.test(tokensCss) && /--radius-arrow:\s*7px/.test(tokensCss);
+    const dbl = /calc\(var\(--box-radius\) \* 2\)/.test(css);
+    const quad = /calc\(var\(--box-radius\) \* 4\)/.test(css);
+    const img12 = /\.rv-media img\s*\{\s*border-radius:\s*var\(--box-radius\)/.test(css);
+    const images = /\.photo,[\s\S]{0,200}\.ph,[\s\S]{0,200}\.frame,[\s\S]{0,200}\.cta-img,[\s\S]{0,200}\.rv,[\s\S]{0,200}\.rv-media\s*\{\s*border-radius:\s*calc\(var\(--box-radius\) \* 2\)/.test(css);
+    const cta = /\.cta-sec\s*\{\s*border-radius:\s*calc\(var\(--box-radius\) \* 4\)/.test(css);
+    const ctaFill = /\.page\s*\{[^}]*background:\s*linear-gradient\([^}]*var\(--ink\)/.test(css);
+    const totRing = /class="ring"[\s\S]{0,140}<path d="M13 1H35A12 12/.test(html);
+    const singleRing = !/\.f input:focus,\s*\.f textarea:focus\s*\{\s*border-color:\s*var\(--ctl-focus\)/.test(css)
+      && /\.f input:focus,\s*\.f textarea:focus\s*\{\s*border-color:\s*var\(--ctl-line\)/.test(css)
+      && !/\.sel\.open \.sel-btn\s*\{\s*border-color:\s*var\(--ctl-focus\)/.test(css);
+    line(base && dbl && quad && img12 && images && cta && ctaFill && totRing && singleRing, 'MD16',
+      '12px base, 24px images/cards, 48px CTA, footer corners, rounded back-to-top, one ring',
+      `base=${base} dbl=${dbl} quad=${quad} img12=${img12} images=${images} cta=${cta} fill=${ctaFill} tot=${totRing} ring=${singleRing}`);
   }
 } catch (e) {
   line(false, 'MD0', 'modal suite threw', (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e)));

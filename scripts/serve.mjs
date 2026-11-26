@@ -53,7 +53,8 @@ const send = (res, status, body, headers = {}) => {
 };
 
 const resolveInside = (urlPath) => {
-  const clean = decodeURIComponent(urlPath.split('?')[0].split('#')[0]);
+  let clean;
+  try { clean = decodeURIComponent(urlPath.split('?')[0].split('#')[0]); } catch { return null; }
   const full = path.resolve(ROOT, '.' + (clean === '/' ? '/index.html' : clean));
   return full === ROOT || full.startsWith(ROOT + path.sep) ? full : null;
 };
@@ -64,14 +65,12 @@ const server = http.createServer(async (req, res) => {
   }
   const file = resolveInside(req.url || '/');
   if (!file) return send(res, 403, 'Forbidden\n', { 'content-type': 'text/plain; charset=utf-8' });
+  const target = file.endsWith(path.sep) || (await fsp.stat(file).catch(() => null))?.isDirectory()
+    ? path.join(file, 'index.html') : file;
   let stat;
-  try {
-    stat = await fsp.stat(file);
-    if (stat.isDirectory()) stat = await fsp.stat(path.join(file, 'index.html'));
-  } catch {
+  try { stat = await fsp.stat(target); } catch {
     return send(res, 404, 'Not found\n', { 'content-type': 'text/plain; charset=utf-8' });
   }
-  const target = stat.isDirectory() ? path.join(file, 'index.html') : file;
   const type = TYPES[path.extname(target).toLowerCase()] || 'application/octet-stream';
   res.writeHead(200, { 'content-type': type, 'content-length': stat.size, 'cache-control': 'no-store' });
   if (req.method === 'HEAD') return res.end();

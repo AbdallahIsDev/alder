@@ -142,6 +142,7 @@ const match = (row, params) => {
     if (raw === 'is.null') { if (v !== null && v !== undefined) return false; continue; }
     if (raw === 'not.is.null') { if (v === null || v === undefined) return false; continue; }
     if (raw.startsWith('gt.')) { if (!(new Date(v) > new Date(raw.slice(3)))) return false; continue; }
+    if (raw.startsWith('gte.')) { if (!(new Date(v) >= new Date(raw.slice(4)))) return false; continue; }
     if (raw.startsWith('lt.')) { if (!(new Date(v) < new Date(raw.slice(3)))) return false; continue; }
     if (raw.startsWith('in.(')) {
       const list = raw.slice(4, -1).split(',');
@@ -1316,6 +1317,33 @@ try {
       && !text.includes('Received while suspended'),
     'LB25', 'detail survives a database without leads.held_at',
     `forced=${forced} retried=${retried} edits=${detailEdits.length}`);
+  }
+  /* LB26: the heading counts only the CURRENT suspension, and an unreadable
+     notice log must not stop the list from being shown. */
+  store = freshStore();
+  {
+    const old = seedLead(BIZ_A, { name: 'Old Hold', created_at: '2026-11-19T12:00:00Z' });
+    const one = seedLead(BIZ_A, { name: 'New Hold 1', created_at: '2026-11-21T12:00:00Z' });
+    const two = seedLead(BIZ_A, { name: 'New Hold 2', created_at: '2026-11-22T12:00:00Z' });
+    for (const id of [old, one, two]) store.leads.find((l) => l.id === id).held_at = id === old
+      ? '2026-11-14T12:00:00Z' : '2026-11-21T12:00:00Z';
+    const eventResponse = (body, status) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+    sbHook = async ({ table }) => table === 'business_events'
+      ? eventResponse([{ created_at: '2026-11-20T00:00:00Z' }], 200) : null;
+    await tgReset();
+    await call(msg(OWNER, '/leads'));
+    const scopedText = String((await sends()).pop().body.text);
+    sbHook = null;
+    sbHook = async ({ table }) => table === 'business_events'
+      ? eventResponse({ message: 'database down', code: '500' }, 500) : null;
+    await tgReset();
+    await call(msg(OWNER, '/leads'));
+    const failedText = String((await sends()).pop().body.text);
+    sbHook = null;
+    const scoped = scopedText.includes('Received while suspended: 2') && !scopedText.includes('Received while suspended: 3');
+    const tolerant = failedText.startsWith('Recent requests\n\n') && failedText.includes('Received while suspended');
+    line(scoped && tolerant, 'LB26', 'held heading scoped to current suspension; count failure still lists',
+      `scoped=${scoped} tolerant=${tolerant}`);
   }
 } catch (e) {
   line(false, 'LB0', 'lead-browser suite threw', e.message);

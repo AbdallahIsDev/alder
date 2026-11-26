@@ -745,10 +745,23 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* The claim is a 10 s rate-limit bucket on the DATABASE clock, so two claims on
    opposite sides of a bucket edge do not see each other (tests/db-wall.test.mjs
    demonstrates the same for the RPC). A test that asserts mutual exclusion has to
-   start away from the edge: same guard as tests/webhook.test.mjs, 3 s margin. */
+   start away from the edge: 4 s margin plus DB-clock feedback in B1d. */
 async function awayFromClaimEdge() {
   const msLeft = 10000 - (Date.now() % 10000);
-  if (msLeft < 3000) await sleep(msLeft + 50);
+  if (msLeft < 4000) await sleep(msLeft + 50);
+}
+async function claimIsLive(id) {
+  const { data } = await svc.rpc('hit_rate_limit', { p_key: 'notify:' + id, p_window_seconds: 10, p_max: 1 });
+  return data === false;
+}
+async function holdClaim(id) {
+  for (let i = 0; i < 5; i++) {
+    await svc.from('rate_limits').delete().eq('key', 'notify:' + id);
+    await awayFromClaimEdge();
+    await svc.rpc('hit_rate_limit', { p_key: 'notify:' + id, p_window_seconds: 10, p_max: 1 });
+    if (await claimIsLive(id)) return true;
+  }
+  return false;
 }
 async function seedSilentLead(key, over, withCreated = true) {
   const { data: biz } = await svc.from('businesses').select('id').eq('slug', ALDER_DEMO).single();
@@ -828,25 +841,30 @@ try {
 } catch (e) { line(false, 'B1c', 'concurrent same-key', e.message); }
 
 /* B1d: a live claim blocks the retry, and releasing it lets the same retry
-   through: the claim is a lock for the duration of the send, not a debounce. */
+   through: the claim is a lock for the duration of the send, not a debounce.
+   The claim lives on the DATABASE clock; the DB-feedback loop and the bounded
+   retry below remove the old bucket-edge race that made this test flaky. */
 try {
-  await clean();
-  await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
-  await reset(TG); await reset(RS);
-  const key = `${RUN}-replay-d`;
-  const id = await seedSilentLead(key);
-  await awayFromClaimEdge();
-  // Some other invocation is announcing this lead right now.
-  await svc.rpc('hit_rate_limit', { p_key: 'notify:' + id, p_window_seconds: 10, p_max: 1 });
-  const held = await post({ idempotencyKey: key });
-  const heldTg = await sendMessageCount(), heldMail = await emailCount();
-  await svc.from('rate_limits').delete().eq('key', 'notify:' + id);
-  const after = await post({ idempotencyKey: key });
-  const afterTg = await sendMessageCount(), afterMail = await emailCount();
-  line(held.res.code === 200 && held.res.body && held.res.body.ok === true && heldTg === 0 && heldMail === 0
-    && after.res.code === 200 && afterTg === 1 && afterMail === 2,
-    'B1d', 'live claim blocks the send; released claim lets it through',
-    `held=${heldTg}/${heldMail} after=${afterTg}/${afterMail}`);
+  let ok = false, detail = '', attempts = 0;
+  while (!ok && attempts < 3) {
+    attempts++;
+    await clean();
+    await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
+    await reset(TG); await reset(RS);
+    const key = `${RUN}-replay-d`;
+    const id = await seedSilentLead(key);
+    const live = await holdClaim(id);
+    const held = await post({ idempotencyKey: key });
+    const heldTg = await sendMessageCount(), heldMail = await emailCount();
+    await svc.from('rate_limits').delete().eq('key', 'notify:' + id);
+    const after = await post({ idempotencyKey: key });
+    const afterTg = await sendMessageCount(), afterMail = await emailCount();
+    ok = live && held.res.code === 200 && held.res.body && held.res.body.ok === true
+      && heldTg === 0 && heldMail === 0
+      && after.res.code === 200 && afterTg === 1 && afterMail === 2;
+    detail = `held=${heldTg}/${heldMail} after=${afterTg}/${afterMail} live=${live} tries=${attempts}`;
+  }
+  line(ok, 'B1d', 'live claim blocks the send; released claim lets it through', detail);
 } catch (e) { line(false, 'B1d', 'claim held', e.message); }
 
 /* B1e: a claim left behind by a killed invocation lives in its own 10 s bucket,

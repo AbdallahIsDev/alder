@@ -11,7 +11,7 @@ is gone on purpose, except for a short log at the end.
 > change it in the same task, not later. `AGENTS.md` carries the same rule for any
 > agent working in this repo. Never write a secret value in this file; names only.
 
-**Last updated:** 2026-11-17.
+**Last updated:** 2026-11-26.
 
 ---
 
@@ -147,11 +147,32 @@ no `.env` (`tests/dev-root.mjs`).
   there. All constants in one `AUTO` object in `index.html`, also exposed on
   `window` and editable from the DEV-gated debug menu (in memory only; the timer
   already scheduled at load is unaffected).
-- The DEV-gated debug menu carries a "Corner radius" [Default] [Custom] control:
-  Default = 0 px (today's sharp look); Custom reveals a 0–32 px field applied
-  live to every boxed element through ONE CSS custom property, `--box-radius`.
-  Nothing persists; production defaults do not change. The owner will pick a
-  value later, and a future prompt will make it permanent and remove the control.
+- The permanent corner radius is **12 px**, set once as `--box-radius: 12px`.
+  It applies to EVERY visible box: buttons, badge and label dots (`::before`),
+  step squares, before/after arrows and tags, FAQ cards, the modal's option
+  cards, fields, checkboxes (row and box), the close button and the whole
+  success screen. Multiples of the SAME token cover the exceptions: 24 px
+  (2×) for standalone images (About, services, before/after viewer, CTA) and
+  for review cards; 12 px for the image inside a review card (24 px card minus
+  its padding); 48 px (4×) for the CTA section; 7 px for the white arrow square
+  inside a primary button (12 px button radius − 6 px right padding + 1 px).
+  That square is a real background on `<i>`, not the hover gradient, so it can
+  be rounded. Three things stay out: full-viewport overlays (`.est`,
+  `.est-scrim`, `.menu`, the disabled preloader), round-by-design avatars and
+  the busy spinner, and SVG paths.
+- The DEV-gated debug menu has **no corner-radius control**; it keeps only the
+  auto-open delay inputs. The radius is permanent, in the stylesheet.
+- The CTA section's 48 px bottom corners reveal the footer colour, not the
+  page's white ground: the bottom strip of `.page` is painted in `var(--ink)`.
+- The back-to-top button's progress ring is a rounded square with the same
+  12 px radius as the button, so the outline no longer draws a sharp square
+  inside a rounded box. `pathLength="100"` and the scroll-progress dash are
+  unchanged.
+- Form focus shows ONE ring, the accent `:focus-visible` outline. The old white
+  focus border on inputs and the open select was removed.
+- Progressive fallbacks (`vh`→`lvh`, `hidden`→`clip`, `attr()`→alt text) use one
+  property reading a token plus `@supports`, never two declarations of the same
+  property in one block (Biome `noDuplicateProperties` stays clean).
 - Copy is plain, human and specific. No staccato fragments ("No fluff. Just
   results."), no comma-couplets used as a sentence, no colon-fragment openers.
   Full sentences with a reason in them.
@@ -427,6 +448,17 @@ the modal's thank-you steps.
 | 2026-11-17 | `tests/webhook.test.mjs` brought up to Part 1: OP61 split into ask/perform/second-confirm, `bR:` added to the forged and stale lists, forged sweep now also proves the row is unchanged, OP63 drives Replace phone (`bw:`/`bW:` and `bp:`/`bP:`) instead of the old Invite button, and the terminated screen is asserted to offer no Reactivate. The mail-subject assertion reads `MAIL_REDIRECT_TO` instead of assuming a machine without it. Green: 115/115, 155 s. |
 | 2026-11-17 | Estimate modal: thank-you screen in three groups with a class-set reveal, one-line next steps, the held state really hides the recap and the steps, draft in sessionStorage with "Start over", one automatic open per session at 8 s / 10 s with a 30-day close suppression. `/leads` header states the total held leads. A support suspension says "Contact support to restore it." instead of "Renew". `npm run serve`. Payment-provider design notes in `docs/OPERATIONS.md` §3b. |
 | 2026-11-17 | Task-gap round: DEV debug menu gained a live `--box-radius` [Default]/[Custom] control and the AUTO delay inputs; X press area 44 px desktop / 32 px phone. `/leads` held rows moved into their own "Received while suspended" group. `/start` excluded from the suspended reply, no free-text cap while off, and the suspended/terminated reply always states a date (or that none is set) and the countdown. Extend's terminated question now says "This business was terminated. Extending restores the service." Held notices use the same four core lines for both reasons. Operator identity is `OPERATOR_CHAT_ID` only. New `BL1e` duration gate. Checklists and `docs/legal-drafts/LAWYER_REVIEW.md` added. |
+| 2026-11-18 | Radius audit: the one `--box-radius` rule now covers every visible box sitewide, including `::before`/`::after` boxes, arrow squares, step squares, before/after tags, review cards and their images, FAQ cards, modal option cards, fields, checkboxes, the X button and the whole success screen. Overlays, round avatars, the busy spinner and SVG paths stay out. `MD14` pins the coverage. |
+| 2026-11-18 | The white arrow square of each primary CTA is a background gradient on `.bx-p`, not the `<i>`, so `border-radius` could not round it. In radius mode the panel set an in-memory `data-radius="custom"` flag and CSS swapped that gradient for a real, rounded background on `<i>` (`MD15`). The field's cap became 36 px. |
+| 2026-11-18 | Permanent radii: `--box-radius` is now 12 px in production. 24 px for standalone images and review cards, 12 px for the image inside a review card, 48 px for the CTA section, 7 px for the primary button's white arrow square (button radius − right padding + 1). The CTA square is permanently a real box, so the hover gradient flood no longer plays. The checkbox row in step 3 gained the 12 px radius. Focus now shows one accent ring: the white focus border on fields and the open select was removed. `MD16` pins the values. |
+| 2026-11-18 | Removed the corner-radius row (markup and JS) from the DEV panel; the auto-open delay inputs stay. The CTA's rounded bottom corners now reveal the footer colour by painting the page's bottom strip in `var(--ink)`. Fixed the six duplicated CSS properties flagged by Biome using token + `@supports` fallbacks; `CSS8` pins it. |
+| 2026-11-18 | The back-to-top progress ring became a rounded square with the button's 12 px radius. Its SVG path and the stale square-cap comment were updated; `MD16` checks the new path. |
+| 2026-11-26 | Hardening phase 0: TEST project restored; the runner's `site_host` failure now prints a sanitised, 200-char `error.message` and `error.status` (`RD1`). Migration `0007` applied to TEST only; `leads.held_at` and `business_events` now present. 43 suites registered. |
+| 2026-11-26 | Hardening phase 1: baseline runner (41 suites; two production-reading suites skipped) had four failures — stale build hash, 2 GB disk floor, B19 regex, B1d timing. All fixed; the five affected suites were re-run green. B1d is now DB-clock-checked with a bounded retry. |
+| 2026-11-26 | Hardening phase 2: fresh five-pass re-audit, 76 rows (DONE 54 / PARTIAL 13 / MISSING 9) in `_debug/audit-report.md`. Two new highs: held-lead replay PII leak after reactivation and modal close-during-send key reset. |
+| 2026-11-26 | Hardening phase 3: fixed DEV gate on production hosts, silent cron owner emails, notice-alert claim release, stale billing Reactivate, held-lead replay leak and status race, modal key on close/reopen, scoped held count, stale Extend token, lifecycle date copy, docs and serve. New tests MD17–MD19, OF1–OF5, LC17, LB26, BL9c, OB31, PL1–PL3. |
+| 2026-11-26 | Hardening phase 4: one design-token file (`design-tokens.json`) drives CSS custom properties and numeric email values through `npm run tokens`; radius default stays 12px. `docs/DESIGN_TOKENS.md` and `DT1`–`DT3` added. |
+| 2026-11-26 | Hardening phase 5: production host is a `{{prodHost}}` build token instead of a hardcoded Alder domain; build baseline and OP61 copy updated; C35 made deterministic with DB-clock feedback. `npm run build` exit 0 with no leftover `{{`. |
 
 ---
 
@@ -439,7 +471,9 @@ These were left open by the last live test and cannot be confirmed from the repo
    `billing_warning_stage` 0 and `suspended_for_billing` false.
 2. A test business `ZZ Billing Test` may still exist in production. Remove it and
    its leads if it does.
-3. Migration `0007` application status on the TEST project and on production.
+3. Migration `0007` was applied to TEST on 2026-11-26 (`npm run db:apply -- --only
+   supabase/migrations/0007_lifecycle.sql`); production status is still unverified and the
+   owner applies it.
 4. `npm run tg:commands` after the lifecycle deploy — the live operator menu was
    out of date once before.
 
@@ -468,7 +502,8 @@ Open after the 2026-11-17 modal round:
 8. The three next-step lines were measured at 320, 375 and 1440 px (one line
    each, longest 192 px of the 246 px box at 320). Not measured in Safari or
    Firefox.
-9. The new `--box-radius` control and the phone-sized X press area were verified
-   by JSDOM and CSS text assertions only, not in a real browser on a phone.
-10. `tests/notify.test.mjs` B1d failed once in a twelve-suite run and passed on a
-   clean rerun (62/62); it is timing-sensitive, not a confirmed regression.
+9. The `--box-radius` control, its sitewide coverage and the phone-sized X press
+   area were verified by JSDOM and CSS text assertions only, not in a real
+   browser on a phone.
+10. Settled 2026-11-26: B1d now uses a 4 s margin, DB-clock feedback and a bounded
+   retry; 62/62 after the change. The 10 s claim is still a fixed bucket, not a hard lock.
