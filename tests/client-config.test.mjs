@@ -144,6 +144,20 @@ try {
       'a client sender wins, otherwise MAIL_FROM, otherwise the default', `${a}/${b}/${String(c)}`);
   }
 
+  /* C15: the DEV gate's production host is baked from the client domain, not
+     left empty or as a placeholder token. */
+  {
+    const hostOf = (name) => {
+      const m = /data-prod-host="([^"]*)"/.exec(fs.readFileSync(outPath(name), 'utf8'));
+      return m ? m[1] : '';
+    };
+    const alderHost = hostOf('alder'), exampleHost = hostOf('example');
+    const ok = /^[a-z0-9.-]+$/.test(alderHost) && /^[a-z0-9.-]+$/.test(exampleHost)
+      && alderHost !== exampleHost;
+    line(ok, 'C15', 'build bakes a real data-prod-host for each client',
+      `alder=${alderHost || '(empty)'} example=${exampleHost || '(empty)'}`);
+  }
+
   /* C3 */
   const r3 = build(['--client', 'no-such-client', '--out', outPath('missing')]);
   const e3 = String(r3.stderr || '').trim().split('\n').filter(Boolean);
