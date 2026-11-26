@@ -291,7 +291,10 @@ export default async function handler(req, res) {
   // can change the state: decide held vs normal from a fresh row immediately
   // before the insert, so a lead that arrives after reactivation is never
   // marked held and a lead that arrives after termination is never stored.
-  const current = await getBusinessById(business.id).catch(() => null);
+  const current = await getBusinessById(business.id).catch((e) => {
+    console.error('lead_status_read_failed', (e && e.code) || 'no_code');
+    return null;
+  });
   if (current) {
     if (current.status === 'churned') {
       return isForm
