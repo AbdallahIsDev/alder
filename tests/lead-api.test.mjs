@@ -761,7 +761,7 @@ const logOffset = fs.statSync(LOG).size;
      DOM and timers, which this suite does not drive. */
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const dup = /if \(Date\.now\(\) - lastSent < 30000\) \{([^}]*)\}/.exec(html);
-  const sentFn = /function showSent\(data, already\) \{([\s\S]*?)\n  \}/.exec(html);
+  const sentFn = /function showSent\(data, already(?:, kind)?\) \{([\s\S]*?)\n  \}/.exec(html);
   const hasState = !!sentFn && /already \? 'You already sent this request/.test(sentFn[1])
     && /Request already received/.test(sentFn[1]);
   const routes = !!dup && /showSent\(data, true\)/.test(dup[1]) && !/showError/.test(dup[1]);

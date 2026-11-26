@@ -454,6 +454,7 @@ the modal's thank-you steps.
 | 2026-11-18 | Removed the corner-radius row (markup and JS) from the DEV panel; the auto-open delay inputs stay. The CTA's rounded bottom corners now reveal the footer colour by painting the page's bottom strip in `var(--ink)`. Fixed the six duplicated CSS properties flagged by Biome using token + `@supports` fallbacks; `CSS8` pins it. |
 | 2026-11-18 | The back-to-top progress ring became a rounded square with the button's 12 px radius. Its SVG path and the stale square-cap comment were updated; `MD16` checks the new path. |
 | 2026-11-26 | Hardening phase 0: TEST project restored; the runner's `site_host` failure now prints a sanitised, 200-char `error.message` and `error.status` (`RD1`). Migration `0007` applied to TEST only; `leads.held_at` and `business_events` now present. 43 suites registered. |
+| 2026-11-26 | Hardening phase 1: baseline runner (41 suites; two production-reading suites skipped) had four failures — stale build hash, 2 GB disk floor, B19 regex, B1d timing. All fixed; the five affected suites were re-run green. B1d is now DB-clock-checked with a bounded retry. |
 
 ---
 
@@ -500,5 +501,5 @@ Open after the 2026-11-17 modal round:
 9. The `--box-radius` control, its sitewide coverage and the phone-sized X press
    area were verified by JSDOM and CSS text assertions only, not in a real
    browser on a phone.
-10. `tests/notify.test.mjs` B1d failed once in a twelve-suite run and passed on a
-   clean rerun (62/62); it is timing-sensitive, not a confirmed regression.
+10. Settled 2026-11-26: B1d now uses a 4 s margin, DB-clock feedback and a bounded
+   retry; 62/62 after the change. The 10 s claim is still a fixed bucket, not a hard lock.

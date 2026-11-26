@@ -37,6 +37,13 @@ const GB = 1024 ** 3;
     'D1', 'below the floor fails, at or above passes', `below=${below.ok} at=${at.ok} above=${above.ok}`);
 }
 
+/* D1b: a machine with just over 1 GB free must be able to run the suites. */
+{
+  const okAt1_1 = diskGate(1.1 * GB, DISK_FLOOR_BYTES).ok;
+  line(okAt1_1, 'D1b', '1.1 GB free is enough for the two 124 MB build trees',
+    `ok=${okAt1_1} floor=${DISK_FLOOR_BYTES / GB}GB`);
+}
+
 /* D2 */
 {
   const raised = floorFromEnv({ DISK_MIN_BYTES: String(50 * GB) });
