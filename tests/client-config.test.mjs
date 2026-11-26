@@ -56,7 +56,7 @@ const OUT = path.join(ROOT, '_debug', 'client-build');
    Before 2026-11-26 this assertion pinned the origin/main build 193536b8…;
    after it pins this branch's build. Cost: an accidental HTML edit still fails
    until the baseline is moved deliberately. */
-const BASELINE = 'e9dccc4d6510235d6166e1c4be4e875d6e38862ae127e4a48711bae292d00324';
+const BASELINE = 'bd9186c57c46ddc520ed13149e6bac075c97057a96922b134fdd43790e2b44fd';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = 'dcd93cf0545e1bad61f0218310823424565419e811ba50b74a2e7f7642ce7053';
 const BASELINE_SITEMAP = 'f90e45bdfa569c01cc2c7fe584831cd9e03b212fbac43254454968bcc16c27e8';

@@ -458,6 +458,7 @@ the modal's thank-you steps.
 | 2026-11-26 | Hardening phase 2: fresh five-pass re-audit, 76 rows (DONE 54 / PARTIAL 13 / MISSING 9) in `_debug/audit-report.md`. Two new highs: held-lead replay PII leak after reactivation and modal close-during-send key reset. |
 | 2026-11-26 | Hardening phase 3: fixed DEV gate on production hosts, silent cron owner emails, notice-alert claim release, stale billing Reactivate, held-lead replay leak and status race, modal key on close/reopen, scoped held count, stale Extend token, lifecycle date copy, docs and serve. New tests MD17–MD19, OF1–OF5, LC17, LB26, BL9c, OB31, PL1–PL3. |
 | 2026-11-26 | Hardening phase 4: one design-token file (`design-tokens.json`) drives CSS custom properties and numeric email values through `npm run tokens`; radius default stays 12px. `docs/DESIGN_TOKENS.md` and `DT1`–`DT3` added. |
+| 2026-11-26 | Hardening phase 5: production host is a `{{prodHost}}` build token instead of a hardcoded Alder domain; build baseline and OP61 copy updated. `npm run build` exit 0 with no leftover `{{`. |
 
 ---
 

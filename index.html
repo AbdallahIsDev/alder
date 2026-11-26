@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="bx" data-page-node-id="lomSK6Lrp5COiedjjPfIZf">
+<html lang="en" class="bx" data-prod-host="{{prodHost}}" data-page-node-id="lomSK6Lrp5COiedjjPfIZf">
 
 <head data-page-node-id="qA66i1soIRBJHtNRlA6SzR">
   <meta charset="utf-8" data-page-node-id="W2m4P2JcBHb8fUCfnpcshs">
@@ -121,7 +121,8 @@
       if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]' || /\.local$/.test(h)) return true;
       /* Only a preview deployment may opt in by URL. The production alias and
          every client domain are ordinary hosts: a query string cannot unlock them. */
-      var preview = /\.vercel\.app$/.test(h) && h !== 'alder-roofing.vercel.app';
+      var prod = document.documentElement.getAttribute('data-prod-host') || '';
+      var preview = /\.vercel\.app$/.test(h) && (prod.charAt(0) === '{' || h !== prod);
       if (!preview) return false;
       if (/[?&]dev=1(?:&|#|$)/.test(location.search)) {
         try { sessionStorage.setItem('dbgDev', '1') } catch (e2) { }

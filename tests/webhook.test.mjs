@@ -2654,7 +2654,7 @@ try {
         await good(cb(OP, 'bS:0:' + invBiz.id));
         const againSends = (await sends()).length;
         const againToast = await answersNow();
-        const afterOk = exOwnerReq.body.text === 'This service has been suspended\nby support.\n\nNo termination date is set.\n\nSend /status to see the\ncountdown.\n\nContact support'
+        const afterOk = exOwnerReq.body.text === 'This service has been suspended\nby support.\n\nNo termination date is set.\n\nSend /status at any time to see\nthe current state.\n\nContact support'
           && supportLink(exOwnerReq) && JSON.stringify(exOwnerReq.body.reply_markup) === STATUS_ONLY
           && exStaffToast === 'This service is suspended. Send /status.' && exStaffDrawn === 0
           && newPhone === 'This service is suspended.\nA new phone cannot be connected\nright now.\n\nContact support' && newPhoneBound === 0 && !!pendingRow && pendingRow.used_at === null
