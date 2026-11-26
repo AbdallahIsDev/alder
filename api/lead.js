@@ -209,8 +209,8 @@ export default async function handler(req, res) {
     console.error('lead_rate_limit_failed', (e && e.code) || 'no_code');
   }
   if (!held && business.status !== 'demo' && business.status !== 'active') return tenantNotFound();
-  const okReply = () => {
-    if (held) return isForm ? htmlReply(200, 'Request saved', HELD_MESSAGE, business.name) : res.status(200).json({ ok: true, held: true });
+  const okReply = (forceHeld = held) => {
+    if (forceHeld) return isForm ? htmlReply(200, 'Request saved', HELD_MESSAGE, business.name) : res.status(200).json({ ok: true, held: true });
     return isForm ? htmlReply(200, 'Request received', 'We received your request.', business.name) : res.status(200).json({ ok: true });
   };
 
@@ -333,7 +333,7 @@ export default async function handler(req, res) {
         // The row was held when it was stored and was never announced. A later
         // reactivation must not turn this replay into the first announcement:
         // that would leak the visitor's details after the fact.
-        if (stored.held_at) return okReply();
+        if (stored.held_at) return okReply(true);
         const state = await getLeadDeliveryState(stored.id);
         // The first invocation can also die between the insert and its first
         // event. The retry writes the missing created row, with the same advisory

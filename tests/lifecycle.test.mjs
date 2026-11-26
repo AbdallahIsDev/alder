@@ -436,7 +436,7 @@ try {
     const again = await submit('alder.test', { key });
     const bodies = JSON.stringify([...again.tg.map((m) => m.body), ...again.mail.map((m) => m.body)]);
     const ok = first.out.body && first.out.body.held === true
-      && again.out.code === 200 && again.out.body && again.out.body.ok === true
+      && again.out.code === 200 && again.out.body && again.out.body.ok === true && again.out.body.held === true
       && leadsOf(A).length === 1 && !!leadsOf(A)[0].held_at
       && again.sends.length === 0 && again.mail.length === 0 && leaks(bodies).length === 0;
     line(ok, 'LC17', 'held lead replay after reactivation stays silent',
