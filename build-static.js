@@ -116,6 +116,9 @@ if (clash.length) fail('clients/' + opt.client + '.json copy key(s) collide with
 
 /* ---- merge client overrides ---- */
 let biz = Object.assign({}, template, clientFile.biz, copy);
+if (clientFile.domain) {
+  try { biz.prodHost = new URL(clientFile.domain).hostname; } catch { /* the domain check below fails with a clear message */ }
+}
 if (opt.config) {
   if (!fs.existsSync(opt.config)) fail('Config file not found: ' + opt.config);
   let over; try { over = JSON.parse(fs.readFileSync(opt.config, 'utf8')); } catch (e) { fail('Config is not valid JSON: ' + e.message); }

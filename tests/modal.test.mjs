@@ -506,8 +506,9 @@ try {
   {
     const { VirtualConsole } = await import('jsdom');
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const gateHtml = html.replace('{{prodHost}}', 'alder-roofing.vercel.app');
     const boot = async (url) => {
-      const dom = new JSDOM(html, {
+      const dom = new JSDOM(gateHtml, {
         runScripts: 'dangerously', pretendToBeVisual: true, url, virtualConsole: new VirtualConsole(),
         beforeParse(window) {
           window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
