@@ -97,6 +97,12 @@ try {
   line(!hasEnv, 'I2', 'the dev root carries no .env or .env.local', `has=${hasEnv}`);
 
   killTree(child);
+  // taskkill is spawned asynchronously on Windows; wait for the dev process to
+  // actually exit before removing the junctions, or removal races the file lock.
+  await Promise.race([
+    new Promise((resolve) => { if (child.exitCode !== null) return resolve(); child.once('exit', resolve); }),
+    new Promise((resolve) => setTimeout(resolve, 10000)),
+  ]);
   child = null;
   removeDevRoot(root);
   const sourceIntact = fs.existsSync(path.join(source, 'api', 'env.js'))
