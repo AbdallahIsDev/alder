@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "radius": {
+    "box": "12px",
+    "image": "24px",
+    "section": "48px",
+    "arrowSquare": "7px",
+    "noJs": "4px",
+    "apiCard": "8px",
+    "reviewCard": "10px",
+    "reviewControl": "8px",
+    "email": {
+      "card": "10px",
+      "headerBand": "10px 10px 0 0",
+      "innerCard": "8px",
+      "button": "8px",
+      "note": "6px",
+      "mobileCard": "0"
+    }
+  },
+  "border": {
+    "hairline": "1px",
+    "control": "1.5px",
+    "focusRing": "2px",
+    "email": "1px"
+  },
+  "color": {
+    "white": "#FFFFFF",
+    "ink": "#1C1F24",
+    "cream": "#F7F4EF",
+    "accent": "#D93917",
+    "muted": "#73777D"
+  },
+  "font": {
+    "display": "Geist",
+    "body": "Inter",
+    "emailFallback": "Arial, Helvetica, sans-serif"
+  },
+  "size": {
+    "buttonHeight": "48px",
+    "headerButtonHeight": "44px",
+    "modalClose": "32px",
+    "fieldHeight": "52px"
+  },
+  "space": {
+    "pad": "24px",
+    "gap": "16px"
+  }
+}

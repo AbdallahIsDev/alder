@@ -1,0 +1,28 @@
+/* Generated from design-tokens.json by scripts/sync-design-tokens.mjs. Do not edit. */
+:root {
+  --box-radius: 12px;
+  --radius-box: 12px;
+  --radius-image: 24px;
+  --radius-section: 48px;
+  --radius-arrow: 7px;
+  --radius-nojs: 4px;
+  --radius-api-card: 8px;
+  --radius-review-card: 10px;
+  --radius-review-control: 8px;
+  --border-hairline: 1px;
+  --border-control: 1.5px;
+  --border-focus-ring: 2px;
+  --color-white: #FFFFFF;
+  --color-ink: #1C1F24;
+  --color-cream: #F7F4EF;
+  --color-accent: #D93917;
+  --color-muted: #73777D;
+  --font-display: Geist;
+  --font-body: Inter;
+  --size-button: 48px;
+  --size-button-header: 44px;
+  --size-modal-close: 32px;
+  --size-field: 52px;
+  --space-pad: 24px;
+  --space-gap: 16px;
+}

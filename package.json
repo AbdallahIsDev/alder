@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "serve": "node scripts/serve.mjs",
+    "tokens": "node scripts/sync-design-tokens.mjs",
     "build": "node build-static.js index.html --out dist/index.html",
     "og": "node scripts/make-og-image.mjs",
     "icons": "node scripts/make-icons.mjs",

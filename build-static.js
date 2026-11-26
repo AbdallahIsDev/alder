@@ -246,6 +246,11 @@ if (survivors.length) fail('placeholder tokens survived the build:\n' + survivor
    sync-brand.mjs writes lib/brand.generated.json and assets/email/*.png from the
    page's :root block and logo, so the emails always match the landing page. */
 import { spawnSync } from 'node:child_process';
+const tokenSync = spawnSync(process.execPath, [path.join(__dirname, 'scripts', 'sync-design-tokens.mjs')], {
+  cwd: __dirname, stdio: 'inherit',
+});
+if (tokenSync.status !== 0) fail('sync-design-tokens.mjs failed; not building with stale tokens.');
+
 const sync = spawnSync(process.execPath, [path.join(__dirname, 'scripts', 'sync-brand.mjs')], {
   cwd: __dirname, stdio: 'inherit',
   env: {
