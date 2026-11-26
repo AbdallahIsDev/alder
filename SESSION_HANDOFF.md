@@ -460,6 +460,7 @@ the modal's thank-you steps.
 | 2026-11-26 | Hardening phase 4: one design-token file (`design-tokens.json`) drives CSS custom properties and numeric email values through `npm run tokens`; radius default stays 12px. `docs/DESIGN_TOKENS.md` and `DT1`–`DT3` added. |
 | 2026-11-26 | Hardening phase 5: production host is a `{{prodHost}}` build token instead of a hardcoded Alder domain; build baseline and OP61 copy updated; C35 made deterministic with DB-clock feedback. `npm run build` exit 0 with no leftover `{{`. |
 | 2026-11-27 | Pre-launch verify: production migration 0007 applied; PR #39 description added. Phase 3 fixes — delayed Extend Confirm accepted with its original 30-day end, held replay stays held, fresh status read logs a code, build bakes both production hosts, token JSON uses `createRequire`, Vercel production alias is denied by the DEV gate. |
+| 2026-11-27 | Phase 4 e2e on localhost + TEST: 46 scenarios in `_debug/e2e-report.md` (30 PASS, 14 suite-covered, 1 production DEV-gate exposure found and fixed, 1 real-phone check not run). Production smoke lead created and deleted; 0007 before/after counts unchanged (2 businesses, 8 leads). |
 
 ---
 
