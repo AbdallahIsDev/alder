@@ -105,7 +105,7 @@ const enabled = (CONFIG.git && CONFIG.git.deploymentEnabled) || null;
   const ok = CONFIG.buildCommand === 'node build-static.js index.html --out dist/index.html'
     && CONFIG.outputDirectory === 'dist'
     && CONFIG.functions && CONFIG.functions['api/*.js']
-    && CONFIG.functions['api/*.js'].includeFiles === 'lib/brand.generated.json'
+    && CONFIG.functions['api/*.js'].includeFiles === 'lib/*.generated.json'
     && Array.isArray(CONFIG.rewrites) && CONFIG.rewrites.length === 2
     && Array.isArray(CONFIG.crons) && CONFIG.crons.length === 2
     && Array.isArray(CONFIG.headers) && CONFIG.headers.length >= 4;
@@ -121,8 +121,10 @@ const enabled = (CONFIG.git && CONFIG.git.deploymentEnabled) || null;
 {
   const lead = CONFIG.functions && CONFIG.functions['api/lead.js'];
   const tg = CONFIG.functions && CONFIG.functions['api/tg.js'];
+  // Vercel 48.12.1 requires a single string. One glob covers both generated
+  // JSON files without an invalid array.
   const allInclude = Object.values(CONFIG.functions || {})
-    .every((f) => f && f.includeFiles === 'lib/brand.generated.json');
+    .every((f) => f && f.includeFiles === 'lib/*.generated.json');
   const ok = !!lead && tg === undefined
     && lead.maxDuration === 30 && Number.isInteger(lead.maxDuration)
     && allInclude;
