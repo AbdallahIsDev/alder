@@ -119,7 +119,7 @@ in `index.html` with the contents of `.preview/versions/<id>.svg`.
 1. Replace every placeholder: phone `(555) 018-4400`, email, address, licence
    number, pricing, review counts, ratings, and all project case details. **Every
    number on this page is invented placeholder content.**
-2. Point the canonical/OG URLs at the real domain (search `alderroof.com`).
+2. Point the canonical/OG URLs at the client's own domain (search `alder-roofing.vercel.app` for the demo build).
 3. Validate JSON-LD and run Lighthouse.
 4. Write real alt text (see above).
 

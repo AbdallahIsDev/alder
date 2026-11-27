@@ -874,14 +874,15 @@ async function loadPhoneApi() {
     if (!m) throw new Error('not found: ' + name);
     return m[0];
   };
-  const asciiLine = built.split('\n').find((l) => l.includes('var ascii ='));
-  const sandbox = { PHONE_CC: JSON.parse(tableMatch[1]), PHONE_DEFAULT_CC: defaultMatch[1] };
+  const marker = '/*__PHONE_RULE_START__*/';
+  const ra = built.indexOf(marker), rb = built.indexOf('/*__PHONE_RULE_END__*/', ra);
+  if (ra < 0 || rb < ra) throw new Error('shared phone rule markers not found in built page');
+  const rule = built.slice(ra + marker.length, rb);
+  const table = JSON.parse(tableMatch[1]);
+  const sandbox = { PHONE_CFG: { table, defaultCc: defaultMatch[1] } };
   const { default: vm } = await import('node:vm');
-  const src = [
-    'var AR = ' + JSON.stringify('٠١٢٣٤٥٦٧٨٩') + ', FA = ' + JSON.stringify('۰۱۲۳۴۵۶۷۸۹') + ';',
-    asciiLine.trim(), fn('matchCc'), fn('phoneOk'), fn('sanitizePhone'), fn('phoneSubmit'),
-  ].join('\n');
-  vm.runInNewContext(src + '\nthis._api = { sanitizePhone, phoneOk, phoneSubmit };', sandbox);
+  const src = [rule, fn('phoneOk'), fn('phoneSubmit')].join('\n');
+  vm.runInNewContext(src + '\nthis._api = { sanitizePhone, phoneOk, phoneSubmit, normalizePhone };', sandbox);
   return sandbox._api;
 }
 const digitsOnly = (s) => String(s).replace(/\D/g, '');
@@ -1039,6 +1040,40 @@ const typeSeqOf = (api) => (s) => { let v = ''; for (const ch of s) v = api.sani
   line(roleOnlyOnPanel && linkedAll && writesRight && submitUsesHelper && !err, 'P23',
     'modal errors: one live region, every field linked, message lands in it',
     err || `alerts=${alerts} generic=${generic} groups=${groups.length} unlinked=${unlinked.join(',') || 'none'} write=${writesRight} submit=${submitUsesHelper} ${detail}`);
+}
+
+/* ---------- P24/P25: the owner's shapes through the real handler (in-process,
+   TEST DB). The live HTTP path is covered by _debug/e2e-phone-notify.mjs. ---------- */
+{
+  const forms = [
+    '(555) 123-4567', '555-123-4567', '555.123.4567', '5551234567',
+    '555 123 4567', '+1 555 123 4567', '+1 (555) 123-4567', '1-555-123-4567',
+    '  (555) 123-4567  ', '٥٥٥١٢٣٤٥٦٧',
+  ];
+  const stored = [];
+  let statusesOk = true;
+  for (let i = 0; i < forms.length; i++) {
+    await resetLimits();
+    const kk = `${RUN}-p24-${i}`;
+    const ss = await post(payload({ idempotencyKey: kk, phone: forms[i] }));
+    if (ss.status !== 200) statusesOk = false;
+    const rr = await leadFor(kk);
+    stored.push(rr.length ? rr[0].phone : 'missing');
+  }
+  line(statusesOk && stored.every((v) => v === '+15551234567'),
+    'P24', 'all ten owner shapes store the same E.164 number',
+    `${forms.length} forms -> ${[...new Set(stored)].join(',')}`);
+}
+{
+  const bads = ['555123456', '555123456789', '(055) 123-4567', '(155) 123-4567', '555-12a-4567', ''];
+  const bad = [];
+  for (let i = 0; i < bads.length; i++) {
+    await resetLimits();
+    const kk = `${RUN}-p25-${i}`;
+    const ss = await post(payload({ idempotencyKey: kk, phone: bads[i] }));
+    if (ss.status !== 400 || (await leadFor(kk)).length !== 0) bad.push(`${JSON.stringify(bads[i])} -> ${ss.status}`);
+  }
+  line(bad.length === 0, 'P25', 'short/long/area-code/letters/empty refused, nothing stored', bad.join(' ; '));
 }
 
 /* ---------- cleanup ----------

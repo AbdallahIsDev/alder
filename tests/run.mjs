@@ -44,6 +44,7 @@ const DEFAULT_SUITES = [
   { file: 'tests/startup-sweep.test.mjs', needsHttp: false },
   { file: 'tests/canary-limits.test.mjs', needsHttp: false },
   { file: 'tests/suite-list.test.mjs', needsHttp: false },
+  { file: 'tests/phone.test.mjs', needsHttp: false },
   { file: 'tests/fixture-safety.test.mjs', needsHttp: false },
   { file: 'tests/housekeeping.test.mjs', needsHttp: false },
   { file: 'tests/bot-text.test.mjs', needsHttp: false },

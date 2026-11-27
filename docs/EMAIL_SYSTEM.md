@@ -346,33 +346,35 @@ no business data. `/leads` returns no lead data for unlinked chats.
 
 ## Phone validation and storage
 
-Server (`api/lead.js`): numbers are validated with `libphonenumber-js/max`
-(the **max** build checks real per-country patterns; the default/min build
-only checks general length ranges and let through e.g. an 8-digit +20 mobile
-that needs 10). Valid numbers are stored as E.164; invalid ones are a 400
-that names the field (`{ ok: false, errors: { phone: ... } }`), and the
-number is never logged. The modal maps each field error to that field's
-message (phone: "Enter a valid phone number."), focuses the field and stays
-on step 4; the generic "We couldn't send your request" panel is only for
-network failures and 5xx.
+One rule in `lib/phone.js` is copied into `index.html` with `export` removed;
+`tests/phone.test.mjs` PH6 fails if the two copies drift. The modal and
+`api/lead.js` both call `normalizePhone` before doing anything else, so they
+normalise the same way and cannot disagree on US shapes.
 
-Client (`index.html` modal): `build-static.js` derives, from the max
-metadata, for each calling code the min/max national length across its
-countries and inlines it as a compact JSON constant (`PHONE_CC`, ~2.5 KB
-for 206 codes). North America (code `1`) is overridden to exactly `[10, 10]`.
-After a leading `+`, the code is matched (1, then 2, then
-3 digits; codes are prefix-free) and typing stops at calling-code digits
-plus the max national length (so +20 allows at most 10 more digits). A
-leading `00` is treated as `+`; one trunk `0` immediately after the calling
-code may exceed the cap by one digit while typing and is removed again on
-submit — the server retries once without that `0` when the number is not
-valid as given, and stores only a valid E.164 (numbers where the `0` is
-part of the number, like Italy, are valid as given and never stripped).
-Without `+`, the business country is the default (US; `businesses` has no
-country column). On submit, the national length must be between min and
-max for a recognised code, else 8–15 digits. Sanitisation is unchanged:
-digits, one leading `+`, spaces `( ) - .` only, `maxlength="20"`,
-`type="tel"`, pasted text sanitised and truncated the same way.
+Normalisation: Arabic-Indic and Persian digits become ASCII; a leading `00`
+becomes `+`; the visitor's punctuation is kept while typing and pasting, and
+letters stay visible so they can be refused instead of being silently
+deleted. There is no typing digit cap — an overlong number is shown with an
+error. The field stays `type="tel"` with `maxlength="20"`.
+
+NANP: ten digits, or eleven starting with `1`, store as `+1XXXXXXXXXX`.
+This includes the 555 range, which `libphonenumber-js/max` marks fictional.
+Fewer than ten digits, more than eleven, letters and an area code starting
+with `0` or `1` are refused with a reason; empty is refused too. No `+` means
+the business country (US; `businesses` has no country column).
+
+Non-NANP numbers keep the strict check: the server uses
+`libphonenumber-js/max`, the browser uses the calling-code length table
+(`PHONE_CC`, ~2.5 KB, baked by `build-static.js` from the same metadata). The
+server is the final authority; if the browser accepted a number the server
+refuses, the modal maps the 400 to the phone field, focuses it and stays on
+step 4 ("Enter a valid phone number."). The generic "We couldn't send your
+request" panel is only for network failures and 5xx.
+
+A single trunk `0` immediately after a non-NANP calling code is removed only
+when it pushes the national part past the maximum (Italy keeps its zero).
+Invalid numbers are a 400 that names the field
+(`{ ok: false, errors: { phone: ... } }`); the number is never logged.
 
 ## Env var names
 
