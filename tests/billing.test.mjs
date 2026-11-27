@@ -305,5 +305,20 @@ const biz = (patch = {}) => ({ id: 'b1', name: 'Alder Roofing', slug: 'alder', s
     `null=${B.extendTargetAllowed(targetFor(null), null, confirm)} overdue=${B.extendTargetAllowed(targetFor(overdue), overdue, confirm)} future=${B.extendTargetAllowed(targetFor(future), future, confirm)} double=${B.extendTargetAllowed(targetFor(future), targetFor(future), confirm)}`);
 }
 
+  /* BL9e: the Confirm button carries its mint time. A tap more than ten
+     minutes later is expired and must ask the operator to press Extend again. */
+  {
+    const mint = T('2026-11-27T10:00:00Z');
+    const target = B.nextPaidUntil(null, mint, 30);
+    const token = B.encodeExtendToken(target, mint);
+    const parsed = B.decodeExtendToken(token);
+    const freshOk = parsed && parsed.target === target && parsed.mint === mint
+      && !B.extendTokenExpired(parsed, mint + 9 * 60000);
+    const expiredOk = B.extendTokenExpired(parsed, mint + 10 * 60000 + 1)
+      && B.extendTokenExpired({ target }, mint + 1000);   // an old token has no mint
+    line(freshOk && expiredOk, 'BL9e', 'Extend token expires 10 minutes after the question',
+      `fresh=${freshOk} expired=${expiredOk}`);
+  }
+
 console.log(`\nGate BL (billing rules): ${total - failed}/${total} PASS`);
 process.exit(failed ? 1 : 0);
