@@ -123,8 +123,12 @@
          every client domain are ordinary hosts: a query string cannot unlock them. */
       var prod = document.documentElement.getAttribute('data-prod-host') || '';
       var prodAlias = document.documentElement.getAttribute('data-prod-vercel-host') || '';
-      var preview = /\.vercel\.app$/.test(h) && (prod.charAt(0) === '{' || h !== prod)
-        && (prodAlias.charAt(0) === '{' || h !== prodAlias);
+      // Fail closed: an empty or unfilled host means the build is incomplete,
+      // so no Vercel host is trusted as a preview.
+      var prodKnown = !!prod && prod.charAt(0) !== '{';
+      var aliasKnown = !!prodAlias && prodAlias.charAt(0) !== '{';
+      var preview = /\.vercel\.app$/.test(h) && prodKnown && aliasKnown
+        && h !== prod && h !== prodAlias;
       if (!preview) return false;
       if (/[?&]dev=1(?:&|#|$)/.test(location.search)) {
         try { sessionStorage.setItem('dbgDev', '1') } catch (e2) { }

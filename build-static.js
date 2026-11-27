@@ -99,6 +99,9 @@ if (extraBizKeys.length) {
 const allowedExtra = new Set(['copy', 'domain', 'lastmod', 'sender', 'vercelProdHost']);
 const unknownKeys = Object.keys(clientFile).filter(k => k !== 'slug' && k !== 'biz' && !allowedExtra.has(k));
 if (unknownKeys.length) fail('clients/' + opt.client + '.json has unknown key(s): ' + unknownKeys.join(', ') + '.');
+if (!String(clientFile.vercelProdHost || '').trim()) {
+  fail('clients/' + opt.client + '.json vercelProdHost is required (the Vercel production alias).');
+}
 const copy = clientFile.copy && typeof clientFile.copy === 'object' ? clientFile.copy : {};
 const copyKeys = Object.keys(copy);
 const clash = copyKeys.filter(k => k in template);

@@ -56,7 +56,7 @@ const OUT = path.join(ROOT, '_debug', 'client-build');
    Before 2026-11-26 this assertion pinned the origin/main build 193536b8…;
    after it pins this branch's build. Cost: an accidental HTML edit still fails
    until the baseline is moved deliberately. */
-const BASELINE = '55496472f8c5b2b8c76ef199942c3e60f63980bca61742c7b2563123c81110ec';
+const BASELINE = 'd0e12fd36e75688080212489b0444c8f83496dd3b0a61d4a2597b3bb5a34214f';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = 'dcd93cf0545e1bad61f0218310823424565419e811ba50b74a2e7f7642ce7053';
 const BASELINE_SITEMAP = 'f90e45bdfa569c01cc2c7fe584831cd9e03b212fbac43254454968bcc16c27e8';
@@ -184,6 +184,16 @@ try {
   const r5 = build(['--client', mk, '--out', outPath('missingkey')]);
   line(r5.status === 1 && /missing: phone/.test(String(r5.stderr || '')), 'C5', 'a missing key is named',
     `exit=${r5.status}`);
+
+  /* C16: a client without a Vercel production alias cannot build. */
+  {
+    const noAlias = JSON.parse(JSON.stringify(alder));
+    delete noAlias.vercelProdHost;
+    const mk = tempClient('t-no-alias', noAlias);
+    const r = build(['--client', mk, '--out', outPath('noalias')]);
+    line(r.status === 1 && /vercelProdHost/.test(String(r.stderr || '')) && !fs.existsSync(outPath('noalias')),
+      'C16', 'a client without vercelProdHost is refused', `exit=${r.status}`);
+  }
 
   /* C6 */
   const unknown = JSON.parse(JSON.stringify(alder));

@@ -506,7 +506,8 @@ try {
   {
     const { VirtualConsole } = await import('jsdom');
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-    const gateHtml = html.replace('{{prodHost}}', 'alder-roofing.vercel.app');
+    const gateHtml = html.replace('{{prodHost}}', 'www.alderroof.com')
+      .replace('{{prodVercelHost}}', 'alder-roofing.vercel.app');
     const boot = async (url) => {
       const dom = new JSDOM(gateHtml, {
         runScripts: 'dangerously', pretendToBeVisual: true, url, virtualConsole: new VirtualConsole(),
@@ -559,6 +560,39 @@ try {
     line(aliasDenied && previewAllowed, 'MD20',
       'DEV gate denies the Vercel production alias, allows preview',
       `aliasDenied=${aliasDenied} previewAllowed=${previewAllowed}`);
+  }
+
+  /* MD21: if either production host is missing or still a placeholder, the
+     gate fails closed: no Vercel host may be treated as a preview. */
+  {
+    const { VirtualConsole } = await import('jsdom');
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const boot = async (variant) => {
+      const dom = new JSDOM(variant, {
+        runScripts: 'dangerously', pretendToBeVisual: true,
+        url: 'https://alder-roofing-git-x.vercel.app/?dev=1', virtualConsole: new VirtualConsole(),
+        beforeParse(window) {
+          window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+          window.scrollTo = () => {};
+          window.CSS = { supports: () => true };
+          window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+        },
+      });
+      await wait(80);
+      const noDev = dom.window.document.documentElement.classList.contains('no-dev');
+      dom.window.close();
+      return noDev;
+    };
+    const good = html.replace('{{prodHost}}', 'www.alderroof.com').replace('{{prodVercelHost}}', 'alder-roofing.vercel.app');
+    const emptyHost = good.replace('data-prod-host="www.alderroof.com"', 'data-prod-host=""');
+    const placeholderHost = good.replace('data-prod-host="www.alderroof.com"', 'data-prod-host="{{prodHost}}"');
+    const emptyAlias = good.replace('data-prod-vercel-host="alder-roofing.vercel.app"', 'data-prod-vercel-host=""');
+    const placeholderAlias = good.replace('data-prod-vercel-host="alder-roofing.vercel.app"', 'data-prod-vercel-host="{{prodVercelHost}}"');
+    const denied = await Promise.all([emptyHost, placeholderHost, emptyAlias, placeholderAlias].map(boot));
+    const previewOk = !(await boot(good));
+    line(denied.every(Boolean) && previewOk, 'MD21',
+      'DEV gate fails closed on missing or placeholder production hosts',
+      `denied=${denied.map(Number).join('')} preview=${previewOk}`);
   }
 
   /* MD19: the auto-open guard must measure the masthead (hero + stats), not
