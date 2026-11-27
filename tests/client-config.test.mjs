@@ -56,7 +56,7 @@ const OUT = path.join(ROOT, '_debug', 'client-build');
    Before 2026-11-26 this assertion pinned the origin/main build 193536b8…;
    after it pins this branch's build. Cost: an accidental HTML edit still fails
    until the baseline is moved deliberately. */
-const BASELINE = 'bd9186c57c46ddc520ed13149e6bac075c97057a96922b134fdd43790e2b44fd';
+const BASELINE = '55496472f8c5b2b8c76ef199942c3e60f63980bca61742c7b2563123c81110ec';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = 'dcd93cf0545e1bad61f0218310823424565419e811ba50b74a2e7f7642ce7053';
 const BASELINE_SITEMAP = 'f90e45bdfa569c01cc2c7fe584831cd9e03b212fbac43254454968bcc16c27e8';
@@ -142,6 +142,25 @@ try {
     const c = resolveSender({ clientSender: '', envFrom: '' });
     line(a === 'a@x.test' && b === 'b@y.test' && c === null, 'C14',
       'a client sender wins, otherwise MAIL_FROM, otherwise the default', `${a}/${b}/${String(c)}`);
+  }
+
+  /* C15: the DEV gate's production host is baked from the client domain, not
+     left empty or as a placeholder token. */
+  {
+    const hostOf = (name) => {
+      const m = /data-prod-host="([^"]*)"/.exec(fs.readFileSync(outPath(name), 'utf8'));
+      return m ? m[1] : '';
+    };
+    const aliasOf = (name) => {
+      const m = /data-prod-vercel-host="([^"]*)"/.exec(fs.readFileSync(outPath(name), 'utf8'));
+      return m ? m[1] : '';
+    };
+    const alderHost = hostOf('alder'), exampleHost = hostOf('example');
+    const alias = aliasOf('alder');
+    const ok = /^[a-z0-9.-]+$/.test(alderHost) && /^[a-z0-9.-]+$/.test(exampleHost)
+      && alderHost !== exampleHost && /^[a-z0-9.-]+$/.test(alias);
+    line(ok, 'C15', 'build bakes real production hosts for each client',
+      `alder=${alderHost || '(empty)'} example=${exampleHost || '(empty)'} alias=${alias || '(empty)'}`);
   }
 
   /* C3 */

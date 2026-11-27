@@ -61,6 +61,16 @@ const line = (ok, id, what, d) => {
   line(ok, 'DT3', 'site, modal, API, review and email all read a token', `ok=${ok}`);
 }
 
+{
+  const files = ['api/lead.js', 'lib/email-layout.js', 'lib/content.js'];
+  const unsafe = files.filter((f) => /with\s*\{\s*type:\s*['"]json['"]\s*\}/.test(read(f)));
+  const helper = read('lib/design-tokens.js');
+  const wired = files.every((f) => read(f).includes("from '../lib/design-tokens.js'") || read(f).includes("from './design-tokens.js'"));
+  line(unsafe.length === 0 && wired && /createRequire/.test(helper), 'DT4',
+    'token JSON loads through createRequire, not an import attribute',
+    `unsafe=${unsafe.join(',') || 'none'} wired=${wired}`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);

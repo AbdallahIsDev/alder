@@ -436,11 +436,35 @@ try {
     const again = await submit('alder.test', { key });
     const bodies = JSON.stringify([...again.tg.map((m) => m.body), ...again.mail.map((m) => m.body)]);
     const ok = first.out.body && first.out.body.held === true
-      && again.out.code === 200 && again.out.body && again.out.body.ok === true
+      && again.out.code === 200 && again.out.body && again.out.body.ok === true && again.out.body.held === true
       && leadsOf(A).length === 1 && !!leadsOf(A)[0].held_at
       && again.sends.length === 0 && again.mail.length === 0 && leaks(bodies).length === 0;
     line(ok, 'LC17', 'held lead replay after reactivation stays silent',
       `first=${JSON.stringify(first.out.body)} again=${JSON.stringify(again.out.body)} leads=${leadsOf(A).length} tg=${again.sends.length} mail=${again.mail.length}`);
+  }
+
+  /* LC18: a failed fresh status read must leave a code-only line. The stale
+     tenant row may still decide the answer, but the failure is never silent. */
+  {
+    fresh();
+    const errors = [];
+    const original = console.error;
+    console.error = (...args) => errors.push(args.map(String).join(' '));
+    world.sbHook = async ({ table, params }) => {
+      if (table === 'businesses' && params.some(([k]) => k === 'id')) {
+        return new Response(JSON.stringify({ message: 'database down', code: 'XX000' }),
+          { status: 500, headers: { 'content-type': 'application/json' } });
+      }
+      return null;
+    };
+    const r = await submit('alder.test');
+    world.sbHook = null;
+    console.error = original;
+    const lineOk = errors.some((l) => l.includes('lead_status_read_failed') && /XX000|no_code/.test(l));
+    const quiet = !errors.some((l) => leaks(l).length > 0);
+    line(lineOk && quiet && r.out.code === 200, 'LC18',
+      'failed fresh status read logs a code, never lead data',
+      `logged=${lineOk} quiet=${quiet} code=${r.out.code}`);
   }
 } catch (e) {
   line(false, 'LC0', 'lifecycle suite threw', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e));

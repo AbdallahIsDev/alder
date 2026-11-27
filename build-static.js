@@ -96,7 +96,7 @@ if (extraBizKeys.length) {
   fail('clients/' + opt.client + '.json biz has unknown key(s): ' + extraBizKeys.join(', ')
     + '. Remove them or add them to the template BIZ.');
 }
-const allowedExtra = new Set(['copy', 'domain', 'lastmod', 'sender']);
+const allowedExtra = new Set(['copy', 'domain', 'lastmod', 'sender', 'vercelProdHost']);
 const unknownKeys = Object.keys(clientFile).filter(k => k !== 'slug' && k !== 'biz' && !allowedExtra.has(k));
 if (unknownKeys.length) fail('clients/' + opt.client + '.json has unknown key(s): ' + unknownKeys.join(', ') + '.');
 const copy = clientFile.copy && typeof clientFile.copy === 'object' ? clientFile.copy : {};
@@ -119,6 +119,7 @@ let biz = Object.assign({}, template, clientFile.biz, copy);
 if (clientFile.domain) {
   try { biz.prodHost = new URL(clientFile.domain).hostname; } catch { /* the domain check below fails with a clear message */ }
 }
+if (clientFile.vercelProdHost) biz.prodVercelHost = String(clientFile.vercelProdHost);
 if (opt.config) {
   if (!fs.existsSync(opt.config)) fail('Config file not found: ' + opt.config);
   let over; try { over = JSON.parse(fs.readFileSync(opt.config, 'utf8')); } catch (e) { fail('Config is not valid JSON: ' + e.message); }

@@ -6,7 +6,7 @@
 // Nothing here logs a name, phone, email, note, raw IP, token or URL. Failures are codes only.
 
 import { randomUUID } from 'node:crypto';
-import TOKENS from '../lib/design-tokens.generated.json' with { type: 'json' };
+import TOKENS from '../lib/design-tokens.js';
 import { hashIp } from '../lib/hash.js';
 import { clientIp } from '../lib/request.js';
 import { isValidPhoneNumber, parsePhoneNumber } from 'libphonenumber-js/max';
@@ -209,8 +209,8 @@ export default async function handler(req, res) {
     console.error('lead_rate_limit_failed', (e && e.code) || 'no_code');
   }
   if (!held && business.status !== 'demo' && business.status !== 'active') return tenantNotFound();
-  const okReply = () => {
-    if (held) return isForm ? htmlReply(200, 'Request saved', HELD_MESSAGE, business.name) : res.status(200).json({ ok: true, held: true });
+  const okReply = (forceHeld = held) => {
+    if (forceHeld) return isForm ? htmlReply(200, 'Request saved', HELD_MESSAGE, business.name) : res.status(200).json({ ok: true, held: true });
     return isForm ? htmlReply(200, 'Request received', 'We received your request.', business.name) : res.status(200).json({ ok: true });
   };
 
@@ -291,7 +291,10 @@ export default async function handler(req, res) {
   // can change the state: decide held vs normal from a fresh row immediately
   // before the insert, so a lead that arrives after reactivation is never
   // marked held and a lead that arrives after termination is never stored.
-  const current = await getBusinessById(business.id).catch(() => null);
+  const current = await getBusinessById(business.id).catch((e) => {
+    console.error('lead_status_read_failed', (e && e.code) || 'no_code');
+    return null;
+  });
   if (current) {
     if (current.status === 'churned') {
       return isForm
@@ -333,7 +336,7 @@ export default async function handler(req, res) {
         // The row was held when it was stored and was never announced. A later
         // reactivation must not turn this replay into the first announcement:
         // that would leak the visitor's details after the fact.
-        if (stored.held_at) return okReply();
+        if (stored.held_at) return okReply(true);
         const state = await getLeadDeliveryState(stored.id);
         // The first invocation can also die between the insert and its first
         // event. The retry writes the missing created row, with the same advisory

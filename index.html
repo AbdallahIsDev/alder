@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="bx" data-prod-host="{{prodHost}}" data-page-node-id="lomSK6Lrp5COiedjjPfIZf">
+<html lang="en" class="bx" data-prod-host="{{prodHost}}" data-prod-vercel-host="{{prodVercelHost}}" data-page-node-id="lomSK6Lrp5COiedjjPfIZf">
 
 <head data-page-node-id="qA66i1soIRBJHtNRlA6SzR">
   <meta charset="utf-8" data-page-node-id="W2m4P2JcBHb8fUCfnpcshs">
@@ -122,7 +122,9 @@
       /* Only a preview deployment may opt in by URL. The production alias and
          every client domain are ordinary hosts: a query string cannot unlock them. */
       var prod = document.documentElement.getAttribute('data-prod-host') || '';
-      var preview = /\.vercel\.app$/.test(h) && (prod.charAt(0) === '{' || h !== prod);
+      var prodAlias = document.documentElement.getAttribute('data-prod-vercel-host') || '';
+      var preview = /\.vercel\.app$/.test(h) && (prod.charAt(0) === '{' || h !== prod)
+        && (prodAlias.charAt(0) === '{' || h !== prodAlias);
       if (!preview) return false;
       if (/[?&]dev=1(?:&|#|$)/.test(location.search)) {
         try { sessionStorage.setItem('dbgDev', '1') } catch (e2) { }
