@@ -81,6 +81,12 @@ no `.env` (`tests/dev-root.mjs`).
   fallback). Operator text never reaches an owner chat.
 - Alerts are best-effort. A guaranteed outbox is a future implementation, not a
   current promise.
+- Phone normalisation is ONE rule in `lib/phone.js`, copied into `index.html`
+  and checked byte-for-byte by test PH6. NANP shapes (10 digits, or 11 starting
+  with 1) store as `+1XXXXXXXXXX`, including 555 numbers; fewer than 10, more
+  than 11, letters and a 0/1 area code are refused. Arabic-Indic and Persian
+  digits become ASCII first. Non-NANP numbers keep libphonenumber-js/max on the
+  server and the baked calling-code table in the browser.
 - Review flow: everyone is sent to the Google review link, whatever the rating.
 
 **Lifecycle and money**
@@ -296,7 +302,7 @@ Images go through `npm run images` only; a changed image needs a new `-v2`
 filename because crawlers cache by URL.
 
 **Lead intake** — `POST /api/lead`: honeypot, timing check, per-IP and per-business
-rate limits, allow-lists, E.164 phone normalisation, idempotency key, duplicate
+rate limits, allow-lists, shared-rule phone normalisation to E.164, idempotency key, duplicate
 advisory (30 days, never blocks), store first and notify second, replay
 re-announces a lead whose first attempt died before alerting. Unknown host fails
 closed with the same response as an unknown token.
@@ -463,6 +469,7 @@ the modal's thank-you steps.
 | 2026-11-27 | Phase 4 e2e on localhost + TEST: 46 scenarios in `_debug/e2e-report.md` (30 PASS, 14 suite-covered, 1 production DEV-gate exposure found and fixed, 1 real-phone check not run). Production smoke lead created and deleted; 0007 before/after counts unchanged (2 businesses, 8 leads). |
 | 2026-11-27 | Production smoke after PR #40: Vercel alias served merged code, DEV panel hidden with `?dev=1`/`?debug=1`, smoke lead stored with four events and deleted. `www.alderroof.com` is unreachable from this machine; Vercel dashboard is login-gated. |
 | 2026-11-27 | Follow-ups branch: DEV gate fails closed on missing/placeholder production hosts and build refuses a client without `vercelProdHost`; Extend Confirm tokens expire after 10 minutes with OB32/BL9e; `vercel.json` includes both generated JSON files for all functions via the valid single-string glob `lib/*.generated.json`. |
+| 2026-11-27 | Phone root cause fixed on `final-verify`: the browser and the API now call one rule (`lib/phone.js`) before validation. The strict libphonenumber-js check rejected all 555/NANP shapes and did not read Arabic-Indic digits. PH1–PH6 (DB-free) and P24/P25 (TEST API) pin ten accepted shapes, six refusals and one stored value `+15551234567`. |
 
 ---
 

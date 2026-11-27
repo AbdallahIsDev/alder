@@ -1783,45 +1783,96 @@ var BIZ = {
   var total = panes.length, step = 0, trigger = null, savedY = 0, state = 'edit' /* edit | sending | sent */, moving = false, E = form.elements, hAnim = null;
   var reduced = function () { return window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches; };
   var canAnimate = function () { return !reduced() && typeof form.animate === 'function' && root.classList.contains('open'); };
-  /* phone numbers: any country, with or without a country code or a leading + (also 00 prefixes, spaces, dots, dashes, brackets,
-     Arabic-Indic and Persian digits, and a trailing extension).
-     PHONE_CC is injected at build time (build-static.js) from libphonenumber-js
-     max metadata: for each calling code, [min, max] NATIONAL length across its
-     countries. It stays null in the unbuilt page, which then falls back to the
-     8 to 15 digit rule below. Calling codes are prefix-free, so trying 1, 2,
-     then 3 digits is unambiguous. */
+  /* Phone: one shared rule. lib/phone.js is copied below (export stripped) and
+     tests/phone.test.mjs PH6 fails if the two ever drift. PHONE_CC is baked by
+     build-static.js from libphonenumber-js metadata. */
   var PHONE_CC = /*__PHONE_CC__*/null;
   var PHONE_DEFAULT_CC = /*__PHONE_DEFAULT__*/'1';   /* the business country (US; businesses has no country column) */
-  var AR = '٠١٢٣٤٥٦٧٨٩', FA = '۰۱۲۳۴۵۶۷۸۹';
-  var ascii = function (s) { return s.replace(/[٠-٩۰-۹]/g, function (c) { var i = AR.indexOf(c); return i > -1 ? i : FA.indexOf(c); }); };
-  function matchCc(digits) {
-    if (!PHONE_CC) return null;
-    for (var l = 1; l <= 3; l++) { var cc = digits.slice(0, l); if (PHONE_CC[cc]) return cc; }
-    return null;
+  var PHONE_CFG = { table: PHONE_CC, defaultCc: PHONE_DEFAULT_CC };
+/*__PHONE_RULE_START__*/
+var AR = '\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668\u0669';
+var FA = '\u06F0\u06F1\u06F2\u06F3\u06F4\u06F5\u06F6\u06F7\u06F8\u06F9';
+
+function ascii(s) {
+  return String(s == null ? '' : s).replace(/[\u0660-\u0669\u06F0-\u06F9]/g, function (c) {
+    var i = AR.indexOf(c);
+    return i > -1 ? String(i) : String(FA.indexOf(c));
+  });
+}
+
+function phoneConfig(table, defaultCc) {
+  return { table: table || null, defaultCc: String(defaultCc || '1') };
+}
+
+function matchCc(digits, table) {
+  if (!table) return null;
+  for (var l = 3; l >= 1; l--) {
+    var cc = String(digits).slice(0, l);
+    if (Object.prototype.hasOwnProperty.call(table, cc)) return cc;
   }
-  function phoneOk(raw) {
-    var v = ascii(raw).trim().replace(/\s*(?:ext\.?|extension|x|#)\s*\d{1,6}$/i, '');
-    if (!v || !/^\+?[\d\s().\-\/\u2010-\u2015]+$/.test(v)) return false;
-    var digits = v.replace(/\D/g, '');
-    if (v.charAt(0) === '+') {
-      var cc = matchCc(digits);
-      if (cc) {
-        var nat = digits.slice(cc.length), r = PHONE_CC[cc];
-        if (nat.length >= r[0] && nat.length <= r[1]) return true;
-        var stripped = nat.charAt(0) === '0' ? nat.slice(1) : '';
-        return stripped.length >= r[0] && stripped.length <= r[1];
-      }
-      return digits.length >= 8 && digits.length <= 15;
-    }
-    var def = PHONE_CC && PHONE_CC[PHONE_DEFAULT_CC];
-    if (def) {
-      var natD = digits;
-      if (natD.length > def[1] && natD.indexOf(PHONE_DEFAULT_CC) === 0) natD = natD.slice(PHONE_DEFAULT_CC.length);
-      return natD.length >= def[0] && natD.length <= def[1];
-    }
-    return digits.length >= 8 && digits.length <= 15;
+  return null;
+}
+
+/* Display-only normalisation. Keeps the punctuation the visitor typed and
+   every letter, so a bad character is shown in the field and refused by
+   normalizePhone instead of being silently swallowed. */
+function sanitizePhone(raw, cfg) {
+  var v = ascii(raw == null ? '' : String(raw));
+  if (v.slice(0, 2) === '00') v = '+' + v.slice(2);
+  var out = '';
+  for (var i = 0; i < v.length; i++) {
+    var ch = v.charAt(i);
+    if (ch === '+' && i === 0) { out = '+'; continue; }
+    if ((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+      || ch === ' ' || ch === '(' || ch === ')' || ch === '.' || ch === '-' || ch === '/'
+      || (ch >= '\u2010' && ch <= '\u2015')) out += ch;
+  }
+  return out;
+}
+
+function result(ok, value, reason) {
+  return { ok: ok, value: value === undefined ? null : value, reason: reason || null };
+}
+
+/* The single validator. `cfg` = phoneConfig(table, defaultCc). `strict` is
+   optional and is called only for non-NANP numbers, with the normalised text. */
+function normalizePhone(raw, cfg, strict) {
+  var v = sanitizePhone(raw, cfg).trim();
+  if (!v) return result(false, null, 'empty');
+  if (/[A-Za-z]/.test(v)) return result(false, null, 'letters');
+  if (/[^\d+\s().\-\/\u2010-\u2015]/.test(v)) return result(false, null, 'characters');
+  var digits = v.replace(/\D/g, '');
+  if (!digits) return result(false, null, 'empty');
+  var plus = v.charAt(0) === '+';
+  var cc = plus && cfg ? matchCc(digits, cfg.table) : null;
+  var localCc = cfg ? cfg.defaultCc : '1';
+  var nanp = (!plus && localCc === '1') || cc === '1' || (plus && !cc && digits.charAt(0) === '1');
+
+  if (nanp) {
+    var national = digits;
+    if (national.length === 11 && national.charAt(0) === '1') national = national.slice(1);
+    if (national.length < 10) return result(false, null, 'too-short');
+    if (national.length > 10) return result(false, null, 'too-long');
+    var area = national.slice(0, 3);
+    if (area.charAt(0) === '0' || area.charAt(0) === '1') return result(false, null, 'area-code');
+    return result(true, '+1' + national);
   }
 
+  if (typeof strict === 'function') {
+    var e164 = strict(v);
+    return e164 ? result(true, e164) : result(false, null, 'number');
+  }
+  if (!cc || !cfg || !cfg.table) return result(false, null, 'country-code');
+  var range = cfg.table[cc];
+  var nat = digits.slice(cc.length);
+  if (nat.length > range[1] && nat.charAt(0) === '0') nat = nat.slice(1);
+  if (nat.length < range[0] || nat.length > range[1]) return result(false, null, 'number');
+  return result(true, '+' + cc + nat);
+}
+/*__PHONE_RULE_END__*/
+  function phoneOk(raw) {
+    return normalizePhone(raw, PHONE_CFG).ok;
+  }
   /* ---------- validation ---------- */
   var R = {
     service: function () { return E.service.value ? '' : 'Choose what you need help with.'; },
@@ -1914,55 +1965,13 @@ var BIZ = {
   }
   form.addEventListener('input', function (e) {
     if (e.target === E.zip) E.zip.value = E.zip.value.replace(/\D/g, '');       /* ZIP accepts digits only */
-    if (e.target === E.phone) E.phone.value = sanitizePhone(E.phone.value);
+    if (e.target === E.phone) E.phone.value = sanitizePhone(E.phone.value, PHONE_CFG);
     var f = e.target.closest('[data-f]'); if (f && f.querySelector('.err').textContent) reflow(function () { check(f.dataset.f); }, 260);
   });
-  E.phone.addEventListener('paste', function () { setTimeout(function () { E.phone.value = sanitizePhone(E.phone.value); }, 0); });
-  function sanitizePhone(raw) {
-    var v = ascii(raw).replace(/[^+()\s.\-\d]/g, '');
-    if (v.indexOf('00') === 0) v = '+' + v.slice(2);   /* "00" is the international prefix: treat as "+" */
-    var plus = v.indexOf('+') === 0;
-    var rest = v.replace(/\+/g, '');
-    var digits = 0, out = '', soFar = '';
-    for (var i = 0; i < rest.length; i++) {
-      var ch = rest[i];
-      if (ch >= '0' && ch <= '9') {
-        var cap = 15;
-        if (plus) {
-          var cc = matchCc(soFar + ch);
-          if (cc) {
-            cap = cc.length + PHONE_CC[cc][1];
-            /* One trunk "0" as the first national digit may exceed the cap by
-               one (e.g. "+44 (0)…"); it is removed again on submit (see
-               collect), so the last meaningful digit is never dropped. */
-            if (soFar.length > cc.length && soFar.charAt(cc.length) === '0') cap += 1;
-          }
-        } else if (PHONE_CC && PHONE_CC[PHONE_DEFAULT_CC]) {
-          cap = PHONE_CC[PHONE_DEFAULT_CC][1];
-          if ((soFar + ch).indexOf(PHONE_DEFAULT_CC) === 0) cap = PHONE_DEFAULT_CC.length + PHONE_CC[PHONE_DEFAULT_CC][1];
-        }
-        if (digits >= cap) break;
-        digits++; soFar += ch;
-      }
-      out += ch;
-    }
-    return (plus ? '+' : '') + out;
-  }
-  /* The submitted phone: "00" becomes "+", and a trunk "0" after the calling
-     code is removed — but only when it pushes the national part past the max
-     (Italy +39 keeps its zero, which is part of the number). */
+  E.phone.addEventListener('paste', function () { setTimeout(function () { E.phone.value = sanitizePhone(E.phone.value, PHONE_CFG); }, 0); });
   function phoneSubmit(raw) {
-    var v = ascii(raw).trim();
-    if (v.indexOf('00') === 0) v = '+' + v.slice(2);
-    if (v.charAt(0) === '+' && PHONE_CC) {
-      var digits = v.replace(/\D/g, '');
-      var cc = matchCc(digits);
-      if (cc) {
-        var nat = digits.slice(cc.length);
-        if (nat.charAt(0) === '0' && nat.length > PHONE_CC[cc][1]) return '+' + cc + nat.slice(1);
-      }
-    }
-    return v;
+    var n = normalizePhone(raw, PHONE_CFG);
+    return n.ok ? n.value : sanitizePhone(raw, PHONE_CFG).trim();
   }
   E.phone.addEventListener('blur', function () { E.phone.value = ascii(E.phone.value).trim().replace(/\s+/g, ' '); });   /* tidy only: never reformat a number */
   function shake(el) { if (canAnimate() && el.animate) el.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(-3px)' }, { transform: 'none' }], { duration: 320, easing: 'ease-out' }); }
