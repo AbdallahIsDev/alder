@@ -84,6 +84,11 @@ no `.env` (`tests/dev-root.mjs`).
 - The demo client's only production host is `alder-roofing.vercel.app` in both
   `domain` and `vercelProdHost`. Canonical, OG, sitemap, robots and the fail-closed
   DEV gate all use that host. Real clients bring their own domains later.
+- Non-NANP numbers keep a deliberate boundary: the browser uses the baked
+  calling-code length table, the server uses libphonenumber-js/max and is the
+  final authority; a refusal shows as the inline phone-field error. US shapes
+  are byte-identical on both sides. Full cross-country equality would need
+  ~64 KB of type patterns shipped to the page (probe in `_debug/probe-pattern-table.mjs`).
 - Phone normalisation is ONE rule in `lib/phone.js`, copied into `index.html`
   and checked byte-for-byte by test PH6. NANP shapes (10 digits, or 11 starting
   with 1) store as `+1XXXXXXXXXX`, including 555 numbers; fewer than 10, more
@@ -475,6 +480,7 @@ the modal's thank-you steps.
 | 2026-11-27 | Phone root cause fixed on `final-verify`: the browser and the API now call one rule (`lib/phone.js`) before validation. The strict libphonenumber-js check rejected all 555/NANP shapes and did not read Arabic-Indic digits. PH1–PH6 (DB-free) and P24/P25 (TEST API) pin ten accepted shapes, six refusals and one stored value `+15551234567`. |
 | 2026-11-27 | Domain cleanup: `clients/alder.json` uses `https://alder-roofing.vercel.app` for both `domain` and `vercelProdHost`; generated canonical/OG/robots/sitemap and `data-prod-host` follow. Tests and README updated; C17 pins the only real host. C1 build baselines moved deliberately (HTML d0e12fd3→62efb2a7, robots dcd93cf0→9a24e9a8, sitemap f90e45bd→2a79589d; manifest unchanged). |
 | 2026-11-27 | `final-verify` branch: full localhost/TEST E2E in `_debug/e2e-final.md`. 44 suites / 633 assertions green, `npm run build` exit 0, review diff `_debug/patches/final-verify-review.diff`. Five fix-and-retest rounds: a mis-ranged canary fixture chat, a transient B6h, and a load-sensitive B5d assertion were fixed in the test harness only. No production data touched. PR opened, not merged. |
+| 2026-11-27 | Final review fixes: `tests/phone.test.mjs` registered in `DEFAULT_SUITES` with N3 pinning it; `docs/EMAIL_SYSTEM.md` phone section rewritten for the shared rule; P24/P25 wording corrected. Reviewer's non-NANP finding accepted as a recorded ruling, not a code change. Free disk fell below the 1 GB suite floor; generated `_debug/e2e-build`, `_debug/e2e-dev-root` and `dist` scratch were deleted (no user work). Final: 45 suites / 634 assertions green. |
 
 ---
 

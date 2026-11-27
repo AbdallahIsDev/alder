@@ -39,6 +39,13 @@ const missing = files.filter((f) => !fs.existsSync(path.join(ROOT, f)));
 line(missing.length === 0, 'N2', 'every listed suite file exists',
   missing.length ? `missing: ${missing.join(',')}` : `${files.length} files`);
 
+/* N3: the parity guard for the shared phone rule must run in a normal full
+   run, not only when someone names the file by hand. Without this, an edit to
+   lib/phone.js or the inline copy can break the browser/API agreement while
+   `node tests/run.mjs` stays green. */
+line(files.includes('tests/phone.test.mjs'), 'N3', 'the shared phone rule suite is registered',
+  files.includes('tests/phone.test.mjs') ? 'registered' : 'MISSING');
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);

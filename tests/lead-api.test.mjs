@@ -1042,7 +1042,8 @@ const typeSeqOf = (api) => (s) => { let v = ''; for (const ch of s) v = api.sani
     err || `alerts=${alerts} generic=${generic} groups=${groups.length} unlinked=${unlinked.join(',') || 'none'} write=${writesRight} submit=${submitUsesHelper} ${detail}`);
 }
 
-/* ---------- P24/P25: the owner's reported shapes, through the real API ---------- */
+/* ---------- P24/P25: the owner's shapes through the real handler (in-process,
+   TEST DB). The live HTTP path is covered by _debug/e2e-phone-notify.mjs. ---------- */
 {
   const forms = [
     '(555) 123-4567', '555-123-4567', '555.123.4567', '5551234567',
