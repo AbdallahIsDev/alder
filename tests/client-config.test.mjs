@@ -56,10 +56,10 @@ const OUT = path.join(ROOT, '_debug', 'client-build');
    Before 2026-11-26 this assertion pinned the origin/main build 193536b8…;
    after it pins this branch's build. Cost: an accidental HTML edit still fails
    until the baseline is moved deliberately. */
-const BASELINE = 'd0e12fd36e75688080212489b0444c8f83496dd3b0a61d4a2597b3bb5a34214f';
+const BASELINE = '62efb2a7371d9f93833b3a114f6bdda4f31657f02db60c7ac71e21e74a4d9e32';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
-const BASELINE_ROBOTS = 'dcd93cf0545e1bad61f0218310823424565419e811ba50b74a2e7f7642ce7053';
-const BASELINE_SITEMAP = 'f90e45bdfa569c01cc2c7fe584831cd9e03b212fbac43254454968bcc16c27e8';
+const BASELINE_ROBOTS = '9a24e9a883cd788ab55016368f3afe111de0bc812a2ab16b2c96b1c80a2efdaf';
+const BASELINE_SITEMAP = '2a79589d7992a9780b47c810763ef32c364aae607dc6f0c393f97c7ed63bc244';
 
 let total = 0;
 let failed = 0;
@@ -105,6 +105,29 @@ try {
       `name=${JSON.stringify(brand.name)}`);
   }
 
+  /* C17: the demo client's only production host is the deployment alias.
+     Canonical, OG, data-prod-host, robots and sitemap must all use it; a host
+     that does not resolve must appear nowhere in a generated file. */
+  {
+    const cfg = JSON.parse(fs.readFileSync(path.join(ROOT, 'clients', 'alder.json'), 'utf8'));
+    const host = 'alder-roofing.vercel.app';
+    const out = fs.readFileSync(outPath('alder'), 'utf8');
+    const robots = fs.readFileSync(path.join(OUT, 'alder', 'robots.txt'), 'utf8');
+    const map = fs.readFileSync(path.join(OUT, 'alder', 'sitemap.xml'), 'utf8');
+    const files = [out, robots, map];
+    const expected = [
+      'rel="canonical" href="https://' + host + '/"',
+      'data-prod-host="' + host + '"',
+      'data-prod-vercel-host="' + host + '"',
+    ];
+    const stale = ['alderroof.com', 'www.alderroof.com'].filter((v) => files.some((f) => f.includes(v)));
+    const ok = cfg.domain === 'https://' + host && cfg.vercelProdHost === host
+      && expected.every((v) => out.includes(v)) && robots.includes(host) && map.includes(host)
+      && stale.length === 0;
+    line(ok, 'C17', 'demo client generates only the real Vercel host',
+      `cfg=${cfg.domain} expected=${expected.filter((v) => out.includes(v)).length}/${expected.length} stale=${stale.join('|') || 'none'}`);
+  }
+
   /* C2 — and C12/C13 ride along with the same build. */
   const brandBefore = sha(path.join(ROOT, 'lib', 'brand.generated.json'));
   const r2 = build(['--client', 'example', '--out', outPath('example')]);
@@ -121,7 +144,7 @@ try {
     const dir2 = path.join(OUT, 'example');
     const robots = fs.readFileSync(path.join(dir2, 'robots.txt'), 'utf8');
     const map = fs.readFileSync(path.join(dir2, 'sitemap.xml'), 'utf8');
-    const bad = ['alderroof.com', 'Alder'].filter((v) => robots.includes(v) || map.includes(v));
+    const bad = ['alder-roofing.vercel.app', 'Alder'].filter((v) => robots.includes(v) || map.includes(v));
     line(bad.length === 0 && robots.includes('northline.example') && map.includes('northline.example'),
       'C12', 'robots and sitemap carry the second client address', `leaked=${bad.join('|') || 'none'}`);
   }

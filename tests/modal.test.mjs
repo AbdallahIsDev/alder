@@ -506,7 +506,7 @@ try {
   {
     const { VirtualConsole } = await import('jsdom');
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-    const gateHtml = html.replace('{{prodHost}}', 'www.alderroof.com')
+    const gateHtml = html.replace('{{prodHost}}', 'alder-roofing.vercel.app')
       .replace('{{prodVercelHost}}', 'alder-roofing.vercel.app');
     const boot = async (url) => {
       const dom = new JSDOM(gateHtml, {
@@ -538,7 +538,7 @@ try {
   {
     const { VirtualConsole } = await import('jsdom');
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-    const gateHtml = html.replace('{{prodHost}}', 'www.alderroof.com')
+    const gateHtml = html.replace('{{prodHost}}', 'alder-roofing.vercel.app')
       .replace('{{prodVercelHost}}', 'alder-roofing.vercel.app');
     const boot = async (url) => {
       const dom = new JSDOM(gateHtml, {
@@ -583,9 +583,9 @@ try {
       dom.window.close();
       return noDev;
     };
-    const good = html.replace('{{prodHost}}', 'www.alderroof.com').replace('{{prodVercelHost}}', 'alder-roofing.vercel.app');
-    const emptyHost = good.replace('data-prod-host="www.alderroof.com"', 'data-prod-host=""');
-    const placeholderHost = good.replace('data-prod-host="www.alderroof.com"', 'data-prod-host="{{prodHost}}"');
+    const good = html.replace('{{prodHost}}', 'alder-roofing.vercel.app').replace('{{prodVercelHost}}', 'alder-roofing.vercel.app');
+    const emptyHost = good.replace('data-prod-host="alder-roofing.vercel.app"', 'data-prod-host=""');
+    const placeholderHost = good.replace('data-prod-host="alder-roofing.vercel.app"', 'data-prod-host="{{prodHost}}"');
     const emptyAlias = good.replace('data-prod-vercel-host="alder-roofing.vercel.app"', 'data-prod-vercel-host=""');
     const placeholderAlias = good.replace('data-prod-vercel-host="alder-roofing.vercel.app"', 'data-prod-vercel-host="{{prodVercelHost}}"');
     const denied = await Promise.all([emptyHost, placeholderHost, emptyAlias, placeholderAlias].map(boot));

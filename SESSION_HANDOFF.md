@@ -81,6 +81,9 @@ no `.env` (`tests/dev-root.mjs`).
   fallback). Operator text never reaches an owner chat.
 - Alerts are best-effort. A guaranteed outbox is a future implementation, not a
   current promise.
+- The demo client's only production host is `alder-roofing.vercel.app` in both
+  `domain` and `vercelProdHost`. Canonical, OG, sitemap, robots and the fail-closed
+  DEV gate all use that host. Real clients bring their own domains later.
 - Phone normalisation is ONE rule in `lib/phone.js`, copied into `index.html`
   and checked byte-for-byte by test PH6. NANP shapes (10 digits, or 11 starting
   with 1) store as `+1XXXXXXXXXX`, including 555 numbers; fewer than 10, more
@@ -467,9 +470,10 @@ the modal's thank-you steps.
 | 2026-11-26 | Hardening phase 5: production host is a `{{prodHost}}` build token instead of a hardcoded Alder domain; build baseline and OP61 copy updated; C35 made deterministic with DB-clock feedback. `npm run build` exit 0 with no leftover `{{`. |
 | 2026-11-27 | Pre-launch verify: production migration 0007 applied; PR #39 description added. Phase 3 fixes — delayed Extend Confirm accepted with its original 30-day end, held replay stays held, fresh status read logs a code, build bakes both production hosts, token JSON uses `createRequire`, Vercel production alias is denied by the DEV gate. |
 | 2026-11-27 | Phase 4 e2e on localhost + TEST: 46 scenarios in `_debug/e2e-report.md` (30 PASS, 14 suite-covered, 1 production DEV-gate exposure found and fixed, 1 real-phone check not run). Production smoke lead created and deleted; 0007 before/after counts unchanged (2 businesses, 8 leads). |
-| 2026-11-27 | Production smoke after PR #40: Vercel alias served merged code, DEV panel hidden with `?dev=1`/`?debug=1`, smoke lead stored with four events and deleted. `www.alderroof.com` is unreachable from this machine; Vercel dashboard is login-gated. |
+| 2026-11-27 | Production smoke after PR #40: Vercel alias served merged code, DEV panel hidden with `?dev=1`/`?debug=1`, smoke lead stored with four events and deleted. The old custom domain never existed and was removed from the demo client in FV2; Vercel dashboard is login-gated. |
 | 2026-11-27 | Follow-ups branch: DEV gate fails closed on missing/placeholder production hosts and build refuses a client without `vercelProdHost`; Extend Confirm tokens expire after 10 minutes with OB32/BL9e; `vercel.json` includes both generated JSON files for all functions via the valid single-string glob `lib/*.generated.json`. |
 | 2026-11-27 | Phone root cause fixed on `final-verify`: the browser and the API now call one rule (`lib/phone.js`) before validation. The strict libphonenumber-js check rejected all 555/NANP shapes and did not read Arabic-Indic digits. PH1–PH6 (DB-free) and P24/P25 (TEST API) pin ten accepted shapes, six refusals and one stored value `+15551234567`. |
+| 2026-11-27 | Domain cleanup: `clients/alder.json` uses `https://alder-roofing.vercel.app` for both `domain` and `vercelProdHost`; generated canonical/OG/robots/sitemap and `data-prod-host` follow. Tests and README updated; C17 pins the only real host. C1 build baselines moved deliberately (HTML d0e12fd3→62efb2a7, robots dcd93cf0→9a24e9a8, sitemap f90e45bd→2a79589d; manifest unchanged). |
 
 ---
 
