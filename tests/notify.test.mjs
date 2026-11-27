@@ -587,7 +587,11 @@ try {
     && replayOwner[0].raw === firstOwnerAttempts[0].raw
     && lastEvents.some((e) => e.kind === 'email_owner_sent'),
     'B6h', 'delivered Telegram + missing email: replay retries email only',
-    `ownerFirst=${firstOwnerAttempts.length} ownerReplay=${replayOwner.length} tgReplay=${replayTg.length}`);
+    `ownerFirst=${firstOwnerAttempts.length} ownerReplay=${replayOwner.length} tgReplay=${replayTg.length}`
+    + ` tgSent=${firstEvents.some((e) => e.kind === 'tg_sent')} mailFail=${firstEvents.some((e) => e.kind === 'email_owner_failed')}`
+    + ` sameKey=${replayOwner[0] && firstOwnerAttempts[0] && replayOwner[0].headers['idempotency-key'] === firstOwnerAttempts[0].headers['idempotency-key']}`
+    + ` sameRaw=${replayOwner[0] && firstOwnerAttempts[0] && replayOwner[0].raw === firstOwnerAttempts[0].raw}`
+    + ` sent=${lastEvents.some((e) => e.kind === 'email_owner_sent')}`);
 } catch (e) { line(false, 'B6h', 'email-only replay after Telegram delivery', e.message); } finally {
   await control(TG, { mode: 'ok' }); await control(RS, { mode: 'ok' });
 }
@@ -965,7 +969,10 @@ try {
   await bindFan();
   process.env.NOTIFY_DEADLINE_MS = '150';
   const hangChat = String(FIXTURE_CHATS.notifyFan2);
-  await control(TG, { mode: 'ok', hangChat, hangMs: 2500 });
+  // The hang must outlast the whole in-process round, including its Supabase
+  // REST trip. Under load that trip alone passed 2.7 s once, so a 2.5 s hang
+  // made the wall-clock guard flaky even though the 150 ms deadline fired.
+  await control(TG, { mode: 'ok', hangChat, hangMs: 6000 });
   await control(RS, { mode: 'ok' });
   await reset(TG); await reset(RS);
   const { res, key, ms } = await post({});
@@ -975,12 +982,15 @@ try {
   const reqs = (await requests(TG)).filter((r) => r.path.includes('/sendMessage'));
   const hangTries = reqs.filter((r) => String(r.body.chat_id) === hangChat).length;
   await control(TG, { mode: 'ok', hangChat: null, failChat: null });
-  // abandoned=1 is itself the proof the deadline fired: this phone's own send
-  // timeout is 200 ms, so only a round that stopped at 150 ms can abandon it.
-  line(res.code === 200 && ms < 2500 && reqs.length === FAN.length && hangTries === 1
-    && !!f && f.meta.status === 'timeout' && f.meta.abandoned === 1,
+  // abandoned >= 1 is the proof the deadline fired: this phone's own send
+  // timeout is 200 ms, so only a round that stopped at 150 ms can abandon
+  // anything. Before FV3 this asserted === 1; under load the 150 ms deadline
+  // can also catch fast sends still in flight (observed abandoned=5). The
+  // strong proof stays: five attempts, one try at the hanging phone, no retry.
+  line(res.code === 200 && ms < 6000 && reqs.length === FAN.length && hangTries === 1
+    && !!f && f.meta.status === 'timeout' && f.meta.abandoned >= 1,
     'B5d', 'deadline: hanging phone abandoned after one attempt',
-    `ms=${ms} reqs=${reqs.length} hang=${hangTries} meta=${JSON.stringify(f && f.meta)}`);
+    `ms=${ms} reqs=${reqs.length} hang=${hangTries} abandoned=${f && f.meta.abandoned} meta=${JSON.stringify(f && f.meta)}`);
 } catch (e) { line(false, 'B5d', 'notify deadline', e.message); } finally { await unbindFan();
   if (savedDeadline === undefined) delete process.env.NOTIFY_DEADLINE_MS; else process.env.NOTIFY_DEADLINE_MS = savedDeadline;
 }

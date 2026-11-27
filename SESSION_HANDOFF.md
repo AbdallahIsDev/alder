@@ -11,7 +11,7 @@ is gone on purpose, except for a short log at the end.
 > change it in the same task, not later. `AGENTS.md` carries the same rule for any
 > agent working in this repo. Never write a secret value in this file; names only.
 
-**Last updated:** 2026-11-26.
+**Last updated:** 2026-11-27.
 
 ---
 
@@ -474,6 +474,7 @@ the modal's thank-you steps.
 | 2026-11-27 | Follow-ups branch: DEV gate fails closed on missing/placeholder production hosts and build refuses a client without `vercelProdHost`; Extend Confirm tokens expire after 10 minutes with OB32/BL9e; `vercel.json` includes both generated JSON files for all functions via the valid single-string glob `lib/*.generated.json`. |
 | 2026-11-27 | Phone root cause fixed on `final-verify`: the browser and the API now call one rule (`lib/phone.js`) before validation. The strict libphonenumber-js check rejected all 555/NANP shapes and did not read Arabic-Indic digits. PH1–PH6 (DB-free) and P24/P25 (TEST API) pin ten accepted shapes, six refusals and one stored value `+15551234567`. |
 | 2026-11-27 | Domain cleanup: `clients/alder.json` uses `https://alder-roofing.vercel.app` for both `domain` and `vercelProdHost`; generated canonical/OG/robots/sitemap and `data-prod-host` follow. Tests and README updated; C17 pins the only real host. C1 build baselines moved deliberately (HTML d0e12fd3→62efb2a7, robots dcd93cf0→9a24e9a8, sitemap f90e45bd→2a79589d; manifest unchanged). |
+| 2026-11-27 | `final-verify` branch: full localhost/TEST E2E in `_debug/e2e-final.md`. 44 suites / 633 assertions green, `npm run build` exit 0, review diff `_debug/patches/final-verify-review.diff`. Five fix-and-retest rounds: a mis-ranged canary fixture chat, a transient B6h, and a load-sensitive B5d assertion were fixed in the test harness only. No production data touched. PR opened, not merged. |
 
 ---
 
