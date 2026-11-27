@@ -50,7 +50,7 @@ import {
 } from '../lib/content.js';
 import { suspendBusiness, terminateBusiness, reactivateBusiness, heldLeadCount, suspendedKeyboard, sendFailed } from '../lib/service-status.js';
 import { suspendedReply, suspendedToast, connectRefused, statusText } from '../lib/lifecycle-text.js';
-import { nextPaidUntil, decodePaidUntil, extendTargetAllowed } from '../lib/billing.js';
+import { nextPaidUntil, decodeExtendToken, extendTargetAllowed, extendTokenExpired } from '../lib/billing.js';
 import { applyPayment } from '../lib/billing-ops.js';
 
 /* ---------- timing ----------
@@ -1386,8 +1386,9 @@ async function handleOperatorExtend({ chatId, messageId, businessId, page, answe
     return;
   }
 
-  const target = decodePaidUntil(token);
-  if (!extendTargetAllowed(target, business.paid_until, now)) {
+  const parsed = decodeExtendToken(token);
+  const target = parsed && parsed.target;
+  if (!parsed || extendTokenExpired(parsed, now) || !extendTargetAllowed(target, business.paid_until, now)) {
     await sendBusinessDetail({ chatId, messageId, businessId: business.id, page, answer, toast: OPERATOR_SCREEN_EXPIRED });
     return;
   }
@@ -1729,7 +1730,7 @@ const CB_OP_LIST = /^(bl|bn):(\d{1,3})$/;
 // business bv, bw, bW, bu.
 const CB_OP_BUSINESS = /^(bd|bs|bS|br|bR|be|bi|bp|bP|bc|bv|bw|bW|bu|bt|bT|bx|bX):(\d{1,3}):([0-9a-f-]{36})$/;
 // bE: extend to exactly <until> (whole seconds, base 36; lib/billing.js).
-const CB_OP_EXTEND = /^bE:(\d{1,3}):([0-9a-f-]{36}):([0-9a-z]{1,8})$/;
+const CB_OP_EXTEND = /^bE:(\d{1,3}):([0-9a-f-]{36}):([0-9a-z]{1,8}\.[0-9a-z]{1,8})$/;
 const CB_OP_LEADS = /^bq:(\d{1,2}):(\d{1,3}):([0-9a-f-]{36})$/;
 const CB_OP_LEAD = /^bo:(\d{1,2}):(\d{1,3}):([A-Za-z0-9_-]{22})([A-Za-z0-9_-]{22})$/;
 /** The invite flow's callbacks: which step, and where Back leads. */

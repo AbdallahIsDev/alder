@@ -110,6 +110,7 @@ import { loadEnv } from './env.mjs';
 import { fakeRes } from './helpers.mjs';
 import * as C from '../lib/content.js';
 import * as LT from '../lib/lifecycle-text.js';
+import * as B from '../lib/billing.js';
 import { FIXTURE_CHATS } from './fixture-ids.mjs';
 
 loadEnv();
@@ -522,7 +523,8 @@ const backKb = (id, page) => [[{ text: 'Back', callback_data: `bd:${page}:${id}`
 /** "Dec 14" in UTC, computed here and not by the code under test. */
 const shortDate = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 /** The date a Confirm button carries: whole seconds, base 36. */
-const untilToken = (ms) => Math.floor(ms / 1000).toString(36);
+const untilToken = (ms) => B.encodeExtendToken(ms, Date.now());
+const oldToken = (ms) => Math.floor(ms / 1000).toString(36);
 const tokenMs = (token) => parseInt(token, 36) * 1000;
 const extendKb = (id, page, token) => [[{ text: 'Confirm', callback_data: `bE:${page}:${id}:${token}`, style: 'success' }, { text: 'Cancel', callback_data: `bd:${page}:${id}` }]];
 const bizRow = (id) => store.businesses.find((b) => b.id === id);
@@ -2231,11 +2233,11 @@ try {
     // button can never add more than one period, whatever it carries.)
     await tap(`bE:0:${BIZ_B}:${untilToken(paidAt + 30 * DAY + 1000)}`, 'one-second-over');
     await tap(`bE:0:${BIZ_B}:${untilToken(paidAt + 60 * DAY)}`, 'two-periods');
-    await tap(`bE:0:${BIZ_B}:zzzzzzzz`, 'far-future');
+    await tap(`bE:0:${BIZ_B}:${untilToken(paidAt + 31 * DAY)}`, 'far-future');
     // Not billed, and the button's date is already in the past, or far ahead.
     await tap(`bE:0:${biz(4)}:${untilToken(Date.now() - DAY)}`, 'past');
     await tap(`bE:0:${biz(4)}:${untilToken(Date.now() + 31 * DAY)}`, 'null-over');
-    await tap(`bE:0:${biz(4)}:0`, 'zero');
+    await tap(`bE:0:${biz(4)}:${B.encodeExtendToken(0, Date.now())}`, 'zero');
     // Exactly what one press reaches is accepted (the boundary of the rule).
     const exact = await run(cb(OP, `bE:0:${BIZ_B}:${untilToken(paidAt + 30 * DAY)}`));
     const exactOk = writes(exact.sb).length === 1 && Date.parse(bizRow(BIZ_B).paid_until) === paidAt + 30 * DAY;
@@ -2357,7 +2359,7 @@ try {
     const inline = toOperator.flatMap((x) => kbOf(x).flat());
     const EMOJI = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u{FE0F}\u{200D}\u{2190}-\u{21FF}]/u;
     const withEmoji = allTg.flatMap((x) => kbOf(x).flat()).filter((b) => EMOJI.test(String(b.text)));
-    const PATTERNS = [/^(bl|bn):\d{1,3}$/, /^(bd|bs|bS|br|bR|be|bv|bi|bp|bP|bc|bw|bW|bu|bx|bX):\d{1,3}:[0-9a-f-]{36}$/, /^bE:\d{1,3}:[0-9a-f-]{36}:[0-9a-z]{1,8}$/, /^bq:\d{1,2}:\d{1,3}:[0-9a-f-]{36}$/,
+    const PATTERNS = [/^(bl|bn):\d{1,3}$/, /^(bd|bs|bS|br|bR|be|bv|bi|bp|bP|bc|bw|bW|bu|bx|bX):\d{1,3}:[0-9a-f-]{36}$/, /^bE:\d{1,3}:[0-9a-f-]{36}:[0-9a-z]{1,8}\.[0-9a-z]{1,8}$/, /^bq:\d{1,2}:\d{1,3}:[0-9a-f-]{36}$/,
       /^bo:\d{1,2}:\d{1,3}:[A-Za-z0-9_-]{44}$/];
     const data = inline.map((b) => String(b.callback_data));
     const unshaped = data.filter((d) => Buffer.byteLength(d, 'utf8') > 64 || !PATTERNS.some((p) => p.test(d)));
@@ -2393,6 +2395,22 @@ try {
       && status.includes('Status: Terminated') && status.includes('No termination date was set.');
     line(ok, 'OB31', 'manual termination has no invented date; /status says so',
       `replyDate=${reply.includes('Terminated on')} statusNoDate=${status.includes('No termination date was set.')}`);
+  }
+
+  /* OB32: a Confirm minted more than ten minutes ago is expired. It answers
+     with the current screen and writes nothing; the operator must ask again. */
+  {
+    store = freshStore();
+    const before = snapshot();
+    const now = Date.now();
+    const target = B.nextPaidUntil(bizRow(BIZ_B).paid_until, now, B.EXTEND_DAYS);
+    const stale = B.encodeExtendToken(target, now - 11 * 60000);
+    const x = await run(cb(OP, `bE:0:${BIZ_B}:${stale}`));
+    const ok = same(x.answers, [EXPIRED]) && writes(x.sb).length === 0
+      && x.sends.length === 0 && x.mail.length === 0 && x.edits.length === 1
+      && snapshot() === before;
+    line(ok, 'OB32', 'an Extend Confirm older than 10 minutes is expired',
+      `toast=${same(x.answers, [EXPIRED])} writes=${writes(x.sb).length} unchanged=${snapshot() === before}`);
   }
 } catch (e) {
   line(false, 'OB0', 'operator-browser suite threw', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e));
