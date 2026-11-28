@@ -52,13 +52,13 @@ your service running.
 **Email** — subject: **Your payment is due soon** · heading: **Your payment is due soon**
 
 ```text
-Your payment is due on Dec 14 (4 days left).
+Your payment is due on Dec 14 (4 days left).
 
-Renewing before that date keeps your service running and your website taking requests.
+Renewing before that date keeps your service running and your website taking requests.
 
-Send /status to the Lead Alerts bot on Telegram at any time to see your dates.
+Send /status to the Lead Alerts bot on Telegram at any time to see your dates.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `overdue` — grace begins: the paid date has passed
@@ -81,13 +81,13 @@ suspended (5 days left).
 **Email** — subject: **Payment overdue** · heading: **Payment overdue**
 
 ```text
-Your payment was due on Dec 14 and has not arrived.
+Your payment was due on Dec 14 and has not arrived.
 
-Your service keeps working until Dec 19 (5 days left). After that it is suspended and your website pauses new requests.
+Your service keeps working until Dec 19 (5 days left). After that it is suspended and your website pauses new requests.
 
-Renewing now keeps everything running without a break.
+Renewing now keeps everything running without a break.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `final_warning` — grace, last day: one day before suspension
@@ -110,13 +110,13 @@ unless payment arrives.
 **Email** — subject: **Final notice: payment overdue** · heading: **Final notice: payment overdue**
 
 ```text
-This is the last reminder before your service is suspended.
+This is the last reminder before your service is suspended.
 
-The payment is still outstanding. The service is suspended on Dec 19 (1 day left) unless payment arrives.
+The payment is still outstanding. The service is suspended on Dec 19 (1 day left) unless payment arrives.
 
-Renewing takes a minute and keeps your website taking requests.
+Renewing takes a minute and keeps your website taking requests.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `suspension` — suspended for non-payment
@@ -144,13 +144,13 @@ Need help? [[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 **Email** — subject: **Your service has been suspended** · heading: **Your service has been suspended**
 
 ```text
-Your website is still taking requests. Each one is saved in full and will be waiting for you when the service is back; nothing is lost.
+Your website still saves every request. Each one is kept safely and will wait for you when service returns.
 
-The service is terminated on Dec 29 (10 days left) unless payment is received.
+The service is terminated on Dec 29 (10 days left) unless payment is received.
 
-Renewing restores the service and shows every request that came in.
+Renewing restores the service and shows every request that came in.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `termination_warning` — suspended: 5 days before termination
@@ -172,13 +172,13 @@ on Dec 29 (5 days left).
 **Email** — subject: **Your service will be terminated** · heading: **Your service will be terminated**
 
 ```text
-Your service is still suspended and the payment has not arrived.
+Your service is still suspended and the payment has not arrived.
 
-It will be terminated on Dec 29 (5 days left) unless payment arrives.
+It will be terminated on Dec 29 (5 days left) unless payment arrives.
 
-A terminated service stops accepting requests, and putting it back takes a new payment.
+A terminated service stops accepting requests, and putting it back takes a new payment.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `termination` — terminated
@@ -203,11 +203,11 @@ Need help? [[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 **Email** — subject: **Your service has been terminated** · heading: **Your service has been terminated**
 
 ```text
-Your website has stopped accepting requests. Everything you had is still stored: no lead, no phone and no setting was deleted.
+Your website has stopped accepting requests. Everything you had is still stored: no lead, no phone and no setting was deleted.
 
-A new payment restores the service and brings every saved request back.
+A new payment restores the service and brings every saved request back.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ## 2. Suspension and termination by hand
@@ -232,13 +232,9 @@ shown once the service is back.
 **Email** — subject: **Your service has been suspended**
 
 ```text
-Your website is still taking requests. Each one is saved in full and will be waiting for you as soon as the service is back; nothing is lost.
+Your website still saves every request. Each one is kept safely and will wait for you when service returns.
 
-There is no termination date: the service stays suspended until it is resolved.
-
-Contact support to resolve it.
-
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `termination` — manual
@@ -259,11 +255,11 @@ restore the service.
 **Email** — subject: **Your service has been terminated**
 
 ```text
-Your website has stopped accepting requests. Everything you had is still stored: no lead, no phone and no setting was deleted.
+Your website has stopped accepting requests. Everything you had is still stored: no lead, no phone and no setting was deleted.
 
-The service can be restored; contact support to arrange it.
+The service can be restored; contact support to arrange it.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ## 3. Back in service
@@ -283,11 +279,9 @@ Your service is active again.
 **Email** — subject: **Your service is active again**
 
 ```text
-Every alert and every lead email is working again.
+Your service is paid until Jan 18.
 
-Your service is paid until Jan 18.
-
-Your website is taking requests again.
+Your website is taking requests again.
 ```
 
 ### `reactivation` — Extend 30 days, 3 held leads (then the second message)
@@ -301,11 +295,9 @@ Your service is active again.
 **Email** — subject: **Your service is active again**
 
 ```text
-Every alert and every lead email is working again.
+Your service is paid until Jan 18.
 
-Your service is paid until Jan 18.
-
-Your website is taking requests again.
+Your website is taking requests again.
 ```
 
 ### `reactivation` — Reactivate, no held leads
@@ -319,9 +311,7 @@ Your service is active again.
 **Email** — subject: **Your service is active again**
 
 ```text
-Every alert and every lead email is working again.
-
-Your website is taking requests again.
+Your website is taking requests again.
 ```
 
 ### `reactivation` — Reactivate, 2 held leads (then the second message)
@@ -335,9 +325,7 @@ Your service is active again.
 **Email** — subject: **Your service is active again**
 
 ```text
-Every alert and every lead email is working again.
-
-Your website is taking requests again.
+Your website is taking requests again.
 ```
 
 ## 4. A new request while the service is suspended
@@ -383,11 +371,11 @@ detail and never a name.
 **Email** — subject: **New requests are waiting**
 
 ```text
-1 request came in through your website form while the service was suspended.
+1 request came in through your website form while the service was suspended.
 
-The details are hidden until the service is active again, and every one of them is saved in full.
+The details are hidden until the service is active again, and every one of them is saved in full.
 
-Renewing shows all of them.
+Renewing shows all of them.
 ```
 
 ### `held_summary` — four requests
@@ -395,11 +383,11 @@ Renewing shows all of them.
 **Email** — subject: **New requests are waiting**
 
 ```text
-4 requests came in through your website form while the service was suspended.
+4 requests came in through your website form while the service was suspended.
 
-The details are hidden until the service is active again, and every one of them is saved in full.
+The details are hidden until the service is active again, and every one of them is saved in full.
 
-Renewing shows all of them.
+Renewing shows all of them.
 ```
 
 ## 6. Every other message while the service is off
@@ -923,12 +911,12 @@ Extend 30 days restores it.
 ## 10. What the visitor reads
 
 Two answers are not "sent" and are not a failure: a suspended business saves
-the request and shows **Request saved** with the Call button; a terminated
-business shows a neutral page and accepts nothing. Neither promises a reply.
+the request and thanks the visitor by name; a terminated business shows a
+neutral page and accepts nothing. Neither promises a reply.
 
 ### Site — suspended business (request saved, then held)
 
-The panel's heading is **Request saved**; the summary of what the visitor typed is shown above these words.
+The no-JS page keeps these words. The modal thanks the visitor by name ("Thanks, Sam."), says **Your request is saved.**, then shows a notice box — "This business can't respond through this form right now. Please call them directly for the fastest help." — above their recap and the Call button.
 
 ```text
 Your request was saved, but this business can’t respond through this form right now. For the fastest help, please call them directly.

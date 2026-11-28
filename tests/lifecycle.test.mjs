@@ -417,25 +417,27 @@ try {
     const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     const esc = (t) => t.replace('\u2019', '\\u2019');
     const css = fs.readFileSync(path.join(ROOT, 'assets/css/styles.css'), 'utf8');
-    // MEANING CHANGE 2026-11-28: the held VISITOR pane is no longer a second
-    // copy of the API's HELD_MESSAGE. Its title is the short label and its body
-    // does not repeat the title. The API sentence (HELD_PAGE) is unchanged.
-    const HELD_TITLE = 'Request saved';
-    const HELD_PANE = "This business can't respond through this form right now. For the fastest help, please call them directly.";
-    const textsOk = html.includes(`title: '${HELD_TITLE}'`) && html.includes(`text: "${HELD_PANE}"`) && html.includes(`text: '${esc(GONE_PAGE)}'`);
+    // MEANING CHANGE 2026-11-28 (item 16): the held VISITOR panel thanks the
+    // visitor by name, says the request is saved, and puts the call-now advice
+    // in its own amber notice box above the recap. The API sentence
+    // (HELD_PAGE) — the no-JS form's answer — is unchanged.
+    const HELD_SUB = 'Your request is saved.';
+    const HELD_PANE = "This business can't respond through this form right now. Please call them directly for the fastest help.";
+    const textsOk = html.includes(`'${HELD_SUB}'`) && html.includes(`text: "${HELD_PANE}"`) && html.includes(`text: '${esc(GONE_PAGE)}'`);
     // Decided on the response, before the generic error panel can show.
     const branchOk = /out && out\.held === true \? 'held' : ''/.test(html)
       && /err && err\.body && err\.body\.unavailable === true\) \{ showSent\(data, false, 'unavailable'\); return; \}\s*showError\(err\)/.test(html);
-    // The panel: its own title and words, the SAME recap of what the visitor
-    // entered (a held request is still theirs), no "what happens next", no
-    // success mark, and the Call button stays. Only a duplicate hides its recap,
-    // because those edited values were never posted. The hidden attribute needs
-    // a display:none rule of its own where a display:flex rule would beat it.
+    // The panel: its own words, the SAME recap of what the visitor entered,
+    // an amber notice box above it, no "what happens next" and a warning badge
+    // instead of the success check. Only a duplicate hides its recap, because
+    // those edited values were never posted. The hidden attribute needs a
+    // display:none rule of its own where a display:flex rule would beat it.
     const hides = (sel) => new RegExp(sel.replace(/[.[\]]/g, '\\$&') + '\\s*\\{\\s*display:\\s*none\\s*\\}').test(css);
     const panelOk = /function showSent\(data, already, kind\)/.test(html) && /after\.hidden = !!notice/.test(html)
       && /recapBox\.hidden = !!already;/.test(html) && /if \(!already\) recap\(data\);/.test(html)
       && /done\.classList\.toggle\('est-plain', !!notice\)/.test(html)
-      && /\.est-done\.est-plain \.est-ok\s*\{\s*display:\s*none/.test(css)
+      && /warnBox\.hidden = !notice/.test(html)
+      && /\.est-done\[data-kind\] \.est-ok \.est-warn-icon\s*\{\s*display:\s*block/.test(css)
       && hides('.est-done .est-recap[hidden]') && hides('.est-done .est-after[hidden]')
       && /<section class="est-pane est-done"[\s\S]*?<button type="button" class="btn ghost" data-close[\s\S]*?<a class="btn phone" href="tel:\{\{tel\}\}"/.test(html);
     const promiseFree = ![HELD_PANE, GONE_PAGE].some((t) => /reply|within|soon|shortly|get back/i.test(t));

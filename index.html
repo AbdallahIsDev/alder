@@ -844,9 +844,10 @@
 
         <section class="est-pane est-done" hidden tabindex="-1" data-page-node-id="YOFKPlpXGGFuQIcy9lQ7Xx">
           <div class="est-done-top">
-            <span class="est-ok" aria-hidden="true" data-page-node-id="jyKcYGcN4ZzXFpEYLdzjSi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" data-page-node-id="i9gSY9oPZnVUlOJOPmKScE"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1" data-page-node-id="ichkaMk46N4VeIBt3HdJ7Q"/></svg></span>
+            <span class="est-ok" aria-hidden="true" data-page-node-id="jyKcYGcN4ZzXFpEYLdzjSi"><svg class="est-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" data-page-node-id="i9gSY9oPZnVUlOJOPmKScE"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1" data-page-node-id="ichkaMk46N4VeIBt3HdJ7Q"/></svg><svg class="est-warn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3.5 22 20H2L12 3.5Z"/><path d="M12 9.5v5"/><circle cx="12" cy="17.6" r="1" fill="currentColor" stroke="none"/></svg></span>
             <div class="est-head" data-page-node-id="2UNJsxAGGf5Bx3EHy0Gy1t"><h3 id="est-thanks" tabindex="-1" data-page-node-id="UVe3v1YdJJ7KiZ33pWlKNS">Thanks.</h3><p class="lead" data-page-node-id="fymQ8nLuu1F9SyBCCIXhmK">We got your request.</p></div>
           </div>
+          <div class="est-warn" hidden data-page-node-id="a1heldNoticeBox001"></div>
           <dl class="est-recap" data-page-node-id="Gxhnd3cASW1DG4a2DQO9kq"></dl>
           <div class="est-next-group">
             <div class="est-after" data-page-node-id="msbRnyFX6BxUndEDpwd0OW"><p class="label" data-page-node-id="FRb05Os7OPa6CX4SFUbV44">What happens next</p><ol class="est-steps" data-page-node-id="3Db21IUpO5xvQAJW3GHpdl"><li data-page-node-id="5XYNxPOX9ucAgERsH0W3Ni">We call to confirm the details.</li><li data-page-node-id="ENBQn4pBHkkTGxSNh8CvD6">We set up a free inspection.</li><li data-page-node-id="LUOSiAy9TSXZbWPxlHGnj4">You get a written estimate.</li></ol></div>
@@ -2218,10 +2219,11 @@ function normalizePhone(raw, cfg, strict) {
   }
   /* The two panels' words (the same sentences api/lead.js gives the no-JS form). Neither promises a reply. */
   var NOTICE = {
-    held: { label: 'Request saved', title: 'Request saved', text: "This business can't respond through this form right now. For the fastest help, please call them directly." },
-    unavailable: { label: 'Not available', title: 'This form is not available.', text: 'This business isn\u2019t accepting requests through this form right now. Please call them directly.' }
+    held: { label: 'Request saved', title: 'Request saved', lead: 'Your request is saved.', text: "This business can't respond through this form right now. Please call them directly for the fastest help." },
+    unavailable: { label: 'Not available', title: 'This form is not available.', lead: '', text: 'This business isn\u2019t accepting requests through this form right now. Please call them directly.' }
   };
   var doneLead = done.querySelector('.est-head .lead'), doneLeadDefault = doneLead ? doneLead.textContent : '';
+  var warnBox = done.querySelector('.est-warn');
   function labelOf(n) { var r = form.querySelector('input[name="' + n + '"]:checked'); return r ? r.closest('.opt').querySelector('b').textContent : ''; }
   function recap(data) {
     var rows = [['Service', labelOf('service')], ['Property', labelOf('home') + ' · ZIP ' + data.zip], ['Roof age', E.age.value], ['Start', labelOf('timing') + (data.claim ? ' · insurance claim' : '')], ['Phone', data.phone]], dl = done.querySelector('.est-recap');
@@ -2237,14 +2239,20 @@ function normalizePhone(raw, cfg, strict) {
     setBusy(false); state = 'sent';
     swap(done, 1, function () {
       var first = (data.name || '').split(/\s+/)[0];
-      done.querySelector('#est-thanks').textContent = notice ? notice.title : (already ? 'You already sent this request — we have it.' : (first ? 'Thanks, ' + first + '.' : 'Thanks.'));
+      // A held request is still theirs: thank them by name, say it is saved,
+      // and put the call-now advice in its own notice box below.
+      done.querySelector('#est-thanks').textContent = notice && notice.lead
+        ? (first ? 'Thanks, ' + first + '.' : 'Thanks.')
+        : notice ? notice.title : (already ? 'You already sent this request — we have it.' : (first ? 'Thanks, ' + first + '.' : 'Thanks.'));
       /* held / unavailable: no check mark, no "what happens next" and no reply
          promises. A held request is still the visitor's request, so the recap
          of what they entered stays; only a duplicate may be hidden (its values
          were never posted). */
       done.classList.toggle('est-plain', !!notice);
       if (notice) done.setAttribute('data-kind', kind); else done.removeAttribute('data-kind');
-      if (doneLead) doneLead.textContent = notice ? notice.text : doneLeadDefault;
+      if (doneLead) doneLead.textContent = notice ? notice.lead : doneLeadDefault;
+      warnBox.hidden = !notice;
+      if (notice) warnBox.textContent = notice.text;
       var after = done.querySelector('.est-after'); if (after) after.hidden = !!notice;
       var recapBox = done.querySelector('.est-recap');
       // An in-page duplicate may contain edited values that were never posted.

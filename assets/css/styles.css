@@ -2656,6 +2656,11 @@
       line-height: 1.1
     }
 
+    /* A visitor's whole name can be one very long token: let the heading wrap. */
+    .est-head h3 {
+      overflow-wrap: anywhere
+    }
+
     .est-done .lead {
       color: var(--mut);
       font-size: var(--fs)
@@ -3268,9 +3273,23 @@
       height: 26px
     }
 
-    /* held / unavailable: the request was not "sent", so no success mark */
-    .est-done.est-plain .est-ok {
+    /* Item 16: the held / unavailable answer keeps the same square badge.
+       A triangle with an exclamation replaces the check mark; nothing is
+       hidden, so the reveal animation and alignment stay identical. */
+    .est-ok .est-warn-icon {
       display: none
+    }
+
+    .est-done[data-kind] .est-ok .est-check {
+      display: none
+    }
+
+    .est-done[data-kind] .est-ok .est-warn-icon {
+      display: block
+    }
+
+    .est-done[data-kind] .est-ok {
+      background: #d99a00
     }
 
     /* The business has been terminated: one sentence and nothing else. The
@@ -3328,6 +3347,10 @@
       --i: 0
     }
 
+    .est-done>.est-warn {
+      --i: 1
+    }
+
     .est-done>.est-recap {
       --i: 1
     }
@@ -3366,6 +3389,23 @@
       border: 1px solid var(--line);
       background: rgb(255 255 255/.10);
       font-size: var(--fs)
+    }
+
+    /* Item 16: the held answer's own notice box, directly above the recap.
+       Same opacity pattern as that box — a 10% tint and an 18% edge — in
+       warning yellow instead of white. */
+    .est-warn {
+      width: 100%;
+      min-width: 0;
+      padding: 12px 16px;
+      border: 1px solid rgb(224 168 0/.18);
+      background: rgb(224 168 0/.10);
+      font-size: var(--fs);
+      line-height: 1.45
+    }
+
+    .est-warn[hidden] {
+      display: none
     }
 
     .est-recap div {
@@ -4743,6 +4783,7 @@
     .est-back,
     .est-restart,
     .est-ok,
+    .est-warn,
     .est-recap,
     .est-next-group,
     .est-after,

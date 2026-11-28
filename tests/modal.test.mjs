@@ -236,8 +236,12 @@ try {
   {
     const d = new JSDOM(html).window.document;
     const pane = d.querySelector('.est-done');
+    // MEANING CHANGE 2026-11-28 (item 16): a held answer inserts its amber
+    // notice box between the heading and the recap. It is hidden on the normal
+    // success screen, so the three reveal groups and their order stay as they
+    // were. The DOM now has four children, in this order.
     const kids = pane ? [...pane.children].map((c) => c.className) : [];
-    const order = same(kids, ['est-done-top', 'est-recap', 'est-next-group']);
+    const order = same(kids, ['est-done-top', 'est-warn', 'est-recap', 'est-next-group']);
     // group 1: the mark and the split heading, side by side
     const top = pane && pane.querySelector(':scope > .est-done-top');
     const topOk = !!top && !!top.querySelector('.est-ok') && top.querySelector('.est-head h3#est-thanks')?.textContent.trim().length > 0
@@ -728,11 +732,10 @@ try {
       `stale=${staleIgnored} empty=${emptyIgnored} live=${liveRestored} auto=${autoFocus}`);
   }
 
-  /* MD24: a request held while the business is suspended is still the
-     visitor's request. The success pane keeps the SAME recap (service,
-     property, roof age, start, phone), its title is the short label
-     "Request saved", and its body never repeats that title or promises a
-     reply. The Call button stays; no "what happens next" steps. */
+  /* MD24 (item 16): a held request still has the visitor's recap. The heading
+     thanks them by first name, the subtitle says the request is saved, and a
+     separate amber notice box above the recap tells them to call. No reply
+     promise; the Call button stays; no "what happens next" steps. */
   {
     const { VirtualConsole } = await import('jsdom');
     const vc = new VirtualConsole();
@@ -763,17 +766,20 @@ try {
     const done = d.querySelector('.est-done');
     const title = done.querySelector('#est-thanks').textContent.trim();
     const body = done.querySelector('.est-head .lead').textContent.trim();
+    const warn = done.querySelector('.est-warn');
     const recap = done.querySelector('.est-recap');
     const recapText = recap.textContent.replace(/\s+/g, ' ');
-    const BODY = "This business can't respond through this form right now. For the fastest help, please call them directly.";
-    const ok = title === 'Request saved' && body === BODY && !body.startsWith(title)
+    const BODY = "This business can't respond through this form right now. Please call them directly for the fastest help.";
+    const beforeRecap = !!warn && !!(warn.compareDocumentPosition(recap) & w.Node.DOCUMENT_POSITION_FOLLOWING);
+    const ok = title === 'Thanks, Sam.' && body === 'Your request is saved.' && !body.startsWith(title)
+      && beforeRecap && warn.hidden === false && warn.textContent.trim() === BODY
       && recap.hidden === false && recap.children.length === 5
       && [service, home + ' · ZIP 50265', '10 to 20 years', start, data.phone].every((v) => recapText.includes(v))
       && !!done.querySelector('.est-actions .btn.phone[href^="tel:"]')
       && !/we will reply|reply within|within one business day/i.test(done.textContent)
       && done.querySelector('.est-after').hidden === true;
-    line(ok, 'MD24', 'held answer: Request saved, same recap, no repeated sentence or reply promise',
-      `title=${JSON.stringify(title)} recap=${recap.hidden === false} rows=${recap.children.length} call=${!!done.querySelector('.est-actions .btn.phone')} promise=${/we will reply|reply within|within one business day/i.test(done.textContent)}`);
+    line(ok, 'MD24', 'held answer: thanks, saved subtitle, amber notice above the recap',
+      `title=${JSON.stringify(title)} sub=${JSON.stringify(body)} warn=${beforeRecap} recap=${recap.hidden === false} rows=${recap.children.length}`);
     w.close();
   }
 
@@ -793,7 +799,7 @@ try {
       '.menu-top', '.menu-acts', '.menu-foot', '.menu nav a::before', '.est-dialog', '.est-dots li',
       '.est-x', '.opt', '.opt::after', '.f input', '.f textarea', '.sel-btn', '.sel-list', '.sel-list li',
       '.sel-list li[aria-selected="true"]::after', '.chk', '.chk input', '.est-alert', '.est-back', '.est-restart',
-      '.est-ok', '.est-recap',
+      '.est-ok', '.est-warn', '.est-recap',
       '.est-next-group', '.est-after', '.est-steps li::before', '.est-actions', '.dbg button', '.dbg input.dbg-num'];
     const missing = required.filter(s => !list.includes(s));
     const keepOut = ['.av', '.est-next.busy::after', '.est', '.est-scrim', '.menu', '.pre'];
@@ -856,6 +862,21 @@ try {
     line(headingFocusable && helper && noPaneFocus && noRing, 'MD26',
       'success panel has no focus ring; focus lands on its heading',
       `heading=${headingFocusable} helper=${helper} noPane=${noPaneFocus} noRing=${noRing}`);
+
+    // MD27 (item 16): the amber warning badge and notice box, and a long name
+    // still wraps. The check mark is untouched on the normal success screen.
+    const badge = /class="est-ok"[\s\S]{0,500}est-check[\s\S]{0,300}est-warn-icon/.test(html);
+    const warning = /\.est-ok \.est-warn-icon\s*\{\s*display:\s*none/.test(css)
+      && /\.est-done\[data-kind\] \.est-ok \.est-check\s*\{\s*display:\s*none/.test(css)
+      && /\.est-done\[data-kind\] \.est-ok \.est-warn-icon\s*\{\s*display:\s*block/.test(css);
+    const warnCss = [...css.matchAll(/\.est-warn\s*\{([^}]*)\}/g)].map((m) => m[1]).join('\n');
+    const amber = /background:\s*rgb\(224 168 0\/\.10\)/.test(warnCss)
+      && /border:\s*1px solid rgb\(224 168 0\/\.18\)/.test(warnCss);
+    const wrapName = /#est-thanks\s*\{[\s\S]{0,160}overflow-wrap:\s*anywhere/.test(css)
+      || /\.est-head h3\s*\{[\s\S]{0,160}overflow-wrap:\s*anywhere/.test(css);
+    line(badge && warning && amber && wrapName, 'MD27',
+      'warning badge + amber notice above recap, long headings wrap',
+      `badge=${badge} warning=${warning} amber=${amber} wrap=${wrapName}`);
     line(base && dbl && quad && img12 && images && cta && ctaFill && totRing && singleRing, 'MD16',
       '12px base, 24px images/cards, 48px CTA, footer corners, rounded back-to-top, one ring',
       `base=${base} dbl=${dbl} quad=${quad} img12=${img12} images=${images} cta=${cta} fill=${ctaFill} tot=${totRing} ring=${singleRing}`);
