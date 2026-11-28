@@ -837,7 +837,7 @@
           <div class="f" data-f="notes" data-page-node-id="zSSixugw6ixwuOPfzKG8it"><label for="e-notes" data-page-node-id="tShePoY9XeOGZkulbhPsub">Anything we should know? (optional)</label><textarea id="e-notes" name="notes" maxlength="2000"></textarea><p class="err" data-page-node-id="notesErr"></p></div>
           <!-- honeypot: invisible to people (off-screen, skipped by Tab and screen readers); bots fill it. Must stay empty. -->
           <div class="hp" aria-hidden="true"><input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"></div>
-          <p class="fine" data-page-node-id="4pVebfApdTCCJJIw75qS4H">By sending this, you agree to be contacted about your estimate. We only use these details to contact you about your estimate. We reply within {{reply}}.</p>
+          <p class="fine" data-page-node-id="4pVebfApdTCCJJIw75qS4H">We only use your details to contact you about your estimate.</p>
         </section>
 
         <div class="est-alert" role="alert" tabindex="-1" hidden data-page-node-id="4nNkbTIXVLUPlb0DtUCHLE"><b data-page-node-id="Ow5PXozA2Onybgp27WUkMW">We couldn’t send your request.</b><span data-page-node-id="4ZpjlDJACLDG3SjTp7xLj8">Check your connection and try again. If it keeps failing, call us on <a href="tel:{{tel}}" data-page-node-id="DvEQdFrBB81SAESswHmpGH">{{phone}}</a>.</span></div>
@@ -2038,6 +2038,10 @@ function normalizePhone(raw, cfg, strict) {
      The honeypot field is never stored: a stored value would come back on the
      next open and make a real visitor look like a bot to the 2 s check. */
   var drafted = false, DRAFT_KEY = 'alder-est-draft-v1', DRAFT_FIELDS = ['service', 'zip', 'home', 'age', 'timing', 'name', 'phone', 'email', 'notes'];
+  /* A draft older than this is not restored: a visitor who came back the next
+     day is starting a new request, and old answers coming back by themselves
+     make a card look chosen when nobody chose it. */
+  var DRAFT_MAX_MS = 24 * 60 * 60 * 1000;
   /* Every storage call goes through one of these four: a browser that refuses
      storage (private mode, quota, cookies off) answers null, and the caller
      falls back to the behaviour it had before there was any storage. */
@@ -2063,14 +2067,48 @@ function normalizePhone(raw, cfg, strict) {
     if (touched) drafted = true;
     if (state !== 'edit' || !root.classList.contains('open')) return; /* closed, or a send in flight */
     if (!drafted) { draftStore('clear'); return; }                 /* nothing typed yet: nothing to restore */
-    draftStore('write', { step: step, touched: true, values: draftValues() });
+    draftStore('write', { step: step, touched: true, at: Date.now(), values: draftValues() });
   }
   function clearDraft() { draftStore('clear'); drafted = false; restart.hidden = true; }
-  /** Fill the form from this tab's draft and jump to the step it was left on. */
+  /** Has this person already answered something, right now, in this form? */
+  function formHasAnswers() {
+    if (E.claim.checked) return true;
+    return DRAFT_FIELDS.some(function (k) { var el = E[k]; return !!(el && el.value) && !isDefault(k, el.value); });
+  }
+  /* The values the form shows before anybody touches it: the roof-age select
+     arrives on "Not sure", so a draft that holds nothing but those is not an
+     answer and must not make a card look chosen. Captured once, at load, before
+     any restore can run. */
+  var INITIAL = draftValues();
+  function isDefault(k, value) { return Object.prototype.hasOwnProperty.call(INITIAL, k) && INITIAL[k] === value; }
+  /** Does the draft say anything the visitor could have chosen? A step of 0
+     with nothing chosen is not an answer, so it must not bring a card back. */
+  function draftHasAnswers(d) {
+    var v = (d && d.values) || {};
+    if (v.claim === true) return true;
+    return DRAFT_FIELDS.some(function (k) { return typeof v[k] === 'string' && v[k] !== '' && !isDefault(k, v[k]); });
+  }
+  /** Fill the form from this tab's draft and jump to the step it was left on.
+     Two guards, both about what the visitor sees at rest: a draft that says
+     nothing chosen is nothing to restore, and old answers never land on top of
+     answers already in the form — otherwise a card (or a radio) can look
+     selected by a session that ended yesterday. */
   function restoreDraft() {
     var d = draftStore('read');
     if (!d || d.touched !== true || !d.values || typeof d.values !== 'object') return false;
     var v = d.values;
+    if (!draftHasAnswers(d)) { draftStore('clear'); drafted = false; return false; }
+    if (d.at && Date.now() - Number(d.at) > DRAFT_MAX_MS) { draftStore('clear'); drafted = false; return false; }
+    /* The live form wins: if it holds answers and they are not the draft's,
+       those are this visit's and the draft is yesterday's. Restoring on top of
+       them is how a card came back chosen when nobody chose it. */
+    if (formHasAnswers()) {
+      var differs = DRAFT_FIELDS.some(function (k) {
+        var el = E[k];
+        return el && typeof v[k] === 'string' && (el.value || '') !== v[k];
+      }) || (E.claim.checked !== (v.claim === true));
+      if (differs) { draftStore('clear'); drafted = false; return false; }
+    }
     DRAFT_FIELDS.forEach(function (k) {
       var el = E[k];
       if (el && typeof v[k] === 'string') el.value = v[k];          /* a radio group takes .value too */
@@ -2292,8 +2330,12 @@ function normalizePhone(raw, cfg, strict) {
   }
 
   /* ---------- open / close: no layout shift (scrollbar-gutter), page scroll locked and inert, modal body scrolls, position restored ---------- */
-  function open(t) {
+  function open(t, auto) {
     if (root.classList.contains('open')) return;
+    /* Who opened it decides where the focus goes: a visitor who pressed the
+       button gets the first field, an automatic invitation gets the dialog. */
+    var byVisitor = auto !== true;
+    var restored = false;
     var resuming = state === 'sending';                        /* closed mid-send: the key is still in flight */
     if (!resuming && window.estimateReset) window.estimateReset(); /* one key per new submission */
     if (!resuming) openedAt = Date.now();                      /* elapsed is measured from here, not from page load */
@@ -2302,11 +2344,14 @@ function normalizePhone(raw, cfg, strict) {
     html.classList.add('est-open'); if (window.__lenis) window.__lenis.stop();
     behind().forEach(function (el) { el.setAttribute('inert', ''); });
     root.classList.add('open'); root.setAttribute('aria-hidden', 'false');
-    if (!resuming) restoreDraft();                             /* this tab's draft: same step, same answers */
+    if (!resuming) restored = restoreDraft();                  /* this tab's draft: same step, same answers */
     setTimeout(function () {
       if (resuming) setBusy(true);                             /* the old request still owns the screen */
       else if (state === 'sent') done.focus({ preventScroll: true });
-      else focusFirst();
+      /* An auto-opened dialog focuses ITSELF: nothing is answered yet, and a
+         focused card or radio would read as a choice. A dialog the visitor
+         opened on purpose goes straight to its first field. */
+      else if (byVisitor || restored) focusFirst();             /* a restored draft continues where it was */
       if (!dlg.contains(document.activeElement)) dlg.focus({ preventScroll: true });
     }, 60);
   }
@@ -2355,7 +2400,8 @@ function normalizePhone(raw, cfg, strict) {
     if (!autoDue || !invitationAllowed()) return;
     ssSet(AUTO.invitedKey, '1');
     var t = document.querySelector('[data-open-estimate]');
-    open(t);                                                          /* focus returns to it on close */
+    open(t, true);                                                    /* the invitation: the dialog takes the focus */
+                                                                      /* (the trigger is still remembered for close) */
   }
   /* The delay is a wait, not a deadline: a tab that is hidden when the delay
      ends opens the moment it comes back, if it is still allowed then. */
