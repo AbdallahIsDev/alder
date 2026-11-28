@@ -48,7 +48,7 @@ import {
   leadDetailKeyboard, persistentKeyboard, KEYBOARD_LABELS, BOT_DISCONNECTED,
   OWNER_KEYBOARD_LABELS, STAFF_KEYBOARD_LABELS, OPERATOR_KEYBOARD_LABELS,
 } from '../lib/content.js';
-import { suspendBusiness, terminateBusiness, reactivateBusiness, heldLeadCount, heldGroupOpen, suspendedKeyboard, sendFailed } from '../lib/service-status.js';
+import { suspendBusiness, terminateBusiness, reactivateBusiness, heldLeadCount, heldGroupCount, heldGroupOpen, suspendedKeyboard, sendFailed } from '../lib/service-status.js';
 import { suspendedReply, suspendedToast, connectRefused, statusText } from '../lib/lifecycle-text.js';
 import { nextPaidUntil, decodeExtendToken, extendTargetAllowed, extendTokenExpired } from '../lib/billing.js';
 import { applyPayment } from '../lib/billing-ops.js';
@@ -462,11 +462,11 @@ async function sendLeadsPage(chatId, businessId, page, messageId, answer = null)
   const hasOlder = leads.length > LEADS_PAGE && safePage < LEADS_PAGE_MAX;
   const shown = leads.slice(0, LEADS_PAGE);
   const empty = !shown.length;
-  // The heading must say the same number as the renewal notice: leads held in
-  // the CURRENT suspension, not every held row ever. It uses the same scoped
-  // helper as the notice, falls back to the rows on this page if the count
-  // cannot be read, and is only read when a held row is shown. Order, numbers,
-  // callbacks and held marks are untouched; only the display is grouped.
+  // Item A4: the heading counts the leads the GROUP shows — every held row
+  // released by a reactivation inside HELD_GROUP_DAYS, from ANY suspension
+  // cycle. Counting only the newest suspension made "1" sit above two rows.
+  // The count is read only when a held row is shown; it falls back to the rows
+  // on the page when unreadable. Order, numbers, callbacks and marks are intact.
   const heldRows = shown.filter((l) => l.held_at).length;
   let heldTotal = null;                                        // null = count unreadable
   let heldGroup = true;
@@ -475,11 +475,11 @@ async function sendLeadsPage(chatId, businessId, page, messageId, answer = null)
       countHeldLeads: dbApi.countHeldLeads,
       lastBusinessEventAt: dbApi.lastBusinessEventAt,
     };
-    const scoped = await heldLeadCount({ id: businessId }, io).catch(() => null);
-    heldTotal = scoped === null || scoped === undefined ? null : Math.max(0, scoped);
-    // HELD_GROUP_DAYS after the reactivation the group closes and the rows
-    // join the ordinary list in date order; the `held` line stays on each row.
+    // HELD_GROUP_DAYS after the latest reactivation the group closes and the
+    // rows join the ordinary list in date order; the `held` line stays.
     heldGroup = await heldGroupOpen({ id: businessId }, io).catch(() => true);
+    const total = await heldGroupCount({ id: businessId }, io, heldGroup).catch(() => null);
+    heldTotal = total === null || total === undefined ? null : Math.max(0, total);
   }
   const text = empty ? 'No requests yet.' : renderHeldLeadList(shown, Date.now(), heldTotal, { group: heldGroup });
   const markup = empty ? { reply_markup: { inline_keyboard: [] } } : leadListKeyboard(shown, safePage, hasOlder);
