@@ -48,10 +48,11 @@ import {
   leadDetailKeyboard, persistentKeyboard, KEYBOARD_LABELS, BOT_DISCONNECTED,
   OWNER_KEYBOARD_LABELS, STAFF_KEYBOARD_LABELS, OPERATOR_KEYBOARD_LABELS,
 } from '../lib/content.js';
-import { suspendBusiness, terminateBusiness, reactivateBusiness, heldLeadCount, suspendedKeyboard, sendFailed } from '../lib/service-status.js';
+import { suspendBusiness, terminateBusiness, reactivateBusiness, heldLeadCount, heldGroupOpen, suspendedKeyboard, sendFailed } from '../lib/service-status.js';
 import { suspendedReply, suspendedToast, connectRefused, statusText } from '../lib/lifecycle-text.js';
 import { nextPaidUntil, decodeExtendToken, extendTargetAllowed, extendTokenExpired } from '../lib/billing.js';
 import { applyPayment } from '../lib/billing-ops.js';
+import { sendHeldLeadsToPhones } from '../lib/held-leads.js';
 
 /* ---------- timing ----------
    Every database and Telegram call this file makes goes through a wrapper that
@@ -67,7 +68,7 @@ const {
   listBusinessChatsDetailed, getBusinessChat, removeBusinessChat,
   expireOtherBindCodes, expireBindCode, removeAllBusinessChats,
   getBusinessBySlug, setBusinessStatus, extendPaidUntil,
-  countHeldLeads, lastBusinessEventAt, addBusinessEvent,
+  countHeldLeads, lastBusinessEventAt, addBusinessEvent, listHeldLeads,
   listBusinessesPage, countChatsForBusinesses, getLeadTotals, countClientLeadsSince,
   listLeadsColumns, getLeadColumns,
 } = timedAll(dbApi, {
@@ -108,6 +109,7 @@ const {
   expireBindCode: 'db.invite_take_back',
   removeAllBusinessChats: 'db.chat_remove_all',
   countHeldLeads: 'db.held_lead_count',
+  listHeldLeads: 'db.held_lead_page',
   lastBusinessEventAt: 'db.business_event_last',
   addBusinessEvent: 'db.business_event_insert',
 });
@@ -137,6 +139,11 @@ const { isSuspendedStatus } = dbApi;
  *  started them. */
 const SERVICE_IO = {
   sendMessage: (...a) => sendMessage(...a),
+  // The SECOND message of a reactivation: the held leads themselves, in
+  // /leads' format (/leads' own builder, so the two cannot drift).
+  sendHeldLeads: ({ business, rows, now }) => sendHeldLeadsToPhones({ business, rows, now }, {
+    ...SERVICE_IO, listHeldLeads: (...a) => listHeldLeads(...a),
+  }),
   sendLifecycleEmail: (...a) => sendLifecycleEmail(...a),
   setBusinessStatus: (...a) => setBusinessStatus(...a),
   getBusinessById: (...a) => getBusinessById(...a),
@@ -462,14 +469,19 @@ async function sendLeadsPage(chatId, businessId, page, messageId, answer = null)
   // callbacks and held marks are untouched; only the display is grouped.
   const heldRows = shown.filter((l) => l.held_at).length;
   let heldTotal = null;                                        // null = count unreadable
+  let heldGroup = true;
   if (heldRows) {
-    const scoped = await heldLeadCount({ id: businessId }, {
+    const io = {
       countHeldLeads: dbApi.countHeldLeads,
       lastBusinessEventAt: dbApi.lastBusinessEventAt,
-    }).catch(() => null);
+    };
+    const scoped = await heldLeadCount({ id: businessId }, io).catch(() => null);
     heldTotal = scoped === null || scoped === undefined ? null : Math.max(0, scoped);
+    // HELD_GROUP_DAYS after the reactivation the group closes and the rows
+    // join the ordinary list in date order; the `held` line stays on each row.
+    heldGroup = await heldGroupOpen({ id: businessId }, io).catch(() => true);
   }
-  const text = empty ? 'No requests yet.' : renderHeldLeadList(shown, Date.now(), heldTotal);
+  const text = empty ? 'No requests yet.' : renderHeldLeadList(shown, Date.now(), heldTotal, { group: heldGroup });
   const markup = empty ? { reply_markup: { inline_keyboard: [] } } : leadListKeyboard(shown, safePage, hasOlder);
   if (messageId) {
     const [, edited] = await together([
