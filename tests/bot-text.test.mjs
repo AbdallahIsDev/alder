@@ -321,7 +321,10 @@ const samples = sampleTelegramTexts();
     && C.operatorAlreadyConnectedText({ business: biz, phones: 3 }) === 'Alder Roofing · Already connected · 3 phones'
     && C.operatorReplaceConfirmText({ business: biz, phones: 1 }) === 'Replace the phone of Alder Roofing? The 1 current phone stops receiving alerts and loses access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.'
     && C.operatorReplaceConfirmText({ business: biz, phones: 3 }) === 'Replace the phones of Alder Roofing? The 3 current phones stop receiving alerts and lose access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.'
-    && C.BOT_ACCESS_ENDED === 'Your access to lead alerts for this business was ended by support.'
+    // MEANING CHANGE 2026-11-28: the disconnected-phone notice used to name
+    // "support" as the actor; the house rule bans that, so it now says only
+    // that access ended. T22 bans the old wording everywhere.
+    && C.BOT_ACCESS_ENDED === 'Your access to lead alerts for this business has ended.'
     && C.OPERATOR_ALREADY_REPLACED === 'Already replaced.'
     && C.operatorInviteSuspendedText(biz) === 'Alder Roofing is suspended. Reactivate it first.'
     && C.operatorInviteFailedText({ business: biz, replace: true }) === 'Could not create an invite for Alder Roofing. Try again. No phone was removed.'
@@ -849,6 +852,37 @@ const samples = sampleTelegramTexts();
   }
   line(bad.length === 0, 'T21', 'no Telegram text ends on an orphan last line',
     `texts=${texts.length} orphans=${bad.slice(0, 6).join(' ') || 'none'}`);
+}
+
+/* T22: no owner-facing text blames a person or a team. The lifecycle house
+   rule says a manual suspension is neutral and a reactivation says only that
+   the service is back. This bans both variants from every sample string and
+   from every notice in both reasons and every /status state. */
+{
+  const P = Date.parse('2026-12-14T09:00:00Z');
+  const biz = (patch = {}) => ({
+    id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'active',
+    paid_until: '2026-12-14T09:00:00Z', billing_warning_stage: 0,
+    suspended_for_billing: false, ...patch,
+  });
+  const texts = samples.map(({ name, text }) => `${name}: ${text}`);
+  for (const type of ['renewal_reminder', 'overdue', 'final_warning', 'suspension',
+    'termination_warning', 'termination', 'reactivation', 'held_lead', 'held_summary']) {
+    for (const reason of ['billing', 'manual']) {
+      const n = ownerNotice(type, { business: biz(), now: P, reason, held: 2 });
+      texts.push(`notice:${type}:${reason}: ${JSON.stringify(n.telegram)} ${JSON.stringify(n.email)}`);
+    }
+  }
+  for (const status of ['paused', 'churned']) for (const reason of ['billing', 'manual']) {
+    texts.push(`reply:${status}:${reason}: ${suspendedReply({ business: biz({ status, suspended_for_billing: reason === 'billing' }), now: P }).text}`);
+  }
+  for (const [name, business] of [['paid', biz()], ['suspended', biz({ status: 'paused' })], ['terminated', biz({ status: 'churned' })], ['demo', biz({ status: 'demo', paid_until: null })]]) {
+    texts.push(`status:${name}: ${statusText({ business, now: P }).text}`);
+  }
+  const BANNED = /by support|Support has reactivated/i;
+  const hits = texts.filter((s) => BANNED.test(s)).map((s) => s.slice(0, 72));
+  line(hits.length === 0, 'T22', 'no owner-facing text says "by support" or credits reactivation',
+    `texts=${texts.length} hits=${hits.slice(0, 3).join(' | ') || 'none'}`);
 }
 
 console.log('');
