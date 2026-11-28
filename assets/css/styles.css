@@ -2953,6 +2953,16 @@
       outline: none
     }
 
+    /* A form control's focus is its one border turning primary. The keyboard
+       ring below stays on buttons and option cards, but must not draw a SECOND
+       outline around a field, textarea or dropdown. */
+    .f input:focus-visible,
+    .f textarea:focus-visible,
+    .sel-btn:focus-visible,
+    .opt :is(input, [type="radio"]):focus-visible {
+      outline: none
+    }
+
     .f ::placeholder {
       color: rgb(255 255 255/.55)
     }

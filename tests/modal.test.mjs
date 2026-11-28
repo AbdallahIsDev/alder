@@ -638,6 +638,10 @@ try {
     const accentCheck = /stroke='%23d93917'/.test(css) && !/stroke='%23f7f4ef'/.test(css);
     const pointer = /:where\(button, \[role="button"\]\):not\(:disabled\):not\(\[aria-disabled="true"\]\)\s*\{\s*cursor:\s*pointer/.test(css);
     const mouseNoRing = /\.f input:focus:not\(:focus-visible\),\s*\.f textarea:focus:not\(:focus-visible\),\s*\.sel-btn:focus:not\(:focus-visible\)/.test(css);
+    // The keyboard ring stays on buttons and option cards, but a form control
+    // shows focus only by turning its one border primary — no outer outline.
+    const noFieldOutline = /\.f input:focus-visible,\s*\.f textarea:focus-visible,\s*\.sel-btn:focus-visible,\s*\.opt :is\(input, \[type="radio"\]\):focus-visible\s*\{\s*outline:\s*none/.test(css)
+      && /\.est :focus-visible\s*\{\s*outline:\s*2px solid var\(--sel\)/.test(css);
     const consent = (html.match(/We only use your details to contact you about your estimate\./g) || []).length === 1
       && !/We only use your details to contact you|by support|Support has reactivated/.test(html.replace(/We only use your details to contact you about your estimate\./g, ''));
     const openFn = (() => { const a = html.indexOf('function open(t, auto)'), b = html.indexOf('function close()', a); return a > -1 && b > a ? html.slice(a, b) : ''; })();
@@ -645,9 +649,9 @@ try {
       && /if \(!dlg\.contains\(document\.activeElement\)\) dlg\.focus\(\{ preventScroll: true \}\)/.test(openFn);
     const inviteAuto = /open\(t, true\)/.test((() => { const a = html.indexOf('function invite()'), b = html.indexOf('/* The delay is a wait', a); return a > -1 && b > a ? html.slice(a, b) : ''; })())
       && /open\(a\)/.test(html);
-    line(noBar && accentCheck && pointer && mouseNoRing && consent && dialogFirst && inviteAuto, 'MD22',
-      'one border, accent check mark, pointer buttons, one consent sentence, auto-open focus',
-      `bar=${noBar} check=${accentCheck} ptr=${pointer} noRing=${mouseNoRing} consent=${consent} focus=${dialogFirst} auto=${inviteAuto}`);
+    line(noBar && accentCheck && pointer && mouseNoRing && noFieldOutline && consent && dialogFirst && inviteAuto, 'MD22',
+      'one border, accent check mark, pointer buttons, keyboard-only ring, auto-open focus',
+      `bar=${noBar} check=${accentCheck} ptr=${pointer} noRing=${mouseNoRing} fieldRing=${noFieldOutline} consent=${consent} focus=${dialogFirst} auto=${inviteAuto}`);
   }
 
   /* MD23: a draft is only restored when it can be a continuation: it holds a
