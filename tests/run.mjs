@@ -57,6 +57,8 @@ const DEFAULT_SUITES = [
   { file: 'tests/replay-policy.test.mjs', needsHttp: false },
   { file: 'tests/health.test.mjs', needsHttp: false },
   { file: 'tests/email-layout.test.mjs', needsHttp: false },
+  { file: 'tests/owner-email.test.mjs', needsHttp: false },
+  { file: 'tests/site-state.test.mjs', needsHttp: false },
   { file: 'tests/digest.test.mjs', needsHttp: false },
   { file: 'tests/recipients.test.mjs', needsHttp: false },
   { file: 'tests/lead-browser.test.mjs', needsHttp: false },

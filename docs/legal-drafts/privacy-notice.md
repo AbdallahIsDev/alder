@@ -43,6 +43,13 @@ Your request is still saved. The business may not see it until its service is
 active again, so calling the business is faster. In that case you get no
 confirmation email.
 
+## If the business's service has ended
+
+The form on this website is replaced by "This website is currently
+unavailable." It accepts nothing, so nothing new about you is stored. We do
+not use the form to check who you are, and nothing you typed before that
+moment is shown to anyone else.
+
 ## How long it is kept
 
 - As long as the business uses the service, unless the business or you ask

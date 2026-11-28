@@ -47,7 +47,14 @@ Run steps 27b to 27n of `docs/MANUAL_TESTING.md` with a phone you hold.
       reaches `OPERATOR_EMAIL`.
 - [ ] While suspended: `/status` answers, `/leads` shows nothing, a form
       submission is saved and the visitor is told to call.
-- [ ] While terminated: the form says it is not available and stores nothing.
+- [ ] While terminated: the estimate form is replaced by "This website is
+      currently unavailable." (no form, no progress, no close button, no
+      navigation) and a POST to `/api/lead` for that host answers 410 and stores
+      nothing. The rest of the page still loads.
+- [ ] `GET /api/site-state` on the real host answers `{"ok":true,"state":"served"}`
+      while active and `{"ok":true,"state":"terminated"}` after Terminate;
+      an unknown host answers `{"ok":false,"state":"served"}` with HTTP 200.
+      Every answer carries `cache-control: no-store`.
 - [ ] After **Extend 30 days**: the service is back, the held leads are in
       `/leads`, and no row was deleted at any step.
 - [ ] `public.business_events` has an `expected` row and an outcome row for
@@ -61,6 +68,17 @@ Run steps 27b to 27n of `docs/MANUAL_TESTING.md` with a phone you hold.
       **Extend 30 days** restore (steps 27b to 27n of `docs/MANUAL_TESTING.md`;
       rules in `docs/OPERATIONS.md` section 3b). Step 27g leaves the business
       `active`, so the billing job enforces it.
+- [ ] The form itself, on a real phone: every field draws the same 1px border
+      at rest; tapping a field changes that border's colour and draws no ring;
+      Tab draws the accent ring; no dropdown row shows a bar down its edge; every
+      button shows a pointer. The consent line under the form reads
+      "We only use your details to contact you about your estimate."
+- [ ] The draft: type an answer, close the form, reopen it — the step and the
+      answers come back with **Start over**. Clear the tab's storage and reopen
+      after a day-old stamp: nothing is restored, and no card looks chosen.
+- [ ] The invitation: after the delay the dialog opens by itself and NO field,
+      card or radio is focused or ringed; the X closes it and it does not come
+      back in that tab.
 - [ ] On a business still marked `demo`, expect no billing enforcement at all
       (`docs/OPERATIONS.md` section 3b). Check only the off-state behaviour:
       suspended holds the form and tells the visitor to call; terminated makes

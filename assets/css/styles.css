@@ -311,6 +311,17 @@
        --btn-pad is the gap between the 36px band (arrow square / label / icon) and the button's edge: (height - 2px border - 36px) / 2,
        so 6px at 48px and 4px at 44px. The primary button uses it on the right (the square keeps the same space on top, right
        and bottom); its left padding is --btn-pad + 8px (14px at 48px). */
+    /* A button is a button: the pointer says so everywhere, and a disabled
+       one says it cannot be pressed. Written with :where() so no selector here
+       starts a line with a word and a colon (that reads as a declaration). */
+    :where(button, [role="button"]):not(:disabled):not([aria-disabled="true"]) {
+      cursor: pointer
+    }
+
+    :where(button, [role="button"]):is(:disabled, [aria-disabled="true"]) {
+      cursor: default
+    }
+
     .btn {
       --btn-h: 48px;
       --btn-pad: calc((var(--btn-h) - 36px) / 2);
@@ -2424,7 +2435,6 @@
          the dialog ground in the worst case (a white section behind the scrim).
          --line stays for cards and decorative edges. */
       --ctl-line: #9aa0a8;
-      --ctl-focus: #fff;
       --ctl-err: #ffb3a6;
       --sb-track: transparent;
       --sb-thumb: rgb(255 255 255/.28);
@@ -2879,9 +2889,12 @@
       background: var(--card-h)
     }
 
+    /* The selected row is told apart by its weight and the check mark on the
+       right, never by an accent bar down its left edge: the bar read as a
+       second focus ring. */
     .sel-list li[aria-selected="true"] {
       font-weight: 600;
-      box-shadow: inset 3px 0 0 var(--accent)
+      box-shadow: none
     }
 
     .sel-list li[aria-selected="true"]::after {
@@ -2892,7 +2905,7 @@
       width: 16px;
       height: 16px;
       margin-top: -8px;
-      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18' fill='none' stroke='%23f7f4ef' stroke-width='2'%3E%3Cpath d='M4.5 9.5l3 3 6-7'/%3E%3C/svg%3E") center / 100% no-repeat
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18' fill='none' stroke='%23d93917' stroke-width='2'%3E%3Cpath d='M4.5 9.5l3 3 6-7'/%3E%3C/svg%3E") center / 100% no-repeat
     }
 
     .sel-list::-webkit-scrollbar {
@@ -2914,11 +2927,40 @@
       border-radius: 0
     }
 
-    /* ONE ring only: the global :focus-visible outline is the accent ring. A
-       second, white border here used to draw a second ring around the field. */
+    /* ONE resting border for every kind of field — text box, textarea and the
+       themed dropdown — and focus changes its COLOUR only. The ring is
+       :focus-visible's job (below), so a mouse press draws nothing and the
+       fields cannot look like different components at rest. */
+    .f input,
+    .f textarea,
+    .sel-btn {
+      border: 1px solid var(--ctl-line)
+    }
+
     .f input:focus,
-    .f textarea:focus {
-      border-color: var(--ctl-line)
+    .f textarea:focus,
+    .sel-btn:focus {
+      border-color: var(--sel)
+    }
+
+    /* The ring is for the keyboard only. A mouse press, a tap and a dialog that
+       focused itself on open draw no ring; the caret and the border colour say
+       where the focus is. */
+    .f input:focus:not(:focus-visible),
+    .f textarea:focus:not(:focus-visible),
+    .sel-btn:focus:not(:focus-visible),
+    .opt :is(input, [type="radio"]):focus:not(:focus-visible) {
+      outline: none
+    }
+
+    /* A form control's focus is its one border turning primary. The keyboard
+       ring below stays on buttons and option cards, but must not draw a SECOND
+       outline around a field, textarea or dropdown. */
+    .f input:focus-visible,
+    .f textarea:focus-visible,
+    .sel-btn:focus-visible,
+    .opt :is(input, [type="radio"]):focus-visible {
+      outline: none
     }
 
     .f ::placeholder {
@@ -3218,6 +3260,25 @@
     /* held / unavailable: the request was not "sent", so no success mark */
     .est-done.est-plain .est-ok {
       display: none
+    }
+
+    /* The business has been terminated: one sentence and nothing else. The
+       pane carries no form, no recap and no promise, and the rule below makes
+       sure a hidden pane stays hidden even though the panes are flex boxes. */
+    .est-pane.est-off {
+      align-items: flex-start;
+      justify-content: center;
+      text-align: center;
+      gap: 10px
+    }
+
+    .est-pane.est-off[hidden] {
+      display: none
+    }
+
+    .est-pane.est-off h3 {
+      color: var(--ink);
+      overflow-wrap: anywhere
     }
 
     /* A hidden recap or next-steps block has to disappear for real: both carry

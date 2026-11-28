@@ -12,6 +12,9 @@
 // T3  the fallback shape (no username) is equally well formed
 // T4  every exported BOT_*/TOAST_* string is in the sample set, so a new
 //     constant cannot dodge T1
+// T21 no sample Telegram text ends on a one-word orphan line. orphanWord()
+//     used to return null for a one-word paragraph, so it could not see the
+//     case it was named for; that helper was fixed with this gate.
 //
 // Mutation: put //n back into botInviteText and T1 fails.
 
@@ -21,6 +24,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { loadEnv } from './env.mjs';
 import { sampleTelegramTexts } from '../lib/sample-texts.js';
 import * as C from '../lib/content.js';
+import { orphanWord, ownerNotice, suspendedReply, statusText } from '../lib/lifecycle-text.js';
 import { isTestKey } from './helpers.mjs';
 
 loadEnv();
@@ -252,13 +256,19 @@ const samples = sampleTelegramTexts();
   const connectedBiz = kbRows(C.operatorAlreadyConnectedKeyboard(bizId, 3, 'business'));
   const replaceList = kbRows(C.operatorReplaceConfirmKeyboard(bizId, 3, 'list'));
   const replaceBiz = kbRows(C.operatorReplaceConfirmKeyboard(bizId, 3, 'business'));
-  const danger = [kb[0], opKb[0], opDetail[0][0], opDetail[2][0], opSuspended[2][0], opBilling[1][0],
-    C.operatorTerminateConfirmKeyboard(bizId, 3).reply_markup.inline_keyboard[0][0],
-    replaceList[0][0], replaceBiz[0][0]];
-  const cancel = [kb[1], opKb[1], opDetail[1][1], opDetail[3][0], opSuspended[0][1], opSuspended[3][0],
-    opBilling[0][1], opBilling[2][0], opTerminated[1][0],
-    C.operatorTerminateConfirmKeyboard(bizId, 3).reply_markup.inline_keyboard[0][1],
-    connectedList[0][1], connectedBiz[0][1], replaceList[0][1], replaceBiz[0][1]];
+  // The danger button of each screen and the Cancel that sits beside it, found
+  // by style rather than by position: the layout is pinned below, this is the
+  // rule that no confirm is ever all danger or all cancel.
+  const dangerOf = (rows) => rows.flat().filter((b) => b.style === 'danger');
+  // A screen's neutral buttons: Cancel, Back, and the plain-styled Leads.
+  const cancelOf = (rows) => rows.flat().filter((b) => b.style === undefined && /^(Cancel|Back|Leads)$/.test(b.text));
+  const danger = [dangerOf([kb]), dangerOf([opKb]), dangerOf(opDetail), dangerOf(opSuspended),
+    dangerOf(opBilling), dangerOf(C.operatorTerminateConfirmKeyboard(bizId, 3).reply_markup.inline_keyboard),
+    dangerOf(replaceList), dangerOf(replaceBiz)].flat();
+  const cancel = [cancelOf([kb]), cancelOf([opKb]), cancelOf(opDetail), cancelOf(opSuspended),
+    cancelOf(opBilling), cancelOf(opTerminated), cancelOf(connectedList), cancelOf(connectedBiz),
+    cancelOf(C.operatorTerminateConfirmKeyboard(bizId, 3).reply_markup.inline_keyboard),
+    cancelOf(replaceList), cancelOf(replaceBiz)].flat();
   const JSONsame = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   // The exact layouts. Active and unconnected: Suspend (danger) + Invite,
   // Extend + Leads, Terminate, Back. With a phone, Replace phone (bw) takes
@@ -268,19 +278,16 @@ const samples = sampleTelegramTexts();
   const stats = { total: 7, recent: 3, lastAt: '2026-11-12T10:00:00Z' };
   const phones = [{ label: null }, { label: 'Van' }];
   const opOk = JSONsame(opDetail, [
-    [{ text: 'Suspend', callback_data: `bs:3:${bizId}`, style: 'danger' }, { text: 'Invite', callback_data: `bv:3:${bizId}`, style: 'primary' }],
-    [{ text: 'Extend 30 days', callback_data: `be:3:${bizId}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
-    [{ text: 'Terminate', callback_data: `bx:3:${bizId}`, style: 'danger' }],
-    [{ text: 'Back', callback_data: 'bl:3' }],
+    [{ text: 'Invite', callback_data: `bv:3:${bizId}`, style: 'primary' }, { text: 'Extend 30 days', callback_data: `be:3:${bizId}`, style: 'primary' }],
+    [{ text: 'Suspend', callback_data: `bs:3:${bizId}`, style: 'danger' }, { text: 'Terminate', callback_data: `bx:3:${bizId}`, style: 'danger' }],
+    [{ text: 'Leads', callback_data: `bq:0:3:${bizId}` }, { text: 'Back', callback_data: 'bl:3' }],
   ]) && JSONsame(kbRows(C.operatorBusinessDetailKeyboard(bizId, 3, { connected: true })), [
-    [{ text: 'Suspend', callback_data: `bs:3:${bizId}`, style: 'danger' }, { text: 'Replace phone', callback_data: `bw:3:${bizId}`, style: 'primary' }],
-    [{ text: 'Extend 30 days', callback_data: `be:3:${bizId}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
-    [{ text: 'Terminate', callback_data: `bx:3:${bizId}`, style: 'danger' }],
-    [{ text: 'Back', callback_data: 'bl:3' }],
+    [{ text: 'Replace phone', callback_data: `bw:3:${bizId}`, style: 'primary' }, { text: 'Extend 30 days', callback_data: `be:3:${bizId}`, style: 'primary' }],
+    [{ text: 'Suspend', callback_data: `bs:3:${bizId}`, style: 'danger' }, { text: 'Terminate', callback_data: `bx:3:${bizId}`, style: 'danger' }],
+    [{ text: 'Leads', callback_data: `bq:0:3:${bizId}` }, { text: 'Back', callback_data: 'bl:3' }],
   ]) && JSONsame(opSuspended, [
-    [{ text: 'Reactivate', callback_data: `br:3:${bizId}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
-    [{ text: 'Extend 30 days', callback_data: `be:3:${bizId}`, style: 'primary' }],
-    [{ text: 'Terminate', callback_data: `bx:3:${bizId}`, style: 'danger' }],
+    [{ text: 'Reactivate', callback_data: `br:3:${bizId}`, style: 'primary' }, { text: 'Extend 30 days', callback_data: `be:3:${bizId}`, style: 'primary' }],
+    [{ text: 'Terminate', callback_data: `bx:3:${bizId}`, style: 'danger' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
     [{ text: 'Back', callback_data: 'bl:3' }],
   ]) && JSONsame(opBilling, [
     [{ text: 'Extend 30 days', callback_data: `be:3:${bizId}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
@@ -314,14 +321,17 @@ const samples = sampleTelegramTexts();
     && C.operatorAlreadyConnectedText({ business: biz, phones: 3 }) === 'Alder Roofing · Already connected · 3 phones'
     && C.operatorReplaceConfirmText({ business: biz, phones: 1 }) === 'Replace the phone of Alder Roofing? The 1 current phone stops receiving alerts and loses access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.'
     && C.operatorReplaceConfirmText({ business: biz, phones: 3 }) === 'Replace the phones of Alder Roofing? The 3 current phones stop receiving alerts and lose access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.'
-    && C.BOT_ACCESS_ENDED === 'Your access to lead alerts for this business was ended by support.'
+    // MEANING CHANGE 2026-11-28: the disconnected-phone notice used to name
+    // "support" as the actor; the house rule bans that, so it now says only
+    // that access ended. T22 bans the old wording everywhere.
+    && C.BOT_ACCESS_ENDED === 'Your access to lead alerts for this business has ended.'
     && C.OPERATOR_ALREADY_REPLACED === 'Already replaced.'
     && C.operatorInviteSuspendedText(biz) === 'Alder Roofing is suspended. Reactivate it first.'
     && C.operatorInviteFailedText({ business: biz, replace: true }) === 'Could not create an invite for Alder Roofing. Try again. No phone was removed.'
     && C.operatorCodeText({ slug: 'alder-demo', code: 'K7M2QPX9RT4W', removed: 2, failed: 1, cancelled: 2 }).text
       === 'Code for alder-demo: K7M2QPX9RT4W\n\nExpires in 24 hours. 2 phones removed (1 notice not delivered). 2 older invites were cancelled. The next message is for the client — forward it as it is.'
     && C.operatorSuspendConfirmText(biz) === 'Suspend Alder Roofing?\nAlerts and emails stop.\nThe site keeps saving\nrequests and holds them.\nNothing is deleted.\nThe owner can see the count.'
-    && C.operatorReactivateConfirmText(biz) === 'Reactivate Alder Roofing?\nAlerts and emails resume.\nRequests held while it was\noff become visible again.\nNothing is deleted.'
+    && C.operatorReactivateConfirmText(biz) === 'Reactivate Alder Roofing?\nLifts the suspension.\nPaid date does not change.\nHeld requests become visible.\nNothing is deleted.'
     && C.operatorTerminateConfirmText(biz) === 'Terminate Alder Roofing?\nAlerts and emails stop.\nThe website form shows\n"not available".\nNothing is deleted: Extend\n30 days puts it back.'
     && C.operatorTerminatedText({ business: biz, notice: { phones: 2, phonesOk: 2, email: 'sent' } }) === 'Terminated: Alder Roofing\nTelegram: sent to 2 phones\nEmail: sent'
     && C.operatorTerminatedText({ business: biz, notice: { phones: 2, phonesOk: 1, email: 'sent' } }) === 'Terminated: Alder Roofing\nTelegram: failed (alert sent)\nEmail: sent'
@@ -336,14 +346,16 @@ const samples = sampleTelegramTexts();
     && C.operatorReactivatedText(biz, { notice: { phones: 2, phonesOk: 2, email: 'sent' } }) === 'Reactivated: Alder Roofing\nTelegram: sent to 2 phones\nEmail: sent'
     && C.operatorStateResultText({ title: 'Paid: Alder Roofing', notice: null }) === 'Paid: Alder Roofing\nTelegram: not reported\nEmail: not reported'
     && C.operatorBusinessDetailText({ business: { ...biz, status: 'churned' }, rows: [], stats: { total: 0, recent: 0, lastAt: null }, nowMs: now }).split('\n')[1] === 'Terminated · alder-demo'
-    && C.operatorBusinessDetailText({ business: { ...biz, status: 'paused' }, rows: [], stats: { total: 4, recent: 4, lastAt: null, held: 2 }, nowMs: now }).includes('\nHeld leads: 2\n')
+    // Held leads is the last fact on the screen, after the status block.
+    && C.operatorBusinessDetailText({ business: { ...biz, status: 'paused' }, rows: [], stats: { total: 4, recent: 4, lastAt: null, held: 2 }, nowMs: now }).endsWith('Held leads: 2')
     // The business screen, to the character, in its three states.
+    // The billing block is two lines now: the state, then what happens next.
     && C.operatorBusinessDetailText({ business: biz, rows: phones, stats, nowMs: now })
-      === 'Alder Roofing\nDemo · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total\nLast 30 days: 3\nLast lead: 2d ago\nBilling: not tracked'
+      === 'Alder Roofing\nDemo · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total\nLast 30 days: 3\nLast lead: 2d ago\n\nStatus: Not tracked\nNo payment date recorded'
     && C.operatorBusinessDetailText({ business: { ...biz, status: 'active' }, rows: [], stats: { total: 0, recent: 0, lastAt: null }, nowMs: now })
-      === 'Alder Roofing\nActive · alder-demo\n\nTelegram: Not connected\n\nLeads: 0 total\nLast 30 days: 0\nBilling: not tracked'
+      === 'Alder Roofing\nActive · alder-demo\n\nTelegram: Not connected\n\nLeads: 0 total\nLast 30 days: 0\n\nStatus: Not tracked\nNo payment date recorded'
     && C.operatorBusinessDetailText({ business: { ...biz, status: 'paused' }, rows: [{ label: null }], stats, nowMs: now })
-      === 'Alder Roofing\nSuspended · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 7 total\nLast 30 days: 3\nLast lead: 2d ago\nBilling: not tracked'
+      === 'Alder Roofing\nSuspended · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 7 total\nLast 30 days: 3\nLast lead: 2d ago\n\nStatus: Suspended (manual)\nNext: none (manual hold)'
     // The operator's view of a lead: these fields and no other.
     && JSONsame([...C.OPERATOR_LEAD_FIELDS], ['service', 'status', 'age'])
     && C.operatorLeadCardText(biz, { service: 'repair', status: 'open', created_at: '2026-11-12T10:00:00Z', name: 'Dana Whitfield', phone: '+15155550142', email: 'dana@example.com', notes: 'side gate' }, now)
@@ -351,12 +363,13 @@ const samples = sampleTelegramTexts();
   const ok = opOk && !/Remove it\?/.test(one) && !/Remove it\?/.test(last)
     && one.includes('It will stop receiving alerts.')
     && last.includes('This is the last phone.')
-    && danger.every((b) => b.style === 'danger')
-    && cancel.every((b) => b.style === undefined)
-    && opDetail[0][1].style === 'primary' && opDetail[1][0].style === 'primary' && opSuspended[0][0].style === 'primary'
+    && danger.length >= 8 && danger.every((b) => b.style === 'danger')
+    && cancel.length >= 10 && cancel.every((b) => b.style === undefined && /^(Cancel|Back|Leads)$/.test(b.text))
+
+    && opDetail[0][0].style === 'primary' && opDetail[1][0].style === 'danger' && opSuspended[0][0].style === 'primary'
     && C.BOT_RECIPIENT_REMOVED === 'Removed.';
   line(ok, 'T10', 'destructive confirm: says what happens, danger only on the action',
-    `one=${one.split('\n').pop()} danger=${danger.map((b) => b.style).join(',')}`);
+    `one=${one.split('\n').pop()} danger=${danger.length} cancel=${cancel.length}`);
 }
 
 /* T8: the preview renders entities, not just .text. It spawns the real script
@@ -788,6 +801,90 @@ const samples = sampleTelegramTexts();
     `exit=${set.status}/${info.status}/${stale.status} calls=${calls.length} scopes=${calls.map((x) => (x.body.scope && x.body.scope.type) || 'default').join(',')} lists=${listsOk} sent=${sentOk} print=${printOk} quiet=${quiet} scope=${scopeOk}`);
 }
 
+/* T21: no Telegram text ends on an orphan last line. `orphanWord()` is the
+   helper the preview notes cite; this is the gate that actually uses it. The
+   sample set is every string a person can see plus every lifecycle notice and
+   reply in both reasons and every /status state. Structural lines that are a
+   deliberate label on their own (`held` on a held lead row) are not prose and
+   are exempt. */
+{
+  const DAY = 86400000;
+  const P = Date.parse('2026-12-14T09:00:00Z');
+  const biz = (patch = {}) => ({
+    id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'active',
+    paid_until: '2026-12-14T09:00:00Z', billing_warning_stage: 0,
+    suspended_for_billing: false, ...patch,
+  });
+  const texts = samples.map(({ name, text }) => ({ name, text }));
+  const TYPES = ['renewal_reminder', 'overdue', 'final_warning', 'suspension',
+    'termination_warning', 'termination', 'reactivation', 'held_lead'];
+  for (const type of TYPES) for (const reason of ['billing', 'manual']) {
+    const business = biz(type === 'suspension' || type === 'termination'
+      ? { status: reason === 'billing' ? 'paused' : 'churned', suspended_for_billing: reason === 'billing' }
+      : {});
+    const doc = ownerNotice(type, { business, now: P, reason, held: 2 }).telegram;
+    if (doc) texts.push({ name: `notice:${type}:${reason}`, text: doc.text });
+  }
+  for (const status of ['paused', 'churned']) for (const reason of ['billing', 'manual']) {
+    const business = biz({ status, suspended_for_billing: reason === 'billing' });
+    texts.push({ name: `reply:${status}:${reason}`, text: suspendedReply({ business, now: P }).text });
+  }
+  for (const [name, business] of [
+    ['paid', biz()], ['due_soon', biz()], ['grace', biz()],
+    ['suspended', biz({ status: 'paused', suspended_for_billing: true })],
+    ['manual', biz({ status: 'paused' })], ['terminated', biz({ status: 'churned' })],
+    ['not_tracked', biz({ status: 'demo', paid_until: null })],
+  ]) texts.push({ name: `status:${name}`, text: statusText({ business, now: name === 'paid' ? P - 6 * DAY : P }).text });
+  // A structural line that is a label on its own ("held" on a held lead row)
+  // is not a prose orphan. Everything else single-word and short is.
+  const STRUCTURAL = new Set(['held']);
+  const bad = [];
+  for (const { name, text } of texts) {
+    const rawText = String(text || '');
+    if (!rawText.includes('\n')) continue;              // a whole one-line toast is not an orphan line
+    for (const raw of rawText.split('\n')) {
+      const s = raw.trim();
+      // Labels ("Commands:"), the bind code on its own line and the held marker
+      // are structure, not a stray last word of prose.
+      if (!s || STRUCTURAL.has(s) || s.endsWith(':') || /^[A-Z2-9]{12}$/.test(s)) continue;
+      if (s.split(/\s+/).length === 1 && orphanWord(s) !== null) bad.push(`${name}:${JSON.stringify(s)}`);
+    }
+  }
+  line(bad.length === 0, 'T21', 'no Telegram text ends on an orphan last line',
+    `texts=${texts.length} orphans=${bad.slice(0, 6).join(' ') || 'none'}`);
+}
+
+/* T22: no owner-facing text blames a person or a team. The lifecycle house
+   rule says a manual suspension is neutral and a reactivation says only that
+   the service is back. This bans both variants from every sample string and
+   from every notice in both reasons and every /status state. */
+{
+  const P = Date.parse('2026-12-14T09:00:00Z');
+  const biz = (patch = {}) => ({
+    id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'active',
+    paid_until: '2026-12-14T09:00:00Z', billing_warning_stage: 0,
+    suspended_for_billing: false, ...patch,
+  });
+  const texts = samples.map(({ name, text }) => `${name}: ${text}`);
+  for (const type of ['renewal_reminder', 'overdue', 'final_warning', 'suspension',
+    'termination_warning', 'termination', 'reactivation', 'held_lead', 'held_summary']) {
+    for (const reason of ['billing', 'manual']) {
+      const n = ownerNotice(type, { business: biz(), now: P, reason, held: 2 });
+      texts.push(`notice:${type}:${reason}: ${JSON.stringify(n.telegram)} ${JSON.stringify(n.email)}`);
+    }
+  }
+  for (const status of ['paused', 'churned']) for (const reason of ['billing', 'manual']) {
+    texts.push(`reply:${status}:${reason}: ${suspendedReply({ business: biz({ status, suspended_for_billing: reason === 'billing' }), now: P }).text}`);
+  }
+  for (const [name, business] of [['paid', biz()], ['suspended', biz({ status: 'paused' })], ['terminated', biz({ status: 'churned' })], ['demo', biz({ status: 'demo', paid_until: null })]]) {
+    texts.push(`status:${name}: ${statusText({ business, now: P }).text}`);
+  }
+  const BANNED = /by support|Support has reactivated/i;
+  const hits = texts.filter((s) => BANNED.test(s)).map((s) => s.slice(0, 72));
+  line(hits.length === 0, 'T22', 'no owner-facing text says "by support" or credits reactivation',
+    `texts=${texts.length} hits=${hits.slice(0, 3).join(' | ') || 'none'}`);
+}
+
 console.log('');
-console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
+console.log(`${total - failed}/${total} passed${failed ? ` - ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);

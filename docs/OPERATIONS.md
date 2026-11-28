@@ -242,13 +242,17 @@ The status is Demo, Active, Suspended (`paused` in the database) or Terminated
 no phone lines under it. The lead numbers come from two queries (a count
 with the newest `created_at`, and a count since 30 days ago): the only lead
 column read for this screen is that one timestamp, and `Last lead` is left
-out when there are none. The last line is the billing line (see **3b.
-Billing and the service lifecycle**). Under it: **Suspend** and **Leads**,
-then **Extend 30 days** and **Invite**, then **Terminate**, then **Back**. For
-a suspended business: **Reactivate** and **Leads**, then **Extend 30 days**
-and **Terminate**, then **Back**, and a `Held leads: N` line when leads came
-in meanwhile. For a terminated business: **Extend 30 days** and **Leads**, then
-**Back**. Reactivate is not offered there.
+out when there are none. The last block is the shared status block from
+`lib/billing.js` (see **3b. Billing and the service lifecycle**): `Status: ...`
+followed by one fact per line — `Next: ...`, a date, or `No payment date
+recorded`. A `Held leads: N` line appears only when N > 0. The buttons are
+three colour-grouped rows: an active business gets [Replace phone (or Invite
+when no phone) | Extend 30 days] / [Suspend | Terminate] / [Leads | Back]; a
+manual suspension gets [Reactivate | Extend 30 days] / [Terminate | Leads] /
+[Back]; a billing suspension has no Reactivate and gets [Extend 30 days |
+Leads] / [Terminate] / [Back]; a terminated business gets [Extend 30 days |
+Leads] / [Back]. Reactivate is not offered on a billing suspension or on a
+termination.
 
 **What the operator can see of a lead.** **Leads** is read-only and minimal:
 every row and every card shows only the service, the status and the age of the
@@ -259,9 +263,10 @@ in `lib/content.js`; showing the name later is one word added there.
 
 **Suspend (operator).** Switches one business off, after one confirmation.
 The status is set to `paused` in one statement; then every connected phone
-gets the suspension notice ("Your service has been suspended by support", the
-`/status` hint and the **Contact support** link) with its keyboard reduced to
-one button, **Status**, and the owner email address gets the same words.
+gets the suspension notice ("Your service has been suspended." with no reason,
+no countdown and no `/status` hint — the **Status** button carries that — plus
+the **Contact support** link) with its keyboard reduced to one button,
+**Status**, and the owner email address gets the same idea in prose.
 A notice or an email that fails is counted ("Telegram: failed (alert sent)" or
 "Email: failed (alert sent)"), alerts this
 chat, and never undoes the suspension. Nothing is deleted: phones, invites,
@@ -293,10 +298,13 @@ back exactly as it was. Deleting a business is the offboard script (section
 
 **Reactivate (operator).** One tap on a **suspended** business sets the status
 to `active` (a business that was `demo` before comes back as
-`active`, not `demo`) and tells every connected phone "Your service is active
-again." with its own keyboard and the number of leads that were held. Those
-leads are ordinary leads from that moment: `/leads` shows them. Reactivating
-is not paying: it does not change `paid_until`, so a business whose paid
+`active`, not `demo`) and tells every connected phone ONE sentence, "Your
+service is active again.", with its own role keyboard back. If leads were
+held, a SECOND message follows with those leads in `/leads`' own format (same
+title, group heading, rows and five-per-page buttons). For seven days they stay
+the "Received while suspended: N" group at the top of `/leads`; after that they
+are ordinary rows in date order but keep their `held` line. Reactivating is
+not paying: it does not change `paid_until`, so a business whose paid
 period is over is suspended again by the next daily runs. Use **Extend 30
 days** when the customer has paid.
 
@@ -393,7 +401,7 @@ extended.` and changes nothing. To add 60 days, press Extend twice.
 
 | Button | From | What it does |
 |---|---|---|
-| **Suspend** (asks first) | active | status `paused`; the owner is told "suspended by support" |
+| **Suspend** (asks first) | active | status `paused`; the owner is told "Your service has been suspended." |
 | **Terminate** (asks first) | active or suspended | status `churned`; the owner is told; nothing is deleted |
 | **Reactivate** (one tap) | suspended only | status `active`; the owner is told, with the count of held leads; `paid_until` is not changed. A terminated business is restored by **Extend 30 days** |
 
@@ -428,18 +436,53 @@ alert that one notice could not be delivered.
 accepting requests through this form right now. Please call them directly."
 (HTTP 410) and stores nothing. Extend 30 days puts everything back.
 
-#### Options for the site itself
+#### The website itself: one neutral sentence
 
-Only option 1 exists today. The current code is form-only: a terminated host
-still serves the full landing page, and only the form answers "not available".
-The other two options are recorded here for a later decision, not implemented.
+A terminated host still serves the page, but the page asks `GET
+/api/site-state` once on load and, when the answer is `terminated`, the
+estimate form is replaced by one sentence:
 
-1. **Keep serving the site (today).** No build work and no running cost, but
-   the site keeps advertising a business that is not accepting work.
-2. **A neutral holding page per terminated host.** Now that the API resolves
-   the tenant from `Host`, this needs a per-host branch in whatever renders
-   the page. The HTML render does not resolve a tenant yet, so that branch
-   does not exist.
+> This website is currently unavailable.
+
+Nothing else changes on the page (the header, the sections and the phone
+number stay), and the sentence carries no business name, no phone, no form and
+no promise. The form endpoint keeps refusing the same host with 410, so a
+visitor who had the modal open before the switch sees the same answer twice.
+
+`/api/site-state` is the ONLY public endpoint that reports a business state.
+It resolves the business from the `Host` header (through `lib/tenant.js`, the
+same selector `/api/lead` uses: body, query, cookies and `X-Forwarded-Host`
+never choose a tenant) and answers one of three fixed words:
+
+| Answer | When | What the page does |
+|---|---|---|
+| `{"ok":true,"state":"served"}` | active or demo | everything, as today |
+| `{"ok":true,"state":"suspended"}` | suspended (billing or by hand) | everything, as today; the form holds the request |
+| `{"ok":true,"state":"terminated"}` | terminated | the sentence above replaces the form |
+| `{"ok":false,"state":"served"}` (HTTP 200) | a host this deployment does not serve | nothing changes |
+| `{"ok":false,"state":"served"}` (HTTP 200) | the database could not be read | nothing changes |
+
+Nothing else leaves that endpoint: no name, no id, no address, no date, no
+billing state, no lead count. Every answer is `cache-control: no-store`, so a
+business switched off between two visits cannot be shown an old answer, and
+only `GET` and `HEAD` are allowed (anything else is `405` with `allow: GET,
+HEAD`).
+
+The rule that matters more than the sentence: **a bad answer never hides a
+live site.** An unknown host, a timeout, a 500, a body this page does not
+understand — the page stays exactly as it was. Only the one word `terminated`
+changes anything.
+
+The two other options recorded earlier are still not built; option 1 is now
+"the form is replaced by one sentence" rather than "the form is the only
+thing that changes". The alternatives for a later decision:
+
+1. **One neutral sentence in the form (today).** No extra build work and no
+   running cost. The site still describes the business, but stops taking
+   requests and says so plainly.
+2. **A neutral holding page for the whole host.** This would need the HTML
+   render to resolve the tenant, which it still does not do; the page is
+   static and the state arrives from `/api/site-state` after paint.
 3. **Redirect the host to the operator's contact page.** One rule to add, but
    the client's SEO is lost because the old pages stop answering.
 
@@ -768,7 +811,38 @@ Two answers are neither "sent" nor "failed". A suspended business holds the
 request (HTTP 200 with `held: true`): the visitor reads that it was saved and
 that calling is faster. A terminated business accepts nothing (HTTP 410 with
 `unavailable: true`): the visitor reads that the form is not available. Both
-panels keep the **Call** button and promise no reply (section 3b).
+panels keep the **Call** button and promise no reply (section 3b). A terminated
+host does not even get that far: `/api/site-state` answers `terminated` when
+the page loads and the form is replaced by "This website is currently
+unavailable." (section 3b); the 410 is the second line of defence for a tab
+that was already open.
+
+**The resting look of the form.** Every field — the text boxes, the textarea
+and the themed dropdown — draws the same 1px border at rest, and focus changes
+that border's colour to the accent and nothing else; the ring is for the
+keyboard only (`:focus-visible`), so a mouse press or a tap draws no ring. The
+selected row of a dropdown is told apart by its weight and the accent check
+mark on the right, not by a bar down its edge. Every pressable button shows a
+pointer; a disabled one does not.
+
+**The consent line** above the send button is one sentence: "We only use your
+details to contact you about your estimate."
+
+**The draft.** What a visitor typed is kept in `sessionStorage` for that tab
+only (never `localStorage`, which holds preferences with timestamps and no
+contact data), written on every input and every step change. It is restored
+only when all of these hold: it holds an answer the visitor actually chose
+(the roof-age select's own default is not one), it has not passed the 24-hour
+draft expiry, and it does not contradict answers already in the open form. A
+draft older than 24 hours belongs to a previous visit and is thrown away. A draft that comes back lands on the step it was left on and
+offers **Start over**, which empties the form and the storage.
+
+**Where the focus goes.** A form the visitor opened on purpose focuses its
+first field. The invitation that opens by itself (10 s desktop, 8 s phone,
+once per tab session) focuses the dialog itself, so no field, card or radio
+looks chosen or ringed before anybody answered. Closing the dialog during a
+send is allowed and keeps the request's idempotency key; reopening it resumes
+the same request instead of sending a second one.
 
 ### What the visitor sees
 

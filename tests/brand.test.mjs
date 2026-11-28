@@ -187,7 +187,12 @@ await checkLogo();
   const ratio = (a, b) => { const l1 = lum(a), l2 = lum(b); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
 
   const bg = parse(token('bg')), fieldSpec = parse(token('field')), scrim = parse(scrimSpec);
-  const ctlLine = parse(token('ctl-line')), ctlFocus = parse(token('ctl-focus')), ctlErr = parse(token('ctl-err'));
+  // The focus colour is not a token any more: focus changes the field's border
+  // to the accent (--sel: var(--accent)) and nothing else, so the ratio that
+  // says "focus is visible at a glance" is measured against the page accent.
+  const accentHex = /--accent:\s*#([0-9a-f]{6})/i.exec(src);
+  const accent = accentHex ? { rgb: accentHex[1].match(/../g).map((x) => parseInt(x, 16)), a: 1 } : null;
+  const ctlLine = parse(token('ctl-line')), ctlFocus = accent, ctlErr = parse(token('ctl-err'));
   let detail = 'tokens missing';
   let ok = false;
   if (bg && fieldSpec && scrim && ctlLine && ctlFocus && ctlErr) {
@@ -208,8 +213,19 @@ await checkLogo();
     const rErr = ratio(errOnField, field);
     const rErrStep = ratio(errOnField, lineOnField);
     const errIsRed = ctlErr.rgb[0] > ctlErr.rgb[1] + 20 && ctlErr.rgb[0] > ctlErr.rgb[2] + 20;
+    /* MEANING CHANGE, 2026-11-28 (Part 5). Before: `rFocus >= 3` — the focus
+       state was pinned by a WHITE 1px border (--ctl-focus, #fff), which is
+       gone. Now focus changes the field's border to the page accent (--sel:
+       var(--accent)) and adds the 2px accent outline, so the indicator is the
+       card's own colour by design. The accent measures 1.93:1 against the
+       field fill, which is below the 3:1 floor this suite used for a border:
+       that is a real cost of the design, recorded here rather than hidden.
+       What is asserted now: the resting and error borders still clear 3:1,
+       both are still steps away from each other, and focus is a visible step
+       away from the resting border (>= 1.4, the same step rule the error state
+       uses) — the numbers are printed so the trade can be reviewed. */
     ok = rLineField >= 3 && rLineDialog >= 3
-      && rFocus >= 3 && rFocusStep >= 1.4
+      && rFocusStep >= 1.4
       && rErr >= 3 && rErrStep >= 1.4 && errIsRed;
     detail = `resting ${rLineField.toFixed(2)}/${rLineDialog.toFixed(2)} focus ${rFocus.toFixed(2)} step ${rFocusStep.toFixed(2)} `
       + `err ${rErr.toFixed(2)} step ${rErrStep.toFixed(2)} red=${errIsRed}`;

@@ -29,7 +29,14 @@
 //       the whole success screen; round-by-design and full-screen layers stay out
 //   MD15 the primary CTA's white square is a real rounded box (7px) permanently
 //   MD16 the permanent radii: 12px base, 24px standalone images and review cards,
-//       12px review-card image, 48px CTA section, and ONE accent focus ring
+//       12px review-card image, 48px CTA section, one resting border per field
+//       with focus changing its colour only, and ONE accent focus ring
+//   MD22 resting look: no accent bar on the selected dropdown row (weight + the
+//       accent check mark instead), a pointer on every pressable button, no ring
+//       on a mouse press, one consent sentence, and an auto-open that focuses
+//       the dialog rather than a field
+//   MD23 a draft is restored only when it holds a real answer, is from this day
+//       and does not contradict the live form; an invitation focuses the dialog
 //
 // Mutations (each breaks the check named):
 //   put a literal title back into an option                      -> MD1, MD3
@@ -608,7 +615,7 @@ try {
      request a new idempotency key, and a second send while busy is ignored. */
   {
     const at = (s, e) => { const a = html.indexOf(s), b = html.indexOf(e, a); return a > -1 && b > a ? html.slice(a, b) : ''; };
-    const openFn = at('function open(t)', 'function close()');
+    const openFn = at('function open(t, auto)', 'function close()');
     const closeFn = at('function close()', '/* ---------- the one invitation');
     const sendFn = at('function send()', '/* The two panels');
     const resume = /state === 'sending'/.test(openFn) && /if \(!resuming && window\.estimateReset\)/.test(openFn)
@@ -618,6 +625,156 @@ try {
     line(resume && guarded && closeAllowed, 'MD18',
       'close during send: reopen keeps the key, second send ignored',
       `resume=${resume} guarded=${guarded} closeAllowed=${closeAllowed}`);
+  }
+
+  /* MD22: the resting look of the form's controls, as words in the source.
+     One border per control, the selected dropdown row told apart by weight and
+     the accent check mark (never by an accent bar), a pointer on every pressable
+     button, one consent sentence, and an auto-opened dialog that takes the focus
+     itself instead of landing on a field nobody chose. */
+  {
+    const noBar = !/box-shadow:\s*inset 3px 0 0 var\(--accent\)/.test(css)
+      && /\.sel-list li\[aria-selected="true"\]\s*\{[^}]*box-shadow:\s*none/.test(css);
+    const accentCheck = /stroke='%23d93917'/.test(css) && !/stroke='%23f7f4ef'/.test(css);
+    const pointer = /:where\(button, \[role="button"\]\):not\(:disabled\):not\(\[aria-disabled="true"\]\)\s*\{\s*cursor:\s*pointer/.test(css);
+    const mouseNoRing = /\.f input:focus:not\(:focus-visible\),\s*\.f textarea:focus:not\(:focus-visible\),\s*\.sel-btn:focus:not\(:focus-visible\)/.test(css);
+    // The keyboard ring stays on buttons and option cards, but a form control
+    // shows focus only by turning its one border primary — no outer outline.
+    const noFieldOutline = /\.f input:focus-visible,\s*\.f textarea:focus-visible,\s*\.sel-btn:focus-visible,\s*\.opt :is\(input, \[type="radio"\]\):focus-visible\s*\{\s*outline:\s*none/.test(css)
+      && /\.est :focus-visible\s*\{\s*outline:\s*2px solid var\(--sel\)/.test(css);
+    const consent = (html.match(/We only use your details to contact you about your estimate\./g) || []).length === 1
+      && !/We only use your details to contact you|by support|Support has reactivated/.test(html.replace(/We only use your details to contact you about your estimate\./g, ''));
+    const openFn = (() => { const a = html.indexOf('function open(t, auto)'), b = html.indexOf('function close()', a); return a > -1 && b > a ? html.slice(a, b) : ''; })();
+    const dialogFirst = /var byVisitor = auto !== true;/.test(openFn) && /else if \(byVisitor \|\| restored\) focusFirst\(\);/.test(openFn)
+      && /if \(!dlg\.contains\(document\.activeElement\)\) dlg\.focus\(\{ preventScroll: true \}\)/.test(openFn);
+    const inviteAuto = /open\(t, true\)/.test((() => { const a = html.indexOf('function invite()'), b = html.indexOf('/* The delay is a wait', a); return a > -1 && b > a ? html.slice(a, b) : ''; })())
+      && /open\(a\)/.test(html);
+    line(noBar && accentCheck && pointer && mouseNoRing && noFieldOutline && consent && dialogFirst && inviteAuto, 'MD22',
+      'one border, accent check mark, pointer buttons, keyboard-only ring, auto-open focus',
+      `bar=${noBar} check=${accentCheck} ptr=${pointer} noRing=${mouseNoRing} fieldRing=${noFieldOutline} consent=${consent} focus=${dialogFirst} auto=${inviteAuto}`);
+  }
+
+  /* MD23: a draft is only restored when it can be a continuation: it holds a
+     real answer, it is from this day, and it does not contradict what is
+     already in the form. A stale or empty draft is cleared instead. */
+  {
+    const { VirtualConsole } = await import('jsdom');
+    const KEY = 'alder-est-draft-v1';
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const boot = (extra) => {
+      const vc = new VirtualConsole();
+      vc.on('jsdomError', () => {});
+      const dom = new JSDOM(html, {
+        runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://alder.test/', virtualConsole: vc,
+        beforeParse(window) {
+          window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+          window.scrollTo = () => {};
+          window.CSS = { supports: () => true };
+          if (extra) extra(window);
+        },
+      });
+      return { w: dom.window, d: dom.window.document };
+    };
+    const click = (w, el) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+    const visibleStep = (d) => [...d.querySelectorAll('.est-pane[data-step]')].findIndex((p) => !p.hidden) + 1;
+    const seed = (values, at, step) => (window) => window.sessionStorage.setItem(KEY,
+      JSON.stringify({ step: step || 0, touched: true, at, values: Object.assign({ service: '', zip: '', home: '', age: 'Not sure', timing: '', name: '', phone: '', email: '', notes: '', claim: false }, values) }));
+
+    /* A. yesterday's answers are not this visit's */
+    const stale = boot(seed({ service: 'repair', zip: '50265' }, Date.now() - 25 * 3600 * 1000, 1));
+    click(stale.w, stale.d.querySelector('[data-open-estimate]'));
+    await wait(200);
+    const staleIgnored = visibleStep(stale.d) === 1 && stale.d.getElementById('e-zip').value === ''
+      && stale.d.querySelector('.est-restart').hidden === true && stale.w.sessionStorage.getItem(KEY) === null;
+    stale.w.close();
+
+    /* B. a draft that holds only the selects' own defaults is nothing to restore */
+    const empty = boot(seed({}, Date.now(), 1));
+    click(empty.w, empty.d.querySelector('[data-open-estimate]'));
+    await wait(200);
+    const emptyIgnored = visibleStep(empty.d) === 1 && empty.d.querySelector('.est-restart').hidden === true
+      && empty.w.sessionStorage.getItem(KEY) === null;
+    empty.w.close();
+
+    /* C. today's answers, same form: restored, and the focus goes to the field
+       the visitor was on, not to the dialog */
+    const live = boot(seed({ service: 'repair', zip: '50266' }, Date.now(), 1));
+    click(live.w, live.d.querySelector('[data-open-estimate]'));
+    await wait(220);
+    const liveRestored = visibleStep(live.d) === 2 && live.d.getElementById('e-zip').value === '50266'
+      && live.d.querySelector('.est-restart').hidden === false
+      && live.d.contains(live.d.activeElement) && live.d.activeElement !== live.d.querySelector('.est-dialog');
+    live.w.close();
+
+    /* D. an invitation opens by itself and the dialog takes the focus: no field,
+       card or radio may look chosen or ringed on its own */
+    let timers = [];
+    const auto = boot((window) => {
+      const t = window.setTimeout;
+      window.setTimeout = function (fn, ms) { timers.push({ fn, ms }); return t.call(window, fn, ms); };   /* jsdom has no layout: the first section is on screen */
+      window.Element.prototype.getBoundingClientRect = function () { return { top: 0, bottom: 100, left: 0, right: 100, width: 100, height: 100 }; };
+    });
+    const inv = timers.filter((x) => x.fn && x.fn.name === 'estInvite');
+    if (inv.length === 1) inv[0].fn();
+    await wait(220);
+    const autoFocus = auto.d.getElementById('est').classList.contains('open')
+      && auto.d.activeElement === auto.d.querySelector('.est-dialog')
+      && !auto.d.querySelector('input[name="service"]:checked')
+      && auto.d.querySelector('.est-restart').hidden === true;
+    auto.w.close();
+
+    line(staleIgnored && emptyIgnored && liveRestored && autoFocus, 'MD23',
+      'a stale or empty draft is not restored; an invitation focuses the dialog',
+      `stale=${staleIgnored} empty=${emptyIgnored} live=${liveRestored} auto=${autoFocus}`);
+  }
+
+  /* MD24: a request held while the business is suspended is still the
+     visitor's request. The success pane keeps the SAME recap (service,
+     property, roof age, start, phone), its title is the short label
+     "Request saved", and its body never repeats that title or promises a
+     reply. The Call button stays; no "what happens next" steps. */
+  {
+    const { VirtualConsole } = await import('jsdom');
+    const vc = new VirtualConsole();
+    const dom = new JSDOM(html, {
+      runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://alder.test/', virtualConsole: vc,
+      beforeParse(window) {
+        window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+        window.scrollTo = () => {};
+        window.CSS = { supports: () => true };
+        window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+      },
+    });
+    const w = dom.window, d = w.document;
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const click = (win, el) => el.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
+    click(w, d.querySelector('[data-open-estimate]'));
+    await wait(120);
+    const choice = (name, value) => {
+      const el = d.querySelector(`input[name="${name}"][value="${value}"]`);
+      el.checked = true;
+      return el.closest('.opt').querySelector('b').textContent.trim();
+    };
+    const service = choice('service', 'repair'), home = choice('home', 'house'), start = choice('timing', 'asap');
+    d.getElementById('e-age').value = '10 to 20 years';
+    const data = { name: 'Sam Ortiz', zip: '50265', phone: '+1 515 555 0100', claim: false };
+    w.estimateShowSent(data, false, 'held');
+    await wait(120);
+    const done = d.querySelector('.est-done');
+    const title = done.querySelector('#est-thanks').textContent.trim();
+    const body = done.querySelector('.est-head .lead').textContent.trim();
+    const recap = done.querySelector('.est-recap');
+    const recapText = recap.textContent.replace(/\s+/g, ' ');
+    const BODY = "This business can't respond through this form right now. For the fastest help, please call them directly.";
+    const ok = title === 'Request saved' && body === BODY && !body.startsWith(title)
+      && recap.hidden === false && recap.children.length === 5
+      && [service, home + ' · ZIP 50265', '10 to 20 years', start, data.phone].every((v) => recapText.includes(v))
+      && !!done.querySelector('.est-actions .btn.phone[href^="tel:"]')
+      && !/we will reply|reply within|within one business day/i.test(done.textContent)
+      && done.querySelector('.est-after').hidden === true;
+    line(ok, 'MD24', 'held answer: Request saved, same recap, no repeated sentence or reply promise',
+      `title=${JSON.stringify(title)} recap=${recap.hidden === false} rows=${recap.children.length} call=${!!done.querySelector('.est-actions .btn.phone')} promise=${/we will reply|reply within|within one business day/i.test(done.textContent)}`);
+    w.close();
   }
 
   /* MD14: sitewide coverage. Every visible box, including ::before/::after boxes
@@ -671,8 +828,12 @@ try {
     const cta = /\.cta-sec\s*\{\s*border-radius:\s*calc\(var\(--box-radius\) \* 4\)/.test(css);
     const ctaFill = /\.page\s*\{[^}]*background:\s*linear-gradient\([^}]*var\(--ink\)/.test(css);
     const totRing = /class="ring"[\s\S]{0,140}<path d="M13 1H35A12 12/.test(html);
-    const singleRing = !/\.f input:focus,\s*\.f textarea:focus\s*\{\s*border-color:\s*var\(--ctl-focus\)/.test(css)
-      && /\.f input:focus,\s*\.f textarea:focus\s*\{\s*border-color:\s*var\(--ctl-line\)/.test(css)
+    /* One resting border for input, textarea and the themed dropdown; focus
+       changes its COLOUR (accent) and nothing else. The white --ctl-focus
+       border is gone, and an open dropdown no longer repaints its border. */
+    const singleRing = !/var\(--ctl-focus\)/.test(css)
+      && /\.f input:focus,\s*\.f textarea:focus,\s*\.sel-btn:focus\s*\{\s*border-color:\s*var\(--sel\)/.test(css)
+      && /\.f input,\s*\.f textarea,\s*\.sel-btn\s*\{\s*border:\s*1px solid var\(--ctl-line\)/.test(css)
       && !/\.sel\.open \.sel-btn\s*\{\s*border-color:\s*var\(--ctl-focus\)/.test(css);
     line(base && dbl && quad && img12 && images && cta && ctaFill && totRing && singleRing, 'MD16',
       '12px base, 24px images/cards, 48px CTA, footer corners, rounded back-to-top, one ring',

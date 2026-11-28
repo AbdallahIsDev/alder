@@ -79,9 +79,14 @@ const T = bizId(3);   // terminated
 const PII = { name: 'Dana Whitfield', phone: '5155550142', email: 'dana.w@fixture.invalid', notes: 'side gate code 4471', zip: '50265' };
 const SUPPORT_URL = 'https://t.me/AbdallahIsDev';
 const STATUS_KB = { keyboard: [[{ text: 'Status' }]], is_persistent: true, resize_keyboard: true };
-const HELD_NOTICE = 'A new lead just submitted your\nform. Your service is suspended,\nso the details are hidden.\nRenew to see them.\n\nSend /status to see the\ncountdown.\n\nContact support';
-const HELD_NOTICE_MANUAL = 'A new lead just submitted your\nform. Your service is suspended,\nso the details are hidden.\nRenew to see them.\n\nContact support to restore it.\n\nSend /status to see the current\nstate.\n\nContact support';
-const HELD_MAIL = (n) => `${n} new request${n === 1 ? ' has' : 's have'} come in through your website form while your service is suspended.\n\nThe details are hidden until the service is active again.\n\nReply to this email and we will help.`;
+// The held-lead notice says one thing: a lead arrived, it is safe, and how to
+// see it. Nothing of the visitor is in it. Billing: renew. Manual: support.
+const HELD_NOTICE = 'New lead received. Your\nlead is saved safely.\n\nRenew now to see the details.\n\nNeed help? Contact support';
+const HELD_NOTICE_MANUAL = 'New lead received. Your\nlead is saved safely.\n\nThe details stay hidden while\nthe service is suspended.\n\nContact support to resolve it.';
+// The daily email is a count, and the last two words of every paragraph are
+// joined with a non-breaking space so they never wrap alone.
+const NB = '\u00A0';
+const HELD_MAIL = (n) => `${n} request${n === 1 ? '' : 's'} came in through your website form while the service was${NB}suspended.`;
 const HELD_PAGE = 'Your request was saved, but this business can\u2019t respond through this form right now. For the fastest help, please call them directly.';
 const GONE_PAGE = 'This business isn\u2019t accepting requests through this form right now. Please call them directly.';
 const OWNER_KB = { keyboard: [[{ text: 'Invite' }, { text: 'Leads' }]], is_persistent: true, resize_keyboard: true };
@@ -290,13 +295,21 @@ try {
     const manualOk = one.sends.length === 2 && one.sends.every((m) => textOf(m) === HELD_NOTICE_MANUAL) && longLines(HELD_NOTICE_MANUAL).length === 0;
     const rows = world.store.chats.filter((c) => c.business_id === A);
     const r = await during(() => SS.reactivateBusiness({ business: get(A), rows, reason: 'manual' }, DEFAULT_IO));
-    const want = 'Your service is active again.\nSupport has reactivated it.\n\n2 leads came in while your\nservice was suspended.\nSend /leads to see them.\n\nSend /status at any time to see\nthe current state.\n\nContact support';
+    // Message 1 says one thing and only one thing. It does not say who
+    // reactivated, and it does not mention leads: message 2 is the leads.
+    const want = 'Your service is active again.';
     const told = (chat) => r.sends.filter((m) => String(m.body.chat_id) === String(chat));
+    const heldMsg = (chat) => told(chat).filter((m) => textOf(m).startsWith('Recent requests'));
     const noticeOk = r.out.changed === true && r.out.held === 2 && get(A).status === 'active'
-      && told(OWNER).length === 1 && textOf(told(OWNER)[0]) === want && same(told(OWNER)[0].body.reply_markup, OWNER_KB)
-      && told(STAFF).length === 1 && textOf(told(STAFF)[0]) === want && same(told(STAFF)[0].body.reply_markup, STAFF_KB)
-      && r.mail.length === 1 && String(r.mail[0].body.text).includes('2 leads came in while your service was suspended.')
-      && leaks(JSON.stringify([...r.tg.map((m) => m.body), ...r.mail.map((m) => m.body)])).length === 0;
+      && told(OWNER).length === 2 && textOf(told(OWNER)[0]) === want && same(told(OWNER)[0].body.reply_markup, OWNER_KB)
+      && textOf(told(STAFF)[0]) === want && same(told(STAFF)[0].body.reply_markup, STAFF_KB)
+      && heldMsg(OWNER).length === 1 && heldMsg(STAFF).length === 1
+      && !/by support|has reactivated/i.test(String(JSON.stringify(r.tg.map((m) => m.body))))
+      && r.mail.length === 1 && String(r.mail[0].body.text).replace(/\u00A0/g, ' ').includes('Every alert and every lead email is working again.')
+      // The held leads themselves DO carry the visitor's details now: the
+      // service is back, so they are ordinary leads. Message 1 and the email
+      // still carry nothing personal.
+      && leaks(JSON.stringify([r.sends[0].body, r.sends[1].body, ...r.mail.map((m) => m.body)])).length === 0;
     // The held leads are ordinary leads of the owner's list now, whole.
     const list = await dbApi.listClientLeads(A, 10, 0);
     const listOk = list.length === 2 && list.some((l) => l.name === PII.name) && list.some((l) => l.name === 'Second Person')
@@ -402,22 +415,28 @@ try {
     const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     const esc = (t) => t.replace('\u2019', '\\u2019');
     const css = fs.readFileSync(path.join(ROOT, 'assets/css/styles.css'), 'utf8');
-    const textsOk = html.includes(`text: '${esc(HELD_PAGE)}'`) && html.includes(`text: '${esc(GONE_PAGE)}'`);
+    // MEANING CHANGE 2026-11-28: the held VISITOR pane is no longer a second
+    // copy of the API's HELD_MESSAGE. Its title is the short label and its body
+    // does not repeat the title. The API sentence (HELD_PAGE) is unchanged.
+    const HELD_TITLE = 'Request saved';
+    const HELD_PANE = "This business can't respond through this form right now. For the fastest help, please call them directly.";
+    const textsOk = html.includes(`title: '${HELD_TITLE}'`) && html.includes(`text: "${HELD_PANE}"`) && html.includes(`text: '${esc(GONE_PAGE)}'`);
     // Decided on the response, before the generic error panel can show.
     const branchOk = /out && out\.held === true \? 'held' : ''/.test(html)
       && /err && err\.body && err\.body\.unavailable === true\) \{ showSent\(data, false, 'unavailable'\); return; \}\s*showError\(err\)/.test(html);
-    // The panel: its own title and words, no recap, no "what happens next",
-    // no success mark, and the Call button of the done pane stays. Two of those
-    // are switched off by the hidden attribute, and a display:flex rule of their
-    // own beats that attribute in a browser, so each needs a rule of its own or
-    // the held visitor still sees their address and the three steps.
+    // The panel: its own title and words, the SAME recap of what the visitor
+    // entered (a held request is still theirs), no "what happens next", no
+    // success mark, and the Call button stays. Only a duplicate hides its recap,
+    // because those edited values were never posted. The hidden attribute needs
+    // a display:none rule of its own where a display:flex rule would beat it.
     const hides = (sel) => new RegExp(sel.replace(/[.[\]]/g, '\\$&') + '\\s*\\{\\s*display:\\s*none\\s*\\}').test(css);
     const panelOk = /function showSent\(data, already, kind\)/.test(html) && /after\.hidden = !!notice/.test(html)
-      && /recapBox\.hidden = !!already \|\| !!notice/.test(html) && /done\.classList\.toggle\('est-plain', !!notice\)/.test(html)
+      && /recapBox\.hidden = !!already;/.test(html) && /if \(!already\) recap\(data\);/.test(html)
+      && /done\.classList\.toggle\('est-plain', !!notice\)/.test(html)
       && /\.est-done\.est-plain \.est-ok\s*\{\s*display:\s*none/.test(css)
       && hides('.est-done .est-recap[hidden]') && hides('.est-done .est-after[hidden]')
       && /<section class="est-pane est-done"[\s\S]*?<button type="button" class="btn ghost" data-close[\s\S]*?<a class="btn phone" href="tel:\{\{tel\}\}"/.test(html);
-    const promiseFree = ![HELD_PAGE, GONE_PAGE].some((t) => /reply|within|soon|shortly|get back/i.test(t));
+    const promiseFree = ![HELD_PANE, GONE_PAGE].some((t) => /reply|within|soon|shortly|get back/i.test(t));
     // deliver() must hand the body on: resolve with the parsed JSON, reject with it.
     const deliverOk = /estimateDeliver/.test(html);
     line(textsOk && branchOk && panelOk && promiseFree && deliverOk, 'LC11', 'the page: a panel per answer, the same words, no promise',

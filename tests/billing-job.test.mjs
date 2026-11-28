@@ -57,7 +57,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   OWNER, STAFF, CHAT_B, OTHER, OP, world, setStore, get, set, newDay, during, everything, textOf, toOf, keyOf, same,
-  bizId, businessRow, iso, DAY, HOUR, tgRefuse, fail500, longLines, supportLinkOk, mailCtl, OPERATOR_MAIL,
+  bizId, businessRow, iso, DAY, HOUR, tgRefuse, fail500, longLines, supportLinkOk, renewLinkOk, mailCtl, OPERATOR_MAIL,
 } from './lifecycle-harness.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -154,7 +154,8 @@ const supportOk = (m) => supportLinkOk(m.body, CFG.SUPPORT_TELEGRAM_URL);
     const now = at(d);
     const want = notice(type, A, now);
     const r = await job(now);
-    const tgOk = same(chatsOf(r), both) && r.sends.every((m) => textOf(m) === want.telegram.text && supportOk(m) && !('reply_markup' in m.body) && !('parse_mode' in m.body));
+    const tgOk = same(chatsOf(r), both) && r.sends.every((m) => textOf(m) === want.telegram.text
+      && renewLinkOk(m.body, CFG.RENEW_URL) && !('reply_markup' in m.body) && !('parse_mode' in m.body));
     const mailOk = r.mail.length === 1 && toOf(r.mail[0]) === 'alder@fixture.invalid' && r.mail[0].body.subject === subject
       && r.mail[0].body.text === want.email.text && keyOf(r.mail[0]) === `${type}:${A}:${Math.floor(P / 1000)}:${iso(now).slice(0, 10)}`;
     const again = await job(now + HOUR, { keepMail: true });
@@ -165,7 +166,7 @@ const supportOk = (m) => supportLinkOk(m.body, CFG.SUPPORT_TELEGRAM_URL);
   const idle = await job(at(4, 6 * HOUR));
   line(quiet(idle), 'BJ3b', 'a later run in the same state sends nothing');
   const text = notice('overdue', A, at(0)).telegram.text;
-  line(text.startsWith('Your payment was due on Dec 14\nand has not been received.\n\nYour service keeps working until\nDec 19 (5 days left).'), 'BJ3c', 'the overdue notice says the dates', text.slice(0, 90));
+  line(text.startsWith('Your payment was due on\nDec 14 and has not arrived.\n\nYour service works\nuntil Dec 19, then it is\nsuspended (5 days left).'), 'BJ3c', 'the overdue notice says the dates', text.slice(0, 90));
 }
 
 /* BJ4 */
@@ -182,7 +183,7 @@ const supportOk = (m) => supportLinkOk(m.body, CFG.SUPPORT_TELEGRAM_URL);
     && keyOf(r.mail[0]) === `suspension:${A}:${now}`;
   line(statusWrite && tgOk && mailOk && state(A) === 'paused/4/true' && r.out.suspended === 1 && world.store.chats.length === 6,
     'BJ4', 'D+5d: suspended, flag set, notice with the Status keyboard', `write=${statusWrite} tg=${tgOk} mail=${mailOk} ${state(A)}`);
-  line(want.telegram.text.includes('because payment was not\nreceived on time.') && want.telegram.text.includes('It will be terminated on\nDec 29 (10 days left)'),
+  line(want.telegram.text.includes('Your service is suspended\nbecause payment was overdue.') && want.telegram.text.includes('The service terminates\non Dec 29 (10 days left).'),
     'BJ4b', 'the billing suspension notice: reason and termination date');
 
   // The operator's Suspend is the same function: same requests, other words, no flag.
@@ -192,8 +193,8 @@ const supportOk = (m) => supportLinkOk(m.body, CFG.SUPPORT_TELEGRAM_URL);
   const manualText = LT.ownerNotice('suspension', { business: get(B), now, reason: 'manual' }).telegram.text;
   line(manual.out.changed && mp.length === 1 && same(mp[0].body, { status: 'paused' }) && state(B) === 'paused/0/false'
     && manual.sends.length === 1 && textOf(manual.sends[0]) === manualText && same(manual.sends[0].body.reply_markup, STATUS_KB)
-    && manualText.startsWith('Your service has been suspended\nby support.') && manual.mail.length === 1,
-    'BJ4c', 'the operator\'s Suspend: same path, "by support", flag stays false', `${state(B)} ${mp.length}`);
+    && manualText.startsWith('Your service has been suspended.') && !/by support/i.test(manualText) && manual.mail.length === 1,
+    'BJ4c', 'the operator\'s Suspend: same path, no "by support", flag stays false', `${state(B)} ${mp.length}`);
   const second = await during(() => SS.suspendBusiness({ business: get(B), rows: [], now }, DEFAULT_IO));
   line(!second.out.changed && second.sends.length === 0 && second.mail.length === 0, 'BJ4d', 'a second Suspend changes and sends nothing');
 }
@@ -207,7 +208,7 @@ const supportOk = (m) => supportLinkOk(m.body, CFG.SUPPORT_TELEGRAM_URL);
   const w = await job(warnAt);
   const wantW = notice('termination_warning', A, warnAt);
   const warnOk = quiet(early) && same(chatsOf(w), both) && w.sends.every((m) => textOf(m) === wantW.telegram.text && same(m.body.reply_markup, STATUS_KB))
-    && w.mail.length === 1 && state(A) === 'paused/5/true' && wantW.telegram.text.includes('It will be terminated on\nDec 29 (5 days left).');
+    && w.mail.length === 1 && state(A) === 'paused/5/true' && wantW.telegram.text.includes('It will be terminated\non Dec 29 (5 days left).');
   line(warnOk, 'BJ5', 'D+10d: the termination warning, once', `${state(A)} sends=${w.sends.length}`);
   newDay();
   const idle = await job(at(14));
@@ -230,7 +231,7 @@ const supportOk = (m) => supportLinkOk(m.body, CFG.SUPPORT_TELEGRAM_URL);
   // Straight from active (the job did not run for weeks): terminated, one notice.
   fresh();
   const late = await job(at(40));
-  line(state(A) === 'churned/6/true' && late.sends.length === 2 && late.sends.every((m) => textOf(m).startsWith('Your service has been\nterminated')),
+  line(state(A) === 'churned/6/true' && late.sends.length === 2 && late.sends.every((m) => textOf(m).startsWith('Your service has been terminated')),
     'BJ5e', 'missed days: terminated directly, only the termination notice', state(A));
 }
 
@@ -376,12 +377,20 @@ const supportOk = (m) => supportLinkOk(m.body, CFG.SUPPORT_TELEGRAM_URL);
   const held = [1, 2].map((n) => ({ id: `h${n}`, business_id: A, idempotency_key: `h${n}`, status: 'open', created_at: iso(P + 6 * DAY), held_at: iso(P + 6 * DAY) }));
   const paused = await restoreCase({ status: 'paused', suspended_for_billing: true, billing_warning_stage: 4 }, null, { leads: held });
   const text = textOf(paused.r.sends[0]);
-  const keyboards = paused.r.sends.map((m) => m.body.reply_markup.keyboard[0].map((k) => k.text).join('+')).sort().join(' ');
-  line(paused.r.out.reactivated && state(A) === 'active/0/false' && same(chatsOf(paused.r), both) && keyboards === 'Invite+Leads Leads'
-    && text.startsWith('Your service is active again.\nThank you for your payment.') && text.includes(`Paid until: ${BL.billingDate(paused.now + 30 * DAY)}.`)
-    && text.includes('2 leads came in while your\nservice was suspended.\nSend /leads to see them.') && paused.r.sends.every(supportOk)
+  const keyboards = paused.r.sends.map((m) => (m.body.reply_markup && m.body.reply_markup.keyboard
+    ? m.body.reply_markup.keyboard[0].map((k) => k.text).join('+')
+    : 'inline')).sort().join(' ');
+  // Message 1 says ONE thing, with the role keyboards. Message 2 (to each
+  // phone) is the held leads themselves, in /leads' format.
+  const firsts = paused.r.sends.filter((m) => textOf(m) === 'Your service is active again.');
+  const seconds = paused.r.sends.filter((m) => textOf(m).startsWith('Recent requests\n\nReceived while suspended: 2'));
+  line(paused.r.out.reactivated && state(A) === 'active/0/false'
+    && firsts.length === 2 && firsts.every((m) => same(m.body.reply_markup, { keyboard: [[{ text: 'Invite' }, { text: 'Leads' }]], is_persistent: true, resize_keyboard: true })
+      || same(m.body.reply_markup, { keyboard: [[{ text: 'Leads' }]], is_persistent: true, resize_keyboard: true }))
+    && seconds.length === 2 && seconds.every((m) => m.body.reply_markup && m.body.reply_markup.inline_keyboard
+      && m.body.reply_markup.inline_keyboard[0].length === 2)
     && paused.r.mail.length === 1 && paused.r.mail[0].body.subject === 'Your service is active again' && paused.r.out.held === 2,
-    'BJ11c', 'a suspended business is restored: keyboards, held count', `${state(A)} kb=${keyboards} held=${paused.r.out.held}`);
+    'BJ11c', 'a suspended business is restored: keyboards, held count', `${state(A)} kb=${keyboards} held=${paused.r.out.held} first=${firsts.length} second=${seconds.length}`);
   const churned = await restoreCase({ status: 'churned', suspended_for_billing: true, billing_warning_stage: 6 }, null);
   line(churned.r.out.reactivated && state(A) === 'active/0/false' && churned.r.sends.length === 2 && !textOf(churned.r.sends[0]).includes('came in while'),
     'BJ11d', 'a terminated business is restored; no held line when none', state(A));
@@ -435,7 +444,10 @@ const supportOk = (m) => supportLinkOk(m.body, CFG.SUPPORT_TELEGRAM_URL);
     'BJ14', 'two suspensions on one day: two emails, two keys', `${k1} ${k2}`);
   const m = one.mail[0];
   const replyTo = [].concat(m.body.reply_to || []).join(',');
-  line(replyTo === OPERATOR_MAIL && String(m.body.text).endsWith('Reply to this email and we will help.') && !/<a\s/i.test(String(m.body.html).split('Sent by Lead Alerts')[0].split('</table>').pop() || '')
+  // Every paragraph's last two words are joined by a non-breaking space, so the
+  // help line ends "we will\u00A0help."; the words are the same.
+  const plainText = String(m.body.text).replace(/\u00A0/g, ' ');
+  line(replyTo === OPERATOR_MAIL && plainText.endsWith('Reply to this email and we will help.') && !/<a\s/i.test(String(m.body.html).split('Sent by Lead Alerts')[0].split('</table>').pop() || '')
     && !/https?:\/\/t\.me/.test(String(m.body.text)), 'BJ14b', 'owner email: Reply-To support, help line, no button', replyTo);
 }
 
@@ -462,7 +474,12 @@ const supportOk = (m) => supportLinkOk(m.body, CFG.SUPPORT_TELEGRAM_URL);
   line(sends.length > 40 && parse === 0, 'BJ16', 'no request carried parse_mode', `sends=${sends.length} parse=${parse}`);
   line(long.length === 0, 'BJ16b', 'no line over 34 characters reached a business', long.slice(0, 3).join(' | '));
   const ownerMail = mail.filter((m) => toOf(m) !== OPERATOR_MAIL);
-  line(ownerMail.length > 10 && ownerMail.every((m) => [].concat(m.body.reply_to || []).join(',') === OPERATOR_MAIL && String(m.body.text).includes('Reply to this email and we will help.')),
+  // Every lifecycle email is Reply-To support. The help line is on every one
+  // except the mails that deliberately offer no reply path: the reactivation
+  // mail (the service is back) and the daily held-leads mail (a count only).
+  const NO_HELP = /^(Your service is active again|New requests are waiting)$/;
+  line(ownerMail.length > 10 && ownerMail.every((m) => [].concat(m.body.reply_to || []).join(',') === OPERATOR_MAIL
+    && (String(m.body.text).replace(/\u00A0/g, ' ').includes('Reply to this email and we will help.') || NO_HELP.test(String(m.body.subject)))),
     'BJ16c', 'every owner email: Reply-To support and the help line', `mails=${ownerMail.length}`);
 }
 

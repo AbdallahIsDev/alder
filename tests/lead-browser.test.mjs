@@ -1319,29 +1319,45 @@ try {
     `forced=${forced} retried=${retried} edits=${detailEdits.length}`);
   }
   /* LB26: the heading counts only the CURRENT suspension, and an unreadable
-     notice log must not stop the list from being shown. */
+     notice log must not stop the list from being shown. Everything is
+     relative to now: the suite runs whenever it runs. */
   store = freshStore();
   {
-    const old = seedLead(BIZ_A, { name: 'Old Hold', created_at: '2026-11-19T12:00:00Z' });
-    const one = seedLead(BIZ_A, { name: 'New Hold 1', created_at: '2026-11-21T12:00:00Z' });
-    const two = seedLead(BIZ_A, { name: 'New Hold 2', created_at: '2026-11-22T12:00:00Z' });
-    for (const id of [old, one, two]) store.leads.find((l) => l.id === id).held_at = id === old
-      ? '2026-11-14T12:00:00Z' : '2026-11-21T12:00:00Z';
+    const day = 86400000;
+    const at = (days) => new Date(Date.now() - days * day).toISOString();
+    // One row held before this suspension, two held during it.
+    const old = seedLead(BIZ_A, { name: 'Old Hold', created_at: at(9) });
+    const one = seedLead(BIZ_A, { name: 'New Hold 1', created_at: at(6) });
+    const two = seedLead(BIZ_A, { name: 'New Hold 2', created_at: at(5) });
+    for (const id of [old, one, two]) store.leads.find((l) => l.id === id).held_at = id === old ? at(9) : at(6);
     const eventResponse = (body, status) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-    sbHook = async ({ table }) => table === 'business_events'
-      ? eventResponse([{ created_at: '2026-11-20T00:00:00Z' }], 200) : null;
+    const suspendedAt = at(7);
+    const reactivatedAt = at(2);   // inside HELD_GROUP_DAYS: the group is open
+    const hook = (body, status) => async ({ table, params }) => {
+      if (table !== 'business_events') return null;
+      const type = String(param({ params }, 'type') || '').replace(/^eq\./, '');
+      return type === 'reactivation' ? eventResponse([{ created_at: reactivatedAt }], status) : eventResponse([{ created_at: suspendedAt }], status);
+    };
+    sbHook = hook([{ created_at: suspendedAt }], 200);
     await tgReset();
     await call(msg(OWNER, '/leads'));
     const scopedText = String((await sends()).pop().body.text);
-    sbHook = null;
-    sbHook = async ({ table }) => table === 'business_events'
-      ? eventResponse({ message: 'database down', code: '500' }, 500) : null;
+    sbHook = hook({ message: 'database down', code: '500' }, 500);
     await tgReset();
     await call(msg(OWNER, '/leads'));
     const failedText = String((await sends()).pop().body.text);
     sbHook = null;
-    const scoped = scopedText.includes('Received while suspended: 2') && !scopedText.includes('Received while suspended: 3');
-    const tolerant = failedText.startsWith('Recent requests\n\n') && failedText.includes('Received while suspended');
+    // Exactly the two rows of THIS suspension are counted (6 days ago, not
+    // the one 9 days ago), and the group is shown because the service came
+    // back two days ago.
+    const scoped = scopedText.includes('Received while suspended: 2') && !scopedText.includes('Received while suspended: 3')
+      && scopedText.split('\n\n').length >= 3;
+    // The count cannot be read: the list is still shown, with the rows on the
+    // page as the minimum.
+    // Unreadable: the page is still shown, and the rows on it are the
+    // minimum (three held rows, so "3" until the count can be read again).
+    const tolerant = failedText.startsWith('Recent requests\n\n') && failedText.includes('Received while suspended: 3')
+      && failedText.includes('Old Hold');
     line(scoped && tolerant, 'LB26', 'held heading scoped to current suspension; count failure still lists',
       `scoped=${scoped} tolerant=${tolerant}`);
   }
