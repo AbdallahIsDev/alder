@@ -49,7 +49,9 @@ hour early.
 ## 5. What "terminated" means
 
 - Your Telegram chats show your service status and nothing else.
-- Your website form accepts no requests. A visitor is told to call you.
+- Your website form accepts no requests: it is replaced by the sentence
+  "This website is currently unavailable." and nothing a visitor types is
+  stored. The rest of your website stays online as it was.
 - Your data is not deleted at termination. See section 6.
 - If you pay within the retention period, we switch the service on again
   with all your data.

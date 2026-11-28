@@ -42,27 +42,23 @@ The paid date is 3 days away. Everything still works.
 **Telegram** (every phone):
 
 ```text
-Your payment is due on Dec 14
-(4 days left).
+Your payment is due on
+Dec 14 (4 days left).
 
-Renew before that date to keep
+[[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to keep
 your service running.
-
-Send /status to see your dates.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 ```
 
 **Email** — subject: **Your payment is due soon** · heading: **Your payment is due soon**
 
 ```text
-Your payment is due on Dec 14 (4 days left).
+Your payment is due on Dec 14 (4 days left).
 
-Renew before that date to keep your service running.
+Renewing before that date keeps your service running and your website taking requests.
 
-Send /status to see your dates.
+Send /status to the Lead Alerts bot on Telegram at any time to see your dates.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `overdue` — grace begins: the paid date has passed
@@ -72,29 +68,26 @@ Overdue, still fully working. The suspension date is named.
 **Telegram** (every phone):
 
 ```text
-Your payment was due on Dec 14
-and has not been received.
+Your payment was due on
+Dec 14 and has not arrived.
 
-Your service keeps working until
-Dec 19 (5 days left).
-After that it is suspended.
+Your service works
+until Dec 19, then it is
+suspended (5 days left).
 
-Send /status to see the
-countdown.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+[[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to keep it running.
 ```
 
 **Email** — subject: **Payment overdue** · heading: **Payment overdue**
 
 ```text
-Your payment was due on Dec 14 and has not been received.
+Your payment was due on Dec 14 and has not arrived.
 
-Your service keeps working until Dec 19 (5 days left). After that it is suspended.
+Your service keeps working until Dec 19 (5 days left). After that it is suspended and your website pauses new requests.
 
-Send /status to see the countdown.
+Renewing now keeps everything running without a break.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `final_warning` — grace, last day: one day before suspension
@@ -104,29 +97,26 @@ The last warning before the service is switched off.
 **Telegram** (every phone):
 
 ```text
-Final notice: your payment is
-overdue.
+Final notice: your
+payment is overdue.
 
 Your service will be suspended
 on Dec 19 (1 day left)
-unless payment is received.
+unless payment arrives.
 
-Send /status to see the
-countdown.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+[[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to keep it running.
 ```
 
 **Email** — subject: **Final notice: payment overdue** · heading: **Final notice: payment overdue**
 
 ```text
-Final notice: your payment is overdue.
+This is the last reminder before your service is suspended.
 
-Your service will be suspended on Dec 19 (1 day left) unless payment is received.
+The payment is still outstanding. The service is suspended on Dec 19 (1 day left) unless payment arrives.
 
-Send /status to see the countdown.
+Renewing takes a minute and keeps your website taking requests.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `suspension` — suspended for non-payment
@@ -137,36 +127,30 @@ Billing reason: the site still saves requests, the termination date is named, th
 
 ```text
 Your service is suspended
-because payment was not
-received on time.
-
-It will be terminated on
-Dec 29 (10 days left)
-unless payment is received.
+because payment was overdue.
 
 Your website still saves new
-requests. You will see them
-when the service is active
-again.
+requests. They are visible
+again after you renew.
 
-Send /status to see the
-countdown.
+The service terminates
+on Dec 29 (10 days left).
 
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+[[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to restore the service.
+
+Need help? [[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 ```
 
 **Email** — subject: **Your service has been suspended** · heading: **Your service has been suspended**
 
 ```text
-Your service is suspended because payment was not received on time.
+Your website is still taking requests. Each one is saved in full and will be waiting for you when the service is back; nothing is lost.
 
-It will be terminated on Dec 29 (10 days left) unless payment is received.
+The service is terminated on Dec 29 (10 days left) unless payment is received.
 
-Your website still saves new requests. You will see them when the service is active again.
+Renewing restores the service and shows every request that came in.
 
-Send /status to see the countdown.
-
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `termination_warning` — suspended: 5 days before termination
@@ -177,28 +161,24 @@ A reminder that termination is coming.
 
 ```text
 Your service is still suspended
-and payment has not been
-received.
+and payment has not arrived.
 
-It will be terminated on
-Dec 29 (5 days left).
+It will be terminated
+on Dec 29 (5 days left).
 
-Send /status to see the
-countdown.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+[[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to keep it running.
 ```
 
 **Email** — subject: **Your service will be terminated** · heading: **Your service will be terminated**
 
 ```text
-Your service is still suspended and payment has not been received.
+Your service is still suspended and the payment has not arrived.
 
-It will be terminated on Dec 29 (5 days left).
+It will be terminated on Dec 29 (5 days left) unless payment arrives.
 
-Send /status to see the countdown.
+A terminated service stops accepting requests, and putting it back takes a new payment.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `termination` — terminated
@@ -208,30 +188,26 @@ The service is off. Nothing was deleted.
 **Telegram** (every phone):
 
 ```text
-Your service has been
-terminated because payment was
-not received.
+Your service has been terminated
+because payment was overdue.
 
-Your website form no longer
-accepts requests. Your data has
-not been deleted.
+Your website has stopped
+accepting requests. Your
+data has not been deleted.
 
-Send /status at any time to see
-the current state.
+[[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to restore the service.
 
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+Need help? [[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 ```
 
 **Email** — subject: **Your service has been terminated** · heading: **Your service has been terminated**
 
 ```text
-Your service has been terminated because payment was not received.
+Your website has stopped accepting requests. Everything you had is still stored: no lead, no phone and no setting was deleted.
 
-Your website form no longer accepts requests. Your data has not been deleted.
+A new payment restores the service and brings every saved request back.
 
-Send /status at any time to see the current state.
-
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ## 2. Suspension and termination by hand
@@ -244,30 +220,25 @@ no countdown, because nothing was scheduled and nobody was late.
 **Telegram**:
 
 ```text
-Your service has been suspended
-by support.
+Your service has been suspended.
 
 Your website still saves new
-requests. You will see them
-when the service is active
-again.
+requests. They are kept safely and
+shown once the service is back.
 
-Send /status at any time to see
-the current state.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]] to resolve it.
 ```
 
 **Email** — subject: **Your service has been suspended**
 
 ```text
-Your service has been suspended by support.
+Your website is still taking requests. Each one is saved in full and will be waiting for you as soon as the service is back; nothing is lost.
 
-Your website still saves new requests. You will see them when the service is active again.
+There is no termination date: the service stays suspended until it is resolved.
 
-Send /status at any time to see the current state.
+Contact support to resolve it.
 
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ### `termination` — manual
@@ -275,29 +246,24 @@ Reply to this email and we will help.
 **Telegram**:
 
 ```text
-Your service has been
-terminated by support.
+Your service has been terminated.
 
-Your website form no longer
-accepts requests. Your data has
-not been deleted.
+Your website has stopped
+accepting requests. Your
+data has not been deleted.
 
-Send /status at any time to see
-the current state.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]] to
+restore the service.
 ```
 
 **Email** — subject: **Your service has been terminated**
 
 ```text
-Your service has been terminated by support.
+Your website has stopped accepting requests. Everything you had is still stored: no lead, no phone and no setting was deleted.
 
-Your website form no longer accepts requests. Your data has not been deleted.
+The service can be restored; contact support to arrange it.
 
-Send /status at any time to see the current state.
-
-Reply to this email and we will help.
+Reply to this email and we will help.
 ```
 
 ## 3. Back in service
@@ -312,26 +278,16 @@ in the same shape as `/leads`.
 
 ```text
 Your service is active again.
-Thank you for your payment.
-
-Paid until: Jan 18.
-
-Send /status at any time to see
-the current state.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 ```
 
 **Email** — subject: **Your service is active again**
 
 ```text
-Your service is active again. Thank you for your payment.
+Every alert and every lead email is working again.
 
-Paid until: Jan 18.
+Your service is paid until Jan 18.
 
-Send /status at any time to see the current state.
-
-Reply to this email and we will help.
+Your website is taking requests again.
 ```
 
 ### `reactivation` — Extend 30 days, 3 held leads (then the second message)
@@ -340,32 +296,16 @@ Reply to this email and we will help.
 
 ```text
 Your service is active again.
-Thank you for your payment.
-
-Paid until: Jan 18.
-
-3 leads came in while your
-service was suspended.
-Send /leads to see them.
-
-Send /status at any time to see
-the current state.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 ```
 
 **Email** — subject: **Your service is active again**
 
 ```text
-Your service is active again. Thank you for your payment.
+Every alert and every lead email is working again.
 
-Paid until: Jan 18.
+Your service is paid until Jan 18.
 
-3 leads came in while your service was suspended. Send /leads to see them.
-
-Send /status at any time to see the current state.
-
-Reply to this email and we will help.
+Your website is taking requests again.
 ```
 
 ### `reactivation` — Reactivate, no held leads
@@ -374,22 +314,14 @@ Reply to this email and we will help.
 
 ```text
 Your service is active again.
-Support has reactivated it.
-
-Send /status at any time to see
-the current state.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 ```
 
 **Email** — subject: **Your service is active again**
 
 ```text
-Your service is active again. Support has reactivated it.
+Every alert and every lead email is working again.
 
-Send /status at any time to see the current state.
-
-Reply to this email and we will help.
+Your website is taking requests again.
 ```
 
 ### `reactivation` — Reactivate, 2 held leads (then the second message)
@@ -398,28 +330,14 @@ Reply to this email and we will help.
 
 ```text
 Your service is active again.
-Support has reactivated it.
-
-2 leads came in while your
-service was suspended.
-Send /leads to see them.
-
-Send /status at any time to see
-the current state.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 ```
 
 **Email** — subject: **Your service is active again**
 
 ```text
-Your service is active again. Support has reactivated it.
+Every alert and every lead email is working again.
 
-2 leads came in while your service was suspended. Send /leads to see them.
-
-Send /status at any time to see the current state.
-
-Reply to this email and we will help.
+Your website is taking requests again.
 ```
 
 ## 4. A new request while the service is suspended
@@ -433,15 +351,12 @@ and are visible after the service is back.
 **Telegram**:
 
 ```text
-A new lead just submitted your
-form. Your service is suspended,
-so the details are hidden.
-Renew to see them.
+New lead received. Your
+lead is saved safely.
 
-Send /status to see the
-countdown.
+[[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to see the details.
 
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+Need help? [[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 ```
 
 ### `held_lead` — manual suspension
@@ -449,17 +364,13 @@ countdown.
 **Telegram**:
 
 ```text
-A new lead just submitted your
-form. Your service is suspended,
-so the details are hidden.
-Renew to see them.
+New lead received. Your
+lead is saved safely.
 
-Contact support to restore it.
+The details stay hidden while
+the service is suspended.
 
-Send /status to see the current
-state.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]] to resolve it.
 ```
 
 ## 5. The daily email about waiting requests
@@ -472,11 +383,11 @@ detail and never a name.
 **Email** — subject: **New requests are waiting**
 
 ```text
-1 new request has come in through your website form while your service is suspended.
+1 request came in through your website form while the service was suspended.
 
-The details are hidden until the service is active again.
+The details are hidden until the service is active again, and every one of them is saved in full.
 
-Reply to this email and we will help.
+Renewing shows all of them.
 ```
 
 ### `held_summary` — four requests
@@ -484,11 +395,11 @@ Reply to this email and we will help.
 **Email** — subject: **New requests are waiting**
 
 ```text
-4 new requests have come in through your website form while your service is suspended.
+4 requests came in through your website form while the service was suspended.
 
-The details are hidden until the service is active again.
+The details are hidden until the service is active again, and every one of them is saved in full.
 
-Reply to this email and we will help.
+Renewing shows all of them.
 ```
 
 ## 6. Every other message while the service is off
@@ -499,73 +410,64 @@ Anything else gets this short answer with the same button.
 ### Reply — suspended for non-payment
 
 ```text
-This service is suspended
-because payment was not
-received on time.
+Your service is suspended
+because payment was overdue.
 
-It will be terminated on
-Dec 24 (27 days left).
+It terminates on Dec
+24 (26 days left).
 
-Send /status to see the
-countdown.
+New requests are still saved
+and shown after you renew.
 
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+[[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to restore the service.
 ```
 
 ### Reply — suspended by hand
 
 ```text
-This service has been suspended
-by support.
+Your service has been suspended.
 
-No termination date is set.
+New requests are still
+saved and kept safely
+until the service is back.
 
-Send /status at any time to see
-the current state.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]] to resolve it.
 ```
 
 ### Reply — terminated
 
 ```text
-This service was terminated
-because payment was not
-received.
+Your service has been terminated
+because payment was overdue.
 
-Terminated on Dec 14.
+Your website accepts no
+new requests. Your data
+has not been deleted.
 
-Days left: 0. Send /status
-to see the current state.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+[[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to restore the service.
 ```
 
 ### Button taps while off (a toast, plain text, 200 characters at most)
 
 ```text
-suspended: This service is suspended. Send /status.
-terminated: This service was terminated. Send /status.
+suspended: This service is suspended.
+terminated: This service was terminated.
 ```
 
 ### A valid invite code used while off
 
 ```text
 This service is suspended.
-A new phone cannot be connected
-right now.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+A new phone cannot be
+connected right now.
 ```
 
 ### …while terminated
 
 ```text
 This service was terminated.
-A new phone cannot be connected
-right now.
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+A new phone cannot be
+connected right now.
 ```
 
 ## 7. `/status`, in every state
@@ -575,93 +477,79 @@ The same facts as the operator's screen, in the owner's words.
 ### /status — paid
 
 ```text
-Status: Active, payment overdue
-
-Payment was due on Dec 14.
-
-Your service will be suspended
-on Dec 19 (5 days left).
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+Status: Overdue (grace)
+Next: Suspension in 5 days
+Paid until: Dec 14
 ```
 
 ### /status — due soon
 
 ```text
-Status: Active
-
+Status: Due soon
+Next: Overdue in 3 days
 Paid until: Dec 14
-(3 days left).
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 ```
 
 ### /status — grace (overdue)
 
 ```text
-Status: Active, payment overdue
-
-Payment was due on Dec 14.
-
-Your service will be suspended
-on Dec 19 (1 day left).
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+Status: Overdue (grace)
+Next: Suspension tomorrow
+Paid until: Dec 14
 ```
 
 ### /status — suspended for non-payment
 
 ```text
-Status: Suspended
+Status: Suspended (payment)
+Next: Termination in 10 days
+Terminates: Dec 29
 
-Reason: payment was not
-received on time.
-
-Terminates on Dec 29
-(10 days left).
+Reason: payment was overdue.
 
 Leads waiting: 2
-Their details are hidden until
-the service is active again.
 
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+Their details are hidden
+until the service is back.
+
+[[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to restore the service.
 ```
 
 ### /status — suspended by hand
 
 ```text
-Status: Suspended
+Status: Suspended (manual)
+Next: none (manual hold)
 
-Reason: suspended by support.
+The service was suspended.
 
 Leads waiting: 1
-Their details are hidden until
-the service is active again.
 
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+Their details are hidden
+until the service is back.
+
+[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]] to
+restore the service.
 ```
 
 ### /status — terminated
 
 ```text
 Status: Terminated
+Terminated: Dec 29
 
 Payment was not received.
-Terminated on Dec 29.
 
-Your website form no longer
-accepts requests. Your data has
-not been deleted.
+Your data has not been deleted.
 
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+[[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to restore the service.
 ```
 
 ### /status — not tracked (a demo)
 
 ```text
-Status: Active
-
-[[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
+Status: Not tracked
+No payment date recorded
 ```
 
 ## 8. The operator's screens
@@ -681,16 +569,18 @@ Phone 1 · main phone
 Leads: 7 total
 Last 30 days: 7
 Last lead: 14d ago
-Overdue since Dec 14 · suspends Dec 19
+
+Status: Overdue (grace)
+Next: Suspension in 5 days
+Paid until: Dec 14
 ```
 
 ### Buttons — active, a phone connected
 
 ```text
-[Suspend] [Replace phone]
-[Extend 30 days] [Leads]
-[Terminate]
-[Back]
+[Replace phone] [Extend 30 days]
+[Suspend] [Terminate]
+[Leads] [Back]
 ```
 
 ### Business screen — active, no phone connected
@@ -704,16 +594,18 @@ Telegram: Not connected
 Leads: 7 total
 Last 30 days: 7
 Last lead: 14d ago
-Overdue since Dec 14 · suspends Dec 19
+
+Status: Overdue (grace)
+Next: Suspension in 5 days
+Paid until: Dec 14
 ```
 
 ### Buttons — active, no phone connected
 
 ```text
-[Suspend] [Invite]
-[Extend 30 days] [Leads]
-[Terminate]
-[Back]
+[Invite] [Extend 30 days]
+[Suspend] [Terminate]
+[Leads] [Back]
 ```
 
 ### Business screen — due soon
@@ -728,16 +620,18 @@ Phone 1 · main phone
 Leads: 7 total
 Last 30 days: 7
 Last lead: 11d ago
-Paid until: Dec 14 · due in 3 days
+
+Status: Due soon
+Next: Overdue in 3 days
+Paid until: Dec 14
 ```
 
 ### Buttons — due soon
 
 ```text
-[Suspend] [Replace phone]
-[Extend 30 days] [Leads]
-[Terminate]
-[Back]
+[Replace phone] [Extend 30 days]
+[Suspend] [Terminate]
+[Leads] [Back]
 ```
 
 ### Business screen — grace
@@ -752,16 +646,18 @@ Phone 1 · main phone
 Leads: 7 total
 Last 30 days: 7
 Last lead: 18d ago
-Overdue since Dec 14 · suspends Dec 19
+
+Status: Overdue (grace)
+Next: Suspension tomorrow
+Paid until: Dec 14
 ```
 
 ### Buttons — grace
 
 ```text
-[Suspend] [Replace phone]
-[Extend 30 days] [Leads]
-[Terminate]
-[Back]
+[Replace phone] [Extend 30 days]
+[Suspend] [Terminate]
+[Leads] [Back]
 ```
 
 ### Business screen — suspended for non-payment
@@ -776,8 +672,11 @@ Phone 1 · main phone
 Leads: 7 total
 Last 30 days: 7
 Last lead: 19d ago
+
+Status: Suspended (payment)
+Next: Termination in 10 days
+Terminates: Dec 29
 Held leads: 2
-Suspended since Dec 19 · terminates Dec 29
 ```
 
 ### Buttons — suspended for non-payment
@@ -800,16 +699,17 @@ Phone 1 · main phone
 Leads: 7 total
 Last 30 days: 7
 Last lead: 19d ago
+
+Status: Suspended (manual)
+Next: none (manual hold)
 Held leads: 2
-Overdue since Dec 14
 ```
 
 ### Buttons — suspended by hand
 
 ```text
-[Reactivate] [Leads]
-[Extend 30 days]
-[Terminate]
+[Reactivate] [Extend 30 days]
+[Terminate] [Leads]
 [Back]
 ```
 
@@ -825,8 +725,10 @@ Phone 1 · main phone
 Leads: 7 total
 Last 30 days: 7
 Last lead: 29d ago
+
+Status: Terminated
+Terminated: Dec 29
 Held leads: 2
-Terminated Dec 29
 ```
 
 ### Buttons — terminated
@@ -848,16 +750,17 @@ Phone 1 · main phone
 Leads: 7 total
 Last 30 days: 7
 Last lead: 14d ago
-Billing: not tracked
+
+Status: Not tracked
+No payment date recorded
 ```
 
 ### Buttons — billing not tracked
 
 ```text
-[Suspend] [Replace phone]
-[Extend 30 days] [Leads]
-[Terminate]
-[Back]
+[Replace phone] [Extend 30 days]
+[Suspend] [Terminate]
+[Leads] [Back]
 ```
 
 ## 9. The operator's questions and their answers
@@ -877,9 +780,9 @@ The owner can see the count.
 
 ```text
 Reactivate Alder Roofing?
-Alerts and emails resume.
-Requests held while it was
-off become visible again.
+Lifts the suspension.
+Paid date does not change.
+Held requests become visible.
 Nothing is deleted.
 ```
 
@@ -906,7 +809,9 @@ Extend Alder Roofing to Jan 13?
 Extend Alder Roofing to Jan 18?
 
 This business was suspended.
-Extending restores the service.
+Adds 30 days from today.
+New date: Jan 18.
+Restores the service.
 ```
 
 ### Ask: extend, a terminated business
@@ -915,7 +820,9 @@ Extending restores the service.
 Extend Alder Roofing to Jan 28?
 
 This business was terminated.
-Extending restores the service.
+Adds 30 days from today.
+New date: Jan 28.
+Restores the service.
 ```
 
 ### Result: suspended

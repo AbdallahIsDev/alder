@@ -31,6 +31,14 @@ const line = (ok, id, what, d) => {
     !ops.includes('at most three times an hour'),
     /44 px[^.]*desktop[^.]*32 px[^.]*phones/.test(ops),
     /may be\s+deleted by hand/.test(privacy),
+    /* the terminated page: the runbook, the privacy notice and the terms all
+       describe the one sentence the page actually shows */
+    ops.includes('/api/site-state') && ops.includes('This website is currently unavailable.'),
+    privacy.includes('This website is currently') && privacy.includes('unavailable.'),
+    !/your website form accepts no requests\. A visitor is told to call you/i.test(read('docs/legal-drafts/terms-of-service.md')),
+    /* the form's resting look and the draft rules are described where the
+       visitor's phone is described */
+    /no-store/.test(ops) && /24 hours old/.test(ops) && /focus-visible/.test(ops),
   ];
   const ok = flags.every(Boolean);
   line(ok, 'PL1', 'runbook and legal draft match the code', `flags=${flags.map(Number).join('')}`);

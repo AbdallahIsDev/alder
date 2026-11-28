@@ -39,27 +39,33 @@ the business, or must it get the contact details at once?
 
 ## 2. What a suspended or terminated site shows
 
-**Fact.** Today the whole landing page is still served in both states. Only
-the form changes. While suspended, the form holds the request (section 1).
-When terminated, the form answers "not available" (HTTP 410) and stores
-nothing; the visitor is told to call. `docs/OPERATIONS.md` section 3b,
-"Options for the site itself", lists three choices: (1) keep serving the
-site, which is the only one built today; (2) a neutral holding page per
-terminated host, which is **not built** — the HTML render does not resolve a
-tenant yet; (3) redirect the host to the operator's contact page, which loses
-the client's SEO. `SESSION_HANDOFF.md` section 7, fact 11, records the same
-limitation.
+**Fact.** The whole landing page is still served in both states; what changes
+is the estimate form. While suspended, the form holds the request (section 1).
+When terminated, the page asks `/api/site-state` once and that endpoint answers
+one word about the host (`served`, `suspended` or `terminated`, with nothing
+about the business). On `terminated` the form is replaced by one sentence —
+"This website is currently unavailable." — with no form, no progress, no close
+button and no navigation; the form endpoint also answers 410 and stores
+nothing. A failed, unknown or unreadable answer changes nothing: the site stays
+as it was. `docs/OPERATIONS.md` section 3b lists three options: (1) one neutral
+sentence in the form, which is what is built today; (2) a neutral holding page
+for the whole host, which is **not built** — the page is static and its state
+arrives after paint; (3) redirect the host to the operator's contact page,
+which loses the client's SEO. `SESSION_HANDOFF.md` section 7, fact 11, records
+the same limitation.
 
 **Proposed clause.** "While your service is suspended, your website stays
 online and the form still accepts requests, which we hold. If your service is
-terminated, your website stays online but the form stops accepting requests
-and tells visitors to call you. We do not replace your website with a holding
-page."
+terminated, your website stays online, the form is replaced by the sentence
+'This website is currently unavailable.', and it accepts and stores no new
+requests. We do not take your website down and we do not redirect its address
+without asking you."
 
 **[REVIEW FLAG]** The owner must choose one of the three options before the
-first customer pays; the clause above states option 1. Is a site that keeps
-advertising a business which is not taking work misleading? If option 2 or 3
-is chosen later, who builds it, and how much notice is the business given?
+first customer pays; the clause above states option 1. Is a site whose header,
+sections and phone number still describe a business that is not taking work
+misleading, even with the form replaced? If option 2 or 3 is chosen later, who
+builds it, and how much notice is the business given?
 
 ## 3. Retention and export after termination
 
@@ -143,7 +149,7 @@ decision to auto-charge; the wording would then be false.
 | Topic | Code-backed fact | Blank for owner / lawyer |
 |---|---|---|
 | Held leads | form stores with `held_at`; count-only notices; released on Reactivate or Extend | how long leads may be held; disclosure to the visitor; what if never restored |
-| Site when off | full landing page still served; form holds when suspended, is unavailable when terminated; holding page not built | which of the three site options applies; misleading-advertising risk; notice before a change |
+| Site when off | full landing page still served; form holds when suspended; when terminated the form is replaced by one neutral sentence (from `/api/site-state`) and stores nothing; whole-host holding page not built | which of the three site options applies; misleading-advertising risk of the rest of the page; notice before a change |
 | Retention and export | 60 days; no purge job; export is a manual database query; deletion is a manual script | "may" vs "will" delete; export format and deadline; manual-only promise |
 | Refund and chargeback | no payments and no amounts in code | refund formula; chargeback action and who pays the fee |
 | Late payment | `max(paid_until, now) + 30 days`; a paid period never shortens | "recorded" vs "paid" day; UTC vs local date; part-months |

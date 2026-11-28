@@ -11,7 +11,7 @@ is gone on purpose, except for a short log at the end.
 > change it in the same task, not later. `AGENTS.md` carries the same rule for any
 > agent working in this repo. Never write a secret value in this file; names only.
 
-**Last updated:** 2026-11-27.
+**Last updated:** 2026-11-28.
 
 ---
 
@@ -353,6 +353,15 @@ refund = Terminate, chargeback = suspend).
 **Multi-client** — `businesses.site_host` + `resolveTenant`; `clients/<slug>.json`
 drives the build; one deployment serves every client.
 
+**Public site state** — `GET /api/site-state` is the one public answer about the
+host the page is on: `{ok, state}` with `state` one of `served`, `suspended`,
+`terminated`, derived from the business `status` and nothing else. No name, id,
+address, date, billing state or lead count leaves it, and every answer is
+`no-store`. An unknown host or an unreadable database answers 200
+`{ok:false,state:'served'}`, so a blip never hides a paying client's site. The
+page uses it only to replace the estimate form with
+"This website is currently unavailable." (`tests/site-state.test.mjs`, gate SS).
+
 ---
 
 ## 6. Landing page design rules that still bind
@@ -406,9 +415,15 @@ the modal's thank-you steps.
 10. **Unverified on real devices:** Gmail/Outlook/Apple Mail rendering, the review
     page handoff on a phone, Telegram button colours on clients older than
     Feb 2026.
-11. **A terminated host still serves the full landing page.** Only the form
-    answers "not available". Three options with their real costs are written in
-    `docs/OPERATIONS.md`; only option 1 exists today.
+11. **A terminated host still serves the landing page.** The page asks
+    `GET /api/site-state` once and, on `terminated`, replaces the estimate form
+    with one neutral sentence ("This website is currently unavailable."). The
+    rest of the page — the header, the sections, the phone number — is still
+    served, so the site keeps describing a business that is not taking work.
+    A whole-host holding page would need the HTML render to resolve the tenant,
+    which it does not do; the three options and their costs are written in
+    `docs/OPERATIONS.md` §3b. A failed or unknown answer never hides a live
+    site.
 
 ---
 
@@ -439,7 +454,7 @@ the modal's thank-you steps.
 | **Uptime / outage alerting** | Proposal only. `docs/proposals/uptime-check.md`. |
 | **Per-client summary schedule** | Four presets, local hour, needs one column and an hourly cron (Pro). `docs/PROPOSALS.md` §5d. |
 | **Keyset paging for `/leads`** | Deferred. Offset paging with an `id` tie-breaker is enough at 5 rows a page. |
-| **Terminated-site presentation** | Three options documented in `docs/OPERATIONS.md` (serve today, per-host holding page, redirect to operator contact). Not built; owner decides later. |
+| **Terminated-site presentation** | Partly built: `/api/site-state` plus one neutral sentence in the form (`docs/OPERATIONS.md` §3b). A whole-host holding page or a redirect to the operator's contact page is still open; the owner decides. |
 | **Telegram audit leftovers** | Named lead buttons (name/service/age instead of 1..5) and merging `/remove_lead` into the lead detail. Everything else in `docs/audits/telegram-bot-audit.md` is done or rejected on purpose. |
 | **Retention automation** | A purge job matching the 60-day rule. |
 | **Supabase key migration** | Swap env values before early 2027; tighten `db-wall` first. |
@@ -482,6 +497,7 @@ the modal's thank-you steps.
 | 2026-11-27 | `final-verify` branch: full localhost/TEST E2E in `_debug/e2e-final.md`. 44 suites / 633 assertions green, `npm run build` exit 0, review diff `_debug/patches/final-verify-review.diff`. Five fix-and-retest rounds: a mis-ranged canary fixture chat, a transient B6h, and a load-sensitive B5d assertion were fixed in the test harness only. No production data touched. PR opened, not merged. |
 | 2026-11-27 | Final review fixes: `tests/phone.test.mjs` registered in `DEFAULT_SUITES` with N3 pinning it; `docs/EMAIL_SYSTEM.md` phone section rewritten for the shared rule; P24/P25 wording corrected. Reviewer's non-NANP finding accepted as a recorded ruling, not a code change. Free disk fell below the 1 GB suite floor; generated `_debug/e2e-build`, `_debug/e2e-dev-root` and `dist` scratch were deleted (no user work). Final: 45 suites / 634 assertions green. |
 | 2026-11-27 | Production smoke after PR #42 merge/deploy: alias and `?dev=1`/`?debug=1` showed no console errors and no `.dbg`; both production host attributes are the Vercel alias. One `ZZ PROD CHECK` lead submitted through the real form returned HTTP 200, stored `+15551234567`, produced `created`/`tg_sent`/`email_owner_sent`/`autoreply_sent`, then was deleted with all four events. Lead count 8 -> 9 -> 8; sentinel count 0 before and after. |
+| 2026-11-28 | Lifecycle/site-lifecycle round, Parts 0–5: one generated `docs/MESSAGE_PREVIEW.md` (Part 0b) and `docs/LIFECYCLE_EXPLAINED.md` (Part 0a); operator business screen and the one status formatter (Part 1); the held group, the two-message reactivation, the owner texts without "by support" (Part 2); owner emails with no repeated sentence (Part 3); `GET /api/site-state` answering one word (Part 4); the form's resting look and the draft guards (Part 5). |
 | 2026-11-28 | Owner authorised a one-time push to `origin/main` and asked to skip the full suite. Merging `final-verify` (production smoke handoff + owner's `update styles` commit) into main. Assertion-meaning change recorded: MD14 previously required `.est-recap div` in the sitewide radius list; the owner's commit removes it, so recap rows no longer carry the 12 px radius, only the recap container does. Review artefact `_debug/patches/main-push-review.diff`: 3,853 bytes, 50 lines, apply-check 0, secret scan all 0. Stale branches (codex/pr27, multi-client-prep, telegram-widgets, visual-polish, whop-notes) are 67–129 commits behind main and hold superseded code or docs-only notes; left out. |
 
 ---
