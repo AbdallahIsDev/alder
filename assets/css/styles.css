@@ -2496,6 +2496,16 @@
       outline-offset: 2px
     }
 
+    /* Item 15: the answer panel is a static region, not a control. Focusing it
+       after a mouse submit drew a red ring around the whole card; the heading
+       takes focus instead, and neither draws an outline. */
+    .est-done:focus,
+    .est-done:focus-visible,
+    .est-done h3:focus,
+    .est-done h3:focus-visible {
+      outline: none
+    }
+
     /* header: step text + four segments + close */
     .est-top {
       display: flex;

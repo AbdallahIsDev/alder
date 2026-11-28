@@ -845,7 +845,7 @@
         <section class="est-pane est-done" hidden tabindex="-1" data-page-node-id="YOFKPlpXGGFuQIcy9lQ7Xx">
           <div class="est-done-top">
             <span class="est-ok" aria-hidden="true" data-page-node-id="jyKcYGcN4ZzXFpEYLdzjSi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" data-page-node-id="i9gSY9oPZnVUlOJOPmKScE"><path d="M5 12.5l4.5 4.5L19 7.5" pathLength="1" data-page-node-id="ichkaMk46N4VeIBt3HdJ7Q"/></svg></span>
-            <div class="est-head" data-page-node-id="2UNJsxAGGf5Bx3EHy0Gy1t"><h3 id="est-thanks" data-page-node-id="UVe3v1YdJJ7KiZ33pWlKNS">Thanks.</h3><p class="lead" data-page-node-id="fymQ8nLuu1F9SyBCCIXhmK">We got your request.</p></div>
+            <div class="est-head" data-page-node-id="2UNJsxAGGf5Bx3EHy0Gy1t"><h3 id="est-thanks" tabindex="-1" data-page-node-id="UVe3v1YdJJ7KiZ33pWlKNS">Thanks.</h3><p class="lead" data-page-node-id="fymQ8nLuu1F9SyBCCIXhmK">We got your request.</p></div>
           </div>
           <dl class="est-recap" data-page-node-id="Gxhnd3cASW1DG4a2DQO9kq"></dl>
           <div class="est-next-group">
@@ -2227,6 +2227,8 @@ function normalizePhone(raw, cfg, strict) {
     var rows = [['Service', labelOf('service')], ['Property', labelOf('home') + ' · ZIP ' + data.zip], ['Roof age', E.age.value], ['Start', labelOf('timing') + (data.claim ? ' · insurance claim' : '')], ['Phone', data.phone]], dl = done.querySelector('.est-recap');
     dl.textContent = ''; rows.forEach(function (r) { var w = document.createElement('div'), dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = r[0]; dd.textContent = r[1]; w.appendChild(dt); w.appendChild(dd); dl.appendChild(w); });
   }
+  /* Item 15: focus the answer's heading, never the whole panel. */
+  function focusSent() { var h = done.querySelector('#est-thanks'); (h || done).focus({ preventScroll: true }); }
   /* `already` is the in-page duplicate: the same visitor pressed send twice within
      30 s. The server dropped the second one, so the honest answer is "we already
      have this", not the generic "we couldn't send it" panel. */
@@ -2257,7 +2259,7 @@ function normalizePhone(raw, cfg, strict) {
       lsSet(AUTO.sentKey, '1');
       alertBox.hidden = true; nav.hidden = true; label.textContent = notice ? notice.label : (already ? 'Request already received' : 'Request sent');
       dots.forEach(function (d) { d.classList.remove('on', 'busy'); d.classList.toggle('done', kind !== 'unavailable'); }); body.scrollTop = 0;
-    }).then(function () { if (root.classList.contains('open')) done.focus({ preventScroll: true }); });
+    }).then(function () { if (root.classList.contains('open')) focusSent(); });
   }
   /* Plain send-error handler (exposed as window.estimateHandleError so tests
      can feed it the real 400 body with a stub ui): a 400 whose body names
@@ -2382,7 +2384,7 @@ function normalizePhone(raw, cfg, strict) {
     if (!resuming) restored = restoreDraft();                  /* this tab's draft: same step, same answers */
     setTimeout(function () {
       if (resuming) setBusy(true);                             /* the old request still owns the screen */
-      else if (state === 'sent') done.focus({ preventScroll: true });
+      else if (state === 'sent') focusSent();
       /* An auto-opened dialog focuses ITSELF: nothing is answered yet, and a
          focused card or radio would read as a choice. A dialog the visitor
          opened on purpose goes straight to its first field. */
@@ -2568,3 +2570,4 @@ function normalizePhone(raw, cfg, strict) {
 </body>
 
 </html>
+

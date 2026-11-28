@@ -845,6 +845,17 @@ try {
     line(sameToken && cardBorder && fieldBorder, 'MD25',
       'fields and option cards share one resting border token',
       `token=${sameToken} card=${cardBorder} field=${fieldBorder}`);
+
+    // MD26 (item 15): the success/held panel is not itself focused — that drew
+    // a red ring around the whole card. Focus moves to its heading, with no
+    // outline; the panel never shows a focus ring.
+    const headingFocusable = /<h3 id="est-thanks"[^>]*tabindex="-1"/.test(html);
+    const helper = /function focusSent\(\)\s*\{\s*var h = done\.querySelector\('#est-thanks'\);\s*\(h \|\| done\)\.focus\(\{ preventScroll: true \}\);\s*\}/.test(html);
+    const noPaneFocus = !/done\.focus\(\{ preventScroll: true \}\)/.test(html);
+    const noRing = /\.est-done:focus,\s*\.est-done:focus-visible,\s*\.est-done h3:focus,\s*\.est-done h3:focus-visible\s*\{\s*outline:\s*none\s*\}/.test(css);
+    line(headingFocusable && helper && noPaneFocus && noRing, 'MD26',
+      'success panel has no focus ring; focus lands on its heading',
+      `heading=${headingFocusable} helper=${helper} noPane=${noPaneFocus} noRing=${noRing}`);
     line(base && dbl && quad && img12 && images && cta && ctaFill && totRing && singleRing, 'MD16',
       '12px base, 24px images/cards, 48px CTA, footer corners, rounded back-to-top, one ring',
       `base=${base} dbl=${dbl} quad=${quad} img12=${img12} images=${images} cta=${cta} fill=${ctaFill} tot=${totRing} ring=${singleRing}`);
