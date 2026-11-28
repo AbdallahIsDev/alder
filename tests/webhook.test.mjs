@@ -1475,6 +1475,11 @@ try {
           'bindChat refuses the operator chat', `code=${err} rows=${rows}`);
       }
 
+      // MEANING CHANGE 2026-11-28 (OP24/OP63): the business screen no longer
+      // ends in "Billing: not tracked" and no longer uses a four-row button
+      // layout. These assertions now pin the shared status block and the three
+      // colour-grouped rows. Intent is unchanged: one screen, no stale detail,
+      // and Replace phone/Invite never both present.
       // OP24: /businesses opens the business browser; a button of the old
       // /phones picker (pb:) says the screen expired and shows that business
       // in it. /invite is the invite list; a number in it, and a button of
@@ -1505,22 +1510,20 @@ try {
         await good(cb(OP, 'bd:0:' + bizA.id));
         const bdEdit = (await sent()).filter((x) => x.path.includes('/editMessageText')).pop();
         // The business screen against the real view: the Telegram line says
-        // Connected and nothing else, the lead numbers are one line (two
-        // aggregates) plus the age of the newest, and "Requests" is gone.
-        // The last line is billing: the demo business is not billed ("not
-        // tracked"), or the test database has no billing columns yet
-        // (migration 0006 not applied: "unavailable"). Either is correct here.
-        // The lead counts are two lines now (total, then the 30-day window), and
-        // a business with a phone gets Replace phone (bw:), never Invite (bv:).
+        // Connected and nothing else, the lead numbers are two lines (total,
+        // then the 30-day window), and "Requests" is gone. The status block is
+        // the LAST block, shared with the owner's /status: not tracked here,
+        // or "unavailable" if migration 0006 is missing. The buttons are three
+        // colour-grouped rows: blue (Replace phone, Extend), red (Suspend,
+        // Terminate), then neutral (Leads, Back). The phone gets bw:, never bv:.
         const detailOk = phSends === 0 && pbToast.includes(C2.OPERATOR_SCREEN_EXPIRED) && phonesTitle.split('\n')[0] === 'Alder Roofing'
           && phonesTitle.split('\n')[1] === 'Demo · alder-demo' && /\n\nTelegram: Connected\nPhone 1 · main phone/.test(phonesTitle)
-          && /\n\nLeads: \d+ total\nLast 30 days: \d+(\nLast lead: [^\n]+)?(\nHeld leads: \d+)?\nBilling: (not tracked|unavailable)$/.test(phonesTitle)
-          && !/Requests|\d phones?|in the last 30 days/.test(phonesTitle)
+          && /\n\nLeads: \d+ total\nLast 30 days: \d+(\nLast lead: [^\n]+)?(\nHeld leads: \d+)?\n\nStatus: (Not tracked\nNo payment date recorded|Billing unavailable\nNo payment data available)$/.test(phonesTitle)
+          && !/Requests|\d phones?|in the last 30 days|Billing: /.test(phonesTitle)
           && JSON.stringify(detailKb) === JSON.stringify([
-            [{ text: 'Suspend', callback_data: 'bs:0:' + bizA.id, style: 'danger' }, { text: 'Replace phone', callback_data: 'bw:0:' + bizA.id, style: 'primary' }],
-            [{ text: 'Extend 30 days', callback_data: 'be:0:' + bizA.id, style: 'primary' }, { text: 'Leads', callback_data: 'bq:0:0:' + bizA.id }],
-            [{ text: 'Terminate', callback_data: 'bx:0:' + bizA.id, style: 'danger' }],
-            [{ text: 'Back', callback_data: 'bl:0' }],
+            [{ text: 'Replace phone', callback_data: 'bw:0:' + bizA.id, style: 'primary' }, { text: 'Extend 30 days', callback_data: 'be:0:' + bizA.id, style: 'primary' }],
+            [{ text: 'Suspend', callback_data: 'bs:0:' + bizA.id, style: 'danger' }, { text: 'Terminate', callback_data: 'bx:0:' + bizA.id, style: 'danger' }],
+            [{ text: 'Leads', callback_data: 'bq:0:0:' + bizA.id }, { text: 'Back', callback_data: 'bl:0' }],
           ])
           && !detailKb.flat().some((b) => String(b.callback_data).startsWith('bv:'))
           && !!bdEdit && bdEdit.body.text === phonesTitle;
@@ -1660,18 +1663,20 @@ try {
           && JSON.stringify(open.edits[0].reply_markup.inline_keyboard) === JSON.stringify([[
             { text: 'Replace phone', callback_data: 'bp:0:' + codeBiz.id, style: 'primary' }, { text: 'Back', callback_data: 'bn:0' }]])
           && JSON.stringify(await liveOf(codeBiz.id)) === JSON.stringify(liveBefore) && (await boundTo(codeBiz.id)) === 2;
-        // The same business, opened from the browser: active with a phone, so the
-        // second button is Replace phone (bw:) and there is no Invite (bv:).
+        // The same business, opened from the browser: active with a phone, so
+        // Replace phone (bw:) is the blue button and there is no Invite (bv:).
+        // The buttons are the three colour-grouped rows of the one formatter,
+        // with the status block last on the screen.
         const screen = await tap('bd:0:' + codeBiz.id);
         const screenRows = ((screen.edits[0] || {}).reply_markup || {}).inline_keyboard || [];
         const screenOk = screen.edits.length === 1 && screen.sends.length === 0
           && String(screen.edits[0].text).split('\n')[0] === 'ZZ Code Fixture'
           && String(screen.edits[0].text).includes('Phone 2')
+          && /\n\nStatus: (Not tracked\nNo payment date recorded|Billing unavailable\nNo payment data available)$/.test(String(screen.edits[0].text))
           && JSON.stringify(screenRows) === JSON.stringify([
-            [{ text: 'Suspend', callback_data: 'bs:0:' + codeBiz.id, style: 'danger' }, { text: 'Replace phone', callback_data: 'bw:0:' + codeBiz.id, style: 'primary' }],
-            [{ text: 'Extend 30 days', callback_data: 'be:0:' + codeBiz.id, style: 'primary' }, { text: 'Leads', callback_data: 'bq:0:0:' + codeBiz.id }],
-            [{ text: 'Terminate', callback_data: 'bx:0:' + codeBiz.id, style: 'danger' }],
-            [{ text: 'Back', callback_data: 'bl:0' }],
+            [{ text: 'Replace phone', callback_data: 'bw:0:' + codeBiz.id, style: 'primary' }, { text: 'Extend 30 days', callback_data: 'be:0:' + codeBiz.id, style: 'primary' }],
+            [{ text: 'Suspend', callback_data: 'bs:0:' + codeBiz.id, style: 'danger' }, { text: 'Terminate', callback_data: 'bx:0:' + codeBiz.id, style: 'danger' }],
+            [{ text: 'Leads', callback_data: 'bq:0:0:' + codeBiz.id }, { text: 'Back', callback_data: 'bl:0' }],
           ]);
         // Ask, from the business screen's own button.
         const ask = await tap('bw:0:' + codeBiz.id);
@@ -2552,6 +2557,14 @@ try {
       // Remove (P:) and the retired Terminate (bt:/bT:) change nothing.
       // Reactivate gives every phone its own role keyboard back. The status
       // is put back afterwards (later tests still use the business).
+      // MEANING CHANGE 2026-11-28: these assertions used to pin the old
+      // "by support" notice, a "/status" hint, the old Reactivate question and
+      // "Support has reactivated it." They now pin the exact wrapped
+      // lifecycle-text output: a manual suspension with no reason or countdown,
+      // a short reply (not the notice) for a suspended phone's command, the
+      // question that says the paid date does not change, and a first
+      // reactivation message that is one sentence. The intent is unchanged:
+      // one notice, one keyboard change, no data, no stale write.
       {
         const C2 = await import('../lib/content.js');
         const sends = async () => (await sent()).filter((x) => x.path.includes('/sendMessage'));
@@ -2615,34 +2628,38 @@ try {
         const termToast = await answersNow();
         const leadsAfter = (await svc.from('leads').select('id').eq('business_id', invBiz.id)).data.length;
         // A suspension made by hand (this fixture is not billed): the notice
-        // says "by support", carries the support link as an entity and leaves
-        // the phone one button, Status.
-        const SUSPENDED_BY_HAND = 'Your service has been suspended\nby support.\n\nYour website still saves new\nrequests. You will see them\nwhen the service is active\nagain.\n\nSend /status at any time to see\nthe current state.\n\nContact support';
+        // says only that the service is suspended, with no reason, no countdown
+        // and no /status hint; the support link is an entity and the phone keeps
+        // one button, Status. This is the exact wrapped lifecycle-text output.
+        const SUSPENDED_BY_HAND = 'Your service has been suspended.\n\nYour website still saves new\nrequests. They are kept safely and\nshown once the service is back.\n\nContact support to resolve it.';
         const STATUS_ONLY = JSON.stringify({ keyboard: [[{ text: 'Status' }]], is_persistent: true, resize_keyboard: true });
         const supportLink = (req) => Array.isArray(req.body.entities) && req.body.entities.length === 1 && req.body.entities[0].type === 'text_link'
           && req.body.text.slice(req.body.entities[0].offset, req.body.entities[0].offset + req.body.entities[0].length) === 'Contact support';
         const noticeSent = (req) => !!req && req.body.text === SUSPENDED_BY_HAND && supportLink(req)
           && JSON.stringify(req.body.reply_markup) === STATUS_ONLY && !('parse_mode' in req.body);
+        const statusAfterSuspend = await statusNow();
+        const perPhoneOk = [invOwner, invStaff].every((chat) => termSends.filter((x) => String(x.body.chat_id) === String(chat)).length === 1);
+        const termSendOk = askSends === 0 && askStatus === statusAtStart && statusAfterSuspend === 'paused' && termSends.length === 2 && perPhoneOk;
+        const termNoticesOk = termSends.every(noticeSent);
+        const sm = suspensionMails[0] && suspensionMails[0].body || {};
+        const termMailOk = suspensionMails.length === 1 && sm.subject === mailSubject('Your service has been suspended', 'inv@zz-test.invalid')
+          && String(sm.text).includes('There is no termination date')
+          && !String(sm.text).includes('by support')
+          && String(sm.text).replace(/\u00a0/g, ' ').includes('Reply to this email and we will help.');
+        const termEditOk = termEdit.body.text === 'Suspended: ZZ Invite Fixture\nTelegram: sent to 2 phones\nEmail: sent';
         const termOk = askEdit.body.text === 'Suspend ZZ Invite Fixture?\nAlerts and emails stop.\nThe site keeps saving\nrequests and holds them.\nNothing is deleted.\nThe owner can see the count.'
           && JSON.stringify(askEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[
             { text: 'Confirm suspend', callback_data: 'bS:0:' + invBiz.id, style: 'danger' },
             { text: 'Cancel', callback_data: 'bd:0:' + invBiz.id },
           ]])
-          && askSends === 0 && askStatus === statusAtStart
-          && (await statusNow()) === 'paused' && termSends.length === 2
-          && [invOwner, invStaff].every((chat) => termSends.filter((x) => String(x.body.chat_id) === String(chat)).length === 1)
-          && termSends.every(noticeSent)
-          && termEdit.body.text === 'Suspended: ZZ Invite Fixture\nTelegram: sent to 2 phones\nEmail: sent'
-          && suspensionMails.length === 1 && suspensionMails[0].body.subject === mailSubject('Your service has been suspended', 'inv@zz-test.invalid')
-          && String(suspensionMails[0].body.text).includes('Your service has been suspended by support.')
-          && String(suspensionMails[0].body.text).includes('Reply to this email and we will help.')
+          && termSendOk && termNoticesOk && termEditOk && termMailOk
           && JSON.stringify(termEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[{ text: 'Back', callback_data: 'bd:0:' + invBiz.id }]])
           && termToast === C2.OPERATOR_SUSPENDED
           && (await bindingsNow()) === 2 && (await liveNow()) === liveBefore && leadsAfter === leadsBefore;
-        // A phone of the suspended business: the reason and the /status hint
-        // for a command, a toast for a button, and no data. A new phone is
-        // refused and its code handed back. (The binding lookup reads the status
-        // through the real foreign key here; the fake cannot prove that.)
+        // A phone of the suspended business: the same no-reason, no-countdown
+        // answer for a command, a toast for a button, and no data. A new phone
+        // is refused and its code handed back. (The binding lookup reads the
+        // status through the real foreign key here; the fake cannot prove that.)
         await reset();
         await good(msg(invOwner, '/leads'));
         const exOwnerReq = (await sends()).pop() || { body: {} };
@@ -2662,10 +2679,13 @@ try {
         await good(cb(OP, 'bS:0:' + invBiz.id));
         const againSends = (await sends()).length;
         const againToast = await answersNow();
-        const afterOk = exOwnerReq.body.text === 'This service has been suspended\nby support.\n\nNo termination date is set.\n\nSend /status at any time to see\nthe current state.\n\nContact support'
-          && supportLink(exOwnerReq) && JSON.stringify(exOwnerReq.body.reply_markup) === STATUS_ONLY
-          && exStaffToast === 'This service is suspended. Send /status.' && exStaffDrawn === 0
-          && newPhone === 'This service is suspended.\nA new phone cannot be connected\nright now.\n\nContact support' && newPhoneBound === 0 && !!pendingRow && pendingRow.used_at === null
+        // A command from a suspended phone gets the SHORT reply, not the
+        // suspension notice: same house rules, different job.
+        const SUSPENDED_REPLY = 'Your service has been suspended.\n\nNew requests are still\nsaved and kept safely\nuntil the service is back.\n\nContact support to resolve it.';
+        const afterOwnerOk = exOwnerReq.body.text === SUSPENDED_REPLY && supportLink(exOwnerReq) && JSON.stringify(exOwnerReq.body.reply_markup) === STATUS_ONLY;
+        const afterStaffOk = exStaffToast === 'This service is suspended.' && exStaffDrawn === 0;
+        const afterPhoneOk = newPhone === 'This service is suspended.\nA new phone cannot be\nconnected right now.' && newPhoneBound === 0 && !!pendingRow && pendingRow.used_at === null;
+        const afterOk = afterOwnerOk && afterStaffOk && afterPhoneOk
           && againSends === 0 && againToast === C2.OPERATOR_ALREADY_SUSPENDED && (await statusNow()) === 'paused';
         // Reactivate, part 1: br ASKS. Nothing is written, nobody is told, and
         // the business row is byte-identical afterwards.
@@ -2677,7 +2697,7 @@ try {
         const askBackToast = await answersNow();
         const rowAfterAsk = (await svc.from('businesses').select('*').eq('id', invBiz.id).maybeSingle()).data;
         const reactivateAskOk = askBackSends === 0 && askBackToast === ''
-          && askBackEdit.body.text === 'Reactivate ZZ Invite Fixture?\nAlerts and emails resume.\nRequests held while it was\noff become visible again.\nNothing is deleted.'
+          && askBackEdit.body.text === 'Reactivate ZZ Invite Fixture?\nLifts the suspension.\nPaid date does not change.\nHeld requests become visible.\nNothing is deleted.'
           && JSON.stringify(askBackEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[
             { text: 'Confirm reactivate', callback_data: 'bR:0:' + invBiz.id, style: 'success' },
             { text: 'Cancel', callback_data: 'bd:0:' + invBiz.id },
@@ -2685,8 +2705,10 @@ try {
           && !('parse_mode' in askBackEdit.body)
           && (await statusNow()) === 'paused'
           && JSON.stringify(rowAfterAsk) === JSON.stringify(rowPaused);
-        // Reactivate, part 2: bR DOES IT. Active again, each phone told with its
-        // own keyboard, and the result screen states one fact per line.
+        // Reactivate, part 2: bR DOES IT. Message 1 is only "Your service is
+        // active again." with each role's keyboard back (no support wording, no
+        // /status hint); held leads, when any, follow in a SECOND message. The
+        // result screen still states one fact per line.
         await fetch(process.env.FAKE_RESEND_URL + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'ok', clearIdempotency: true }) });
         await resetResend();
         await reset();
@@ -2701,10 +2723,11 @@ try {
         await reset();
         await good(msg(invOwner, '/help'));
         const servedAgain = await allText();
-        const REACTIVATED_BY_HAND = 'Your service is active again.\nSupport has reactivated it.\n\nSend /status at any time to see\nthe current state.\n\nContact support';
+        const REACTIVATED_BY_HAND = 'Your service is active again.';
         const reactivateOk = (await statusNow()) === 'active' && backSends.length === 2
           && toOwner.length === 1 && toOwner[0].body.text === REACTIVATED_BY_HAND && JSON.stringify(rowsOf(toOwner[0])) === JSON.stringify([['Invite', 'Leads']])
           && toStaff.length === 1 && toStaff[0].body.text === REACTIVATED_BY_HAND && JSON.stringify(rowsOf(toStaff[0])) === JSON.stringify([['Leads']])
+          && backSends.every((x) => !(x.body.text || '').includes('support') && !('parse_mode' in x.body))
           && backToast === C2.OPERATOR_REACTIVATED
           && backEdit.body.text === 'Reactivated: ZZ Invite Fixture\nTelegram: sent to 2 phones\nEmail: sent'
           && JSON.stringify(backEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[{ text: 'Back', callback_data: 'bd:0:' + invBiz.id }]])
@@ -2800,7 +2823,7 @@ try {
           && terminatedRefuseOk && pausedPathOk && ownerRemoved === 0
           && ownerNotices.length === 1 && noticeOk(ownerNotices[0]) && rebound === 2,
           'OP61', 'suspend / reactivate / owner remove: one notice + keyboard each',
-          `start=${startingBindings} P=${pKept}/${pNotices}/${pToast} old=${oldTerminate} suspend=${termOk} after=${afterOk} ask=${reactivateAskOk} reactivate=${reactivateOk} again=${reactivateAgainOk} termScreen=${termScreenOk} refuse=${terminatedRefuseOk} paused=${pausedPathOk} owner=${ownerNotices.length}/${ownerNotices.every(noticeOk)} rebound=${rebound}`);
+          `n=${termNoticesOk} m=${termMailOk} s=${termSendOk} r=${afterOwnerOk} x=${reactivateOk} a=${reactivateAgainOk} o=${ownerNotices.length}`);
       }
 
       // OP4: /businesses is the business list; the business screen marks the
