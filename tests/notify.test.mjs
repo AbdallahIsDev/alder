@@ -279,17 +279,17 @@ try {
   const dividerOk = compact.html.includes(divider)
     && compact.html.indexOf('>Customer<') < compact.html.indexOf(divider)
     && compact.html.indexOf(divider) < compact.html.indexOf('>Job<');
-  /* The label column is 124 wide since 2026-11-10 (96 clipped "Insurance claim"),
-     and the mobile block gained the two stacking rules. Each rule is checked on
-     its own rather than as one exact string. */
-  const label124 = compact.html.includes('width="124"') && !compact.html.includes('width="96"');
+  // MEANING CHANGE 2026-11-28 (item 7): the label column is 88 wide, leaving
+  // the value column wide enough for a long timing and a long email on 360 px.
+  // Each mobile rule is checked on its own rather than as one exact string.
+  const label124 = compact.html.includes('width="88"') && !compact.html.includes('width="124"');
   const mobileParts = ['.outer{padding:0!important}', '.card{border-radius:0!important;border:0!important}',
     '.px{padding-left:16px!important;padding-right:16px!important}',
     '.btn-cell{display:block!important;width:100%!important}',
     '.btn-gap{display:block!important;width:100%!important;height:12px!important;line-height:12px!important}'];
   const mobileOk = compact.html.includes('@media (max-width:480px)') && mobileParts.every((s2) => compact.html.includes(s2));
-  line(radii === 2 && dividerOk && label124 && mobileOk, 'G12', 'one radius container, divider, label-124, mobile block',
-    `radius=${radii} divider=${dividerOk} label124=${label124} mobile=${mobileOk}`);
+  line(radii === 2 && dividerOk && label124 && mobileOk, 'G12', 'one radius container, divider, label-88, mobile block',
+    `radius=${radii} divider=${dividerOk} label88=${label124} mobile=${mobileOk}`);
 
   /* G11: pinned button colours (from brand tokens) */
   const bc = getBrand().colors;

@@ -242,18 +242,54 @@ const FIXTURES = {
     'L10', 'two buttons: both cells stack full width on a phone',
     `cells=${cells.length} gap=${gap} media=${media.includes('.btn-cell')}`);
 
+  // MEANING CHANGE 2026-11-28 (item 7): the label column was 124 px and the
+  // value was allowed to wrap. It is now 88 px so the value column is wide
+  // enough for "As soon as possible" and a long email on a 360 px phone, and
+  // the value no longer wraps.
   const label = html.match(/<td width="(\d+)" valign="top" style="[^"]*white-space:nowrap[^"]*">/);
-  line(!!label && label[1] === '124', 'L11', 'label column is 124 wide and never wraps',
-    `width=${label ? label[1] : 'none'}`);
+  const valueCell = html.match(/<td valign="top" style="padding:8px 0;[^"]*">/);
+  line(!!label && label[1] === '88' && !!valueCell && valueCell[0].includes('white-space:nowrap'),
+    'L11', 'label column is narrow and the value never wraps',
+    `width=${label ? label[1] : 'none'} nowrap=${!!valueCell && valueCell[0].includes('white-space:nowrap')}`);
 
   line(/color:[^;"]+;padding:0 0 6px">Notes<\/div>/.test(html), 'L12',
     'the Notes label has 6px above the grey box',
     `found=${/padding:0 0 6px">Notes/.test(html)}`);
 
-  const spacer = html.match(/<td height="16" style="font-size:0;line-height:0">&nbsp;<\/td><\/tr><\/table><table role="presentation"[^>]*><tr><td height="1"/);
-  line(!!spacer && /padding:16px 0 4px">Job<\/div>/.test(html), 'L13',
-    'Customer rows, 16px, line, 16px, Job',
-    `spacer=${!!spacer} job=${/padding:16px 0 4px">Job/.test(html)}`);
+  // MEANING CHANGE 2026-11-28 (item 7): the 16 px gap moved from ABOVE the
+  // divider to BELOW it, and the Job heading keeps only its small top inset.
+  const divider = html.indexOf('border-top:1px solid');
+  const afterDivider = html.slice(divider);
+  const gapBelow = /<td height="16" style="font-size:0;line-height:0">&nbsp;<\/td><\/tr><\/table><div style="font:600 13px\/18px[^"]*padding:4px 0 4px">Job/.test(afterDivider);
+  line(divider > 0 && gapBelow, 'L13',
+    'Customer rows, line, 16px, Job',
+    `divider=${divider > 0} gapBelow=${gapBelow}`);
+}
+
+/* L14-L16 (2026-11-28, item 7): the field set and its order. Email is a row
+   only when the visitor actually gave one; ZIP comes third in Job. */
+{
+  const { ownerEmail } = await import('../lib/content.js');
+  const withEmail = ownerEmail({ business, lead });
+  const noEmail = ownerEmail({ business, lead: { ...lead, email: '' } });
+  const labels = [...noEmail.html.matchAll(/<td width="88"[^>]*>([^<]+)<\/td>/g)].map((m) => m[1]);
+  // The full lead is the one with all three Customer rows; the trailing plain
+  // text "Email:" line of the no-address lead is not a Customer field.
+  const plain = withEmail.text.split('\n');
+  const zipAt = plain.indexOf('ZIP: 50265');
+  const propAt = plain.findIndex((l) => l.startsWith('Property:'));
+  line(withEmail.html.includes('>Email</td>') && !noEmail.html.includes('>Email</td>')
+    && !noEmail.text.includes('Email: —'), 'L14',
+    'the Email row exists only when the visitor gave an address',
+    `with=${withEmail.html.includes('>Email</td>')} without=${noEmail.html.includes('>Email</td>')}`);
+  const at = (prefix) => plain.findIndex((l) => l.startsWith(prefix));
+  line(at('Name:') < at('Phone:') && at('Phone:') < at('Email:')
+    && zipAt > 0 && propAt > 0 && zipAt < propAt && at('Service:') < zipAt,
+    'L15', 'Customer: name, phone, email; Job: service, timing, ZIP, property, roof age, claim',
+    `order=${labels.join(',')} zip=${zipAt} prop=${propAt}`);
+  const timingCell = withEmail.html.match(/<td valign="top" style="padding:8px 0;[^"]*">As soon as possible<\/td>/);
+  line(!!timingCell, 'L16', 'long timing value stays in one cell without a break',
+    `found=${!!timingCell}`);
 }
 
 console.log('');
