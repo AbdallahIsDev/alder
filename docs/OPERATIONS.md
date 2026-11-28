@@ -832,9 +832,9 @@ details to contact you about your estimate."
 only (never `localStorage`, which holds preferences with timestamps and no
 contact data), written on every input and every step change. It is restored
 only when all of these hold: it holds an answer the visitor actually chose
-(the roof-age select's own default is not one), it is less than 24 hours old,
-and it does not contradict answers already in the open form. Otherwise it is
-thrown away. A draft that comes back lands on the step it was left on and
+(the roof-age select's own default is not one), it has not passed the 24-hour
+draft expiry, and it does not contradict answers already in the open form. A
+draft older than 24 hours belongs to a previous visit and is thrown away. A draft that comes back lands on the step it was left on and
 offers **Start over**, which empties the form and the storage.
 
 **Where the focus goes.** A form the visitor opened on purpose focuses its
