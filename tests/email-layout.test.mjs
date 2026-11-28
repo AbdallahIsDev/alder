@@ -302,6 +302,32 @@ const FIXTURES = {
     `href=${mailto ? mailto[1] : 'none'}`);
 }
 
+/* L18-L20 (2026-11-28, item 9): the visitor confirmation has the same title
+   section as the other emails, does not repeat that title in the body, and its
+   paragraphs carry a line-height like every other email's body copy. */
+{
+  const { autoReply } = await import('../lib/content.js');
+  const out = autoReply({ business, lead });
+  const header = out.html.split(HEADER_END)[0];
+  line(header.includes('font:600 20px/26px') && header.includes('>We received your request<'),
+    'L18', 'visitor email has the shared title section', `title=${header.includes('>We received your request<')}`);
+  const want = ['Hi Test,', 'Alder Roofing will be in touch about it.', 'Thank you.'];
+  const htmlParas = [...out.html.matchAll(/<p style="[^"]*">([^<]+)<\/p>/g)].map((m) => m[1]);
+  line(out.text === want.join('\n\n') && !out.text.includes('We received your request')
+    && htmlParas.slice(0, 3).join('|') === want.join('|'),
+    'L19', 'body is two lines, heading is not repeated', `text=${JSON.stringify(out.text)}`);
+  const tight = [];
+  for (const [name, build] of Object.entries(EMAIL_BUILDERS)) {
+    const html = String(build(...(FIXTURES[name] || [])).html || '');
+    for (const m of html.matchAll(/<p style="([^"]*)"/g)) {
+      const style = m[1];
+      if (/font-size:15px/.test(style) && !/line-height:|font:[^;]*\/\d/.test(style)) tight.push(name);
+    }
+  }
+  line(tight.length === 0, 'L20', 'no email body paragraph has a tight default line-height',
+    `tight=${[...new Set(tight)].join(',') || 'none'}`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
