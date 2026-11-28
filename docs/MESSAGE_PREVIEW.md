@@ -339,8 +339,8 @@ and are visible after the service is back.
 **Telegram**:
 
 ```text
-New lead received. Your
-lead is saved safely.
+New lead received.
+Your lead is saved safely.
 
 [[link:https://t.me/AbdallahIsDev]]Renew now[[/link]] to see the details.
 
@@ -352,8 +352,8 @@ Need help? [[link:https://t.me/AbdallahIsDev]]Contact support[[/link]]
 **Telegram**:
 
 ```text
-New lead received. Your
-lead is saved safely.
+New lead received.
+Your lead is saved safely.
 
 The details stay hidden while
 the service is suspended.
@@ -506,8 +506,7 @@ until the service is back.
 ### /status — suspended by hand
 
 ```text
-Status: Suspended (manual)
-Next: none (manual hold)
+Status: Suspended
 
 The service was suspended.
 
@@ -757,6 +756,7 @@ No payment date recorded
 
 ```text
 Suspend Alder Roofing?
+
 Alerts and emails stop.
 The site keeps saving
 requests and holds them.
@@ -768,6 +768,7 @@ The owner can see the count.
 
 ```text
 Reactivate Alder Roofing?
+
 Lifts the suspension.
 Paid date does not change.
 Held requests become visible.
@@ -778,6 +779,7 @@ Nothing is deleted.
 
 ```text
 Terminate Alder Roofing?
+
 Alerts and emails stop.
 The website form shows
 "not available".
