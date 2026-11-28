@@ -2186,7 +2186,7 @@ function normalizePhone(raw, cfg, strict) {
   }
   /* The two panels' words (the same sentences api/lead.js gives the no-JS form). Neither promises a reply. */
   var NOTICE = {
-    held: { label: 'Request saved', title: 'Your request was saved.', text: 'Your request was saved, but this business can\u2019t respond through this form right now. For the fastest help, please call them directly.' },
+    held: { label: 'Request saved', title: 'Request saved', text: "This business can't respond through this form right now. For the fastest help, please call them directly." },
     unavailable: { label: 'Not available', title: 'This form is not available.', text: 'This business isn\u2019t accepting requests through this form right now. Please call them directly.' }
   };
   var doneLead = done.querySelector('.est-head .lead'), doneLeadDefault = doneLead ? doneLead.textContent : '';
@@ -2204,7 +2204,10 @@ function normalizePhone(raw, cfg, strict) {
     swap(done, 1, function () {
       var first = (data.name || '').split(/\s+/)[0];
       done.querySelector('#est-thanks').textContent = notice ? notice.title : (already ? 'You already sent this request — we have it.' : (first ? 'Thanks, ' + first + '.' : 'Thanks.'));
-      /* held / unavailable: no check mark, no recap, no "what happens next", and none of the reply promises */
+      /* held / unavailable: no check mark, no "what happens next" and no reply
+         promises. A held request is still the visitor's request, so the recap
+         of what they entered stays; only a duplicate may be hidden (its values
+         were never posted). */
       done.classList.toggle('est-plain', !!notice);
       if (notice) done.setAttribute('data-kind', kind); else done.removeAttribute('data-kind');
       if (doneLead) doneLead.textContent = notice ? notice.text : doneLeadDefault;
@@ -2212,8 +2215,8 @@ function normalizePhone(raw, cfg, strict) {
       var recapBox = done.querySelector('.est-recap');
       // An in-page duplicate may contain edited values that were never posted.
       // Hide the recap rather than presenting those new values as received.
-      recapBox.hidden = !!already || !!notice;
-      if (!already && !notice) recap(data);
+      recapBox.hidden = !!already;
+      if (!already) recap(data);
       /* Every path here is a definite answer from the server (sent, already,
          held, unavailable): the draft has done its job, and the form must never
          invite itself again in this browser. A failure does not reach this

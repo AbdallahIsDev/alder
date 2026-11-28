@@ -724,6 +724,55 @@ try {
       `stale=${staleIgnored} empty=${emptyIgnored} live=${liveRestored} auto=${autoFocus}`);
   }
 
+  /* MD24: a request held while the business is suspended is still the
+     visitor's request. The success pane keeps the SAME recap (service,
+     property, roof age, start, phone), its title is the short label
+     "Request saved", and its body never repeats that title or promises a
+     reply. The Call button stays; no "what happens next" steps. */
+  {
+    const { VirtualConsole } = await import('jsdom');
+    const vc = new VirtualConsole();
+    const dom = new JSDOM(html, {
+      runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://alder.test/', virtualConsole: vc,
+      beforeParse(window) {
+        window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+        window.scrollTo = () => {};
+        window.CSS = { supports: () => true };
+        window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+      },
+    });
+    const w = dom.window, d = w.document;
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const click = (win, el) => el.dispatchEvent(new win.MouseEvent('click', { bubbles: true, cancelable: true }));
+    click(w, d.querySelector('[data-open-estimate]'));
+    await wait(120);
+    const choice = (name, value) => {
+      const el = d.querySelector(`input[name="${name}"][value="${value}"]`);
+      el.checked = true;
+      return el.closest('.opt').querySelector('b').textContent.trim();
+    };
+    const service = choice('service', 'repair'), home = choice('home', 'house'), start = choice('timing', 'asap');
+    d.getElementById('e-age').value = '10 to 20 years';
+    const data = { name: 'Sam Ortiz', zip: '50265', phone: '+1 515 555 0100', claim: false };
+    w.estimateShowSent(data, false, 'held');
+    await wait(120);
+    const done = d.querySelector('.est-done');
+    const title = done.querySelector('#est-thanks').textContent.trim();
+    const body = done.querySelector('.est-head .lead').textContent.trim();
+    const recap = done.querySelector('.est-recap');
+    const recapText = recap.textContent.replace(/\s+/g, ' ');
+    const BODY = "This business can't respond through this form right now. For the fastest help, please call them directly.";
+    const ok = title === 'Request saved' && body === BODY && !body.startsWith(title)
+      && recap.hidden === false && recap.children.length === 5
+      && [service, home + ' · ZIP 50265', '10 to 20 years', start, data.phone].every((v) => recapText.includes(v))
+      && !!done.querySelector('.est-actions .btn.phone[href^="tel:"]')
+      && !/we will reply|reply within|within one business day/i.test(done.textContent)
+      && done.querySelector('.est-after').hidden === true;
+    line(ok, 'MD24', 'held answer: Request saved, same recap, no repeated sentence or reply promise',
+      `title=${JSON.stringify(title)} recap=${recap.hidden === false} rows=${recap.children.length} call=${!!done.querySelector('.est-actions .btn.phone')} promise=${/we will reply|reply within|within one business day/i.test(done.textContent)}`);
+    w.close();
+  }
+
   /* MD14: sitewide coverage. Every visible box, including ::before/::after boxes
      and the images that a parent's radius cannot clip, is in the ONE live rule.
      Full-viewport layers and the two things that must stay round stay out. */
