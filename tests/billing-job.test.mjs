@@ -391,6 +391,21 @@ const supportOk = (m) => supportLinkOk(m.body, CFG.SUPPORT_TELEGRAM_URL);
       && m.body.reply_markup.inline_keyboard[0].length === 2)
     && paused.r.mail.length === 1 && paused.r.mail[0].body.subject === 'Your service is active again' && paused.r.out.held === 2,
     'BJ11c', 'a suspended business is restored: keyboards, held count', `${state(A)} kb=${keyboards} held=${paused.r.out.held} first=${firsts.length} second=${seconds.length}`);
+  /* BJ11f (item A5): exactly ONE held lead is shown on its own, with all its
+     details and a Back to /leads — no "Recent requests" list, no number button. */
+  {
+    const one = [{ id: 'h1', business_id: A, idempotency_key: 'h1', name: 'Only Hold', phone: '5155550111', service: 'repair', timing: 'asap', home: 'house', roof_age: 'Not sure', zip: '50265', status: 'open', created_at: iso(P + 6 * DAY), held_at: iso(P + 6 * DAY) }];
+    const r = await restoreCase({ status: 'paused', suspended_for_billing: true, billing_warning_stage: 4 }, null, { leads: one });
+    const details = r.r.sends.filter((m) => textOf(m).includes('Name: Only Hold'));
+    const ok = r.r.out.held === 1 && details.length === 2
+      && details.every((m) => !textOf(m).startsWith('Recent requests')
+        && !textOf(m).includes('Received while suspended:')
+        && textOf(m).includes('Phone: +15155550111')
+        && textOf(m).includes('Received while suspended')
+        && m.body.reply_markup.inline_keyboard.flat().some((b) => b.callback_data === 'l:0'));
+    line(ok, 'BJ11f', 'one held lead: full detail message, Back to /leads, no list',
+      `held=${r.r.out.held} detailMsgs=${details.length} first=${details[0] ? textOf(details[0]).split('\n')[0] : 'none'}`);
+  }
   const churned = await restoreCase({ status: 'churned', suspended_for_billing: true, billing_warning_stage: 6 }, null);
   line(churned.r.out.reactivated && state(A) === 'active/0/false' && churned.r.sends.length === 2 && !textOf(churned.r.sends[0]).includes('came in while'),
     'BJ11d', 'a terminated business is restored; no held line when none', state(A));

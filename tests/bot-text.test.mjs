@@ -1005,6 +1005,25 @@ const samples = sampleTelegramTexts();
     `owner=${JSON.stringify(owner.split('\n').slice(0, 2))} billingNext=${/Next: Termination/.test(withDate)} operator=${operator.includes('Next: none (manual hold)')}`);
 }
 
+/* T27 (2026-11-28, item A5): the held list has its own callbacks, so a lead
+   opened from it goes Back to that held list. The one-lead reactivation detail
+   is opened from /leads and goes Back there. */
+{
+  const C2 = await import('../lib/content.js');
+  const id = '00000000-0000-0000-0000-000000000001';
+  const heldKb = C2.heldListKeyboard([{ id }], 2, false, true);
+  const backHeld = C2.leadDetailKeyboard('new', id, 2, { email: '' }, true).reply_markup.inline_keyboard;
+  const backLeads = C2.leadDetailKeyboard('new', id, 0, { email: '' }).reply_markup.inline_keyboard;
+  const ok = JSON.stringify(heldKb) === JSON.stringify({ reply_markup: { inline_keyboard: [
+    [{ text: '1', callback_data: `HL:2:${id}` }],
+    [{ text: 'Newer', callback_data: 'hL:1' }],
+  ] } })
+    && backHeld[backHeld.length - 1][0].callback_data === 'hl:2'
+    && backLeads[backLeads.length - 1][0].callback_data === 'l:0';
+  line(ok, 'T27', 'held list keeps its own Back chain; single detail Backs to /leads',
+    `heldKb=${JSON.stringify(heldKb)} backHeld=${backHeld[backHeld.length - 1][0].callback_data} backLeads=${backLeads[backLeads.length - 1][0].callback_data}`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` - ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);

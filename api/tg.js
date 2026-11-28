@@ -19,7 +19,7 @@ import {
   BOT_INVITE_CAPPED, BOT_INVITE_CANCEL_BUTTON, BOT_INVITE_CANCEL_ALREADY, BOT_INVITE_RATE_LIMIT,
   botInvitePendingText, BOT_RECIPIENTS_PENDING, BOT_RECIPIENT_LAST, BOT_RECIPIENT_REMOVED, BOT_RECIPIENT_GONE,
   TOAST_NOT_FOUND, TOAST_ALREADY_DONE, TOAST_CONTACT_FIRST, TOAST_NOTHING_TO_RETRY, TOAST_GENERIC_ERROR,
-  TOAST_ALREADY_UPDATED, TOAST_TOO_MANY_OPENS, TOAST_OWNER_ONLY, leadListKeyboard, alertKeyboard,
+  TOAST_ALREADY_UPDATED, TOAST_TOO_MANY_OPENS, TOAST_OWNER_ONLY, leadListKeyboard, heldListKeyboard, heldLeadsText, alertKeyboard,
   TOAST_NO_OLDER, TOAST_NO_LEADS, TOAST_NO_REMOVE, BOT_INVITE_FORWARD_HINT,
   BOT_CODE_BAD, BOT_ALREADY_CONNECTED_CODE, BOT_BOUND_ELSEWHERE, BOT_BIND_FAILED, TOAST_LEAD_GONE, BOT_RECIPIENT_SELF,
   removeLeadListText, removeLeadKeyboard, removeLeadConfirmText, removeLeadConfirmKeyboard, removedText, REMOVE_LEAD_GONE,
@@ -491,6 +491,32 @@ async function sendLeadsPage(chatId, businessId, page, messageId, answer = null)
     return edited;
   }
   if (empty) return reply(chatId, safePage === 0 ? 'No requests yet.' : 'No older requests.');
+  return sendMessage(chatId, text, markup);
+}
+
+/**
+ * Item A5: the held list opened from a lead's Back button (or its Older/Newer
+ * row). It is NOT /leads: only held rows, its own callbacks and a count that
+ * matches the rows grouped here. A lead opened from this message Backs here;
+ * the single detail sent at reactivation Backs to /leads.
+ */
+async function sendHeldLeadsPage(chatId, businessId, page, messageId, answer = null) {
+  const safePage = Math.max(0, Math.min(LEADS_PAGE_MAX, Number(page) || 0));
+  const offset = safePage * LEADS_PAGE;
+  const all = await dbApi.listHeldLeads(businessId, { limit: offset + LEADS_PAGE + 1 });
+  const shown = all.slice(offset, offset + LEADS_PAGE);
+  const hasOlder = all.length > offset + LEADS_PAGE && safePage < LEADS_PAGE_MAX;
+  const text = shown.length ? heldLeadsText(shown, Date.now(), all.length) : 'No requests yet.';
+  const markup = shown.length
+    ? heldListKeyboard(shown, safePage, hasOlder, safePage > 0)
+    : { reply_markup: { inline_keyboard: [] } };
+  if (messageId) {
+    const [, edited] = await together([
+      answer ? answer(shown.length ? '' : (safePage === 0 ? TOAST_NO_LEADS : TOAST_NO_OLDER)) : null,
+      editList(chatId, messageId, text, markup),
+    ]);
+    return edited;
+  }
   return sendMessage(chatId, text, markup);
 }
 
@@ -1716,6 +1742,10 @@ const CB_PAGE = /^l:(\d{1,3})$/;
 // list came from, so Back restores that exact page; the lead address is a uuid
 // and the page is bounded digits, so nothing a customer typed can ride along.
 const CB_LEAD_OPEN = /^L:(\d{1,3}):([0-9a-f-]{36})$/;
+// Item A5: the held list's own number tap, page and Back from its detail.
+const CB_HELD_OPEN = /^HL:(\d{1,3}):([0-9a-f-]{36})$/;
+const CB_HELD_PAGE = /^hL:(\d{1,3})$/;
+const CB_HELD_BACK = /^hl:(\d{1,3})$/;
 const CB_LEAD_DETAIL = /^([CDYNR]):(\d{1,3}):([0-9a-f-]{36})$/;
 // /remove_lead: open a confirm, delete, cancel, page. All scoped to the binding.
 const CB_REMOVE_OPEN = /^rl:([0-9a-f-]{36})$/;
@@ -1789,7 +1819,7 @@ async function handleOpenLead({ cb, leadId, binding, answer }) {
  * callback so Back can restore the exact list page. A lead that is gone
  * answers and refreshes the page, so no dead number button is left behind.
  */
-async function handleDetailOpen({ cb, page, leadId, binding, answer }) {
+async function handleDetailOpen({ cb, page, leadId, binding, answer, held = false }) {
   const chatId = cb.message && cb.message.chat && cb.message.chat.id;
   const messageId = cb.message && cb.message.message_id;
   // The lead (scoped by id AND business) and the business row both need only
@@ -1808,7 +1838,7 @@ async function handleDetailOpen({ cb, page, leadId, binding, answer }) {
   if (!business) { await answer(GENERIC_NOT_FOUND); return; }
   const card = await cardFor({ lead, leadId });
   const text = renderAlert({ business, lead, view: card.view, reviewResult: card.reviewResult });
-  const markup = leadDetailKeyboard(card.view, leadId, page, lead);
+  const markup = leadDetailKeyboard(card.view, leadId, page, lead, held);
   const [, r] = await together([answer(''), editList(chatId, messageId, text, markup)]);
   // Too old to edit: send the detail as a new message rather than leaving a
   // dead number button on screen. Its Back edits the new message instead.
@@ -2024,6 +2054,21 @@ async function handleCallback(cb, binding) {
     if (page) {
       setHandler('cb.leads_page');
       await sendLeadsPage(chatId, binding.business_id, Number(page[1]), messageId, answer);
+      return;
+    }
+
+    // The held list (item A5): its pages and its detail Back never fall
+    // through to the full /leads browser.
+    const heldPage = CB_HELD_PAGE.exec(data) || CB_HELD_BACK.exec(data);
+    if (heldPage) {
+      setHandler('cb.held_page');
+      await sendHeldLeadsPage(chatId, binding.business_id, Number(heldPage[1]), messageId, answer);
+      return;
+    }
+    const heldOpen = CB_HELD_OPEN.exec(data);
+    if (heldOpen) {
+      setHandler('cb.held_open');
+      await handleDetailOpen({ cb, page: Number(heldOpen[1]), leadId: heldOpen[2], binding, answer, held: true });
       return;
     }
 
