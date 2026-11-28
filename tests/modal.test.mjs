@@ -783,6 +783,39 @@ try {
     w.close();
   }
 
+  /* MD28 (item 17): an active business is the ordinary success screen —
+     the same thanks heading, "We got your request.", recap and next steps,
+     with the warning badge and notice box still hidden. */
+  {
+    const { VirtualConsole } = await import('jsdom');
+    const dom = new JSDOM(html, {
+      runScripts: 'dangerously', pretendToBeVisual: true, url: 'https://alder.test/', virtualConsole: new VirtualConsole(),
+      beforeParse(window) {
+        window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+        window.scrollTo = () => {};
+        window.CSS = { supports: () => true };
+        window.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
+      },
+    });
+    const w = dom.window, d = w.document;
+    const wait2 = (ms) => new Promise((r) => setTimeout(r, ms));
+    d.querySelector('[data-open-estimate]').dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
+    await wait2(120);
+    w.estimateShowSent({ name: 'Sam Ortiz', zip: '50265', phone: '+1 515 555 0100', claim: false }, false, '');
+    await wait2(120);
+    const done = d.querySelector('.est-done');
+    const title = done.querySelector('#est-thanks').textContent.trim();
+    const sub = done.querySelector('.est-head .lead').textContent.trim();
+    const ok = title === 'Thanks, Sam.' && sub === 'We got your request.'
+      && done.querySelector('.est-warn').hidden === true
+      && !done.hasAttribute('data-kind') && !done.classList.contains('est-plain')
+      && done.querySelector('.est-recap').hidden === false && done.querySelector('.est-after').hidden === false
+      && !/can't respond|call them directly/i.test(done.textContent);
+    line(ok, 'MD28', 'active business keeps the ordinary success screen',
+      `title=${JSON.stringify(title)} sub=${JSON.stringify(sub)} warn=${done.querySelector('.est-warn').hidden} after=${done.querySelector('.est-after').hidden}`);
+    w.close();
+  }
+
   /* MD14: sitewide coverage. Every visible box, including ::before/::after boxes
      and the images that a parent's radius cannot clip, is in the ONE live rule.
      Full-viewport layers and the two things that must stay round stay out. */
