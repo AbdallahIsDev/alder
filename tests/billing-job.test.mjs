@@ -350,6 +350,21 @@ const supportOk = (m) => supportLinkOk(m.body, CFG.SUPPORT_TELEGRAM_URL);
     'BJ10d', 'Telegram refused: the summary goes by email');
 }
 
+/* BJ10e (item A6): a business suspended by hand 20 days ago is named in the
+   daily summary even though nothing else happened today. */
+{
+  fresh();
+  set(PAUSED, { status: 'paused', suspended_for_billing: false });
+  world.store.events.push({ id: 'e-manual', business_id: PAUSED, type: 'suspension', status: 'expected', created_at: iso(P - 20 * DAY) });
+  const r = await job(at(10));
+  const summary = r.operator.map(textOf);
+  // Alder is suspended by the billing run at D+10 too; the point of this case
+  // is the extra names-only block for the business nobody touched today.
+  line(summary.length === 1 && summary[0].includes('Manually suspended over 14 days:\nPaused Co'),
+  'BJ10e', 'manual suspension older than 14 days: named in the daily summary',
+    summary[0] || '(none)');
+}
+
 /* BJ11 */
 {
   fresh();
