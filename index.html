@@ -1993,7 +1993,17 @@ function normalizePhone(raw, cfg, strict) {
     return out;
   }
   /*__PHONE_ENTRY_END__*/
-  var phoneLast = E.phone.value || '';
+  form.addEventListener('input', function (e) {
+    if (e.target === E.zip) E.zip.value = E.zip.value.replace(/\D/g, '');       /* ZIP accepts digits only */
+    if (e.target === E.phone) {
+      E.phone.value = filterPhoneInput(E.phone.value, phoneLast);               /* backstop for every input source */
+      phoneLast = E.phone.value;
+    }
+    var f = e.target.closest('[data-f]'); if (f && f.querySelector('.err').textContent) reflow(function () { check(f.dataset.f); }, 260);
+  });
+  /* Registered after the input listener so the field-wiring gate can run the
+     block above on its own (it knows `form` and `R`, not `E`). */
+  var phoneLast = '';
   E.phone.addEventListener('beforeinput', function (e) {
     if (!/^insert/.test(e.inputType || '')) return;
     var data = e.data || (e.dataTransfer ? e.dataTransfer.getData('text') : '');
@@ -2002,14 +2012,6 @@ function normalizePhone(raw, cfg, strict) {
     var to = el.selectionEnd == null ? from : el.selectionEnd;
     var next = el.value.slice(0, from) + data + el.value.slice(to);
     if (filterPhoneInput(next, null) !== next) e.preventDefault();     /* typing, paste, drop, IME */
-  });
-  form.addEventListener('input', function (e) {
-    if (e.target === E.zip) E.zip.value = E.zip.value.replace(/\D/g, '');       /* ZIP accepts digits only */
-    if (e.target === E.phone) {
-      E.phone.value = filterPhoneInput(E.phone.value, phoneLast);               /* backstop for every input source */
-      phoneLast = E.phone.value;
-    }
-    var f = e.target.closest('[data-f]'); if (f && f.querySelector('.err').textContent) reflow(function () { check(f.dataset.f); }, 260);
   });
   function phoneSubmit(raw) {
     var n = normalizePhone(raw, PHONE_CFG);
