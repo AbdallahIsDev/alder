@@ -570,10 +570,12 @@ const SUSPENDED_LINE = 'Your service has been suspended.\n\nNew requests are sti
 const SUSPENDED_TOAST = 'This service is suspended.';
 const TERMINATED_TOAST = 'This service was terminated.';
 const REFUSED_LINE = 'This service is suspended.\nA new phone cannot be\nconnected right now.';
-const STATUS_SUSPENDED = 'Status: Suspended (manual)\nNext: none (manual hold)\n\nThe service was suspended.\n\n' + SUPPORT + ' to\nrestore the service.';
+// MEANING CHANGE 2026-11-28 (item A3): the OWNER's /status no longer carries
+// the operator's maintenance detail. The operator screen below still does.
+const STATUS_SUSPENDED = 'Status: Suspended\n\nThe service was suspended.\n\n' + SUPPORT + ' to\nrestore the service.';
 // With held requests the count and one line about them come between the
 // reason and the way out; never a detail.
-const STATUS_SUSPENDED_HELD = 'Status: Suspended (manual)\nNext: none (manual hold)\n\nThe service was suspended.\n\nLeads waiting: 2\n\nTheir details are hidden\nuntil the service is back.\n\n' + SUPPORT + ' to\nrestore the service.';
+const STATUS_SUSPENDED_HELD = 'Status: Suspended\n\nThe service was suspended.\n\nLeads waiting: 2\n\nTheir details are hidden\nuntil the service is back.\n\n' + SUPPORT + ' to\nrestore the service.';
 const STATUS_TERMINATED = 'Status: Terminated\n\nThe service was terminated.\n\nYour data has not been deleted.\n\n' + SUPPORT + ' to\nrestore the service.';
 const TERMINATED_NOTICE = 'Your service has been terminated.\n\nYour website has stopped\naccepting requests. Your\ndata has not been deleted.\n\n' + SUPPORT + ' to\nrestore the service.';
 // Anything but /status, on a terminated business's phone.

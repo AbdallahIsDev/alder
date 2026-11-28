@@ -973,6 +973,38 @@ const samples = sampleTelegramTexts();
     bad.join(' ; ') || 'billing/manual both exact');
 }
 
+/* T26 (2026-11-28, item A3): the owner's /status says "Status: Suspended",
+   never a "(manual)" badge or a "Next:" line, and no owner-facing Telegram text
+   mentions a termination date (or its absence) for a manual suspension. The
+   operator screen keeps its own "Next: none (manual)". */
+{
+  const P = Date.parse('2026-12-14T09:00:00Z');
+  const biz = (patch = {}) => ({
+    id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'active',
+    paid_until: '2026-12-14T09:00:00Z', billing_warning_stage: 0, suspended_for_billing: false, ...patch,
+  });
+  const manual = { ...biz({ status: 'paused' }) };
+  const billing = biz({ status: 'paused', suspended_for_billing: true });
+  const owner = statusText({ business: manual, now: P, held: 2 }).text;
+  const withDate = statusText({ business: billing, now: P, held: 2 }).text;
+  const C2 = await import('../lib/content.js');
+  const operator = C2.operatorBusinessDetailText({
+    business: manual, rows: [], stats: { total: 0, recent: 0, lastAt: null }, nowMs: P,
+  });
+  const notices = ['renewal_reminder', 'overdue', 'final_warning', 'suspension', 'termination_warning',
+    'termination', 'reactivation', 'held_lead'].map((type) =>
+    ownerNotice(type, { business: manual, now: P, reason: 'manual', held: 2 }).telegram?.text || '');
+  notices.push(suspendedReply({ business: manual, now: P }).text);
+  const ownerTexts = [owner, ...notices].join('\n');
+  const ok = owner.startsWith('Status: Suspended\n')
+    && !/\(manual\)|manual hold|Next:/.test(owner)
+    && !/termination date|terminat(e|es|ion) on|deadline/i.test(ownerTexts)
+    && /Next: Termination/.test(withDate) && /Terminates:/.test(withDate)
+    && operator.includes('Status: Suspended (manual)\nNext: none (manual hold)');
+  line(ok, 'T26', 'owner status: plain Suspended, no Next/date; operator keeps manual detail',
+    `owner=${JSON.stringify(owner.split('\n').slice(0, 2))} billingNext=${/Next: Termination/.test(withDate)} operator=${operator.includes('Next: none (manual hold)')}`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` - ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
