@@ -1171,7 +1171,7 @@ try {
     // confirm keyboard: with email "Send request", without email "Mark done".
     const ckEmail = confirmKeyboard(uid, true).inline_keyboard[0];
     const ckNoEmail = confirmKeyboard(uid, false).inline_keyboard[0];
-    const ckOk = ckEmail[0].text === 'Send request' && ckEmail[0].callback_data === 'y:' + uid && ckEmail[0].style === 'success'
+    const ckOk = ckEmail[0].text === 'Confirm' && ckEmail[0].callback_data === 'y:' + uid && ckEmail[0].style === 'success'
       && ckNoEmail[0].text === 'Mark done' && ckNoEmail[0].callback_data === 'y:' + uid && ckNoEmail[0].style === 'success'
       && ckEmail[1].text === 'Cancel' && ckNoEmail[1].text === 'Cancel';
     line(lineOk && mailOk && nameOk && btnOk && ckOk, 'S1', 'status block: lines <=26, no name/email, one r: button, confirm labels',
@@ -1376,3 +1376,5 @@ console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 console.warn = realWarn; console.error = realErr;
 process.exit(failed ? 1 : 0);
+
+

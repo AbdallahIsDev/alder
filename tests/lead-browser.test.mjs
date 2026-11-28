@@ -404,7 +404,7 @@ try {
     const cancelEdits = await edits();
     const nKb = kbOf(cancelEdits[0]);
     line(askEdits.length === 1 && cancelEdits.length === 1
-      && aKb[0][0].text === 'Send request' && aKb[0][0].callback_data === `Y:1:${rest[3]}`
+      && aKb[0][0].text === 'Confirm' && aKb[0][0].callback_data === `Y:1:${rest[3]}`
       && aKb[0][1].text === 'Cancel' && aKb[0][1].callback_data === `N:1:${rest[3]}`
       && aKb.length === 2 && same(aKb[1], [{ text: 'Back', callback_data: 'l:1' }])
       && String(cancelEdits[0].body.text).includes('Status: Contacted')
@@ -480,7 +480,7 @@ try {
       && same(kb[1], [{ text: 'Older', callback_data: 'rm:1' }])
       && !kb.flat().some((b) => 'disabled' in b)
       && askKb.length === 1
-      && askKb[0][0].text === 'Remove' && askKb[0][0].style === 'danger' && askKb[0][0].callback_data === `E:0:${rm[0]}`
+      && askKb[0][0].text === 'Confirm' && askKb[0][0].style === 'danger' && askKb[0][0].callback_data === `E:0:${rm[0]}`
       && askKb[0][1].text === 'Cancel' && askKb[0][1].callback_data === 'rm:0'
       && String(cancelled.body.text).startsWith(C.REMOVE_LEAD_TITLE)
       && kbOf(cancelled)[0][0].callback_data.startsWith('Q:0:')
@@ -1372,3 +1372,5 @@ try {
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
+
+

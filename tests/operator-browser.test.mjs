@@ -541,10 +541,10 @@ const STAFF_KB = { keyboard: [[{ text: 'Leads' }]], is_persistent: true, resize_
 const REMOVED_KB = { remove_keyboard: true };
 const fail500 = () => new Response('{"message":"fake failure"}', { status: 500, headers: { 'content-type': 'application/json' } });
 const textOf = (req) => String((req && req.body && req.body.text) || '');
-const SUSPEND_ASK = 'Suspend Alder Roofing?\nAlerts and emails stop.\nThe site keeps saving\nrequests and holds them.\nNothing is deleted.\nThe owner can see the count.';
+const SUSPEND_ASK = 'Suspend Alder Roofing?\n\nAlerts and emails stop.\nThe site keeps saving\nrequests and holds them.\nNothing is deleted.\nThe owner can see the count.';
 // Reactivate and Extend look alike and are not: the question says which is
 // which, before the tap.
-const REACTIVATE_ASK = 'Reactivate Alder Roofing?\nLifts the suspension.\nPaid date does not change.\nHeld requests become visible.\nNothing is deleted.';
+const REACTIVATE_ASK = 'Reactivate Alder Roofing?\n\nLifts the suspension.\nPaid date does not change.\nHeld requests become visible.\nNothing is deleted.';
 const RESULT_A = (title) => `${title}\nTelegram: sent to 2 phones\nEmail: sent`;
 const RESULT_ONE = (title) => `${title}\nTelegram: sent to 1 phone\nEmail: sent`;
 const RESULT_FAIL = (title) => `${title}\nTelegram: failed (alert sent)\nEmail: sent`;
@@ -560,10 +560,11 @@ const RESULT_UNREPORTED = (title, date) => `${title}\nPaid until: ${date}\nTeleg
 // no termination date) and where help is; nothing is "by support".
 const SUPPORT = 'Contact support';
 const NOTICE = 'Your service has been suspended.\n\nYour website still saves new\nrequests. They are kept safely and\nshown once the service is back.\n\n' + SUPPORT + ' to resolve it.';
-const NOTICE_EMAIL = 'Your website is still taking requests. Each one is saved in full and will be waiting for you as soon as the service is back; nothing is\u00A0lost.\n\n'
-  + 'There is no termination date: the service stays suspended until it is\u00A0resolved.\n\n'
-  + 'Contact support to resolve\u00A0it.\n\n'
-  + 'Reply to this email and we will\u00A0help.';
+// MEANING CHANGE 2026-11-28 (items A1/B10): every confirm question now has a
+// blank line before its explanation; the manual suspension email no longer
+// mentions a termination date or a second "Contact support" action.
+const NOTICE_EMAIL = 'Your website still saves every request. Each one is kept safely and will wait for you when\u00A0service\u00A0returns.\n\n'
+  + 'Reply to this email and we\u00A0will\u00A0help.';
 // What a phone of a business suspended by hand is told (lib/lifecycle-text.js).
 const SUSPENDED_LINE = 'Your service has been suspended.\n\nNew requests are still\nsaved and kept safely\nuntil the service is back.\n\n' + SUPPORT + ' to resolve it.';
 const SUSPENDED_TOAST = 'This service is suspended.';
@@ -857,7 +858,7 @@ try {
     const askOk = ask.sends.length === 0 && ask.edits.length === 1 && ask.edits[0].body.message_id === 9
       && ask.edits[0].body.text === SUSPEND_ASK && same(ask.answers, [''])
       && same(askKb, [[
-        { text: 'Confirm suspend', callback_data: `bS:0:${BIZ_A}`, style: 'danger' },
+        { text: 'Confirm', callback_data: `bS:0:${BIZ_A}`, style: 'danger' },
         { text: 'Cancel', callback_data: `bd:0:${BIZ_A}` },
       ]])
       && writes(ask.sb).length === 0 && ask.mail.length === 0
@@ -1079,7 +1080,7 @@ try {
       && ask.edits.length === 1 && textOf(ask.edits[0]) === REACTIVATE_ASK
       && textOf(ask.edits[0]).split('\n').every((l) => l.length <= 34)
       && same(askKb, [[
-        { text: 'Confirm reactivate', callback_data: `bR:0:${BIZ_A}`, style: 'success' },
+        { text: 'Confirm', callback_data: `bR:0:${BIZ_A}`, style: 'success' },
         { text: 'Cancel', callback_data: `bd:0:${BIZ_A}` },
       ]]) && same(ask.answers, ['']);
     const cancel = await run(cb(OP, askKb[0][1].callback_data));
@@ -1119,7 +1120,7 @@ try {
       && stale.sends.length === 0 && stale.mail.length === 0 && writes(stale.sb).length === 0
       && textOf(stale.edits[0]) === REACTIVATE_ASK
       && same(kbOf(stale.edits[0]), [[
-        { text: 'Confirm reactivate', callback_data: `bR:0:${BIZ_A}`, style: 'success' },
+        { text: 'Confirm', callback_data: `bR:0:${BIZ_A}`, style: 'success' },
         { text: 'Cancel', callback_data: `bd:0:${BIZ_A}` },
       ]])
       && neverAsk.edits.length === 1 && textOf(neverAsk.edits[0]).startsWith('Reactivate Beta Roofing?')
@@ -1140,7 +1141,7 @@ try {
       && x.edits.length === 1 && textOf(x.edits[0]) === TERMINATED_REFUSE_ASK
       && textOf(x.edits[0]).split('\n').every((l) => l.length <= 34)
       && same(kbOf(x.edits[0]), backKb(BIZ_C, 2)) && same(x.answers, ['Terminated. Extend 30 days.']))
-      && !same(kbOf(terminatedAsk.edits[0]), [[{ text: 'Confirm reactivate', callback_data: `bR:2:${BIZ_C}`, style: 'success' }]])
+      && !same(kbOf(terminatedAsk.edits[0]), [[{ text: 'Confirm', callback_data: `bR:2:${BIZ_C}`, style: 'success' }]])
       && bizRow(BIZ_C).status === 'churned' && JSON.stringify(bizRow(BIZ_C)) === churnedRow;
     line(askOk && cancelOk && writeOk && noticeOk && resultOk && againOk && backOk && churnedOk,
       'OB10', 'reactivate: asks first, one scoped update, phones told with their keyboards',
@@ -1394,10 +1395,10 @@ try {
     { text: 'Replace phone', callback_data: `${from === 'business' ? 'bw' : 'bp'}:${page}:${id}`, style: 'primary' },
     { text: 'Back', callback_data: from === 'business' ? `bd:${page}:${id}` : `bn:${page}` },
   ]];
-  const REPLACE_ASK_2 = 'Replace the phones of Alder Roofing? The 2 current phones stop receiving alerts and lose access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.';
-  const REPLACE_ASK_1 = 'Replace the phone of Beta Roofing? The 1 current phone stops receiving alerts and loses access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.';
+  const REPLACE_ASK_2 = 'Replace the phones of Alder Roofing?\n\nThe 2 current phones stop receiving alerts and lose access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.';
+  const REPLACE_ASK_1 = 'Replace the phone of Beta Roofing?\n\nThe 1 current phone stops receiving alerts and loses access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.';
   const replaceKb = (id, page, from) => [[
-    { text: 'Confirm replace', callback_data: `${from === 'business' ? 'bW' : 'bP'}:${page}:${id}`, style: 'danger' },
+    { text: 'Confirm', callback_data: `${from === 'business' ? 'bW' : 'bP'}:${page}:${id}`, style: 'danger' },
     { text: 'Cancel', callback_data: `${from === 'business' ? 'bu' : 'bc'}:${page}:${id}` },
   ]];
   // MEANING CHANGE 2026-11-28: the disconnected-phone notice no longer names
@@ -2299,13 +2300,13 @@ try {
   leadIds = seedSeven();
   seedCode(BIZ_A, 'KEEPKEEPKEEP');
   {
-    const TERMINATE_ASK = 'Terminate Alder Roofing?\nAlerts and emails stop.\nThe website form shows\n"not available".\nNothing is deleted: Extend\n30 days puts it back.';
+    const TERMINATE_ASK = 'Terminate Alder Roofing?\n\nAlerts and emails stop.\nThe website form shows\n"not available".\nNothing is deleted: Extend\n30 days puts it back.';
     const before = snapshot();
     const ask = seen(await run(cb(OP, `bx:0:${BIZ_A}`)));
     const askKb = kbOf(ask.edits[0]);
     const askOk = ask.sends.length === 0 && ask.edits.length === 1 && textOf(ask.edits[0]) === TERMINATE_ASK && same(ask.answers, [''])
       && same(askKb, [[
-        { text: 'Confirm terminate', callback_data: `bX:0:${BIZ_A}`, style: 'danger' },
+        { text: 'Confirm', callback_data: `bX:0:${BIZ_A}`, style: 'danger' },
         { text: 'Cancel', callback_data: `bd:0:${BIZ_A}` },
       ]]) && writes(ask.sb).length === 0 && ask.mail.length === 0 && ask.sb.length === 2;
     const cancel = await run(cb(OP, askKb[0][1].callback_data));
@@ -2408,16 +2409,18 @@ try {
       /^bo:\d{1,2}:\d{1,3}:[A-Za-z0-9_-]{44}$/];
     const data = inline.map((b) => String(b.callback_data));
     const unshaped = data.filter((d) => Buffer.byteLength(d, 'utf8') > 64 || !PATTERNS.some((p) => p.test(d)));
+    // MEANING CHANGE 2026-11-28 (item A1): the five operator Confirm buttons
+    // share one label; their style is keyed by the CALLBACK, not the words.
     const STYLES = {
-      Suspend: 'danger', 'Confirm suspend': 'danger', Terminate: 'danger', 'Confirm terminate': 'danger',
-      'Confirm replace': 'danger', 'Replace phone': 'primary',
+      Suspend: 'danger', Terminate: 'danger', 'Replace phone': 'primary',
       Invite: 'primary', Reactivate: 'primary', 'Extend 30 days': 'primary',
-      Confirm: 'success', 'Confirm reactivate': 'success',
     };
-    // Replace phone is primary everywhere; only its Confirm is danger.
-    const styled = inline.filter((b) => (b.style || null) !== (STYLES[b.text] || null));
+    const expectedStyle = (b) => b.text === 'Confirm'
+      ? (/^(bS|bX|bP|bW):/.test(String(b.callback_data)) ? 'danger' : 'success')
+      : (STYLES[b.text] || null);
+    const styled = inline.filter((b) => (b.style || null) !== expectedStyle(b));
     const labels = [...new Set(inline.map((b) => b.text))].filter((t) => !/^\d$/.test(t)).sort();
-    const labelsOk = same(labels, ['Back', 'Cancel', 'Confirm', 'Confirm reactivate', 'Confirm replace', 'Confirm suspend', 'Confirm terminate', 'Extend 30 days', 'Invite', 'Leads', 'Newer', 'Older', 'Reactivate', 'Replace phone', 'Suspend', 'Terminate']);
+    const labelsOk = same(labels, ['Back', 'Cancel', 'Confirm', 'Extend 30 days', 'Invite', 'Leads', 'Newer', 'Older', 'Reactivate', 'Replace phone', 'Suspend', 'Terminate']);
     // Nothing a customer typed, and no retired word, in anything the operator
     // chat was shown by the flows above.
     const words = operatorTexts.filter((t) => !/^(Suspend|Reactivate|Terminate) /.test(t)
@@ -2474,3 +2477,6 @@ try {
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
+
+
+
