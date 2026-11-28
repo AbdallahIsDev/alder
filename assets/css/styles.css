@@ -2435,7 +2435,6 @@
          the dialog ground in the worst case (a white section behind the scrim).
          --line stays for cards and decorative edges. */
       --ctl-line: #9aa0a8;
-      --ctl-focus: #fff;
       --ctl-err: #ffb3a6;
       --sb-track: transparent;
       --sb-thumb: rgb(255 255 255/.28);

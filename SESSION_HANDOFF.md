@@ -183,7 +183,13 @@ no `.env` (`tests/dev-root.mjs`).
   inside a rounded box. `pathLength="100"` and the scroll-progress dash are
   unchanged.
 - Form focus shows ONE ring, the accent `:focus-visible` outline. The old white
-  focus border on inputs and the open select was removed.
+  focus border on inputs and the open select was removed, and the `--ctl-focus`
+  token went with it in the lifecycle round: every field (text box, textarea,
+  themed dropdown) draws the same 1px `--ctl-line` border at rest and focus
+  changes that border's COLOUR to the accent (`--sel`). The accent measures
+  1.93:1 against the field fill, so the border colour alone is not a WCAG 1.4.11
+  indicator; the 2px accent outline is what carries the focus state visually and
+  `F7` in `tests/brand.test.mjs` records the trade rather than hiding it.
 - Progressive fallbacks (`vh`→`lvh`, `hidden`→`clip`, `attr()`→alt text) use one
   property reading a token plus `@supports`, never two declarations of the same
   property in one block (Biome `noDuplicateProperties` stays clean).

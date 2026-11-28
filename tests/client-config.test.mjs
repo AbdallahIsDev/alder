@@ -56,7 +56,11 @@ const OUT = path.join(ROOT, '_debug', 'client-build');
    Before 2026-11-26 this assertion pinned the origin/main build 193536b8…;
    after it pins this branch's build. Cost: an accidental HTML edit still fails
    until the baseline is moved deliberately. */
-const BASELINE = '62efb2a7371d9f93833b3a114f6bdda4f31657f02db60c7ac71e21e74a4d9e32';
+// 2026-11-28: moved deliberately for the site-lifecycle round (Parts 4-5:
+// the neutral sentence for a terminated host, the estimate form's one border
+// and the draft/focus rules). The manifest, robots and sitemap hashes below
+// did not move.
+const BASELINE = '1b9229150d23aa463af9b3c4986c4c7d63dac1a3ad2f145fe21ff982663bb9b6';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = '9a24e9a883cd788ab55016368f3afe111de0bc812a2ab16b2c96b1c80a2efdaf';
 const BASELINE_SITEMAP = '2a79589d7992a9780b47c810763ef32c364aae607dc6f0c393f97c7ed63bc244';

@@ -915,7 +915,6 @@ try {
       && r.edits[0].body.text === RESULT_A('Suspended: Alder Roofing')
       && r.edits[0].body.text.split('\n').every((l) => l.length <= 34)
       && same(kbOf(r.edits[0]), backKb(BIZ_A, 0)) && same(r.answers, ['Suspended.']);
-    if (process.env.OBDBG && !noticeOk) console.log('OB6DBG', JSON.stringify({ n: r.sends.length, texts: r.sends.map((m) => textOf(m)), kb: r.sends.map((m) => m.body.reply_markup) }));
     line(noticeOk && mailOk && orderOk && writeOk && logOk && untouched && resultOk,
       'OB6', 'suspend: one scoped update, then notices, email and log',
       `notice=${noticeOk} mail=${mailOk} order=${orderOk} write=${writeOk} log=${logOk} untouched=${untouched} result=${resultOk}`);
@@ -959,7 +958,6 @@ try {
     for (const chat of [OWNER, STAFF]) {
       for (const text of ['/leads', '/invite', '/recipients', '/remove_lead', '/help', 'Leads', 'Invite', 'Recipients', 'Help']) {
         const x = await run(msg(chat, text));
-        if (process.env.OBDBG2 && chat === OWNER && text === '/leads') console.log('OB9B', JSON.stringify({ tg: x.tg.length, sends: x.sends.map((m) => textOf(m)), sb: x.sb.map((q) => q.table), mail: x.mail.length }));
         if (x.tg.length !== 1 || x.sends.length !== 1 || textOf(x.sends[0]) !== SUSPENDED_LINE || !supportLinked(x.sends[0])
           || !same(x.sends[0].body.reply_markup, STATUS_KB) || !bindingAndBusiness(x, chat) || x.mail.length) bad.push(`${chat === OWNER ? 'owner' : 'staff'}:${text}`);
       }
