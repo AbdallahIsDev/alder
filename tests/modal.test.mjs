@@ -835,6 +835,16 @@ try {
       && /\.f input:focus,\s*\.f textarea:focus,\s*\.sel-btn:focus\s*\{\s*border-color:\s*var\(--sel\)/.test(css)
       && /\.f input,\s*\.f textarea,\s*\.sel-btn\s*\{\s*border:\s*1px solid var\(--ctl-line\)/.test(css)
       && !/\.sel\.open \.sel-btn\s*\{\s*border-color:\s*var\(--ctl-focus\)/.test(css);
+    // MD25 (item 14): fields and option cards have the SAME resting border.
+    // The opaque --ctl-line made the fields look almost solid white next to the
+    // cards' translucent edge, so it now aliases --line; focus only recolours.
+    const sameToken = /--ctl-line:\s*var\(--line\)/.test(css);
+    const cardBorder = /\.opt\s*\{[^}]*border:\s*1px solid var\(--line\)/.test(css);
+    const fieldBorder = /\.f input,\s*\.f textarea,\s*\.sel-btn\s*\{\s*border:\s*1px solid var\(--ctl-line\)/.test(css)
+      || /\.f input\[type="text"\][\s\S]{0,300}border:\s*1px solid var\(--ctl-line\)/.test(css);
+    line(sameToken && cardBorder && fieldBorder, 'MD25',
+      'fields and option cards share one resting border token',
+      `token=${sameToken} card=${cardBorder} field=${fieldBorder}`);
     line(base && dbl && quad && img12 && images && cta && ctaFill && totRing && singleRing, 'MD16',
       '12px base, 24px images/cards, 48px CTA, footer corners, rounded back-to-top, one ring',
       `base=${base} dbl=${dbl} quad=${quad} img12=${img12} images=${images} cta=${cta} fill=${ctaFill} tot=${totRing} ring=${singleRing}`);

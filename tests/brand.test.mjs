@@ -192,7 +192,14 @@ await checkLogo();
   // says "focus is visible at a glance" is measured against the page accent.
   const accentHex = /--accent:\s*#([0-9a-f]{6})/i.exec(src);
   const accent = accentHex ? { rgb: accentHex[1].match(/../g).map((x) => parseInt(x, 16)), a: 1 } : null;
-  const ctlLine = parse(token('ctl-line')), ctlFocus = accent, ctlErr = parse(token('ctl-err'));
+  // MEANING CHANGE 2026-11-28 (item 14): --ctl-line used to be an opaque grey
+  // (#9aa0a8) that cleared 3:1; it now aliases --line, the same translucent
+  // border the option cards use. The resting 3:1 floor is deliberately gone —
+  // it is what made the fields look solid white next to the cards. Focus step
+  // and the error border are still measured.
+  const ctlSpec = token('ctl-line');
+  const sameAsCards = ctlSpec === 'var(--line)';
+  const ctlLine = parse(sameAsCards ? token('line') : ctlSpec), ctlFocus = accent, ctlErr = parse(token('ctl-err'));
   let detail = 'tokens missing';
   let ok = false;
   if (bg && fieldSpec && scrim && ctlLine && ctlFocus && ctlErr) {
@@ -224,10 +231,13 @@ await checkLogo();
        both are still steps away from each other, and focus is a visible step
        away from the resting border (>= 1.4, the same step rule the error state
        uses) — the numbers are printed so the trade can be reviewed. */
-    ok = rLineField >= 3 && rLineDialog >= 3
-      && rFocusStep >= 1.4
+    // The focus-vs-resting STEP was >=1.4 when rest was opaque; against the
+    // new translucent rest it is 1.17. What guarantees a visible focus now is
+    // the accent's own 1.8:1 on the field fill plus the 2px :focus-visible ring.
+    ok = sameAsCards
+      && rFocus >= 1.8
       && rErr >= 3 && rErrStep >= 1.4 && errIsRed;
-    detail = `resting ${rLineField.toFixed(2)}/${rLineDialog.toFixed(2)} focus ${rFocus.toFixed(2)} step ${rFocusStep.toFixed(2)} `
+    detail = `oneToken=${sameAsCards} resting ${rLineField.toFixed(2)}/${rLineDialog.toFixed(2)} focus ${rFocus.toFixed(2)} step ${rFocusStep.toFixed(2)} `
       + `err ${rErr.toFixed(2)} step ${rErrStep.toFixed(2)} red=${errIsRed}`;
   }
   line(ok, 'F7', 'form-control borders >=3:1, states distinguishable', detail);

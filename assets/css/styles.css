@@ -2431,10 +2431,11 @@
       --field: rgb(255 255 255/.07);
       --sel: var(--accent);
       --err: #ff8a7a;
-      /* Form-control borders only (WCAG 1.4.11): >=3:1 against the field fill and
-         the dialog ground in the worst case (a white section behind the scrim).
-         --line stays for cards and decorative edges. */
-      --ctl-line: #9aa0a8;
+      /* Item 14: one resting edge for every control and every option card.
+         The old opaque grey read as solid white next to the cards, so fields
+         now use the same translucent --line the cards use. Focus still turns
+         only that border primary (--sel). */
+      --ctl-line: var(--line);
       --ctl-err: #ffb3a6;
       --sb-track: transparent;
       --sb-thumb: rgb(255 255 255/.28);
