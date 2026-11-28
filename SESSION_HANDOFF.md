@@ -129,6 +129,14 @@ no `.env` (`tests/dev-root.mjs`).
   adds one line, "Contact support to restore it.", and its own state hint.
 - Retention is 60 days after termination, kept **by hand**. There is no purge job.
   To be reviewed by a lawyer; drafts in `docs/legal-drafts/`.
+- A terminated host's page is not taken down. It asks `GET /api/site-state` once
+  and replaces the estimate form with exactly one sentence, "This website is
+  currently unavailable."; the header, the sections and the phone number stay.
+  `/api/site-state` answers one of three words (`served`, `suspended`,
+  `terminated`), carries nothing about the business, is `no-store`, allows only
+  `GET`/`HEAD`, and answers `{ok:false,state:'served'}` with HTTP 200 for an
+  unknown host or an unreadable database. **A bad answer never hides a live
+  site** (`tests/site-state.test.mjs`, gate SS; part 4 of the 2026-11-28 round).
 
 **Landing page**
 
@@ -139,6 +147,22 @@ no `.env` (`tests/dev-root.mjs`).
   screen. The press area is 44 px on desktop and 32 px on phones (≤ 760 px;
   owner decision 2026-11-17, reversing the earlier all-screen 44 px rule). A
   click outside the form does not close it.
+- The estimate form draws ONE resting border per control (input, textarea and the
+  themed dropdown all `1px solid var(--ctl-line)`); focus changes that border's
+  colour to the accent (`--sel`) and nothing else, and the ring is
+  `:focus-visible` only, so a mouse press or a tap draws none. The white
+  `--ctl-focus` token is retired. A dropdown's selected row is told apart by its
+  weight and the accent check mark on the right, never by a bar down its edge.
+  Every pressable button has a pointer. `MD16`/`MD22` pin it, and `F7` records
+  that the accent is 1.93:1 on the field fill (the 2px outline carries the state).
+- The consent line under the form is one sentence: "We only use your details to
+  contact you about your estimate."
+- A draft is restored only when it holds an answer the visitor actually chose (a
+  select's default is not one), is less than 24 hours old, and does not
+  contradict answers already in the open form; otherwise it is cleared. It
+  restores its step and offers **Start over**. A dialog the visitor opened goes
+  to its first field; the automatic invitation focuses the dialog itself, so
+  nothing looks chosen or ringed. `MD9`/`MD23` pin it (part 5).
 - The thank-you screen is three groups, each one beat of the reveal: the mark
   with a split heading ("Thanks." + "We got your request."), the tinted recap,
   then "What happens next" with Close and Call. Delays 160/240/320 ms after the
