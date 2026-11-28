@@ -228,9 +228,12 @@ try {
   line(Object.values(renders).every((r) => r.html && r.text && r.subject.startsWith('New lead:')),
     'G2', 'O1 renders for clean, minimal and stress leads', `renders=${Object.keys(renders).length}`);
   // G3
-  const orderOk = Object.values(renders).every((r) => {
+  // MEANING CHANGE 2026-11-28 (item 8): the reply line is absent for a lead
+  // with no email; when it exists it still follows the buttons.
+  const orderOk = Object.values(renders).every((r, i) => {
     const j = r.html.indexOf('>Job<'), b = r.html.indexOf('>Call '), rp = r.html.indexOf('Reply to this email');
-    return j >= 0 && b > j && rp > b;
+    const wantsReply = Object.values(leads)[i].email !== '';
+    return j >= 0 && b > j && (wantsReply ? rp > b : rp === -1);
   });
   // G4
   const widthsOk = Object.values(renders).filter((r) => r.html.includes('width="2%"'))
@@ -360,6 +363,23 @@ try {
   line(h3ok, 'H3', 'no private-feedback sentence, no incentives', `ok=${h3ok}`);
   line(h4ok, 'H4', 'customer footers: Sent by <business>, never Lead Alerts', `ok=${h4ok}`);
   line(h5ok, 'H5', 'owner footer still Sent by Lead Alerts', `ok=${h5ok}`);
+
+  /* A1d (item 8): the Reply-To header is the visitor's address or NOTHING —
+     never the business's own address. The "reply to this email" line may appear
+     only when that header carries the visitor, and an absent address gets no
+     empty Email button. The payload is read from the fake Resend server. */
+  try {
+    await clean(); await reset(RS);
+    await post({ email: '' });
+    const noMail = (await requests(RS)).find((x) => x.body && /New lead:/.test(String(x.body.subject || '')));
+    const bodyNo = noMail && noMail.body;
+    line(!!bodyNo && !('reply_to' in bodyNo)
+      && !String(bodyNo.html).includes('Reply to this email')
+      && !String(bodyNo.text).includes('Reply to this email')
+      && !/href="mailto:/.test(bodyNo.html) && /href="tel:/.test(bodyNo.html),
+    'A1d', 'no visitor email: no Reply-To, no reply line, no Email button',
+    `replyTo=${bodyNo && ('reply_to' in bodyNo)} line=${bodyNo && bodyNo.html.includes('Reply to this email')} mailto=${bodyNo && /href="mailto:/.test(bodyNo.html)}`);
+  } catch (e) { line(false, 'A1d', 'no visitor email', e.message); }
 
   /* A1b: MAIL_REDIRECT_PREFIX=off skips ONLY the subject prefix; recipient still redirected */
   await clean(); await reset(RS);

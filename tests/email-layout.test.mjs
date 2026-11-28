@@ -290,6 +290,16 @@ const FIXTURES = {
   const timingCell = withEmail.html.match(/<td valign="top" style="padding:8px 0;[^"]*">As soon as possible<\/td>/);
   line(!!timingCell, 'L16', 'long timing value stays in one cell without a break',
     `found=${!!timingCell}`);
+
+  // L17 (item 8): the Email button is a mailto with a prefilled subject and an
+  // empty body. The visible reply line is tied to the visitor's address below.
+  const mailto = withEmail.html.match(/href="mailto:([^"]+)"/);
+  line(!!mailto && mailto[1] === 'customer@example.com?subject=Your%20roofing%20estimate%20request&body='
+    && !/href="mailto:/.test(noEmail.html)
+    && withEmail.html.includes('Reply to this email to answer Test directly.')
+    && !noEmail.html.includes('Reply to this email'),
+    'L17', 'mailto subject prefilled, body empty, reply line only with an address',
+    `href=${mailto ? mailto[1] : 'none'}`);
 }
 
 console.log('');
