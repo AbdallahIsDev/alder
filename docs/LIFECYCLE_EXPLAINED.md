@@ -77,8 +77,12 @@ The six notices, each sent **once** per period:
 **The website.** Nothing changes in any state until the business is suspended.
 From suspension on, a visitor who sends the form gets "Request saved" with a
 **Call** button instead of the usual thank-you, because the business cannot reply
-through the form. A terminated business's site shows a neutral page instead: no
-form, no business content, just "This website is currently unavailable."
+through the form. A terminated business's page keeps its header, sections and
+phone number, but the estimate form is replaced by one sentence — "This website
+is currently unavailable." — with no form, no step counter and no close button.
+The page learns that from `GET /api/site-state`, which answers one word about the
+host and nothing about the business; a failed or unknown answer leaves the page
+exactly as it was.
 
 **The bot.** In service, every command works. While suspended or terminated the
 keyboard shrinks to one button, **Status**, and `/status` answers with the state,
