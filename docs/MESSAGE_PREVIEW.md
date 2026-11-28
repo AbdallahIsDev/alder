@@ -477,8 +477,8 @@ The same facts as the operator's screen, in the owner's words.
 ### /status — paid
 
 ```text
-Status: Overdue (grace)
-Next: Suspension in 5 days
+Status: Paid
+Next: Due soon in 3 days
 Paid until: Dec 14
 ```
 
@@ -942,7 +942,7 @@ This business isn’t accepting requests through this form right now. Please cal
 
 ### Site — terminated business: the whole page
 
-No form, no business name, no contact details on the page. The form API answers the same refusal.
+Only the form is replaced by this sentence; the page keeps its header, its sections and its phone number. The form API answers the same refusal.
 
 ```text
 This website is currently unavailable.
@@ -990,8 +990,8 @@ Storm damage · (555) 501-1111
 Contacted · 9d ago
 ```
 
-After 7 days the same page is one list, in date order, with no group
-and no `held` line.
+After 7 days the same page is one list, in date order, with no group;
+each held row keeps its `held` line.
 
 ---
 

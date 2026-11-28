@@ -313,7 +313,9 @@ w();
 w('The same facts as the operator\'s screen, in the owner\'s words.');
 w();
 const statusCases = [
-  ['paid', { ...business }, 0, null],
+  // A whole three days BEFORE the reminder starts, so the sample shows the
+  // paid facts (due-soon begins at D - RENEWAL_REMINDER_DAYS).
+  ['paid', { ...business }, -RENEWAL_REMINDER_DAYS - 3, null],
   ['due soon', { ...business }, -RENEWAL_REMINDER_DAYS + 0.5, null],
   ['grace (overdue)', { ...business }, GRACE_DAYS - 1 + 0.5, null],
   ['suspended for non-payment', { ...business, status: 'paused', suspended_for_billing: true }, GRACE_DAYS + 0.5, 2],
@@ -388,7 +390,7 @@ block('Site — suspended business (request saved, then held)', HELD_MESSAGE,
   'The panel\'s heading is **Request saved**; the summary of what the visitor typed is shown above these words.');
 block('Site — terminated business (the form is not available)', UNAVAILABLE_MESSAGE);
 block('Site — terminated business: the whole page', 'This website is currently unavailable.',
-  'No form, no business name, no contact details on the page. The form API answers the same refusal.');
+  'Only the form is replaced by this sentence; the page keeps its header, its sections and its phone number. The form API answers the same refusal.');
 block('No-JS form — suspended business (stored, held)', 'Your request was saved. The business will see it when its service is active again.',
   'The no-JS page is a plain HTML page, one paragraph, no promise of a reply.');
 block('No-JS form — terminated business (nothing stored)', 'This business isn\'t accepting requests through this form right now.');
@@ -422,8 +424,8 @@ w('Storm damage · (555) 501-1111');
 w('Contacted · 9d ago');
 w('```');
 w();
-w(`After ${HELD_GROUP_DAYS} days the same page is one list, in date order, with no group`);
-w('and no `held` line.');
+w(`After ${HELD_GROUP_DAYS} days the same page is one list, in date order, with no group;`);
+w('each held row keeps its `held` line.');
 w();
 
 w('---');
