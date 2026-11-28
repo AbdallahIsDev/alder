@@ -569,6 +569,7 @@ the modal's thank-you steps.
 | 2026-11-28 | Lifecycle/site-lifecycle round, Parts 0–5: one generated `docs/MESSAGE_PREVIEW.md` (Part 0b) and `docs/LIFECYCLE_EXPLAINED.md` (Part 0a); operator business screen and the one status formatter (Part 1); the held group, the two-message reactivation, the owner texts without "by support" (Part 2); owner emails with no repeated sentence (Part 3); `GET /api/site-state` answering one word (Part 4); the form's resting look and the draft guards (Part 5). |
 | 2026-11-28 | Owner authorised a one-time push to `origin/main` and asked to skip the full suite. Merging `final-verify` (production smoke handoff + owner's `update styles` commit) into main. Assertion-meaning change recorded: MD14 previously required `.est-recap div` in the sitewide radius list; the owner's commit removes it, so recap rows no longer carry the 12 px radius, only the recap container does. Review artefact `_debug/patches/main-push-review.diff`: 3,853 bytes, 50 lines, apply-check 0, secret scan all 0. Stale branches (codex/pr27, multi-client-prep, telegram-widgets, visual-polish, whop-notes) are 67–129 commits behind main and hold superseded code or docs-only notes; left out. |
 | 2026-11-28 | PR #43 review fixes on the PR branch: webhook OP24/OP61/OP63 pinned to the status block, three-row buttons and two-message reactivation; held visitor pane keeps its recap and drops the repeated heading (MD24); OPERATIONS runbook follows the code and names the 24 h draft expiry; generated preview samples corrected; T21 gates orphan last lines (and `orphanWord()` now sees one-word paragraphs); T22 bans "by support" in every owner text; MD22 adds no outer outline on form controls. No webhook ack-order or db-timeout change. |
+| 2026-11-28 | PR #44 merged at `cb758ae` after 49 suites / 711 assertions green, build and preview clean; production smoke passed (lead stored `+15551234567`, four events, deleted; count 10 -> 11 -> 10). Review artefact `_debug/patches/ui-fixes-2-review.diff`: 170,029 bytes, 2,714 lines, apply-check 0, secret scan all zero. |
 | 2026-11-28 | `ui-fixes-2` round (17 items + gates): confirm screens, held notice lines, owner status wording, held-group count across two cycles, single-lead reactivation detail and held-list Back chain, 14-day manual-suspension summary; owner/visitor email layout, Reply-To rule, three-word NBSP orphan guard, reactivation copy; entry-time phone filter, shared field border, no panel focus ring, held success redesign. TEST project only. Item 12 finding: the missing second "New requests are waiting" email is the deliberate once-per-UTC-day bucket `held:mail:<business>` (`hitRateLimit(key,86400,1)`), confirmed by two same-day suspended cycles in TEST `business_events` (14:32:55 sent, 14:32:58 only held_lead); rule unchanged. |
 
 ---
@@ -624,3 +625,9 @@ Open after the 2026-11-17 modal round:
    Screenshots in `_debug/ui2-modal-*.png`; emitted Telegram texts in
    `_debug/ui2-telegram-texts.png`. Native Telegram rendering on a real phone,
    Safari/Firefox and Vercel dashboard internals were not verified.
+   PR #44 merged to `origin/main` at `cb758ae`; Vercel status `success`. The
+   production smoke after deploy: alias with 0 console errors, no `.dbg`,
+   `?dev=1` and `?debug=1` denied; one `ZZ PROD CHECK` lead with phone
+   `(555) 123-4567` returned HTTP 200, stored `+15551234567`, wrote
+   `created`/`tg_sent`/`email_owner_sent`/`autoreply_sent`, then was deleted
+   with all four events. Lead count 10 -> 11 -> 10; sentinel 0 before/after.
