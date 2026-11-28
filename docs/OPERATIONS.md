@@ -242,13 +242,17 @@ The status is Demo, Active, Suspended (`paused` in the database) or Terminated
 no phone lines under it. The lead numbers come from two queries (a count
 with the newest `created_at`, and a count since 30 days ago): the only lead
 column read for this screen is that one timestamp, and `Last lead` is left
-out when there are none. The last line is the billing line (see **3b.
-Billing and the service lifecycle**). Under it: **Suspend** and **Leads**,
-then **Extend 30 days** and **Invite**, then **Terminate**, then **Back**. For
-a suspended business: **Reactivate** and **Leads**, then **Extend 30 days**
-and **Terminate**, then **Back**, and a `Held leads: N` line when leads came
-in meanwhile. For a terminated business: **Extend 30 days** and **Leads**, then
-**Back**. Reactivate is not offered there.
+out when there are none. The last block is the shared status block from
+`lib/billing.js` (see **3b. Billing and the service lifecycle**): `Status: ...`
+followed by one fact per line — `Next: ...`, a date, or `No payment date
+recorded`. A `Held leads: N` line appears only when N > 0. The buttons are
+three colour-grouped rows: an active business gets [Replace phone (or Invite
+when no phone) | Extend 30 days] / [Suspend | Terminate] / [Leads | Back]; a
+manual suspension gets [Reactivate | Extend 30 days] / [Terminate | Leads] /
+[Back]; a billing suspension has no Reactivate and gets [Extend 30 days |
+Leads] / [Terminate] / [Back]; a terminated business gets [Extend 30 days |
+Leads] / [Back]. Reactivate is not offered on a billing suspension or on a
+termination.
 
 **What the operator can see of a lead.** **Leads** is read-only and minimal:
 every row and every card shows only the service, the status and the age of the
@@ -259,9 +263,10 @@ in `lib/content.js`; showing the name later is one word added there.
 
 **Suspend (operator).** Switches one business off, after one confirmation.
 The status is set to `paused` in one statement; then every connected phone
-gets the suspension notice ("Your service has been suspended.", the
-`/status` hint and the **Contact support** link) with its keyboard reduced to
-one button, **Status**, and the owner email address gets the same words.
+gets the suspension notice ("Your service has been suspended." with no reason,
+no countdown and no `/status` hint — the **Status** button carries that — plus
+the **Contact support** link) with its keyboard reduced to one button,
+**Status**, and the owner email address gets the same idea in prose.
 A notice or an email that fails is counted ("Telegram: failed (alert sent)" or
 "Email: failed (alert sent)"), alerts this
 chat, and never undoes the suspension. Nothing is deleted: phones, invites,
@@ -293,10 +298,13 @@ back exactly as it was. Deleting a business is the offboard script (section
 
 **Reactivate (operator).** One tap on a **suspended** business sets the status
 to `active` (a business that was `demo` before comes back as
-`active`, not `demo`) and tells every connected phone "Your service is active
-again." with its own keyboard and the number of leads that were held. Those
-leads are ordinary leads from that moment: `/leads` shows them. Reactivating
-is not paying: it does not change `paid_until`, so a business whose paid
+`active`, not `demo`) and tells every connected phone ONE sentence, "Your
+service is active again.", with its own role keyboard back. If leads were
+held, a SECOND message follows with those leads in `/leads`' own format (same
+title, group heading, rows and five-per-page buttons). For seven days they stay
+the "Received while suspended: N" group at the top of `/leads`; after that they
+are ordinary rows in date order but keep their `held` line. Reactivating is
+not paying: it does not change `paid_until`, so a business whose paid
 period is over is suspended again by the next daily runs. Use **Extend 30
 days** when the customer has paid.
 
