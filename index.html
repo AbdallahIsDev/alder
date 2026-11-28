@@ -1972,12 +1972,44 @@ function normalizePhone(raw, cfg, strict) {
     if (c) { if (m) c.setAttribute('aria-invalid', 'true'); else c.removeAttribute('aria-invalid'); }
     return m;
   }
+  /* Item 13: entry-time phone filter. The shared rule below is a VALIDATOR —
+     it is deliberately display-only so the visitor can see a bad character.
+     This filter is the gate: only digits and + ( ) - . and space ever enter the
+     field, from typing, paste, a drop or an IME commit. A value with more than
+     15 digits or 20 raw characters is refused (the previous value stays).
+     The submit path and the server keep the shared validator unchanged. */
+  /*__PHONE_ENTRY_START__*/
+  var PHONE_ENTRY_MAX = 20, PHONE_ENTRY_DIGITS = 15;
+  function filterPhoneInput(raw, previous) {
+    var v = ascii(raw == null ? '' : String(raw)).replace(/[^0-9+()\-. ]/g, '');
+    var out = '', plus = false;
+    for (var i = 0; i < v.length; i++) {
+      var ch = v.charAt(i);
+      if (ch === '+') { if (plus) continue; plus = true; }
+      out += ch;
+    }
+    if (out.length > PHONE_ENTRY_MAX || out.replace(/\D/g, '').length > PHONE_ENTRY_DIGITS) return previous;
+    return out;
+  }
+  /*__PHONE_ENTRY_END__*/
+  var phoneLast = E.phone.value || '';
+  E.phone.addEventListener('beforeinput', function (e) {
+    if (!/^insert/.test(e.inputType || '')) return;
+    var data = e.data || (e.dataTransfer ? e.dataTransfer.getData('text') : '');
+    if (!data) return;
+    var el = E.phone, from = el.selectionStart == null ? el.value.length : el.selectionStart;
+    var to = el.selectionEnd == null ? from : el.selectionEnd;
+    var next = el.value.slice(0, from) + data + el.value.slice(to);
+    if (filterPhoneInput(next, null) !== next) e.preventDefault();     /* typing, paste, drop, IME */
+  });
   form.addEventListener('input', function (e) {
     if (e.target === E.zip) E.zip.value = E.zip.value.replace(/\D/g, '');       /* ZIP accepts digits only */
-    if (e.target === E.phone) E.phone.value = sanitizePhone(E.phone.value, PHONE_CFG);
+    if (e.target === E.phone) {
+      E.phone.value = filterPhoneInput(E.phone.value, phoneLast);               /* backstop for every input source */
+      phoneLast = E.phone.value;
+    }
     var f = e.target.closest('[data-f]'); if (f && f.querySelector('.err').textContent) reflow(function () { check(f.dataset.f); }, 260);
   });
-  E.phone.addEventListener('paste', function () { setTimeout(function () { E.phone.value = sanitizePhone(E.phone.value, PHONE_CFG); }, 0); });
   function phoneSubmit(raw) {
     var n = normalizePhone(raw, PHONE_CFG);
     return n.ok ? n.value : sanitizePhone(raw, PHONE_CFG).trim();
