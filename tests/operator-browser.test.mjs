@@ -490,18 +490,25 @@ const PAGE0 = ['Alder Roofing · Demo · 2 phones', 'Beta Roofing · Active · 1
 const PAGE0_IDS = [BIZ_A, BIZ_B, biz(4), biz(5), biz(6)];
 const PAGE1_IDS = [biz(9), biz(7), biz(8), biz(11), biz(12)];
 const listText = (rows) => 'Businesses\n\n' + rows.map((r, i) => `${i + 1}. ${r}`).join('\n');
-const DETAIL_A = 'Alder Roofing\nDemo · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total\nLast 30 days: 3\nLast lead: 2d ago\nBilling: not tracked';
-const DETAIL_FIR = 'Fir & Sons\nActive · fir\n\nTelegram: Not connected\n\nLeads: 0 total\nLast 30 days: 0\nBilling: not tracked';
-const DETAIL_P = 'Zz Paused\nSuspended · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total\nLast 30 days: 0\nBilling: not tracked';
+// The business screen: one fact per line, and the SAME status block the
+// owner's /status shows (statusLines in lib/billing.js), after a blank line.
+const DETAIL_A = 'Alder Roofing\nDemo · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total\nLast 30 days: 3\nLast lead: 2d ago\n\nStatus: Not tracked\nNo payment date recorded';
+const DETAIL_FIR = 'Fir & Sons\nActive · fir\n\nTelegram: Not connected\n\nLeads: 0 total\nLast 30 days: 0\n\nStatus: Not tracked\nNo payment date recorded';
+const DETAIL_P = 'Zz Paused\nSuspended · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total\nLast 30 days: 0\n\nStatus: Suspended (manual)\nNext: none (manual hold)';
+// Buttons grouped by colour: blue, then red, then gray, Back full width last.
+// Active: [Replace phone|Invite] [Extend 30 days] / [Suspend] [Terminate] /
+// [Leads] [Back].
 const detailKb = (id, page, { connected = true } = {}) => [
+  [connected
+    ? { text: 'Replace phone', callback_data: `bw:${page}:${id}`, style: 'primary' }
+    : { text: 'Invite', callback_data: `bv:${page}:${id}`, style: 'primary' },
+  { text: 'Extend 30 days', callback_data: `be:${page}:${id}`, style: 'primary' }],
   [{ text: 'Suspend', callback_data: `bs:${page}:${id}`, style: 'danger' },
-    connected
-      ? { text: 'Replace phone', callback_data: `bw:${page}:${id}`, style: 'primary' }
-      : { text: 'Invite', callback_data: `bv:${page}:${id}`, style: 'primary' }],
-  [{ text: 'Extend 30 days', callback_data: `be:${page}:${id}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
-  [{ text: 'Terminate', callback_data: `bx:${page}:${id}`, style: 'danger' }],
-  [{ text: 'Back', callback_data: `bl:${page}` }],
+    { text: 'Terminate', callback_data: `bx:${page}:${id}`, style: 'danger' }],
+  [{ text: 'Leads', callback_data: `bq:0:${page}:${id}` }, { text: 'Back', callback_data: `bl:${page}` }],
 ];
+// Suspended: manual has a way back without paying, so Reactivate leads;
+// a billing suspension has none (payment is the unlock), so Extend leads.
 const suspendedKb = (id, page, { billing = false } = {}) => billing
   ? [
     [{ text: 'Extend 30 days', callback_data: `be:${page}:${id}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
@@ -509,9 +516,8 @@ const suspendedKb = (id, page, { billing = false } = {}) => billing
     [{ text: 'Back', callback_data: `bl:${page}` }],
   ]
   : [
-    [{ text: 'Reactivate', callback_data: `br:${page}:${id}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
-    [{ text: 'Extend 30 days', callback_data: `be:${page}:${id}`, style: 'primary' }],
-    [{ text: 'Terminate', callback_data: `bx:${page}:${id}`, style: 'danger' }],
+    [{ text: 'Reactivate', callback_data: `br:${page}:${id}`, style: 'primary' }, { text: 'Extend 30 days', callback_data: `be:${page}:${id}`, style: 'primary' }],
+    [{ text: 'Terminate', callback_data: `bx:${page}:${id}`, style: 'danger' }, { text: 'Leads', callback_data: `bq:0:${page}:${id}` }],
     [{ text: 'Back', callback_data: `bl:${page}` }],
   ];
 /** Terminated: Extend, Leads, Back. No Reactivate, Terminate, Suspend or Invite. */
@@ -536,7 +542,9 @@ const REMOVED_KB = { remove_keyboard: true };
 const fail500 = () => new Response('{"message":"fake failure"}', { status: 500, headers: { 'content-type': 'application/json' } });
 const textOf = (req) => String((req && req.body && req.body.text) || '');
 const SUSPEND_ASK = 'Suspend Alder Roofing?\nAlerts and emails stop.\nThe site keeps saving\nrequests and holds them.\nNothing is deleted.\nThe owner can see the count.';
-const REACTIVATE_ASK = 'Reactivate Alder Roofing?\nAlerts and emails resume.\nRequests held while it was\noff become visible again.\nNothing is deleted.';
+// Reactivate and Extend look alike and are not: the question says which is
+// which, before the tap.
+const REACTIVATE_ASK = 'Reactivate Alder Roofing?\nLifts the suspension.\nPaid date does not change.\nHeld requests become visible.\nNothing is deleted.';
 const RESULT_A = (title) => `${title}\nTelegram: sent to 2 phones\nEmail: sent`;
 const RESULT_ONE = (title) => `${title}\nTelegram: sent to 1 phone\nEmail: sent`;
 const RESULT_FAIL = (title) => `${title}\nTelegram: failed (alert sent)\nEmail: sent`;
@@ -547,28 +555,46 @@ const RESULT_NO_PHONE = (title) => `${title}\nTelegram: no phone connected\nEmai
 const RESULT_EXTENDED_REACTIVATED = (title, date, telegram = 'Telegram: sent to 1 phone', email = 'Email: sent') =>
   `${title}\nPaid until: ${date}\nService: reactivated\n${telegram}\n${email}`;
 const RESULT_UNREPORTED = (title, date) => `${title}\nPaid until: ${date}\nTelegram: not reported\nEmail: not reported`;
-const NOTICE = 'Your service has been suspended\nby support.\n\nYour website still saves new\nrequests. You will see them\nwhen the service is active\nagain.\n\nSend /status at any time to see\nthe current state.\n\nContact support';
-const NOTICE_EMAIL = 'Your service has been suspended by support.\n\nYour website still saves new requests. You will see them when the service is active again.\n\nSend /status at any time to see the current state.\n\nReply to this email and we will help.';
-// What a phone of a business suspended by hand is told (lib/lifecycle-text.js),
-// written out here and not taken from the code under test.
+// lib/lifecycle-text.js, written out here and not read from the code under
+// test. A suspension by hand says what is true (a suspension, requests kept,
+// no termination date) and where help is; nothing is "by support".
 const SUPPORT = 'Contact support';
-const SUSPENDED_LINE = 'This service has been suspended\nby support.\n\nNo termination date is set.\n\nSend /status at any time to see\nthe current state.\n\n' + SUPPORT;
-const SUSPENDED_TOAST = 'This service is suspended. Send /status.';
-const TERMINATED_TOAST = 'This service was terminated. Send /status.';
-const REFUSED_LINE = 'This service is suspended.\nA new phone cannot be connected\nright now.\n\n' + SUPPORT;
-const STATUS_SUSPENDED = 'Status: Suspended\n\nReason: suspended by support.\n\n' + SUPPORT;
-const STATUS_TERMINATED = 'Status: Terminated\n\nTerminated by support.\nNo termination date was set.\n\nYour website form no longer\naccepts requests. Your data has\nnot been deleted.\n\n' + SUPPORT;
-const TERMINATED_NOTICE = 'Your service has been\nterminated by support.\n\nYour website form no longer\naccepts requests. Your data has\nnot been deleted.\n\nSend /status at any time to see\nthe current state.\n\n' + SUPPORT;
-const REACTIVATED_NOTICE = 'Your service is active again.\nSupport has reactivated it.\n\nSend /status at any time to see\nthe current state.\n\n' + SUPPORT;
+const NOTICE = 'Your service has been suspended.\n\nYour website still saves new\nrequests. They are kept safely and\nshown once the service is back.\n\n' + SUPPORT + ' to resolve it.';
+const NOTICE_EMAIL = 'Your website is still taking requests. Each one is saved in full and will be waiting for you as soon as the service is back; nothing is\u00A0lost.\n\n'
+  + 'There is no termination date: the service stays suspended until it is\u00A0resolved.\n\n'
+  + 'Contact support to resolve\u00A0it.\n\n'
+  + 'Reply to this email and we will\u00A0help.';
+// What a phone of a business suspended by hand is told (lib/lifecycle-text.js).
+const SUSPENDED_LINE = 'Your service has been suspended.\n\nNew requests are still\nsaved and kept safely\nuntil the service is back.\n\n' + SUPPORT + ' to resolve it.';
+const SUSPENDED_TOAST = 'This service is suspended.';
+const TERMINATED_TOAST = 'This service was terminated.';
+const REFUSED_LINE = 'This service is suspended.\nA new phone cannot be\nconnected right now.';
+const STATUS_SUSPENDED = 'Status: Suspended (manual)\nNext: none (manual hold)\n\nThe service was suspended.\n\n' + SUPPORT + ' to\nrestore the service.';
+// With held requests the count and one line about them come between the
+// reason and the way out; never a detail.
+const STATUS_SUSPENDED_HELD = 'Status: Suspended (manual)\nNext: none (manual hold)\n\nThe service was suspended.\n\nLeads waiting: 2\n\nTheir details are hidden\nuntil the service is back.\n\n' + SUPPORT + ' to\nrestore the service.';
+const STATUS_TERMINATED = 'Status: Terminated\n\nThe service was terminated.\n\nYour data has not been deleted.\n\n' + SUPPORT + ' to\nrestore the service.';
+const TERMINATED_NOTICE = 'Your service has been terminated.\n\nYour website has stopped\naccepting requests. Your\ndata has not been deleted.\n\n' + SUPPORT + ' to\nrestore the service.';
+// Anything but /status, on a terminated business's phone.
+const TERMINATED_REPLY = 'Your service has been terminated.\n\nYour website accepts no\nnew requests. Your data\nhas not been deleted.\n\n' + SUPPORT + ' to\nrestore the service.';
+// A valid invite code used on a terminated business: nothing connects.
+const TERMINATED_REFUSED = 'This service was terminated.\nA new phone cannot be\nconnected right now.';
+// One message, one sentence. If leads were held, a SECOND message carries
+// them in /leads' own format (api/tg.js sends it).
+const REACTIVATED_NOTICE = 'Your service is active again.';
 /** The one keyboard of a suspended or terminated business's phone. */
 const STATUS_KB = { keyboard: [[{ text: 'Status' }]], is_persistent: true, resize_keyboard: true };
-/** The support link is an entity over the last words; there is no parse_mode. */
-const supportLinked = (m) => {
+/** One text_link entity whose words are exactly `label`, pointing at the
+ *  configured address, and no parse_mode: the links are entities, not markup.
+ *  A message may carry more than one (renew and support). */
+const linkOver = (m, label) => {
   const e = m && m.body && m.body.entities;
   const t = textOf(m);
-  return Array.isArray(e) && e.length === 1 && e[0].type === 'text_link' && e[0].url === 'https://t.me/AbdallahIsDev'
-    && t.slice(e[0].offset, e[0].offset + e[0].length) === SUPPORT && t.endsWith(SUPPORT) && !('parse_mode' in m.body);
+  return Array.isArray(e) && e.some((x) => x.type === 'text_link' && x.url === 'https://t.me/AbdallahIsDev'
+    && t.slice(x.offset, x.offset + x.length) === label) && !('parse_mode' in m.body);
 };
+const supportLinked = (m) => linkOver(m, SUPPORT);
+const renewLinked = (m) => linkOver(m, 'Renew now');
 const EXPIRED = 'That screen expired. Here is the current screen.';
 /** Every text the operator chat was shown, across the suite (for OB4). */
 const operatorTexts = [];
@@ -743,7 +769,8 @@ try {
     sbHook = ({ table }) => (table === 'v_client_leads' ? fail500() : null);
     const blind = await run(cb(OP, `bd:0:${BIZ_A}`));
     sbHook = null;
-    const blindOk = blind.edits.length === 1 && textOf(blind.edits[0]).endsWith('Leads: ? total\nLast 30 days: ?\nBilling: not tracked');
+    const blindOk = blind.edits.length === 1
+      && textOf(blind.edits[0]).endsWith('Leads: ? total\nLast 30 days: ?\n\nStatus: Not tracked\nNo payment date recorded');
     line(openOk && aggregates && otherOk && backOk && pausedOk && clean && blindOk,
       'OB3', 'business screen: three states, exact text, rows and styles',
       `open=${openOk} aggregates=${aggregates} notConnected=${otherOk} back=${backOk} suspended=${pausedOk} clean=${clean} unknown=${blindOk}`);
@@ -888,6 +915,7 @@ try {
       && r.edits[0].body.text === RESULT_A('Suspended: Alder Roofing')
       && r.edits[0].body.text.split('\n').every((l) => l.length <= 34)
       && same(kbOf(r.edits[0]), backKb(BIZ_A, 0)) && same(r.answers, ['Suspended.']);
+    if (process.env.OBDBG && !noticeOk) console.log('OB6DBG', JSON.stringify({ n: r.sends.length, texts: r.sends.map((m) => textOf(m)), kb: r.sends.map((m) => m.body.reply_markup) }));
     line(noticeOk && mailOk && orderOk && writeOk && logOk && untouched && resultOk,
       'OB6', 'suspend: one scoped update, then notices, email and log',
       `notice=${noticeOk} mail=${mailOk} order=${orderOk} write=${writeOk} log=${logOk} untouched=${untouched} result=${resultOk}`);
@@ -931,6 +959,7 @@ try {
     for (const chat of [OWNER, STAFF]) {
       for (const text of ['/leads', '/invite', '/recipients', '/remove_lead', '/help', 'Leads', 'Invite', 'Recipients', 'Help']) {
         const x = await run(msg(chat, text));
+        if (process.env.OBDBG2 && chat === OWNER && text === '/leads') console.log('OB9B', JSON.stringify({ tg: x.tg.length, sends: x.sends.map((m) => textOf(m)), sb: x.sb.map((q) => q.table), mail: x.mail.length }));
         if (x.tg.length !== 1 || x.sends.length !== 1 || textOf(x.sends[0]) !== SUSPENDED_LINE || !supportLinked(x.sends[0])
           || !same(x.sends[0].body.reply_markup, STATUS_KB) || !bindingAndBusiness(x, chat) || x.mail.length) bad.push(`${chat === OWNER ? 'owner' : 'staff'}:${text}`);
       }
@@ -958,8 +987,7 @@ try {
       { id: uuid(902), business_id: BIZ_A, name: 'Held Two', phone: '+15155550992', service: 'storm', status: 'open', held_at: new Date().toISOString(), created_at: new Date().toISOString() });
     const waiting = await run(msg(OWNER, '/status'));
     const waitingText = textOf(waiting.sends[0]);
-    if (waitingText !== 'Status: Suspended\n\nReason: suspended by support.\n\nLeads waiting: 2\nTheir details are hidden until\nthe service is active again.\n\n' + SUPPORT
-      || /Held One|Held Two|5155550/.test(waitingText)) bad.push('status:held');
+    if (waitingText !== STATUS_SUSPENDED_HELD || /Held One|Held Two|5155550/.test(waitingText)) bad.push('status:held');
     // /leads still shows nothing while suspended, held leads included.
     const hidden = await run(msg(OWNER, '/leads'));
     if (textOf(hidden.sends[0]) !== SUSPENDED_LINE || hidden.sb.some((q) => q.table === 'v_client_leads')) bad.push('leads:held');
@@ -990,7 +1018,7 @@ try {
     // and the invite is still unused for the day the business is reactivated.
     const link = await run(msg(CHAT_X, '/start KEEPKEEPKEEP'));
     const pasted = await run(msg(CHAT_X, 'KEEPKEEPKEEP'));
-    const bindOk = [link, pasted].every((x) => x.sends.length === 1 && textOf(x.sends[0]) === REFUSED_LINE && supportLinked(x.sends[0])
+    const bindOk = [link, pasted].every((x) => x.sends.length === 1 && textOf(x.sends[0]) === REFUSED_LINE
       && same(x.sends[0].body.reply_markup, REMOVED_KB))
       && !store.chats.some((c) => String(c.tg_chat_id) === String(CHAT_X))
       && liveCodes(BIZ_A).length === 1 && liveCodes(BIZ_A)[0].code === 'KEEPKEEPKEEP';
@@ -1057,7 +1085,7 @@ try {
         { text: 'Cancel', callback_data: `bd:0:${BIZ_A}` },
       ]]) && same(ask.answers, ['']);
     const cancel = await run(cb(OP, askKb[0][1].callback_data));
-    const pausedDetail = 'Alder Roofing\nSuspended · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total\nLast 30 days: 3\nLast lead: 2d ago\nBilling: not tracked';
+    const pausedDetail = 'Alder Roofing\nSuspended · alder-demo\n\nTelegram: Connected\nPhone 1 · main phone\nPhone 2 (Van)\n\nLeads: 7 total\nLast 30 days: 3\nLast lead: 2d ago\n\nStatus: Suspended (manual)\nNext: none (manual hold)';
     const cancelTextOk = cancel.edits.length === 1 && textOf(cancel.edits[0]) === pausedDetail;
     const cancelKbOk = cancel.edits.length === 1 && same(kbOf(cancel.edits[0]), suspendedKb(BIZ_A, 0));
     const cancelNoWrites = writes(cancel.sb).length === 0;
@@ -1074,7 +1102,8 @@ try {
     const told = (chat) => r.sends.filter((m) => String(m.body.chat_id) === String(chat));
     const noticeOk = r.sends.length === 2 && r.mail.length === 1 && r.mail[0].body.subject === 'Your service is active again'
       && same([].concat(r.mail[0].body.to), ['alder-demo@fixture.invalid'])
-      && told(OWNER).length === 1 && textOf(told(OWNER)[0]) === REACTIVATED_NOTICE && same(told(OWNER)[0].body.reply_markup, OWNER_KB) && supportLinked(told(OWNER)[0])
+      && told(OWNER).length === 1 && textOf(told(OWNER)[0]) === REACTIVATED_NOTICE && same(told(OWNER)[0].body.reply_markup, OWNER_KB)
+      && !(told(OWNER)[0].body.entities || []).length
       && told(STAFF).length === 1 && textOf(told(STAFF)[0]) === REACTIVATED_NOTICE && same(told(STAFF)[0].body.reply_markup, STAFF_KB);
     const resultOk = r.edits.length === 1 && r.edits[0].body.text === RESULT_A('Reactivated: Alder Roofing')
       && r.edits[0].body.text.split('\n').every((l) => l.length <= 34)
@@ -1932,60 +1961,65 @@ try {
 
   /* ---------- billing on the operator's screens ---------- */
 
-  /* OB24: the billing line, in every state, to the character. */
+  /* OB24: the status block, in every state, to the character. It is the SAME
+     block the owner's /status shows (statusLines in lib/billing.js). */
   store = freshStore();
   {
     const now = Date.now();
     const set = (id, patch) => Object.assign(bizRow(id), patch);
     const open = async (id, page = 0) => seen(await run(cb(OP, `bd:${page}:${id}`)));
-    const lastLine = (r) => textOf(r.edits[0]).split('\n').pop();
+    const block = (r) => textOf(r.edits[0]).split('\n\n').pop();
     // Paid, connected (Beta Roofing has one phone): the whole screen.
     const paidAt = now + 10 * DAY;
     set(BIZ_B, { paid_until: new Date(paidAt).toISOString() });
     const paid = await open(BIZ_B);
     const paidOk = paid.edits.length === 1
-      && textOf(paid.edits[0]) === `Beta Roofing\nActive · beta\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total\nLast 30 days: 0\nPaid until: ${shortDate(paidAt)}`
+      && textOf(paid.edits[0]) === `Beta Roofing\nActive · beta\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total\nLast 30 days: 0\n\nStatus: Paid\nNext: Due soon in 7 days\nPaid until: ${shortDate(paidAt)}`
       && same(kbOf(paid.edits[0]), detailKb(BIZ_B, 0)) && writes(paid.sb).length === 0;
-    // Overdue, not connected (Fir & Sons has no phone): the suspension date
-    // is paid_until + 5 days (GRACE_DAYS).
+    // Overdue, not connected (Fir & Sons has no phone): in the grace period
+    // until paid_until + 5 days (GRACE_DAYS).
     const overdueAt = now - 2 * DAY;
     set(biz(9), { paid_until: new Date(overdueAt).toISOString(), billing_warning_stage: 1 });
     const overdue = await open(biz(9), 1);
-    const overdueOk = textOf(overdue.edits[0]) === `Fir & Sons\nActive · fir\n\nTelegram: Not connected\n\nLeads: 0 total\nLast 30 days: 0\nOverdue since ${shortDate(overdueAt)} · suspends ${shortDate(overdueAt + 5 * DAY)}`
+    const overdueOk = block(overdue) === `Status: Overdue (grace)\nNext: Suspension in 3 days\nPaid until: ${shortDate(overdueAt)}`
       && same(kbOf(overdue.edits[0]), detailKb(biz(9), 1, { connected: false }));
-    // Past the grace period and not suspended yet (the job runs once a day).
+    // Past the grace period and not suspended yet (the job runs once a day):
+    // the dates say suspended, and the screen says what the dates say.
     set(biz(4), { paid_until: new Date(now - 8 * DAY).toISOString(), billing_warning_stage: 2 });
     const expired = await open(biz(4));
-    const expiredOk = lastLine(expired) === `Overdue since ${shortDate(now - 8 * DAY)} · suspends today`;
-    // Suspended by the job: since when (paid_until + 5 days) and when it
-    // terminates (paid_until + 15 days), with the Reactivate layout.
+    const expiredOk = block(expired) === `Status: Suspended (payment)\nNext: Termination in 7 days\nTerminates: ${shortDate(now - 8 * DAY + 15 * DAY)}`;
+    // Suspended by the job: when it terminates, and the billing suspension
+    // layout (no Reactivate: payment is the unlock).
     set(BIZ_P, { paid_until: new Date(now - 9 * DAY).toISOString(), billing_warning_stage: 4, suspended_for_billing: true });
     const unpaid = await open(BIZ_P, 2);
-    const unpaidOk = textOf(unpaid.edits[0]) === `Zz Paused\nSuspended · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total\nLast 30 days: 0\nSuspended since ${shortDate(now - 4 * DAY)} · terminates ${shortDate(now + 6 * DAY)}`
+    const unpaidOk = block(unpaid) === `Status: Suspended (payment)\nNext: Termination in 6 days\nTerminates: ${shortDate(now - 9 * DAY + 15 * DAY)}`
       && same(kbOf(unpaid.edits[0]), suspendedKb(BIZ_P, 2, { billing: true }));
-    // Suspended by hand: never the billing suspension line, whatever the dates say.
+    // Suspended by hand: never the billing words, whatever the dates say.
     set(BIZ_P, { suspended_for_billing: false });
     const byHand = await open(BIZ_P, 2);
     set(BIZ_P, { paid_until: new Date(now + 3 * DAY).toISOString() });
     const byHandPaid = await open(BIZ_P, 2);
-    const byHandOk = lastLine(byHand) === `Overdue since ${shortDate(now - 9 * DAY)}` && !/Suspended since|terminates/.test(textOf(byHand.edits[0]))
-      && lastLine(byHandPaid) === `Paid until: ${shortDate(now + 3 * DAY)} · due in 3 days`;
+    const byHandOk = block(byHand) === 'Status: Suspended (manual)\nNext: none (manual hold)'
+      && !/Suspended since|terminates|Overdue since/.test(textOf(byHand.edits[0]))
+      && block(byHandPaid) === 'Status: Suspended (manual)\nNext: none (manual hold)';
     // Terminated by the job: the day it happened (paid_until + 15 days), and
     // the word shown is "Terminated", never "Churned".
     set(BIZ_C, { paid_until: new Date(now - 20 * DAY).toISOString(), billing_warning_stage: 6, suspended_for_billing: true });
     const ended = await open(BIZ_C, 2);
-    const endedOk = textOf(ended.edits[0]) === `Juniper Roofing\nTerminated · juniper\n\nTelegram: Not connected\n\nLeads: 0 total\nLast 30 days: 0\nTerminated ${shortDate(now - 5 * DAY)}`
+    const endedOk = block(ended) === `Status: Terminated\nTerminated: ${shortDate(now - 5 * DAY)}`
       && same(kbOf(ended.edits[0]), terminatedKb(BIZ_C, 2));
     set(BIZ_C, { paid_until: null, billing_warning_stage: 0, suspended_for_billing: false });
-    // A demo business is never enforced, and the line says so.
+    // A demo business is never enforced, so a date it happens to carry is
+    // never shown as a countdown: the block is the not-tracked one.
     set(BIZ_A, { paid_until: new Date(now - 20 * DAY).toISOString() });
     const demo = await open(BIZ_A);
-    const demoOk = lastLine(demo) === `Overdue since ${shortDate(now - 20 * DAY)} · not enforced`;
+    const demoOk = block(demo) === 'Status: Not tracked\nNo payment date recorded'
+      && !/Overdue since|Terminated/.test(textOf(demo.edits[0]));
     // Not billed.
     const none = await open(biz(5));
-    const noneOk = lastLine(none) === 'Billing: not tracked' && same(kbOf(none.edits[0]), detailKb(biz(5), 0, { connected: false }));
+    const noneOk = block(none) === 'Status: Not tracked\nNo payment date recorded' && same(kbOf(none.edits[0]), detailKb(biz(5), 0, { connected: false }));
     // The database has no billing columns: the screen still opens, from a
-    // second read that does not name them, and says billing is unavailable.
+    // second read that does not name them, and says so.
     const missing = ({ table, method, params }) => (table === 'businesses' && method === 'GET' && String(param({ params }, 'select') || '').includes('paid_until')
       ? new Response(JSON.stringify({ code: '42703', message: 'column businesses.paid_until does not exist' }), { status: 400, headers: { 'content-type': 'application/json' } })
       : null);
@@ -1995,16 +2029,23 @@ try {
     const bareConfirm = await run(cb(OP, `bE:0:${BIZ_B}:${untilToken(now + 30 * DAY)}`));
     const bareSuspend = await run(cb(OP, `bs:0:${BIZ_B}`));
     sbHook = null;
-    const bareOk = bare.edits.length === 1 && lastLine(bare) === 'Billing: unavailable' && textOf(bare.edits[0]).startsWith('Beta Roofing\nActive · beta\n\nTelegram: Connected\n')
+    const bareOk = bare.edits.length === 1 && block(bare) === 'Status: Billing unavailable\nNo payment data available'
+      && !/paid_until|Paid until/.test(textOf(bare.edits[0]))
+      && textOf(bare.edits[0]).startsWith('Beta Roofing\nActive · beta\n\nTelegram: Connected\n')
       && same(kbOf(bare.edits[0]), detailKb(BIZ_B, 0))
       && [bareAsk, bareConfirm].every((x) => x.edits.length === 1 && textOf(x.edits[0]) === C.OPERATOR_BILLING_UNAVAILABLE
         && same(kbOf(x.edits[0]), backKb(BIZ_B, 0)) && writes(x.sb).length === 0 && x.sends.length === 0)
       && bareSuspend.edits.length === 1 && textOf(bareSuspend.edits[0]).startsWith('Suspend Beta Roofing?');
-    // One billing line per screen, always the last.
-    const all = [paid, overdue, expired, unpaid, byHand, ended, demo, none, bare];
-    const once = all.every((x) => textOf(x.edits[0]).split('\n').filter((l) => /^(Paid until|Billing|Overdue since|Suspended since|Terminated [A-Z][a-z]{2} \d)/.test(l)).length === 1);
+    // One status block per screen, always the last, always after a blank line.
+    const all = [paid, overdue, expired, unpaid, byHand, byHandPaid, ended, demo, none, bare];
+    const once = all.every((x) => {
+      const lines = textOf(x.edits[0]).split('\n');
+      return lines.filter((l) => l === 'Status:' || l.startsWith('Status: ')).length === 1
+        && lines.filter((l) => /^(Paid until|Terminated [A-Z][a-z]{2} \d|No payment date recorded)/.test(l)).length <= 1
+        && lines.slice(0, -1).includes('Status: ' + lines.find((l) => l.startsWith('Status: ')).slice(8)) === true;
+    });
     line(paidOk && overdueOk && expiredOk && unpaidOk && byHandOk && endedOk && demoOk && noneOk && bareOk && once,
-      'OB24', 'billing line: every state, exact; no columns -> unavailable',
+      'OB24', 'status block: every state, exact; no columns -> unavailable',
       `paid=${paidOk} overdue=${overdueOk} expired=${expiredOk} unpaid=${unpaidOk} byHand=${byHandOk} ended=${endedOk} demo=${demoOk} none=${noneOk} bare=${bareOk} once=${once}`);
   }
 
@@ -2042,12 +2083,13 @@ try {
     const lateOk = near(late.target, late.t0 + 30 * DAY) && textOf(late.r.edits[0]) === `Extend Beta Roofing to ${shortDate(late.target)}?`;
     // Suspended: the question says what else Confirm will do.
     const susp = await askFor(BIZ_P, 2);
-    const suspOk = textOf(susp.r.edits[0]) === `Extend Zz Paused to ${shortDate(susp.target)}?\n\nThis business was suspended.\nExtending restores the service.`
+    const suspOk = textOf(susp.r.edits[0]) === `Extend Zz Paused to ${shortDate(susp.target)}?\n\nThis business was suspended.\nAdds 30 days from today.\nNew date: ${shortDate(susp.target)}.\nRestores the service.`
       && same(susp.kb, extendKb(BIZ_P, 2, susp.token)) && susp.r.sends.length === 0;
     // Cancel is the business screen, and nothing moved: the two rows that
     // were set by hand above are the only difference from the start.
     const cancel = await run(cb(OP, `bd:0:${biz(5)}`));
-    const cancelOk = cancel.edits.length === 1 && textOf(cancel.edits[0]).endsWith('Billing: not tracked') && same(kbOf(cancel.edits[0]), detailKb(biz(5), 0, { connected: false }));
+    const cancelOk = cancel.edits.length === 1 && textOf(cancel.edits[0]).endsWith('Status: Not tracked\nNo payment date recorded')
+      && same(kbOf(cancel.edits[0]), detailKb(biz(5), 0, { connected: false }));
     set(BIZ_B, { paid_until: null, billing_warning_stage: 0 });
     line(freshOk && paidOk && lateOk && suspOk && cancelOk && snapshot() === before,
       'OB25', 'Extend asks first: the date, Confirm carries it, nothing written',
@@ -2149,9 +2191,11 @@ try {
     // The phone is told through the Reactivate path, keyboard included, and
     // the notice thanks for the payment and gives the new date; the owner
     // address gets the same by email.
+    // One message, one sentence: no thanks-for-payment paragraph, no /status
+    // hint (the role keyboard comes back, and Status is not on it), no link.
     const noticeOk = r.sends.length === 1 && String(r.sends[0].body.chat_id) === String(PHONE_P)
-      && textOf(r.sends[0]) === `Your service is active again.\nThank you for your payment.\n\nPaid until: ${shortDate(a.target)}.\n\nSend /status at any time to see\nthe current state.\n\n${SUPPORT}`
-      && supportLinked(r.sends[0]) && same(r.sends[0].body.reply_markup, OWNER_KB)
+      && textOf(r.sends[0]) === REACTIVATED_NOTICE
+      && !(r.sends[0].body.entities || []).length && same(r.sends[0].body.reply_markup, OWNER_KB)
       && r.mail.length === 1 && r.mail[0].body.subject === 'Your service is active again' && same([].concat(r.mail[0].body.to), ['zz-paused@fixture.invalid']);
     const resultOk = r.edits.length === 1 && textOf(r.edits[0]) === RESULT_EXTENDED_REACTIVATED('Extended: Zz Paused', shortDate(a.target))
       && textOf(r.edits[0]).split('\n').every((l) => l.length <= 34)
@@ -2161,7 +2205,7 @@ try {
     const againOk = writes(again.sb).length === 0 && again.sends.length === 0 && same(again.answers, ['Already extended.']);
     // The screen now: active, paid, the served layout.
     const now = await run(cb(OP, `bd:2:${BIZ_P}`));
-    const nowOk = textOf(now.edits[0]) === `Zz Paused\nActive · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total\nLast 30 days: 0\nPaid until: ${shortDate(a.target)}`
+    const nowOk = textOf(now.edits[0]) === `Zz Paused\nActive · zz-paused\n\nTelegram: Connected\nPhone 1 · main phone\n\nLeads: 0 total\nLast 30 days: 0\n\nStatus: Paid\nNext: Due soon in 27 days\nPaid until: ${shortDate(a.target)}`
       && same(kbOf(now.edits[0]), detailKb(BIZ_P, 2));
 
     // Suspended by hand (Alder, two phones), one notice refused: still
@@ -2309,10 +2353,10 @@ try {
     const join = await run(msg(CHAT_X, 'KEEPKEEPKEEP'));
     const phoneOk = status.sends.length === 1 && textOf(status.sends[0]) === STATUS_TERMINATED && same(status.sends[0].body.reply_markup, STATUS_KB)
       && !status.sb.some((q) => q.table === 'v_client_leads')
-      && leads.sends.length === 1 && textOf(leads.sends[0]) === 'This service was terminated\nby support.\n\nNo termination date was set.\n\nDays left: 0. Send /status\nto see the current state.\n\n' + SUPPORT
+      && leads.sends.length === 1 && textOf(leads.sends[0]) === TERMINATED_REPLY
       && !leads.sb.some((q) => q.table === 'v_client_leads')
       && same(tap.answers, [TERMINATED_TOAST]) && tap.sends.length === 0
-      && join.sends.length === 1 && textOf(join.sends[0]) === 'This service was terminated.\nA new phone cannot be connected\nright now.\n\n' + SUPPORT
+      && join.sends.length === 1 && textOf(join.sends[0]) === TERMINATED_REFUSED
       && !store.chats.some((c) => String(c.tg_chat_id) === String(CHAT_X)) && liveCodes(BIZ_A).length === 1;
 
     // From a SUSPENDED business too (the statement allows 'paused').
@@ -2334,8 +2378,8 @@ try {
     const backData = String(kbOf(backAsk.edits[0])[0][0].callback_data);
     const backTarget = Number.parseInt(backData.split(':')[3], 36) * 1000;
     const back = await run(cb(OP, backData));
-    const PAID_BACK = `Your service is active again.\nThank you for your payment.\n\nPaid until: ${shortDate(backTarget)}.\n\nSend /status at any time to see\nthe current state.\n\n${SUPPORT}`;
-    const backOk = textOf(backAsk.edits[0]).endsWith('\n\nThis business was terminated.\nExtending restores the service.')
+    const PAID_BACK = REACTIVATED_NOTICE;
+    const backOk = textOf(backAsk.edits[0]) === `Extend Alder Roofing to ${shortDate(backTarget)}?\n\nThis business was terminated.\nAdds 30 days from today.\nNew date: ${shortDate(backTarget)}.\nRestores the service.`
       && bizRow(BIZ_A).status === 'active'
       && textOf(back.edits[0]) === RESULT_EXTENDED_REACTIVATED('Extended: Alder Roofing', shortDate(backTarget), 'Telegram: sent to 2 phones')
       && back.sends.length === 2 && back.sends.every((m) => textOf(m) === PAID_BACK)
@@ -2343,7 +2387,7 @@ try {
     const extendAsk = await run(cb(OP, `be:2:${BIZ_P}`));
     const extendData = String(kbOf(extendAsk.edits[0])[0][0].callback_data);
     const extended = await run(cb(OP, extendData));
-    const extendOk = textOf(extendAsk.edits[0]).endsWith('\n\nThis business was terminated.\nExtending restores the service.')
+    const extendOk = textOf(extendAsk.edits[0]).endsWith('\n\nThis business was terminated.\nAdds 30 days from today.\nRestores the service.'.replace('Adds 30 days from today.\nRestores', 'Adds 30 days from today.\nNew date: ' + textOf(extendAsk.edits[0]).match(/New date: [A-Z][a-z]{2} \d+/)[0].slice(10) + '.\nRestores'))
       && bizRow(BIZ_P).status === 'active' && textOf(extended.edits[0]).includes('\nService: reactivated\n')
       && textOf(extended.edits[0]).startsWith('Extended: Zz Paused\nPaid until: ');
     line(askOk && cancelOk && oldOk && writeOk && noticeOk && keptOk && resultOk && againOk && phoneOk && pausedOk && reactOk && backOk && extendOk,
@@ -2391,10 +2435,15 @@ try {
     const business = { status: 'churned', suspended_for_billing: false, paid_until: new Date(now + 90 * DAY).toISOString() };
     const reply = LT.suspendedReply({ business, now }).text;
     const status = LT.statusText({ business, now }).text;
-    const ok = !reply.includes('Terminated on') && reply.includes('No termination date was set.')
-      && status.includes('Status: Terminated') && status.includes('No termination date was set.');
+    // No date is invented anywhere: the reply and /status say the service was
+    // terminated, that nothing was deleted, and where help is (the status block
+    // carries no date either). A future paid_until is not a termination date.
+    const ok = !reply.includes('Terminated on') && !/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d/.test(reply)
+      && reply.includes('Your service has been terminated.')
+      && status.startsWith('Status: Terminated') && !/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d/.test(status)
+      && status.includes('Your data has not been deleted.');
     line(ok, 'OB31', 'manual termination has no invented date; /status says so',
-      `replyDate=${reply.includes('Terminated on')} statusNoDate=${status.includes('No termination date was set.')}`);
+      `replyDate=${reply.includes('Terminated on')} statusDate=${/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d/.test(status)}`);
   }
 
   /* OB32: a Confirm minted more than ten minutes ago is expired. It answers

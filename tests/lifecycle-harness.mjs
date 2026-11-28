@@ -244,12 +244,28 @@ export async function everything() {
 
 /** No line of a message longer than the rule allows. */
 export const longLines = (text, max = 34) => String(text || '').split('\n').filter((l) => l.length > max);
-/** The support link: exactly one text_link entity over the words "Contact
- *  support", pointing at the configured address. */
+/** One text_link entity whose words are exactly `label`, pointing at `url`. */
+export const linkOk = (body, label, url) => {
+  const e = body && body.entities;
+  if (!Array.isArray(e)) return false;
+  const text = String(body.text || '');
+  return e.some((x) => x.type === 'text_link' && x.url === url
+    && text.slice(x.offset, x.offset + x.length) === label);
+};
+
+/** The support link: the words "Contact support" carry one text_link entity
+ *  pointing at the configured address. Since the renewal notice puts its main
+ *  action ("Renew now") on a link of its own, this no longer requires the
+ *  support link to be the ONLY entity — it requires the support words to be a
+ *  link, and every entity to be a text_link that lies inside the message. */
 export function supportLinkOk(body, url) {
   const e = body && body.entities;
-  if (!Array.isArray(e) || e.length !== 1) return false;
+  if (!Array.isArray(e) || e.length === 0) return false;
   const text = String(body.text || '');
-  return e[0].type === 'text_link' && e[0].url === url && text.slice(e[0].offset, e[0].offset + e[0].length) === 'Contact support'
-    && e[0].offset + e[0].length === text.length;
+  const allInside = e.every((x) => x.type === 'text_link' && Number.isInteger(x.offset) && x.offset >= 0 && x.offset + x.length <= text.length);
+  return allInside && linkOk(body, 'Contact support', url);
 }
+
+/** The renew link: the words "Renew now" carry one text_link entity pointing
+ *  at the configured renew address (today the support address). */
+export const renewLinkOk = (body, url) => linkOk(body, 'Renew now', url);
