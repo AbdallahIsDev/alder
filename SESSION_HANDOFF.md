@@ -481,6 +481,8 @@ the modal's thank-you steps.
 | 2026-11-27 | Domain cleanup: `clients/alder.json` uses `https://alder-roofing.vercel.app` for both `domain` and `vercelProdHost`; generated canonical/OG/robots/sitemap and `data-prod-host` follow. Tests and README updated; C17 pins the only real host. C1 build baselines moved deliberately (HTML d0e12fd3→62efb2a7, robots dcd93cf0→9a24e9a8, sitemap f90e45bd→2a79589d; manifest unchanged). |
 | 2026-11-27 | `final-verify` branch: full localhost/TEST E2E in `_debug/e2e-final.md`. 44 suites / 633 assertions green, `npm run build` exit 0, review diff `_debug/patches/final-verify-review.diff`. Five fix-and-retest rounds: a mis-ranged canary fixture chat, a transient B6h, and a load-sensitive B5d assertion were fixed in the test harness only. No production data touched. PR opened, not merged. |
 | 2026-11-27 | Final review fixes: `tests/phone.test.mjs` registered in `DEFAULT_SUITES` with N3 pinning it; `docs/EMAIL_SYSTEM.md` phone section rewritten for the shared rule; P24/P25 wording corrected. Reviewer's non-NANP finding accepted as a recorded ruling, not a code change. Free disk fell below the 1 GB suite floor; generated `_debug/e2e-build`, `_debug/e2e-dev-root` and `dist` scratch were deleted (no user work). Final: 45 suites / 634 assertions green. |
+| 2026-11-27 | Production smoke after PR #42 merge/deploy: alias and `?dev=1`/`?debug=1` showed no console errors and no `.dbg`; both production host attributes are the Vercel alias. One `ZZ PROD CHECK` lead submitted through the real form returned HTTP 200, stored `+15551234567`, produced `created`/`tg_sent`/`email_owner_sent`/`autoreply_sent`, then was deleted with all four events. Lead count 8 -> 9 -> 8; sentinel count 0 before and after. |
+| 2026-11-28 | Owner authorised a one-time push to `origin/main` and asked to skip the full suite. Merging `final-verify` (production smoke handoff + owner's `update styles` commit) into main. Assertion-meaning change recorded: MD14 previously required `.est-recap div` in the sitewide radius list; the owner's commit removes it, so recap rows no longer carry the 12 px radius, only the recap container does. Review artefact `_debug/patches/main-push-review.diff`: 3,853 bytes, 50 lines, apply-check 0, secret scan all 0. Stale branches (codex/pr27, multi-client-prep, telegram-widgets, visual-polish, whop-notes) are 67–129 commits behind main and hold superseded code or docs-only notes; left out. |
 
 ---
 
@@ -493,9 +495,9 @@ These were left open by the last live test and cannot be confirmed from the repo
    `billing_warning_stage` 0 and `suspended_for_billing` false.
 2. A test business `ZZ Billing Test` may still exist in production. Remove it and
    its leads if it does.
-3. Migration `0007` was applied to TEST on 2026-11-26 (`npm run db:apply -- --only
-   supabase/migrations/0007_lifecycle.sql`); production status is still unverified and the
-   owner applies it.
+3. Migration `0007` was applied to TEST on 2026-11-26 and to production on
+   2026-11-27 with the owner's explicit authorisation; both projects have
+   `leads.held_at` and `business_events`.
 4. `npm run tg:commands` after the lifecycle deploy — the live operator menu was
    out of date once before.
 

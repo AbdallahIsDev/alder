@@ -636,7 +636,7 @@ try {
       '.menu-top', '.menu-acts', '.menu-foot', '.menu nav a::before', '.est-dialog', '.est-dots li',
       '.est-x', '.opt', '.opt::after', '.f input', '.f textarea', '.sel-btn', '.sel-list', '.sel-list li',
       '.sel-list li[aria-selected="true"]::after', '.chk', '.chk input', '.est-alert', '.est-back', '.est-restart',
-      '.est-ok', '.est-recap', '.est-recap div',
+      '.est-ok', '.est-recap',
       '.est-next-group', '.est-after', '.est-steps li::before', '.est-actions', '.dbg button', '.dbg input.dbg-num'];
     const missing = required.filter(s => !list.includes(s));
     const keepOut = ['.av', '.est-next.busy::after', '.est', '.est-scrim', '.menu', '.pre'];
