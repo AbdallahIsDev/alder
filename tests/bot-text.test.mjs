@@ -12,6 +12,9 @@
 // T3  the fallback shape (no username) is equally well formed
 // T4  every exported BOT_*/TOAST_* string is in the sample set, so a new
 //     constant cannot dodge T1
+// T21 no sample Telegram text ends on a one-word orphan line. orphanWord()
+//     used to return null for a one-word paragraph, so it could not see the
+//     case it was named for; that helper was fixed with this gate.
 //
 // Mutation: put //n back into botInviteText and T1 fails.
 
@@ -21,6 +24,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { loadEnv } from './env.mjs';
 import { sampleTelegramTexts } from '../lib/sample-texts.js';
 import * as C from '../lib/content.js';
+import { orphanWord, ownerNotice, suspendedReply, statusText } from '../lib/lifecycle-text.js';
 import { isTestKey } from './helpers.mjs';
 
 loadEnv();
@@ -794,6 +798,59 @@ const samples = sampleTelegramTexts();
     `exit=${set.status}/${info.status}/${stale.status} calls=${calls.length} scopes=${calls.map((x) => (x.body.scope && x.body.scope.type) || 'default').join(',')} lists=${listsOk} sent=${sentOk} print=${printOk} quiet=${quiet} scope=${scopeOk}`);
 }
 
+/* T21: no Telegram text ends on an orphan last line. `orphanWord()` is the
+   helper the preview notes cite; this is the gate that actually uses it. The
+   sample set is every string a person can see plus every lifecycle notice and
+   reply in both reasons and every /status state. Structural lines that are a
+   deliberate label on their own (`held` on a held lead row) are not prose and
+   are exempt. */
+{
+  const DAY = 86400000;
+  const P = Date.parse('2026-12-14T09:00:00Z');
+  const biz = (patch = {}) => ({
+    id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'active',
+    paid_until: '2026-12-14T09:00:00Z', billing_warning_stage: 0,
+    suspended_for_billing: false, ...patch,
+  });
+  const texts = samples.map(({ name, text }) => ({ name, text }));
+  const TYPES = ['renewal_reminder', 'overdue', 'final_warning', 'suspension',
+    'termination_warning', 'termination', 'reactivation', 'held_lead'];
+  for (const type of TYPES) for (const reason of ['billing', 'manual']) {
+    const business = biz(type === 'suspension' || type === 'termination'
+      ? { status: reason === 'billing' ? 'paused' : 'churned', suspended_for_billing: reason === 'billing' }
+      : {});
+    const doc = ownerNotice(type, { business, now: P, reason, held: 2 }).telegram;
+    if (doc) texts.push({ name: `notice:${type}:${reason}`, text: doc.text });
+  }
+  for (const status of ['paused', 'churned']) for (const reason of ['billing', 'manual']) {
+    const business = biz({ status, suspended_for_billing: reason === 'billing' });
+    texts.push({ name: `reply:${status}:${reason}`, text: suspendedReply({ business, now: P }).text });
+  }
+  for (const [name, business] of [
+    ['paid', biz()], ['due_soon', biz()], ['grace', biz()],
+    ['suspended', biz({ status: 'paused', suspended_for_billing: true })],
+    ['manual', biz({ status: 'paused' })], ['terminated', biz({ status: 'churned' })],
+    ['not_tracked', biz({ status: 'demo', paid_until: null })],
+  ]) texts.push({ name: `status:${name}`, text: statusText({ business, now: name === 'paid' ? P - 6 * DAY : P }).text });
+  // A structural line that is a label on its own ("held" on a held lead row)
+  // is not a prose orphan. Everything else single-word and short is.
+  const STRUCTURAL = new Set(['held']);
+  const bad = [];
+  for (const { name, text } of texts) {
+    const rawText = String(text || '');
+    if (!rawText.includes('\n')) continue;              // a whole one-line toast is not an orphan line
+    for (const raw of rawText.split('\n')) {
+      const s = raw.trim();
+      // Labels ("Commands:"), the bind code on its own line and the held marker
+      // are structure, not a stray last word of prose.
+      if (!s || STRUCTURAL.has(s) || s.endsWith(':') || /^[A-Z2-9]{12}$/.test(s)) continue;
+      if (s.split(/\s+/).length === 1 && orphanWord(s) !== null) bad.push(`${name}:${JSON.stringify(s)}`);
+    }
+  }
+  line(bad.length === 0, 'T21', 'no Telegram text ends on an orphan last line',
+    `texts=${texts.length} orphans=${bad.slice(0, 6).join(' ') || 'none'}`);
+}
+
 console.log('');
-console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
+console.log(`${total - failed}/${total} passed${failed ? ` - ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
