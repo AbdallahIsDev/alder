@@ -957,6 +957,22 @@ const samples = sampleTelegramTexts();
     `unspaced=${spaced.join(',') || 'none'} confirm=${confirm} cancel=${cancels} markDone=${noDone}`);
 }
 
+/* T25 (2026-11-28, item A2): the held-lead notice opens with exactly two
+   lines. "Your" must not be stranded on the first line by wrapping. */
+{
+  const P = Date.parse('2026-12-14T09:00:00Z');
+  const biz = { id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'paused', paid_until: '2026-12-14T09:00:00Z', suspended_for_billing: false };
+  const bad = [];
+  for (const reason of ['billing', 'manual']) {
+    const text = ownerNotice('held_lead', {
+      business: { ...biz, suspended_for_billing: reason === 'billing' }, now: P, reason,
+    }).telegram.text;
+    if (!text.startsWith('New lead received.\nYour lead is saved safely.\n\n')) bad.push(`${reason}:${JSON.stringify(text.split('\n').slice(0, 3))}`);
+  }
+  line(bad.length === 0, 'T25', 'held notice: two exact opening lines, "Your" not split',
+    bad.join(' ; ') || 'billing/manual both exact');
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` - ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);

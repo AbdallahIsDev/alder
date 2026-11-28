@@ -81,8 +81,10 @@ const SUPPORT_URL = 'https://t.me/AbdallahIsDev';
 const STATUS_KB = { keyboard: [[{ text: 'Status' }]], is_persistent: true, resize_keyboard: true };
 // The held-lead notice says one thing: a lead arrived, it is safe, and how to
 // see it. Nothing of the visitor is in it. Billing: renew. Manual: support.
-const HELD_NOTICE = 'New lead received. Your\nlead is saved safely.\n\nRenew now to see the details.\n\nNeed help? Contact support';
-const HELD_NOTICE_MANUAL = 'New lead received. Your\nlead is saved safely.\n\nThe details stay hidden while\nthe service is suspended.\n\nContact support to resolve it.';
+// MEANING CHANGE 2026-11-28 (item A2): the two opening facts are separate
+// lines; "Your" no longer ends the first line.
+const HELD_NOTICE = 'New lead received.\nYour lead is saved safely.\n\nRenew now to see the details.\n\nNeed help? Contact support';
+const HELD_NOTICE_MANUAL = 'New lead received.\nYour lead is saved safely.\n\nThe details stay hidden while\nthe service is suspended.\n\nContact support to resolve it.';
 // The daily email is a count. Item 10: the last THREE words of every paragraph
 // are glued with non-breaking spaces, so the tail cannot wrap alone.
 const NB = '\u00A0';
