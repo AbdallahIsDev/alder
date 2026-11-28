@@ -93,7 +93,10 @@ const EVERY = CASES.map(([type, business, now, reason]) => ({
   line(bad.length === 0, 'OE1', 'no sentence repeated across subject, heading and body', bad.slice(0, 4).join(' '));
 }
 
-/* OE2: the last two words cannot be split. */
+/* OE2: the last THREE words cannot be split. MEANING CHANGE 2026-11-28:
+   until now only the last two were glued, which still left a tail of "nothing
+   is lost." on a phone; the last three chunks must now carry NBSP joins and
+   nothing earlier may. */
 {
   const bad = [];
   for (const { type, reason, email } of EVERY) {
@@ -102,16 +105,16 @@ const EVERY = CASES.map(([type, business, now, reason]) => ({
       // Split on PLAIN spaces only: JavaScript's \s matches the non-breaking
       // space too, which is exactly what a naive split would hide.
       const words = para.split(' ').filter(Boolean);
-      if (words.length < 2) { bad.push(`${type}:${reason}:short`); break; }
-      // The join is between the LAST two words of the paragraph, so the
-      // final space-separated chunk contains the non-breaking space.
-      if (!words[words.length - 1].includes(NBSP)) { bad.push(`${type}:${reason}:${words.slice(-2).join('_')}`); break; }
-      // Exactly one, and nowhere else.
+      const last = words[words.length - 1] || '';
       const joins = (para.match(/\u00A0/g) || []).length;
-      if (joins !== 1) { bad.push(`${type}:${reason}:joins=${joins}`); break; }
+      // The last plain-space chunk holds three words and both NBSP joins;
+      // no earlier word is glued.
+      if ((last.match(/\u00A0/g) || []).length !== 2 || joins !== 2) {
+        bad.push(`${type}:${reason}:${words.slice(-3).join('_')}`); break;
+      }
     }
   }
-  line(bad.length === 0, 'OE2', 'every paragraph ends in two words that cannot split', bad.slice(0, 4).join(' '));
+  line(bad.length === 0, 'OE2', 'every paragraph ends in three words that cannot split', bad.slice(0, 4).join(' '));
 }
 
 /* OE3: the help line where it belongs. */
@@ -159,8 +162,12 @@ const EVERY = CASES.map(([type, business, now, reason]) => ({
     && oneText.includes('Renewing shows all of them.')
     && !/reply to this email/i.test(oneText);
   const manual = plain(mail('held_summary', biz({ status: 'paused' }), P + 6 * DAY, 'manual', { held: 2 }).text);
-  line(ok && manual.includes('Contact support to resolve it, and the requests appear.') && !manual.includes('Renewing'),
-    'OE5', 'held leads: one count, no details, no promise it cannot keep', oneText.slice(0, 50));
+  // MEANING CHANGE 2026-11-28 (item 10): the manual "Contact support to resolve
+  // it, and the requests appear." was a second call to action; the count email
+  // now only says when the requests appear.
+  line(ok && manual.includes('Your requests appear when the service is back.')
+    && !/contact support/i.test(manual) && !manual.includes('Renewing'),
+    'OE5', 'held leads: one count, no details, no second call to action', oneText.slice(0, 50));
 }
 
 /* OE6: the suspensions keep the help line, and say the right thing. */
@@ -175,8 +182,8 @@ const EVERY = CASES.map(([type, business, now, reason]) => ({
     && bt.includes(`(${daysText(Math.ceil((P + 15 * DAY - (P + 5 * DAY + 3600000)) / DAY))} left)`)
     // By hand: no payment language and no termination date, because neither
     // is true.
-    && !/payment|renew/i.test(mt) && /no termination date/i.test(mt)
-    && mt.includes('Contact support to resolve it.')
+    && !/payment|renew|termination date|deadline/i.test(mt)
+    && !/contact support/i.test(bt + mt)
     && mt.endsWith('Reply to this email and we will help.')
     // Neither says who suspended the service.
     && !/by support|support has/i.test(`${bt}${mt}`);

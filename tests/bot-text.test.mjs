@@ -885,6 +885,44 @@ const samples = sampleTelegramTexts();
     `texts=${texts.length} hits=${hits.slice(0, 3).join(' | ') || 'none'}`);
 }
 
+/* T23 (2026-11-28, item 10): an email paragraph may not end on a line of one
+   or two short words at a phone-width column. NBSP joins are respected as
+   unbreakable, and every notice paragraph is wrapped at 40 characters. */
+{
+  const P = Date.parse('2026-12-14T09:00:00Z');
+  const biz = { id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'active', paid_until: '2026-12-14T09:00:00Z', billing_warning_stage: 0, suspended_for_billing: false };
+  const TYPES = ['renewal_reminder', 'overdue', 'final_warning', 'suspension',
+    'termination_warning', 'termination', 'reactivation', 'held_summary'];
+  const bad = [];
+  let paras = 0;
+  for (const type of TYPES) for (const reason of ['billing', 'manual']) {
+    const email = ownerNotice(type, { business: biz, now: P, reason, held: 2 }).email;
+    if (!email || !email.text) continue;
+    for (const para of email.text.split('\n\n')) {
+      paras++;
+      // Split on PLAIN spaces only: NBSP holds its words on the same line.
+      const words = para.split(' ').filter(Boolean);
+      const lines = [];
+      let current = '';
+      for (const w of words) {
+        if (!current) current = w;
+        else if (current.length + 1 + w.length <= 40) current += ' ' + w;
+        else { lines.push(current); current = w; }
+      }
+      if (current) lines.push(current);
+      // NBSP keeps words together on the line; expand it only when counting
+      // the words a reader actually sees at the end of that line.
+      const last = lines[lines.length - 1].split(' ').filter(Boolean)
+        .flatMap((w) => w.split('\u00A0')).filter(Boolean);
+      if (last.length <= 2 && last.every((w) => w.length <= 12)) {
+        bad.push(`${type}:${reason}:${JSON.stringify(last.join(' '))}`);
+      }
+    }
+  }
+  line(bad.length === 0, 'T23', 'no email paragraph ends on a one/two-short-word line',
+    `paras=${paras} orphans=${bad.slice(0, 5).join(' ') || 'none'}`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` - ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
