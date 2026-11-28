@@ -854,6 +854,15 @@
           </div>
         </section>
 
+        <!-- The business this host belongs to has been terminated. Nothing of the
+             business is on it: no name, no form, no phone, no promise. The page
+             asks /api/site-state once and, when the answer is "terminated",
+             shows this and hides everything else. A page whose host the endpoint
+             does not know keeps working exactly as before. -->
+        <section class="est-pane est-off" hidden tabindex="-1" data-page-node-id="oFfPaNe0000000000000001">
+          <div class="est-head" data-page-node-id="oFfPaNe0000000000000002"><h3 data-page-node-id="oFfPaNe0000000000000003">This website is currently unavailable.</h3></div>
+        </section>
+
       </div>
       <div class="est-nav" data-page-node-id="B0vLwWBf8QZmtP3QryfKqN"><button type="button" class="est-back" hidden data-page-node-id="KdU69DFQ25ZkHhJAJb2BtG">Back</button><button type="button" class="est-restart" hidden>Start over</button><button type="button" class="btn est-next" data-page-node-id="GqYjko1IZEPPNsCjIYbbP6"><span data-page-node-id="NXOfcbOSJzA3VMKsplP7sg">Continue</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" data-page-node-id="1PePcnFJ6Wt3C9HaAmPjy8"><path d="M3 8h10M9 4l4 4-4 4" data-page-node-id="pEOMI0T8tw3vyLiPr1Gl5M"/></svg></button></div>
     </form>
@@ -2196,6 +2205,37 @@ function normalizePhone(raw, cfg, strict) {
   }
   window.estimateHandleError = handleLeadError;
   window.estimateShowSent = showSent; // JSDOM can verify the duplicate-panel recap rule.
+  /* The business this host belongs to has been terminated: the website is
+     simply not available. /api/site-state answers with ONE WORD from a fixed
+     set and never with anything about the business, so the page can show the
+     right face without holding the record. Anything else — an unknown host, a
+     failed request, an answer this code does not know — leaves the page exactly
+     as it is: a live business must never be hidden by a bad answer. */
+  var OFF_TEXT = 'This website is currently unavailable.';
+  function applySiteState(state) {
+    if (state !== 'terminated') return false;
+    var off = form.querySelector('.est-off');
+    var closed = document.querySelector('.est');
+    Array.prototype.forEach.call(form.querySelectorAll('.est-pane'), function (pane) {
+      if (pane !== off) pane.hidden = true;
+    });
+    if (off) { off.hidden = false; off.querySelector('h3').textContent = OFF_TEXT; }
+    var navBox = form.querySelector('.est-nav');
+    if (navBox) navBox.hidden = true;
+    var prog = closed && closed.querySelector('.est-prog');
+    if (prog) prog.hidden = true;
+    var x = closed && closed.querySelector('.est-x');
+    if (x) x.hidden = true;
+    if (closed) closed.setAttribute('data-site-state', 'terminated');
+    return true;
+  }
+  window.estimateApplySiteState = applySiteState;
+  try {
+    fetch('/api/site-state', { headers: { accept: 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (b) { if (b && typeof b.state === 'string') applySiteState(b.state); })
+      .catch(function () { /* a failed check hides nothing */ });
+  } catch (e) { /* no fetch: the page keeps working */ }
   /* Step that holds the first errored field (in step order, not object order).
      Fields not in STEPS (notes) live on the last step. Exposed for tests. */
   function firstErrorStep(errors) {

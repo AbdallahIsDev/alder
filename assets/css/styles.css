@@ -3220,6 +3220,25 @@
       display: none
     }
 
+    /* The business has been terminated: one sentence and nothing else. The
+       pane carries no form, no recap and no promise, and the rule below makes
+       sure a hidden pane stays hidden even though the panes are flex boxes. */
+    .est-pane.est-off {
+      align-items: flex-start;
+      justify-content: center;
+      text-align: center;
+      gap: 10px
+    }
+
+    .est-pane.est-off[hidden] {
+      display: none
+    }
+
+    .est-pane.est-off h3 {
+      color: var(--ink);
+      overflow-wrap: anywhere
+    }
+
     /* A hidden recap or next-steps block has to disappear for real: both carry
        display:flex, and in a browser that beats the attribute's own rule, so the
        held state would still show the visitor's address and the three steps.
