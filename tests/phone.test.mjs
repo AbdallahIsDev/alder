@@ -99,5 +99,46 @@ const US = P.phoneConfig(null, '1');
     `src=${a >= 0 && b > a} inline=${inline.length} canonical=${canonical.length}`);
 }
 
+/* PH7 (2026-11-28, item 13): the field blocks bad characters at ENTRY time.
+   The filter lives in the page, outside the byte-pinned shared rule; the server
+   and submit validators are deliberately untouched. This runs the real page
+   block in a VM so a future refactor cannot silently drop the gate again. */
+{
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const a = html.indexOf('/*__PHONE_ENTRY_START__*/'), b = html.indexOf('/*__PHONE_ENTRY_END__*/');
+  const block = a >= 0 && b > a ? html.slice(a, b) : '';
+  let filter = null, err = '';
+  try {
+    const { default: vm } = await import('node:vm');
+    filter = vm.runInNewContext(`(function (ascii) {\n${block}\nreturn filterPhoneInput;\n})`, Object.create(null))(P.ascii);
+  } catch (e) { err = e.message; }
+  const cases = [
+    ['abc(555) 123-4567!', '', '(555) 123-4567'],
+    ['٥٥٥١٢٣٤٥٦٧', '', '5551234567'],
+    ['+1 (555) 123-4567', '', '+1 (555) 123-4567'],
+    ['++15551234567', '', '+15551234567'],
+    ['5551234567890123456', 'KEEP', 'KEEP'],
+    ['555 123 4567            ', 'KEEP', 'KEEP'],
+    ['555@123#4567', '', '5551234567'],
+  ];
+  const bad = [];
+  if (typeof filter === 'function') {
+    for (const [raw, prev, want] of cases) {
+      const got = filter(raw, prev);
+      if (got !== want) bad.push(`${JSON.stringify(raw)} -> ${JSON.stringify(got)} want ${JSON.stringify(want)}`);
+    }
+  }
+  const wired = /E\.phone\.value = filterPhoneInput\(E\.phone\.value, phoneLast\)/.test(html)
+    && /E\.phone\.addEventListener\('beforeinput'/.test(html)
+    && /inputType/.test(html)
+    && /normalizePhone\(raw, PHONE_CFG\)/.test(html);
+  const limits = [
+    ['name', '80'], ['e-name', '80'], ['phone', '20'], ['email', '254'], ['notes', '2000'], ['e-zip', '5'],
+  ].map(([name, max]) => new RegExp(`(?:name="${name}"|id="${name}")[^>]*maxlength="${max}"|maxlength="${max}"[^>]*(?:name="${name}"|id="${name}")`).test(html));
+  line(typeof filter === 'function' && bad.length === 0 && wired && limits.every(Boolean) && !err, 'PH7',
+    'entry filter: allowed characters only, 15 digits/20 raw cap, other field limits kept',
+    err || `cases=${cases.length - bad.length}/${cases.length} wired=${wired} limits=${limits.join(',')} bad=${bad.slice(0, 2).join(' ; ')}`);
+}
+
 console.log(`\nPHone ${pass}/${pass + fail} PASS${fail ? ` — ${fail} FAILED` : ''}`);
 if (fail) process.exitCode = 1;

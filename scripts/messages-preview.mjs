@@ -383,11 +383,11 @@ block('Refusal: an invite for a terminated business', operatorInviteSuspendedTex
 w('## 10. What the visitor reads');
 w();
 w('Two answers are not "sent" and are not a failure: a suspended business saves');
-w('the request and shows **Request saved** with the Call button; a terminated');
-w('business shows a neutral page and accepts nothing. Neither promises a reply.');
+w('the request and thanks the visitor by name; a terminated business shows a');
+w('neutral page and accepts nothing. Neither promises a reply.');
 w();
 block('Site — suspended business (request saved, then held)', HELD_MESSAGE,
-  'The panel\'s heading is **Request saved**; the summary of what the visitor typed is shown above these words.');
+  'The no-JS page keeps these words. The modal thanks the visitor by name ("Thanks, Sam."), says **Your request is saved.**, then shows a notice box — "This business can\'t respond through this form right now. Please call them directly for the fastest help." — above their recap and the Call button.');
 block('Site — terminated business (the form is not available)', UNAVAILABLE_MESSAGE);
 block('Site — terminated business: the whole page', 'This website is currently unavailable.',
   'Only the form is replaced by this sentence; the page keeps its header, its sections and its phone number. The form API answers the same refusal.');

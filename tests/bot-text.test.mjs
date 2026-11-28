@@ -297,30 +297,30 @@ const samples = sampleTelegramTexts();
     [{ text: 'Extend 30 days', callback_data: `be:3:${bizId}`, style: 'primary' }, { text: 'Leads', callback_data: `bq:0:3:${bizId}` }],
     [{ text: 'Back', callback_data: 'bl:3' }],
   ]) && JSONsame(kbRows(C.operatorReactivateConfirmKeyboard(bizId, 3)), [[
-    { text: 'Confirm reactivate', callback_data: `bR:3:${bizId}`, style: 'success' },
+    { text: 'Confirm', callback_data: `bR:3:${bizId}`, style: 'success' },
     { text: 'Cancel', callback_data: `bd:3:${bizId}` },
   ]]) && kbRows(C.operatorExtendConfirmKeyboard(bizId, 3, now))[0][0].style === 'success'
     && JSONsame(kbRows(C.operatorTerminateConfirmKeyboard(bizId, 3)), [[
     // bx / bX: never the retired bt / bT.
-    { text: 'Confirm terminate', callback_data: `bX:3:${bizId}`, style: 'danger' },
+    { text: 'Confirm', callback_data: `bX:3:${bizId}`, style: 'danger' },
     { text: 'Cancel', callback_data: `bd:3:${bizId}` },
   ]]) && JSONsame(opKb, [
-    { text: 'Confirm suspend', callback_data: `bS:3:${bizId}`, style: 'danger' },
+    { text: 'Confirm', callback_data: `bS:3:${bizId}`, style: 'danger' },
     { text: 'Cancel', callback_data: `bd:3:${bizId}` },
   ])
     // Already connected: Replace phone (primary) left, Back right. The
     // question: Confirm replace (danger) left, Cancel right, side by side.
     && JSONsame(connectedList, [[{ text: 'Replace phone', callback_data: `bp:3:${bizId}`, style: 'primary' }, { text: 'Back', callback_data: 'bn:3' }]])
     && JSONsame(connectedBiz, [[{ text: 'Replace phone', callback_data: `bw:3:${bizId}`, style: 'primary' }, { text: 'Back', callback_data: `bd:3:${bizId}` }]])
-    && JSONsame(replaceList, [[{ text: 'Confirm replace', callback_data: `bP:3:${bizId}`, style: 'danger' }, { text: 'Cancel', callback_data: `bc:3:${bizId}` }]])
-    && JSONsame(replaceBiz, [[{ text: 'Confirm replace', callback_data: `bW:3:${bizId}`, style: 'danger' }, { text: 'Cancel', callback_data: `bu:3:${bizId}` }]])
+    && JSONsame(replaceList, [[{ text: 'Confirm', callback_data: `bP:3:${bizId}`, style: 'danger' }, { text: 'Cancel', callback_data: `bc:3:${bizId}` }]])
+    && JSONsame(replaceBiz, [[{ text: 'Confirm', callback_data: `bW:3:${bizId}`, style: 'danger' }, { text: 'Cancel', callback_data: `bu:3:${bizId}` }]])
     && JSONsame(kbRows(C.operatorInviteBackKeyboard(bizId, 3, 'list')), [[{ text: 'Back', callback_data: 'bn:3' }]])
     && JSONsame(kbRows(C.operatorInviteBackKeyboard(bizId, 3, 'business')), [[{ text: 'Back', callback_data: `bd:3:${bizId}` }]])
     && [connectedList, connectedBiz, replaceList, replaceBiz].flat(2).every((b) => Buffer.byteLength(b.callback_data, 'utf8') <= 64)
     && C.operatorAlreadyConnectedText({ business: biz, phones: 1 }) === 'Alder Roofing · Already connected · 1 phone'
     && C.operatorAlreadyConnectedText({ business: biz, phones: 3 }) === 'Alder Roofing · Already connected · 3 phones'
-    && C.operatorReplaceConfirmText({ business: biz, phones: 1 }) === 'Replace the phone of Alder Roofing? The 1 current phone stops receiving alerts and loses access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.'
-    && C.operatorReplaceConfirmText({ business: biz, phones: 3 }) === 'Replace the phones of Alder Roofing? The 3 current phones stop receiving alerts and lose access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.'
+    && C.operatorReplaceConfirmText({ business: biz, phones: 1 }) === 'Replace the phone of Alder Roofing?\n\nThe 1 current phone stops receiving alerts and loses access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.'
+    && C.operatorReplaceConfirmText({ business: biz, phones: 3 }) === 'Replace the phones of Alder Roofing?\n\nThe 3 current phones stop receiving alerts and lose access immediately, and a new invite is created. Alerts on Telegram stay off until the new phone connects; new leads are still saved and emailed.'
     // MEANING CHANGE 2026-11-28: the disconnected-phone notice used to name
     // "support" as the actor; the house rule bans that, so it now says only
     // that access ended. T22 bans the old wording everywhere.
@@ -330,9 +330,9 @@ const samples = sampleTelegramTexts();
     && C.operatorInviteFailedText({ business: biz, replace: true }) === 'Could not create an invite for Alder Roofing. Try again. No phone was removed.'
     && C.operatorCodeText({ slug: 'alder-demo', code: 'K7M2QPX9RT4W', removed: 2, failed: 1, cancelled: 2 }).text
       === 'Code for alder-demo: K7M2QPX9RT4W\n\nExpires in 24 hours. 2 phones removed (1 notice not delivered). 2 older invites were cancelled. The next message is for the client — forward it as it is.'
-    && C.operatorSuspendConfirmText(biz) === 'Suspend Alder Roofing?\nAlerts and emails stop.\nThe site keeps saving\nrequests and holds them.\nNothing is deleted.\nThe owner can see the count.'
-    && C.operatorReactivateConfirmText(biz) === 'Reactivate Alder Roofing?\nLifts the suspension.\nPaid date does not change.\nHeld requests become visible.\nNothing is deleted.'
-    && C.operatorTerminateConfirmText(biz) === 'Terminate Alder Roofing?\nAlerts and emails stop.\nThe website form shows\n"not available".\nNothing is deleted: Extend\n30 days puts it back.'
+    && C.operatorSuspendConfirmText(biz) === 'Suspend Alder Roofing?\n\nAlerts and emails stop.\nThe site keeps saving\nrequests and holds them.\nNothing is deleted.\nThe owner can see the count.'
+    && C.operatorReactivateConfirmText(biz) === 'Reactivate Alder Roofing?\n\nLifts the suspension.\nPaid date does not change.\nHeld requests become visible.\nNothing is deleted.'
+    && C.operatorTerminateConfirmText(biz) === 'Terminate Alder Roofing?\n\nAlerts and emails stop.\nThe website form shows\n"not available".\nNothing is deleted: Extend\n30 days puts it back.'
     && C.operatorTerminatedText({ business: biz, notice: { phones: 2, phonesOk: 2, email: 'sent' } }) === 'Terminated: Alder Roofing\nTelegram: sent to 2 phones\nEmail: sent'
     && C.operatorTerminatedText({ business: biz, notice: { phones: 2, phonesOk: 1, email: 'sent' } }) === 'Terminated: Alder Roofing\nTelegram: failed (alert sent)\nEmail: sent'
     && C.operatorAlreadyTerminatedText(biz) === 'Alder Roofing is already terminated.'
@@ -618,7 +618,7 @@ const samples = sampleTelegramTexts();
   const ok = same(fresh, [[{ text: 'Mark contacted', callback_data: `C:3:${uuid}`, style: 'primary' }], BACK])
     && same(contacted, [[{ text: 'Job completed', callback_data: `D:3:${uuid}`, style: 'primary' }], BACK])
     && same(confirm, [[
-      { text: 'Send request', callback_data: `Y:3:${uuid}`, style: 'success' },
+      { text: 'Confirm', callback_data: `Y:3:${uuid}`, style: 'success' },
       { text: 'Cancel', callback_data: `N:3:${uuid}`, style: 'danger' },
     ], BACK])
     && kb('confirm', { ...lead, email: null })[0][0].text === 'Mark done'
@@ -885,6 +885,147 @@ const samples = sampleTelegramTexts();
     `texts=${texts.length} hits=${hits.slice(0, 3).join(' | ') || 'none'}`);
 }
 
+/* T23 (2026-11-28, item 10): an email paragraph may not end on a line of one
+   or two short words at a phone-width column. NBSP joins are respected as
+   unbreakable, and every notice paragraph is wrapped at 40 characters. */
+{
+  const P = Date.parse('2026-12-14T09:00:00Z');
+  const biz = { id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'active', paid_until: '2026-12-14T09:00:00Z', billing_warning_stage: 0, suspended_for_billing: false };
+  const TYPES = ['renewal_reminder', 'overdue', 'final_warning', 'suspension',
+    'termination_warning', 'termination', 'reactivation', 'held_summary'];
+  const bad = [];
+  let paras = 0;
+  for (const type of TYPES) for (const reason of ['billing', 'manual']) {
+    const email = ownerNotice(type, { business: biz, now: P, reason, held: 2 }).email;
+    if (!email || !email.text) continue;
+    for (const para of email.text.split('\n\n')) {
+      paras++;
+      // Split on PLAIN spaces only: NBSP holds its words on the same line.
+      const words = para.split(' ').filter(Boolean);
+      const lines = [];
+      let current = '';
+      for (const w of words) {
+        if (!current) current = w;
+        else if (current.length + 1 + w.length <= 40) current += ' ' + w;
+        else { lines.push(current); current = w; }
+      }
+      if (current) lines.push(current);
+      // NBSP keeps words together on the line; expand it only when counting
+      // the words a reader actually sees at the end of that line.
+      const last = lines[lines.length - 1].split(' ').filter(Boolean)
+        .flatMap((w) => w.split('\u00A0')).filter(Boolean);
+      if (last.length <= 2 && last.every((w) => w.length <= 12)) {
+        bad.push(`${type}:${reason}:${JSON.stringify(last.join(' '))}`);
+      }
+    }
+  }
+  line(bad.length === 0, 'T23', 'no email paragraph ends on a one/two-short-word line',
+    `paras=${paras} orphans=${bad.slice(0, 5).join(' ') || 'none'}`);
+}
+
+/* T24 (2026-11-28, item A1): every confirmation puts a blank line between
+   its question and the explanation, and its affirmative button reads exactly
+   "Confirm". Cancel, callbacks, styles and "Mark done" are untouched. */
+{
+  const C2 = await import('../lib/content.js');
+  const biz = { name: 'Alder Roofing', status: 'paused', paid_until: '2026-12-14T09:00:00Z' };
+  const now = Date.parse('2026-12-11T09:00:00Z');
+  const questions = {
+    suspend: C2.operatorSuspendConfirmText(biz),
+    reactivate: C2.operatorReactivateConfirmText(biz),
+    terminate: C2.operatorTerminateConfirmText(biz),
+    extend: C2.operatorExtendConfirmText({ business: biz, target: now, suspended: true }),
+    replace: C2.operatorReplaceConfirmText({ business: biz, phones: 1 }),
+    removeLead: C2.removeLeadConfirmText({ name: 'Sam', service: 'repair', created_at: now }, now),
+    review: C2.renderAlert({ business: biz, lead: { name: 'Sam', phone: '5155550100', email: 's@example.com', service: 'repair', timing: 'asap', home: 'house', roof_age: 'Not sure', insurance_claim: false, zip: '50265' }, view: 'confirm' }),
+  };
+  const spaced = Object.entries(questions).filter(([, text]) => !/\?\n\n/.test(text)).map(([k]) => k);
+  const id = '00000000-0000-0000-0000-000000000001';
+  const kbs = [
+    C2.operatorSuspendConfirmKeyboard(id, 1), C2.operatorReactivateConfirmKeyboard(id, 1),
+    C2.operatorTerminateConfirmKeyboard(id, 1), C2.operatorExtendConfirmKeyboard(id, 1, now),
+    C2.operatorReplaceConfirmKeyboard(id, 1, 'list'), C2.recipientConfirmKeyboard(id),
+    C2.removeLeadConfirmKeyboard(id, 1), C2.confirmKeyboard(id, true),
+    C2.leadDetailKeyboard('confirm', id, 1, { email: 's@example.com' }),
+  ];
+  const rows = kbs.map((k) => (k.reply_markup || k).inline_keyboard[0]);
+  const confirm = rows.every((row) => row[0].text === 'Confirm');
+  const cancels = rows.every((row) => row.some((b) => b.text === 'Cancel'));
+  const noDone = C2.leadDetailKeyboard('confirm', id, 1, { email: '' }).reply_markup.inline_keyboard[0][0].text === 'Mark done';
+  line(spaced.length === 0 && confirm && cancels && noDone,
+    'T24', 'every confirm screen: blank line after the question, button "Confirm"',
+    `unspaced=${spaced.join(',') || 'none'} confirm=${confirm} cancel=${cancels} markDone=${noDone}`);
+}
+
+/* T25 (2026-11-28, item A2): the held-lead notice opens with exactly two
+   lines. "Your" must not be stranded on the first line by wrapping. */
+{
+  const P = Date.parse('2026-12-14T09:00:00Z');
+  const biz = { id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'paused', paid_until: '2026-12-14T09:00:00Z', suspended_for_billing: false };
+  const bad = [];
+  for (const reason of ['billing', 'manual']) {
+    const text = ownerNotice('held_lead', {
+      business: { ...biz, suspended_for_billing: reason === 'billing' }, now: P, reason,
+    }).telegram.text;
+    if (!text.startsWith('New lead received.\nYour lead is saved safely.\n\n')) bad.push(`${reason}:${JSON.stringify(text.split('\n').slice(0, 3))}`);
+  }
+  line(bad.length === 0, 'T25', 'held notice: two exact opening lines, "Your" not split',
+    bad.join(' ; ') || 'billing/manual both exact');
+}
+
+/* T26 (2026-11-28, item A3): the owner's /status says "Status: Suspended",
+   never a "(manual)" badge or a "Next:" line, and no owner-facing Telegram text
+   mentions a termination date (or its absence) for a manual suspension. The
+   operator screen keeps its own "Next: none (manual)". */
+{
+  const P = Date.parse('2026-12-14T09:00:00Z');
+  const biz = (patch = {}) => ({
+    id: 'b1', name: 'Alder Roofing', slug: 'alder', status: 'active',
+    paid_until: '2026-12-14T09:00:00Z', billing_warning_stage: 0, suspended_for_billing: false, ...patch,
+  });
+  const manual = { ...biz({ status: 'paused' }) };
+  const billing = biz({ status: 'paused', suspended_for_billing: true });
+  const owner = statusText({ business: manual, now: P, held: 2 }).text;
+  const withDate = statusText({ business: billing, now: P, held: 2 }).text;
+  const C2 = await import('../lib/content.js');
+  const operator = C2.operatorBusinessDetailText({
+    business: manual, rows: [], stats: { total: 0, recent: 0, lastAt: null }, nowMs: P,
+  });
+  const notices = ['renewal_reminder', 'overdue', 'final_warning', 'suspension', 'termination_warning',
+    'termination', 'reactivation', 'held_lead'].map((type) =>
+    ownerNotice(type, { business: manual, now: P, reason: 'manual', held: 2 }).telegram?.text || '');
+  notices.push(suspendedReply({ business: manual, now: P }).text);
+  const ownerTexts = [owner, ...notices].join('\n');
+  const ok = owner.startsWith('Status: Suspended\n')
+    && !/\(manual\)|manual hold|Next:/.test(owner)
+    && !/termination date|terminat(e|es|ion) on|deadline/i.test(ownerTexts)
+    && /Next: Termination/.test(withDate) && /Terminates:/.test(withDate)
+    && operator.includes('Status: Suspended (manual)\nNext: none (manual hold)');
+  line(ok, 'T26', 'owner status: plain Suspended, no Next/date; operator keeps manual detail',
+    `owner=${JSON.stringify(owner.split('\n').slice(0, 2))} billingNext=${/Next: Termination/.test(withDate)} operator=${operator.includes('Next: none (manual hold)')}`);
+}
+
+/* T27 (2026-11-28, item A5): the held list has its own callbacks, so a lead
+   opened from it goes Back to that held list. The one-lead reactivation detail
+   is opened from /leads and goes Back there. */
+{
+  const C2 = await import('../lib/content.js');
+  const id = '00000000-0000-0000-0000-000000000001';
+  const heldKb = C2.heldListKeyboard([{ id }], 2, false, true);
+  const backHeld = C2.leadDetailKeyboard('new', id, 2, { email: '' }, true).reply_markup.inline_keyboard;
+  const backLeads = C2.leadDetailKeyboard('new', id, 0, { email: '' }).reply_markup.inline_keyboard;
+  const ok = JSON.stringify(heldKb) === JSON.stringify({ reply_markup: { inline_keyboard: [
+    [{ text: '1', callback_data: `HL:2:${id}` }],
+    [{ text: 'Newer', callback_data: 'hL:1' }],
+  ] } })
+    && backHeld[backHeld.length - 1][0].callback_data === 'hl:2'
+    && backLeads[backLeads.length - 1][0].callback_data === 'l:0';
+  line(ok, 'T27', 'held list keeps its own Back chain; single detail Backs to /leads',
+    `heldKb=${JSON.stringify(heldKb)} backHeld=${backHeld[backHeld.length - 1][0].callback_data} backLeads=${backLeads[backLeads.length - 1][0].callback_data}`);
+}
+
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` - ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
+
+

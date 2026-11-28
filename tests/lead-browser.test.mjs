@@ -404,7 +404,7 @@ try {
     const cancelEdits = await edits();
     const nKb = kbOf(cancelEdits[0]);
     line(askEdits.length === 1 && cancelEdits.length === 1
-      && aKb[0][0].text === 'Send request' && aKb[0][0].callback_data === `Y:1:${rest[3]}`
+      && aKb[0][0].text === 'Confirm' && aKb[0][0].callback_data === `Y:1:${rest[3]}`
       && aKb[0][1].text === 'Cancel' && aKb[0][1].callback_data === `N:1:${rest[3]}`
       && aKb.length === 2 && same(aKb[1], [{ text: 'Back', callback_data: 'l:1' }])
       && String(cancelEdits[0].body.text).includes('Status: Contacted')
@@ -480,7 +480,7 @@ try {
       && same(kb[1], [{ text: 'Older', callback_data: 'rm:1' }])
       && !kb.flat().some((b) => 'disabled' in b)
       && askKb.length === 1
-      && askKb[0][0].text === 'Remove' && askKb[0][0].style === 'danger' && askKb[0][0].callback_data === `E:0:${rm[0]}`
+      && askKb[0][0].text === 'Confirm' && askKb[0][0].style === 'danger' && askKb[0][0].callback_data === `E:0:${rm[0]}`
       && askKb[0][1].text === 'Cancel' && askKb[0][1].callback_data === 'rm:0'
       && String(cancelled.body.text).startsWith(C.REMOVE_LEAD_TITLE)
       && kbOf(cancelled)[0][0].callback_data.startsWith('Q:0:')
@@ -1318,8 +1318,40 @@ try {
     'LB25', 'detail survives a database without leads.held_at',
     `forced=${forced} retried=${retried} edits=${detailEdits.length}`);
   }
-  /* LB26: the heading counts only the CURRENT suspension, and an unreadable
-     notice log must not stop the list from being shown. Everything is
+  /* LB27 (2026-11-28, item A4): two suspension cycles. Every lead held in
+     either cycle stays in the group while a reactivation released it inside
+     HELD_GROUP_DAYS, and the heading counts the SAME rows the group lists —
+     no more "1" above two held leads. */
+  store = freshStore();
+  {
+    const day = 86400000;
+    const at = (days) => new Date(Date.now() - days * day).toISOString();
+    const first = seedLead(BIZ_A, { name: 'Cycle One', created_at: at(11) });
+    const second = seedLead(BIZ_A, { name: 'Cycle Two', created_at: at(4) });
+    for (const [id, days] of [[first, 11], [second, 4]]) store.leads.find((l) => l.id === id).held_at = at(days);
+    const hook = ({ table, params }) => {
+      if (table !== 'business_events') return null;
+      const type = String(param({ params }, 'type') || '').replace(/^eq\./, '');
+      // The newest reactivation is recent; both cycles were released by it.
+      return new Response(JSON.stringify([{ created_at: at(type === 'reactivation' ? 1 : 4) }]),
+        { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    sbHook = hook;
+    await tgReset();
+    await call(msg(OWNER, '/leads'));
+    const listSend = (await sends()).pop();
+    const text = String(listSend.body.text);
+    const kb = kbOf(listSend);
+    sbHook = null;
+    const rows = text.split('\n\n').filter((b) => /^\d+\. /.test(b) && b.split('\n').includes('held'));
+    line(text.startsWith('Recent requests\n\nReceived while suspended: 2\n\n')
+      && rows.length === 2 && rows.some((r) => r.includes('Cycle One')) && rows.some((r) => r.includes('Cycle Two')),
+    'LB27', 'two cycles: one group, heading equals the held rows listed',
+      `heading=${text.split('\n')[2]} heldRows=${rows.length} buttons=${kb.length}`);
+  }
+
+  /* LB26: the heading counts the held leads still in the group, and an
+     unreadable notice log must not stop the list from being shown. Everything is
      relative to now: the suite runs whenever it runs. */
   store = freshStore();
   {
@@ -1347,10 +1379,11 @@ try {
     await call(msg(OWNER, '/leads'));
     const failedText = String((await sends()).pop().body.text);
     sbHook = null;
-    // Exactly the two rows of THIS suspension are counted (6 days ago, not
-    // the one 9 days ago), and the group is shown because the service came
-    // back two days ago.
-    const scoped = scopedText.includes('Received while suspended: 2') && !scopedText.includes('Received while suspended: 3')
+    // MEANING CHANGE 2026-11-28 (item A4): all three held rows were released
+    // by the reactivation two days ago, so the heading counts all three and
+    // matches the rows listed under it. The old "2" scoped to the newest
+    // suspension alone was the bug.
+    const scoped = scopedText.includes('Received while suspended: 3') && !scopedText.includes('Received while suspended: 2')
       && scopedText.split('\n\n').length >= 3;
     // The count cannot be read: the list is still shown, with the rows on the
     // page as the minimum.
@@ -1372,3 +1405,5 @@ try {
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
+
+

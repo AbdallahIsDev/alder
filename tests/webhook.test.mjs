@@ -270,11 +270,11 @@ try {
   const seqRow2 = (await svc.from('leads').select('status, review_token').eq('id', seqLead).single()).data;
   const edits2 = (await sent()).filter((x) => x.path.includes('/editMessageText'));
   // Before (26-char rule): label 'Yes, send review request' + text
-  // 'Send a review request to Seq'. After: label 'Send request' (fits the
+  // 'Send a review request to Seq'. After: label 'Confirm' (fits the
   // bubble) + nameless 'Send a review request?'.
   const s2Kb = edits2.length === 1 && JSON.stringify(edits2[0].body.reply_markup)
     === JSON.stringify({ inline_keyboard: [[
-      { text: 'Send request', callback_data: 'y:' + seqLead, style: 'success' },
+      { text: 'Confirm', callback_data: 'y:' + seqLead, style: 'success' },
       { text: 'Cancel', callback_data: 'n:' + seqLead, style: 'danger' }]] })
     && edits2[0].body.text.includes('Send a review request?');
   await reset();
@@ -823,11 +823,11 @@ try {
       ...confirmKeyboard(uid, true).inline_keyboard[0],
     ];
     const allowed = new Set(['primary', 'success', 'danger']);
-    // Before (26-char rule): 'Yes, send review request'. After: 'Send request'.
+    // Before (26-char rule): 'Yes, send review request'. After: 'Confirm'.
     const expect = {
       'Mark contacted': { cb: 'c:' + uid, style: 'primary' },
       'Job completed': { cb: 'd:' + uid, style: 'primary' },
-      'Send request': { cb: 'y:' + uid, style: 'success' },
+      'Confirm': { cb: 'y:' + uid, style: 'success' },
       'Cancel': { cb: 'n:' + uid, style: 'danger' },
     };
     const ok = allBtns.length === 4 && allBtns.every((b) => allowed.has(b.style) && expect[b.text] && b.callback_data === expect[b.text].cb && b.style === expect[b.text].style);
@@ -1683,7 +1683,7 @@ try {
         const askOk = ask.edits.length === 1 && ask.sends.length === 0
           && ask.edits[0].text === C2.operatorReplaceConfirmText({ business: { name: 'ZZ Code Fixture' }, phones: 2 })
           && JSON.stringify(ask.edits[0].reply_markup.inline_keyboard) === JSON.stringify([[
-            { text: 'Confirm replace', callback_data: 'bW:0:' + codeBiz.id, style: 'danger' },
+            { text: 'Confirm', callback_data: 'bW:0:' + codeBiz.id, style: 'danger' },
             { text: 'Cancel', callback_data: 'bu:0:' + codeBiz.id },
           ]])
           && (await boundTo(codeBiz.id)) === 2 && JSON.stringify(await liveOf(codeBiz.id)) === JSON.stringify(liveBefore);
@@ -2046,7 +2046,7 @@ try {
         const doneNew = await sends();
         const doneEmails = (await resendCalls()).length;
         const row = (await svc.from('leads').select('status, review_token').eq('id', leadOnPage0).single()).data;
-        line(askEdits.length === 1 && aKb[0][0].text === 'Send request' && aKb[0][0].callback_data === `Y:0:${leadOnPage0}`
+        line(askEdits.length === 1 && aKb[0][0].text === 'Confirm' && aKb[0][0].callback_data === `Y:0:${leadOnPage0}`
           && aKb[0][1].text === 'Cancel' && aKb[0][1].callback_data === `N:0:${leadOnPage0}`
           && doneEdits.length === 1 && doneNew.length === 0 && doneEmails === 1
           && row.status === 'done' && !!row.review_token
@@ -2083,7 +2083,7 @@ try {
           && rmKb0[0].every((b, i) => b.text === String(i + 1) && /^Q:0:[0-9a-f-]{36}$/.test(b.callback_data))
           && JSON.stringify(rmKb0[1]) === JSON.stringify([{ text: 'Older', callback_data: 'rm:1' }])
           && rmKb0[0][0].callback_data === `Q:0:${longLead.id}`
-          && askKb.length === 1 && askKb[0][0].text === 'Remove'
+          && askKb.length === 1 && askKb[0][0].text === 'Confirm'
           && askKb[0][0].style === 'danger' && askKb[0][0].callback_data === `E:0:${ids[5]}`
           && askKb[0][1].text === 'Cancel' && askKb[0][1].callback_data === 'rm:0'
           && String(cancelled.body.text).startsWith(C2.REMOVE_LEAD_TITLE)
@@ -2643,13 +2643,14 @@ try {
         const termNoticesOk = termSends.every(noticeSent);
         const sm = suspensionMails[0] && suspensionMails[0].body || {};
         const termMailOk = suspensionMails.length === 1 && sm.subject === mailSubject('Your service has been suspended', 'inv@zz-test.invalid')
-          && String(sm.text).includes('There is no termination date')
+          && !String(sm.text).includes('termination date')
           && !String(sm.text).includes('by support')
           && String(sm.text).replace(/\u00a0/g, ' ').includes('Reply to this email and we will help.');
         const termEditOk = termEdit.body.text === 'Suspended: ZZ Invite Fixture\nTelegram: sent to 2 phones\nEmail: sent';
-        const termOk = askEdit.body.text === 'Suspend ZZ Invite Fixture?\nAlerts and emails stop.\nThe site keeps saving\nrequests and holds them.\nNothing is deleted.\nThe owner can see the count.'
+        // MEANING CHANGE 2026-11-28 (item A1): the question stands alone.
+        const termOk = askEdit.body.text === 'Suspend ZZ Invite Fixture?\n\nAlerts and emails stop.\nThe site keeps saving\nrequests and holds them.\nNothing is deleted.\nThe owner can see the count.'
           && JSON.stringify(askEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[
-            { text: 'Confirm suspend', callback_data: 'bS:0:' + invBiz.id, style: 'danger' },
+            { text: 'Confirm', callback_data: 'bS:0:' + invBiz.id, style: 'danger' },
             { text: 'Cancel', callback_data: 'bd:0:' + invBiz.id },
           ]])
           && termSendOk && termNoticesOk && termEditOk && termMailOk
@@ -2697,9 +2698,10 @@ try {
         const askBackToast = await answersNow();
         const rowAfterAsk = (await svc.from('businesses').select('*').eq('id', invBiz.id).maybeSingle()).data;
         const reactivateAskOk = askBackSends === 0 && askBackToast === ''
-          && askBackEdit.body.text === 'Reactivate ZZ Invite Fixture?\nLifts the suspension.\nPaid date does not change.\nHeld requests become visible.\nNothing is deleted.'
+          // MEANING CHANGE 2026-11-28 (item A1): the question owns its line.
+          && askBackEdit.body.text === 'Reactivate ZZ Invite Fixture?\n\nLifts the suspension.\nPaid date does not change.\nHeld requests become visible.\nNothing is deleted.'
           && JSON.stringify(askBackEdit.body.reply_markup.inline_keyboard) === JSON.stringify([[
-            { text: 'Confirm reactivate', callback_data: 'bR:0:' + invBiz.id, style: 'success' },
+            { text: 'Confirm', callback_data: 'bR:0:' + invBiz.id, style: 'success' },
             { text: 'Cancel', callback_data: 'bd:0:' + invBiz.id },
           ]])
           && !('parse_mode' in askBackEdit.body)
@@ -2999,3 +3001,6 @@ try {
 console.log('');
 console.log(`${total - failed}/${total} passed${failed ? ` — ${failed} FAILED` : ''}`);
 process.exit(failed ? 1 : 0);
+
+
+

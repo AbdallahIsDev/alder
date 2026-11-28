@@ -2431,10 +2431,11 @@
       --field: rgb(255 255 255/.07);
       --sel: var(--accent);
       --err: #ff8a7a;
-      /* Form-control borders only (WCAG 1.4.11): >=3:1 against the field fill and
-         the dialog ground in the worst case (a white section behind the scrim).
-         --line stays for cards and decorative edges. */
-      --ctl-line: #9aa0a8;
+      /* Item 14: one resting edge for every control and every option card.
+         The old opaque grey read as solid white next to the cards, so fields
+         now use the same translucent --line the cards use. Focus still turns
+         only that border primary (--sel). */
+      --ctl-line: var(--line);
       --ctl-err: #ffb3a6;
       --sb-track: transparent;
       --sb-thumb: rgb(255 255 255/.28);
@@ -2493,6 +2494,16 @@
     .est :focus-visible {
       outline: 2px solid var(--sel);
       outline-offset: 2px
+    }
+
+    /* Item 15: the answer panel is a static region, not a control. Focusing it
+       after a mouse submit drew a red ring around the whole card; the heading
+       takes focus instead, and neither draws an outline. */
+    .est-done:focus,
+    .est-done:focus-visible,
+    .est-done h3:focus,
+    .est-done h3:focus-visible {
+      outline: none
     }
 
     /* header: step text + four segments + close */
@@ -2643,6 +2654,11 @@
       font-weight: 500;
       letter-spacing: -.03em;
       line-height: 1.1
+    }
+
+    /* A visitor's whole name can be one very long token: let the heading wrap. */
+    .est-head h3 {
+      overflow-wrap: anywhere
     }
 
     .est-done .lead {
@@ -3257,9 +3273,23 @@
       height: 26px
     }
 
-    /* held / unavailable: the request was not "sent", so no success mark */
-    .est-done.est-plain .est-ok {
+    /* Item 16: the held / unavailable answer keeps the same square badge.
+       A triangle with an exclamation replaces the check mark; nothing is
+       hidden, so the reveal animation and alignment stay identical. */
+    .est-ok .est-warn-icon {
       display: none
+    }
+
+    .est-done[data-kind] .est-ok .est-check {
+      display: none
+    }
+
+    .est-done[data-kind] .est-ok .est-warn-icon {
+      display: block
+    }
+
+    .est-done[data-kind] .est-ok {
+      background: #d99a00
     }
 
     /* The business has been terminated: one sentence and nothing else. The
@@ -3317,6 +3347,10 @@
       --i: 0
     }
 
+    .est-done>.est-warn {
+      --i: 1
+    }
+
     .est-done>.est-recap {
       --i: 1
     }
@@ -3355,6 +3389,23 @@
       border: 1px solid var(--line);
       background: rgb(255 255 255/.10);
       font-size: var(--fs)
+    }
+
+    /* Item 16: the held answer's own notice box, directly above the recap.
+       Same opacity pattern as that box — a 10% tint and an 18% edge — in
+       warning yellow instead of white. */
+    .est-warn {
+      width: 100%;
+      min-width: 0;
+      padding: 12px 16px;
+      border: 1px solid rgb(224 168 0/.18);
+      background: rgb(224 168 0/.10);
+      font-size: var(--fs);
+      line-height: 1.45
+    }
+
+    .est-warn[hidden] {
+      display: none
     }
 
     .est-recap div {
@@ -4732,6 +4783,7 @@
     .est-back,
     .est-restart,
     .est-ok,
+    .est-warn,
     .est-recap,
     .est-next-group,
     .est-after,

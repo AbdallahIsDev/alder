@@ -117,16 +117,17 @@ no `.env` (`tests/dev-root.mjs`).
   reactivation; it is shown in its own **"Received while suspended"** group,
   with the remaining rows under "Other requests", and every held row keeps a
   fourth `held` line so it stays marked. The group heading states the **total**
-  held leads of the business (`countHeldLeads`), never just the rows on the page
-  — the renewal notice says the total and two numbers for one fact is a bug. It
-  is read only when the page carries a held row, so an ordinary `/leads` costs
+  held rows still in the group (`heldGroupCount`), from ANY suspension inside
+  HELD_GROUP_DAYS after its reactivation, never just the rows on the page
+  The old current-suspension-only count put "1" above two rows. The count is
+  read only when the page carries a held row, so an ordinary `/leads` costs
   what it always did. A page with no held row has no group. One detail fact
   names the state.
 - A suspended business's form **holds** leads: stored whole with `leads.held_at`,
   owner told a count and no detail, visitor told to call. A terminated business's
-  form answers 410 and stores nothing. Every held-lead Telegram notice carries
-  the same four core lines ending "Renew to see them."; a support suspension
-  adds one line, "Contact support to restore it.", and its own state hint.
+  form answers 410 and stores nothing. Every held-lead Telegram notice opens
+  with two exact lines, `New lead received.` and `Your lead is saved safely.`,
+  then the reason-specific help; billing and manual notices differ afterwards.
 - Retention is 60 days after termination, kept **by hand**. There is no purge job.
   To be reviewed by a lawyer; drafts in `docs/legal-drafts/`.
 - A terminated host's page is not taken down. It asks `GET /api/site-state` once
@@ -148,13 +149,15 @@ no `.env` (`tests/dev-root.mjs`).
   owner decision 2026-11-17, reversing the earlier all-screen 44 px rule). A
   click outside the form does not close it.
 - The estimate form draws ONE resting border per control (input, textarea and the
-  themed dropdown all `1px solid var(--ctl-line)`); focus changes that border's
-  colour to the accent (`--sel`) and nothing else, and the ring is
-  `:focus-visible` only, so a mouse press or a tap draws none. The white
-  `--ctl-focus` token is retired. A dropdown's selected row is told apart by its
-  weight and the accent check mark on the right, never by a bar down its edge.
-  Every pressable button has a pointer. `MD16`/`MD22` pin it, and `F7` records
-  that the accent is 1.93:1 on the field fill (the 2px outline carries the state).
+  themed dropdown all `1px solid var(--ctl-line)`); since 2026-11-28
+  `--ctl-line` ALIASES `--line`, the option cards' translucent white, so fields
+  no longer look solid white next to the cards. Focus changes that border's
+  colour to the accent (`--sel`) and nothing else; the ring is `:focus-visible`
+  only. The white `--ctl-focus` token is retired. A dropdown's selected row is
+  told apart by its weight and the accent check mark, never by an edge bar.
+  Every pressable button has a pointer. `MD16`/`MD22`/`MD25` pin it; `F7` no
+  longer requires the opaque 3:1 rest (1.66:1 now) and checks the accent focus
+  (1.93:1) and error states instead.
 - The consent line under the form is one sentence: "We only use your details to
   contact you about your estimate."
 - A draft is restored only when it holds an answer the visitor actually chose (a
@@ -169,8 +172,11 @@ no `.env` (`tests/dev-root.mjs`).
   mark's 50 ms pop, set on the groups' classes, not on `:nth-child`. Each of the
   three next-step lines stays on ONE line at 320 px: the reply promise is
   deliberately NOT repeated here (it measured 2–3 lines at 320 px) and lives in
-  the fine print of step 4. The held / unavailable panel shows the title, its
-  words, Close and Call and nothing else.
+  the fine print of step 4. Since 2026-11-28 the held panel thanks the visitor
+  by name, says `Your request is saved.`, shows a warning triangle in the same
+  square badge, then an amber notice box above the same recap, then Close and
+  Call. Focus lands on its heading with no outline (`MD26`, `MD28`); the normal
+  success screen is unchanged.
 - The estimate answers persist in **sessionStorage** (`alder-est-draft-v1`:
   `{ step, touched, values }`), never localStorage, and die with the tab. Saved
   on every step change and input, restored on open, cleared on a definite answer
@@ -220,6 +226,37 @@ no `.env` (`tests/dev-root.mjs`).
 - Copy is plain, human and specific. No staccato fragments ("No fluff. Just
   results."), no comma-couplets used as a sentence, no colon-fragment openers.
   Full sentences with a reason in them.
+
+**2026-11-28, `ui-fixes-2` (owner-authorised round):**
+
+- Every confirmation screen puts a blank line between its question and the
+  explanation, and its affirmative button reads exactly `Confirm` (Cancel,
+  callbacks and styles unchanged). The held-lead notice opens with two exact
+  lines: `New lead received.` / `Your lead is saved safely.`
+- The owner's `/status` for a manual suspension reads `Status: Suspended` with
+  NO `Next:` line, no `(manual)` suffix and no termination-date wording. The
+  operator screen keeps `Suspended (manual)` and `Next: none (manual hold)`;
+  a billing suspension keeps `Next` and the real termination date.
+- The held group in `/leads` counts every held row while the group is open
+  (`heldGroupCount`, HELD_GROUP_DAYS after the reactivation), so two suspension
+  cycles show one heading equal to the rows listed. One held lead at
+  reactivation is sent as its full detail with Back to `/leads`; 2+ keep the
+  numbered list, whose own `HL`/`hL`/`hl` callbacks Back to that held list.
+- The operator daily summary names businesses suspended by hand for more than
+  `MANUAL_SUSPENSION_REMINDER_DAYS` (14) from the suspension notice log; no
+  log means no guessed age. The once-per-UTC-day held-summary email rule is
+  deliberately UNCHANGED.
+- Owner email Reply-To is the visitor's address or nothing; the "reply to this
+  email" line and Email button exist only then (mailto subject `Your roofing
+  estimate request`, empty body). Email paragraphs glue their last THREE words
+  with NBSP; manual suspension email says nothing about a termination date and
+  keeps one CTA. The visitor confirmation uses the shared title section.
+- The phone field filters at ENTRY time to digits and `+ ( ) - .` and space,
+  with caps of 15 digits and 20 raw characters. The shared validator, submit
+  path and server checks are unchanged. Form controls now share the option
+  cards' translucent resting border (`--ctl-line` aliases `--line`); focus
+  turns only that border primary. The held panel uses a warning badge and an
+  amber notice above the recap, and no focus ring; normal success is unchanged.
 
 ---
 
@@ -400,7 +437,9 @@ page uses it only to replace the estimate form with
   light sections. Page background white / warm off-white (`#F7F4EF` for cards);
   charcoal `#1C1F24`; red-orange accent for arrows, badges, symbols.
 - Clean grotesque sans, tight tracking on headings. Small labels never below
-  13–14 px; contrast at least 4.5:1; borders `#9aa0a8`.
+  13–14 px; contrast at least 4.5:1. The modal's control and option-card borders
+  share one translucent token (`--ctl-line: var(--line)`); the old opaque
+  `#9aa0a8` control border is retired.
 - Spacing comes from the main container's `gap`, not per-section padding. The
   masthead wraps hero and stats with `gap: 0` and one shared dark background.
 - Images: warm morning or daytime light, **never sunset**. Replace AI images with
@@ -530,6 +569,7 @@ the modal's thank-you steps.
 | 2026-11-28 | Lifecycle/site-lifecycle round, Parts 0–5: one generated `docs/MESSAGE_PREVIEW.md` (Part 0b) and `docs/LIFECYCLE_EXPLAINED.md` (Part 0a); operator business screen and the one status formatter (Part 1); the held group, the two-message reactivation, the owner texts without "by support" (Part 2); owner emails with no repeated sentence (Part 3); `GET /api/site-state` answering one word (Part 4); the form's resting look and the draft guards (Part 5). |
 | 2026-11-28 | Owner authorised a one-time push to `origin/main` and asked to skip the full suite. Merging `final-verify` (production smoke handoff + owner's `update styles` commit) into main. Assertion-meaning change recorded: MD14 previously required `.est-recap div` in the sitewide radius list; the owner's commit removes it, so recap rows no longer carry the 12 px radius, only the recap container does. Review artefact `_debug/patches/main-push-review.diff`: 3,853 bytes, 50 lines, apply-check 0, secret scan all 0. Stale branches (codex/pr27, multi-client-prep, telegram-widgets, visual-polish, whop-notes) are 67–129 commits behind main and hold superseded code or docs-only notes; left out. |
 | 2026-11-28 | PR #43 review fixes on the PR branch: webhook OP24/OP61/OP63 pinned to the status block, three-row buttons and two-message reactivation; held visitor pane keeps its recap and drops the repeated heading (MD24); OPERATIONS runbook follows the code and names the 24 h draft expiry; generated preview samples corrected; T21 gates orphan last lines (and `orphanWord()` now sees one-word paragraphs); T22 bans "by support" in every owner text; MD22 adds no outer outline on form controls. No webhook ack-order or db-timeout change. |
+| 2026-11-28 | `ui-fixes-2` round (17 items + gates): confirm screens, held notice lines, owner status wording, held-group count across two cycles, single-lead reactivation detail and held-list Back chain, 14-day manual-suspension summary; owner/visitor email layout, Reply-To rule, three-word NBSP orphan guard, reactivation copy; entry-time phone filter, shared field border, no panel focus ring, held success redesign. TEST project only. Item 12 finding: the missing second "New requests are waiting" email is the deliberate once-per-UTC-day bucket `held:mail:<business>` (`hitRateLimit(key,86400,1)`), confirmed by two same-day suspended cycles in TEST `business_events` (14:32:55 sent, 14:32:58 only held_lead); rule unchanged. |
 
 ---
 
@@ -537,9 +577,9 @@ the modal's thank-you steps.
 
 These were left open by the last live test and cannot be confirmed from the repo:
 
-1. `alder-demo` was temporarily set to `status = 'active'` for a billing
-   simulation. Confirm it is back to `demo`, with `paid_until` NULL,
-   `billing_warning_stage` 0 and `suspended_for_billing` false.
+1. Settled: `alder-demo` was temporarily `active` for a billing simulation;
+   `_debug/e2e-restore.mjs` put it back to `demo` before the 2026-11-28 suite
+   run, which printed `ALDER_DEMO_STATUS=demo`.
 2. A test business `ZZ Billing Test` may still exist in production. Remove it and
    its leads if it does.
 3. Migration `0007` was applied to TEST on 2026-11-26 and to production on
@@ -578,3 +618,9 @@ Open after the 2026-11-17 modal round:
    browser on a phone.
 10. Settled 2026-11-26: B1d now uses a 4 s margin, DB-clock feedback and a bounded
    retry; 62/62 after the change. The 10 s claim is still a fixed bucket, not a hard lock.
+11. `ui-fixes-2` (2026-11-28): modal computed styles and focus were measured in
+   local Chrome at 320/375/1280 px (`.opt`, `#e-zip`, `.sel-btn`, `#e-phone`,
+   notes all `rgba(255,255,255,.18)` at rest, accent on focus, no outline).
+   Screenshots in `_debug/ui2-modal-*.png`; emitted Telegram texts in
+   `_debug/ui2-telegram-texts.png`. Native Telegram rendering on a real phone,
+   Safari/Firefox and Vercel dashboard internals were not verified.

@@ -263,6 +263,12 @@ const biz = (patch = {}) => ({ id: 'b1', name: 'Alder Roofing', slug: 'alder', s
     '', 'In grace:', 'Alder Roofing', '', 'Due within 3 days:', 'zed-roof', '', 'Suspended, held leads:', 'Alder Roofing: 2'].join('\n');
   line(text === want, 'BL8b', 'summary: every block, names only, one per line', text === want ? '' : text);
   line(B.dueSoon(biz(), P - DAY) && B.dueSoon(biz(), P - 3 * DAY) && !B.dueSoon(biz(), P - 3 * DAY - 1) && !B.dueSoon(biz(), P), 'BL8c', 'dueSoon: the reminder window');
+  // BL8d (item A6): a manual suspension older than 14 days is reported even
+  // when nothing else happened today. Names only, one per line.
+  const oldText = B.billingSummaryText({ manualOld: [a, z] });
+  line(oldText === ['Billing today', '', 'Manually suspended over 14 days:', 'Alder Roofing', 'zed-roof'].join('\n'),
+    'BL8d', 'summary: forgotten manual suspensions get their own names-only block',
+    JSON.stringify(oldText));
 }
 
 /* BL9 */

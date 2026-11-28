@@ -81,12 +81,14 @@ const SUPPORT_URL = 'https://t.me/AbdallahIsDev';
 const STATUS_KB = { keyboard: [[{ text: 'Status' }]], is_persistent: true, resize_keyboard: true };
 // The held-lead notice says one thing: a lead arrived, it is safe, and how to
 // see it. Nothing of the visitor is in it. Billing: renew. Manual: support.
-const HELD_NOTICE = 'New lead received. Your\nlead is saved safely.\n\nRenew now to see the details.\n\nNeed help? Contact support';
-const HELD_NOTICE_MANUAL = 'New lead received. Your\nlead is saved safely.\n\nThe details stay hidden while\nthe service is suspended.\n\nContact support to resolve it.';
-// The daily email is a count, and the last two words of every paragraph are
-// joined with a non-breaking space so they never wrap alone.
+// MEANING CHANGE 2026-11-28 (item A2): the two opening facts are separate
+// lines; "Your" no longer ends the first line.
+const HELD_NOTICE = 'New lead received.\nYour lead is saved safely.\n\nRenew now to see the details.\n\nNeed help? Contact support';
+const HELD_NOTICE_MANUAL = 'New lead received.\nYour lead is saved safely.\n\nThe details stay hidden while\nthe service is suspended.\n\nContact support to resolve it.';
+// The daily email is a count. Item 10: the last THREE words of every paragraph
+// are glued with non-breaking spaces, so the tail cannot wrap alone.
 const NB = '\u00A0';
-const HELD_MAIL = (n) => `${n} request${n === 1 ? '' : 's'} came in through your website form while the service was${NB}suspended.`;
+const HELD_MAIL = (n) => `${n} request${n === 1 ? '' : 's'} came in through your website form while the service${NB}was${NB}suspended.`;
 const HELD_PAGE = 'Your request was saved, but this business can\u2019t respond through this form right now. For the fastest help, please call them directly.';
 const GONE_PAGE = 'This business isn\u2019t accepting requests through this form right now. Please call them directly.';
 const OWNER_KB = { keyboard: [[{ text: 'Invite' }, { text: 'Leads' }]], is_persistent: true, resize_keyboard: true };
@@ -305,7 +307,9 @@ try {
       && textOf(told(STAFF)[0]) === want && same(told(STAFF)[0].body.reply_markup, STAFF_KB)
       && heldMsg(OWNER).length === 1 && heldMsg(STAFF).length === 1
       && !/by support|has reactivated/i.test(String(JSON.stringify(r.tg.map((m) => m.body))))
-      && r.mail.length === 1 && String(r.mail[0].body.text).replace(/\u00A0/g, ' ').includes('Every alert and every lead email is working again.')
+      // Item 11: the mail keeps only the service and website lines.
+      && r.mail.length === 1 && /Your website is taking requests again\./.test(String(r.mail[0].body.text).replace(/\u00A0/g, ' '))
+      && !/Every alert/.test(String(r.mail[0].body.text))
       // The held leads themselves DO carry the visitor's details now: the
       // service is back, so they are ordinary leads. Message 1 and the email
       // still carry nothing personal.
@@ -415,25 +419,27 @@ try {
     const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     const esc = (t) => t.replace('\u2019', '\\u2019');
     const css = fs.readFileSync(path.join(ROOT, 'assets/css/styles.css'), 'utf8');
-    // MEANING CHANGE 2026-11-28: the held VISITOR pane is no longer a second
-    // copy of the API's HELD_MESSAGE. Its title is the short label and its body
-    // does not repeat the title. The API sentence (HELD_PAGE) is unchanged.
-    const HELD_TITLE = 'Request saved';
-    const HELD_PANE = "This business can't respond through this form right now. For the fastest help, please call them directly.";
-    const textsOk = html.includes(`title: '${HELD_TITLE}'`) && html.includes(`text: "${HELD_PANE}"`) && html.includes(`text: '${esc(GONE_PAGE)}'`);
+    // MEANING CHANGE 2026-11-28 (item 16): the held VISITOR panel thanks the
+    // visitor by name, says the request is saved, and puts the call-now advice
+    // in its own amber notice box above the recap. The API sentence
+    // (HELD_PAGE) — the no-JS form's answer — is unchanged.
+    const HELD_SUB = 'Your request is saved.';
+    const HELD_PANE = "This business can't respond through this form right now. Please call them directly for the fastest help.";
+    const textsOk = html.includes(`'${HELD_SUB}'`) && html.includes(`text: "${HELD_PANE}"`) && html.includes(`text: '${esc(GONE_PAGE)}'`);
     // Decided on the response, before the generic error panel can show.
     const branchOk = /out && out\.held === true \? 'held' : ''/.test(html)
       && /err && err\.body && err\.body\.unavailable === true\) \{ showSent\(data, false, 'unavailable'\); return; \}\s*showError\(err\)/.test(html);
-    // The panel: its own title and words, the SAME recap of what the visitor
-    // entered (a held request is still theirs), no "what happens next", no
-    // success mark, and the Call button stays. Only a duplicate hides its recap,
-    // because those edited values were never posted. The hidden attribute needs
-    // a display:none rule of its own where a display:flex rule would beat it.
+    // The panel: its own words, the SAME recap of what the visitor entered,
+    // an amber notice box above it, no "what happens next" and a warning badge
+    // instead of the success check. Only a duplicate hides its recap, because
+    // those edited values were never posted. The hidden attribute needs a
+    // display:none rule of its own where a display:flex rule would beat it.
     const hides = (sel) => new RegExp(sel.replace(/[.[\]]/g, '\\$&') + '\\s*\\{\\s*display:\\s*none\\s*\\}').test(css);
     const panelOk = /function showSent\(data, already, kind\)/.test(html) && /after\.hidden = !!notice/.test(html)
       && /recapBox\.hidden = !!already;/.test(html) && /if \(!already\) recap\(data\);/.test(html)
       && /done\.classList\.toggle\('est-plain', !!notice\)/.test(html)
-      && /\.est-done\.est-plain \.est-ok\s*\{\s*display:\s*none/.test(css)
+      && /warnBox\.hidden = !notice/.test(html)
+      && /\.est-done\[data-kind\] \.est-ok \.est-warn-icon\s*\{\s*display:\s*block/.test(css)
       && hides('.est-done .est-recap[hidden]') && hides('.est-done .est-after[hidden]')
       && /<section class="est-pane est-done"[\s\S]*?<button type="button" class="btn ghost" data-close[\s\S]*?<a class="btn phone" href="tel:\{\{tel\}\}"/.test(html);
     const promiseFree = ![HELD_PANE, GONE_PAGE].some((t) => /reply|within|soon|shortly|get back/i.test(t));
