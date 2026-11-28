@@ -1400,7 +1400,10 @@ try {
     { text: 'Confirm replace', callback_data: `${from === 'business' ? 'bW' : 'bP'}:${page}:${id}`, style: 'danger' },
     { text: 'Cancel', callback_data: `${from === 'business' ? 'bu' : 'bc'}:${page}:${id}` },
   ]];
-  const ENDED = 'Your access to lead alerts for this business was ended by support.';
+  // MEANING CHANGE 2026-11-28: the disconnected-phone notice no longer names
+  // "support" as the actor (the owner-text house rule). OB21 still proves one
+  // plain notice per removed phone, with the keyboard removed and no data.
+  const ENDED = 'Your access to lead alerts for this business has ended.';
   const noWrite = (r) => r.sb.every((q) => ['GET', 'HEAD'].includes(q.method));
   const INVITE_LIST_0 = 'Invite: pick a business\n\n1. Alder Roofing · Demo\n2. Beta Roofing · Active\n3. Cedar Co · Active\n4. Delta Roofs · Active\n5. Echo Roofing · Active';
 

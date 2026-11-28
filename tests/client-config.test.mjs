@@ -60,7 +60,10 @@ const OUT = path.join(ROOT, '_debug', 'client-build');
 // the neutral sentence for a terminated host, the estimate form's one border
 // and the draft/focus rules). The manifest, robots and sitemap hashes below
 // did not move.
-const BASELINE = '1b9229150d23aa463af9b3c4986c4c7d63dac1a3ad2f145fe21ff982663bb9b6';
+// 2026-11-28 (PR43 review): moved deliberately for the held visitor pane —
+// the recap now stays and the heading/body no longer repeat each other.
+// Verified by rebuilding index.html with --client alder independently.
+const BASELINE = 'a333e6c0406e5ac0beae90dee6b4413acd84ccc4fa6fe5de16d1f1a9f0a3ab3b';
 const BASELINE_MANIFEST = 'f45e8fc93ecb9681edf3a509164885c1e5c59ffd1b6016b25dc700fe9bf7524d';
 const BASELINE_ROBOTS = '9a24e9a883cd788ab55016368f3afe111de0bc812a2ab16b2c96b1c80a2efdaf';
 const BASELINE_SITEMAP = '2a79589d7992a9780b47c810763ef32c364aae607dc6f0c393f97c7ed63bc244';
