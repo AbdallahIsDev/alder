@@ -139,7 +139,10 @@ const EVERY = CASES.map(([type, business, now, reason]) => ({
   const ok = /^(Your service is active again)$/.test(e.subject) && e.heading === e.subject
     && !/reactivat|by support|support has/i.test(text)
     && !/reply to this email/i.test(text)
-    && text.includes('Every alert and every lead email is working again.')
+    // MEANING CHANGE 2026-11-28 (item 11): the "every alert ..." sentence is
+    // gone; the mail says only that the service and website work again.
+    && !text.includes('Every alert') && !text.includes('working again')
+    && e.subject === 'Your service is active again'
     && text.includes('Your website is taking requests again.')
     // The date it is paid until, when there is one: the reader's next question.
     && text.includes(`Your service is paid until ${billingDate(P + 30 * DAY)}.`);

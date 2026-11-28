@@ -83,10 +83,10 @@ const STATUS_KB = { keyboard: [[{ text: 'Status' }]], is_persistent: true, resiz
 // see it. Nothing of the visitor is in it. Billing: renew. Manual: support.
 const HELD_NOTICE = 'New lead received. Your\nlead is saved safely.\n\nRenew now to see the details.\n\nNeed help? Contact support';
 const HELD_NOTICE_MANUAL = 'New lead received. Your\nlead is saved safely.\n\nThe details stay hidden while\nthe service is suspended.\n\nContact support to resolve it.';
-// The daily email is a count, and the last two words of every paragraph are
-// joined with a non-breaking space so they never wrap alone.
+// The daily email is a count. Item 10: the last THREE words of every paragraph
+// are glued with non-breaking spaces, so the tail cannot wrap alone.
 const NB = '\u00A0';
-const HELD_MAIL = (n) => `${n} request${n === 1 ? '' : 's'} came in through your website form while the service was${NB}suspended.`;
+const HELD_MAIL = (n) => `${n} request${n === 1 ? '' : 's'} came in through your website form while the service${NB}was${NB}suspended.`;
 const HELD_PAGE = 'Your request was saved, but this business can\u2019t respond through this form right now. For the fastest help, please call them directly.';
 const GONE_PAGE = 'This business isn\u2019t accepting requests through this form right now. Please call them directly.';
 const OWNER_KB = { keyboard: [[{ text: 'Invite' }, { text: 'Leads' }]], is_persistent: true, resize_keyboard: true };
@@ -305,7 +305,9 @@ try {
       && textOf(told(STAFF)[0]) === want && same(told(STAFF)[0].body.reply_markup, STAFF_KB)
       && heldMsg(OWNER).length === 1 && heldMsg(STAFF).length === 1
       && !/by support|has reactivated/i.test(String(JSON.stringify(r.tg.map((m) => m.body))))
-      && r.mail.length === 1 && String(r.mail[0].body.text).replace(/\u00A0/g, ' ').includes('Every alert and every lead email is working again.')
+      // Item 11: the mail keeps only the service and website lines.
+      && r.mail.length === 1 && /Your website is taking requests again\./.test(String(r.mail[0].body.text).replace(/\u00A0/g, ' '))
+      && !/Every alert/.test(String(r.mail[0].body.text))
       // The held leads themselves DO carry the visitor's details now: the
       // service is back, so they are ordinary leads. Message 1 and the email
       // still carry nothing personal.
